@@ -4,13 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="13c8bcca-584b-46c9-b514-2786f5a09530" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/core/scheduler/scheduler.py" beforeDir="false" afterPath="$PROJECT_DIR$/core/scheduler/scheduler.py" afterDir="false" />
+    <list default="true" id="13c8bcca-584b-46c9-b514-2786f5a09530" name="Changes" comment="transfer na server">
       <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/moduly/apps/meteo/meteo_sync.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/apps/meteo/meteo_sync.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/moduly/mereni/elektromery/SOFTLINK/SOFTLINK_to_database.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/mereni/elektromery/SOFTLINK/SOFTLINK_to_database.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/moduly/mereni/vodomery/SCVK/SCVK_data_z_dotazu.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/mereni/vodomery/SCVK/SCVK_data_z_dotazu.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -30,6 +25,18 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
+  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
+  "lastFilter": {
+    "state": "OPEN",
+    "assignee": "mtravnicekarmex"
+  }
+}]]></component>
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/mtravnicekarmex/monitorovaci_platforma.git",
+    "accountId": "5798b7a5-323b-468e-a08c-b8439703e2e9"
+  }
+}]]></component>
   <component name="McpProjectServerCommands">
     <commands />
     <urls />
@@ -110,12 +117,25 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1772604874336</updated>
-      <workItem from="1772604875379" duration="16802000" />
+      <workItem from="1772604875379" duration="17191000" />
     </task>
+    <task id="LOCAL-00001" summary="transfer na server">
+      <option name="closed" value="true" />
+      <created>1772631086572</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1772631086572</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="transfer na server" />
+    <option name="LAST_COMMIT_MESSAGE" value="transfer na server" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/monitorovaci_platforma$time_utils.coverage" NAME="time_utils Coverage Results" MODIFIED="1772621206756" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/app" />

@@ -23,7 +23,7 @@ from moduly.mereni.vodomery.database.vodomery_db_vse import vodomery_db_import
 from moduly.mereni.vodomery.vodomery_prediction import rebuild_profiles
 from moduly.mereni.vodomery.vodomery_anomaly import score_new_measurements
 from moduly.mereni.vodomery.vodomery_events import detect_events_from_scores
-from moduly.apps.meteo import meteo_sync
+from moduly.apps.meteo.meteo_sync import meteo_sync
 
 
 # -------------------------
@@ -336,6 +336,14 @@ def quarter_hour_job():
     safe_call(vodomery_db_import)
     safe_call(score_new_measurements, model_version=1)
     safe_call(detect_events_from_scores, model_version=1)
+    safe_call(meteo_sync)
+    safe_call(rebuild_profiles, 1)
+    safe_call(uloz_manometry_parquet)
+    safe_call(uloz_kalorimetry_parquet)
+    safe_call(uloz_plynomery_parquet)
+    safe_call(uloz_vodomery_parquet)
+
+
 
 
 # každou hodinu
@@ -410,45 +418,45 @@ def main_scheduler():
     # každých 15 minut v X:02,17,32,47
     scheduler.add_job(
         quarter_hour_job,
-        CronTrigger(minute="5,20,35,50", second=5),
+        CronTrigger(minute="5,28,35,50", second=5),
         id="quarter_hour_job",
     )
-
-    # každou hodinu v X:02
-    scheduler.add_job(
-        hourly_job,
-        CronTrigger(minute=2, second=5),
-        id="hourly_job",
-        max_instances=1,
-    )
-
-    # # každou hodinu v X:03 v pracovní dny od 6 do 16
+    #
+    # # každou hodinu v X:02
     # scheduler.add_job(
-    #     working_time_hourly_job,
-    #     CronTrigger(hour="6-16", minute=3, day_of_week="mon-fri"),
-    #     id="working_time_hourly_job",
+    #     hourly_job,
+    #     CronTrigger(minute=2, second=5),
+    #     id="hourly_job",
+    #     max_instances=1,
     # )
-
-    # každý den v X:00 7 a 14
-    scheduler.add_job(
-        daily_seven_and_two_job,
-        CronTrigger(hour="7,14", minute=0),
-        id="daily_seven_and_two_job",
-    )
-
-    # každý den v 0:05
-    scheduler.add_job(
-        daily_pulnoc_job,
-        CronTrigger(hour=0, minute=15, second=5),
-        id="daily_job",
-    )
-
-    # každý týden v pondělí v 6:10
-    scheduler.add_job(
-        weekly_job,
-        CronTrigger(day_of_week="1", hour=0, minute=10, second=5),
-        id="weekly_job",
-    )
+    #
+    # # # každou hodinu v X:03 v pracovní dny od 6 do 16
+    # # scheduler.add_job(
+    # #     working_time_hourly_job,
+    # #     CronTrigger(hour="6-16", minute=3, day_of_week="mon-fri"),
+    # #     id="working_time_hourly_job",
+    # # )
+    #
+    # # každý den v X:00 7 a 14
+    # scheduler.add_job(
+    #     daily_seven_and_two_job,
+    #     CronTrigger(hour="7,14", minute=0),
+    #     id="daily_seven_and_two_job",
+    # )
+    #
+    # # každý den v 0:05
+    # scheduler.add_job(
+    #     daily_pulnoc_job,
+    #     CronTrigger(hour=0, minute=15, second=5),
+    #     id="daily_job",
+    # )
+    #
+    # # každý týden v pondělí v 6:10
+    # scheduler.add_job(
+    #     weekly_job,
+    #     CronTrigger(day_of_week="1", hour=0, minute=10, second=5),
+    #     id="weekly_job",
+    # )
 
     # # každý první den v měsíci v 0:00
     # scheduler.add_job(

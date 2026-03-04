@@ -108,8 +108,3 @@ def SOFTLINK_to_database_mereni(api_json):
             )
 
         session.commit()
-
-
-
-
-SOFTLINK_to_database_mereni(SOFTLINK_dotaz())

@@ -132,6 +132,12 @@ def SCVK_dotaz(dotazVodomer):
     return scvk_json
 
 
+
+
+
+
+
+
 # Původní verze funkce ponechána zakomentovaná dle požadavku:
 # def SCVK_dotaz(dotazVodomer):
 #     """ přiravit hodnoty pro další použití """

@@ -163,3 +163,5 @@ def meteo_sync():
     finally:
         db_session.close()
 
+
+

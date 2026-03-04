@@ -1,10 +1,8 @@
 from core.db.connect import SessionLocalMS
-from moduly.elektromery.database.models import Elektromer_areal_Zarizeni, Elektromer_areal_Mereni
+from moduly.mereni.elektromery.database.models import Elektromer_areal_Zarizeni, Elektromer_areal_Mereni
 from collections import defaultdict
 from datetime import datetime, timezone
-from moduly.elektromery.SOFTLINK.SOFTLINK_data_z_dotazu import SOFTLINK_dotaz
-
-
+from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_data_z_dotazu import SOFTLINK_dotaz
 
 
 def SOFTLINK_to_database_mereni(api_json):
@@ -110,3 +108,8 @@ def SOFTLINK_to_database_mereni(api_json):
             )
 
         session.commit()
+
+
+
+
+SOFTLINK_to_database_mereni(SOFTLINK_dotaz())

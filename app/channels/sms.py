@@ -44,3 +44,4 @@ def send_sms(phone: str, message: str, timeout: float = 10.0) -> Dict:
         logger.error(f"An unexpected error occurred: {e}")
         return {"error": "unexpected_error", "details": str(e)}
 
+

@@ -3,18 +3,18 @@ from time import perf_counter
 from sqlalchemy import select, func, inspect, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
-from moduly.vodomery.database.models import (
+from moduly.mereni.vodomery.database.models import (
     Mereni_vodomery,
     Vodomer_areal_Mereni,
     Vodomer_SCVK_Mereni,
     Vodomer_areal_Zarizeni_QGIS,
 )
-from core.db.connect import engine_MS, engine_PG
+from core.db.connect import ENGINE_MS, ENGINE_PG
 from app.time_utils import utc_now_naive
 
 
-engine = engine_PG()
-engine_ms = engine_MS()
+engine = ENGINE_PG
+engine_ms = ENGINE_MS
 
 
 CHUNK_SIZE = 5000

@@ -1,7 +1,7 @@
 from sqlalchemy import select, insert, update
 from sqlalchemy.orm import Session
-from moduly.vodomery.database.models import *
-from core.db.connect import engine_PG
+from moduly.mereni.vodomery.database.models import *
+from core.db.connect import ENGINE_PG
 from app.time_utils import utc_now_naive
 
 
@@ -17,9 +17,7 @@ def score_new_measurements(model_version: int = 1, batch_size: int = 1000):
     - update scoring state v jedné transakci
     """
 
-    engine = engine_PG()
-
-    with Session(engine, autoflush=False, expire_on_commit=False) as session:
+    with Session(ENGINE_PG, autoflush=False, expire_on_commit=False) as session:
 
         # -------------------------------------------------
         # 1️⃣ Načti nebo inicializuj scoring state
@@ -149,30 +147,31 @@ def score_new_measurements(model_version: int = 1, batch_size: int = 1000):
         # 5️⃣ Jedna transakce
         # -------------------------------------------------
         if rows_to_insert:
-
             session.execute(
                 insert(VodomeryAnomalyScore),
                 rows_to_insert,
             )
 
-            session.execute(
-                update(VodomeryScoringState)
-                .where(VodomeryScoringState.model_version == model_version)
-                .values(
-                    last_measurement_id=max_processed_id,
-                    updated_at=utc_now_naive(),
-                )
+        # Posun checkpointu vždy na poslední zpracovaný záznam dávky
+        session.execute(
+            update(VodomeryScoringState)
+            .where(VodomeryScoringState.model_version == model_version)
+            .values(
+                last_measurement_id=max_processed_id,
+                updated_at=utc_now_naive(),
             )
+        )
 
-            session.commit()
+        session.commit()
 
+        if rows_to_insert:
             print(
                 f"Scored {len(rows_to_insert)} measurements. "
                 f"Last processed id: {max_processed_id}"
             )
-
             return len(rows_to_insert)
 
+        print(f"No scores inserted. Advanced checkpoint to id: {max_processed_id}")
         return 0
 
 

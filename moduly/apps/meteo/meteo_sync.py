@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, date
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert
 from core.db.connect import get_session_pg
-from moduly.meteo.database.models import MeteoHourly
+from moduly.apps.meteo.database.models import MeteoHourly
 from app.time_utils import utc_now_naive
 
 # ==============================
@@ -156,12 +156,10 @@ def run_meteo_sync(db_session):
 #         db_session.close()
 
 
-def meteo_sync(db_session=get_session_pg()):
+def meteo_sync():
+    db_session=get_session_pg()
     try:
         run_meteo_sync(db_session)
     finally:
         db_session.close()
 
-
-
-meteo_sync()

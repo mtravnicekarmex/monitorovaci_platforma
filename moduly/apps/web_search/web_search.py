@@ -5,13 +5,9 @@ from selenium.webdriver.chrome.options import Options
 from urllib.parse import urljoin, urlparse
 import re
 from datetime import datetime
-from moduly.web_search.database.models import Monitor, Result
+from moduly.apps.web_search.database.models import Monitor, Result
 from app.channels.email import send_email_outlook
 from decouple import config
-import streamlit as st
-from core.db.connect import get_session_pg
-import json
-
 
 
 # -------------------------
@@ -314,7 +310,7 @@ def poslat_email_html_vyraz(to_email, subject, vyskyt_list):
 #     # Kontrola pro "refresh"
 #     if 'refresh' in st.session_state:
 #         del st.session_state['refresh']
-#         st.experimental_rerun()
+#         st.rerun()
 #
 #     if not monitory:
 #         st.info("Žádné uložené monitory.")

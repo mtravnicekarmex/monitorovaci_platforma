@@ -1,9 +1,9 @@
 from sqlalchemy import select
-from moduly.vodomery.database.models import *
-from core.db.connect import engine_PG
+from moduly.mereni.vodomery.database.models import *
+from core.db.connect import ENGINE_PG
 from sqlalchemy.orm import Session
 from app.time_utils import utc_now_naive
-from moduly.vodomery.database.vodomery_db_vse import is_night_time
+from moduly.mereni.vodomery.database.vodomery_db_vse import is_night_time
 
 
 EVENT_CONFIG = {
@@ -28,9 +28,7 @@ EVENT_CONFIG = {
 
 def detect_events_from_scores(model_version: int, batch_size: int = 50000):
 
-    engine = engine_PG()
-
-    with Session(engine, autoflush=False, expire_on_commit=False) as session:
+    with Session(ENGINE_PG, autoflush=False, expire_on_commit=False) as session:
 
         # =====================================================
         # 1️⃣ Engine state

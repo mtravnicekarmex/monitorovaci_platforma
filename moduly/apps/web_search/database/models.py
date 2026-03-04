@@ -4,6 +4,7 @@ from sqlalchemy import String, ForeignKey, Text, Float, Boolean, BigInteger, Int
     UniqueConstraint, text, CheckConstraint
 from geoalchemy2 import Geometry
 from typing import List
+import json
 
 
 
@@ -26,6 +27,8 @@ class Monitor(Base):
 
     results: Mapped[List["Result"]] = relationship(back_populates="monitor", cascade="all, delete-orphan", passive_deletes=True)
 
+    def get_expressions(self):
+        return json.loads(self.vyrazy)
 
 
 

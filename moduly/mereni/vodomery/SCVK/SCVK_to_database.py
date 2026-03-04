@@ -1,8 +1,8 @@
 import datetime
-from moduly.vodomery.SCVK.SCVK_data_z_dotazu import SCVK_dotaz, seznam_vodomeru
+from moduly.mereni.vodomery.SCVK.SCVK_data_z_dotazu import SCVK_dotaz, seznam_vodomeru
 from core.db.connect import SessionLocalPG
 
-from moduly.vodomery.database.models import Vodomer_SCVK_Zarizeni, Vodomer_SCVK_Alarm, Vodomer_SCVK_Mereni
+from moduly.mereni.vodomery.database.models import Vodomer_SCVK_Zarizeni, Vodomer_SCVK_Alarm, Vodomer_SCVK_Mereni
 
 
 def save_to_database(SCVK_Json):

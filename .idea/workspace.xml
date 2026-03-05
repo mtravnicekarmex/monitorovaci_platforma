@@ -4,10 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="13c8bcca-584b-46c9-b514-2786f5a09530" name="Changes" comment="chyba">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/moduly/apps/web_search/web_search.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/apps/web_search/web_search.py" afterDir="false" />
-    </list>
+    <list default="true" id="13c8bcca-584b-46c9-b514-2786f5a09530" name="Changes" comment="opraveny streamlit web_search" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -119,7 +116,7 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1772604874336</updated>
-      <workItem from="1772604875379" duration="18996000" />
+      <workItem from="1772604875379" duration="19387000" />
     </task>
     <task id="LOCAL-00001" summary="transfer na server">
       <option name="closed" value="true" />
@@ -137,7 +134,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772631468959</updated>
     </task>
-    <option name="localTasksCounter" value="3" />
+    <task id="LOCAL-00003" summary="opraveny streamlit web_search">
+      <option name="closed" value="true" />
+      <created>1772634061190</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1772634061190</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -146,7 +151,8 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="transfer na server" />
     <MESSAGE value="chyba" />
-    <option name="LAST_COMMIT_MESSAGE" value="chyba" />
+    <MESSAGE value="opraveny streamlit web_search" />
+    <option name="LAST_COMMIT_MESSAGE" value="opraveny streamlit web_search" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/monitorovaci_platforma$time_utils.coverage" NAME="time_utils Coverage Results" MODIFIED="1772621206756" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/app" />

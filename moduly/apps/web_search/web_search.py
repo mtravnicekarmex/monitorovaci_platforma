@@ -190,6 +190,9 @@ def poslat_email_html_vyraz(to_email, subject, vyskyt_list):
 
 
 
+
+
+
 # -------------------------
 # Streamlit UI
 # -------------------------
@@ -379,6 +382,7 @@ with st.container():
                             st.rerun()
 
     session.close()
+
 
 
 

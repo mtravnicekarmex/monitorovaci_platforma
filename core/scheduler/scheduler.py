@@ -336,14 +336,6 @@ def quarter_hour_job():
     safe_call(vodomery_db_import)
     safe_call(score_new_measurements, model_version=1)
     safe_call(detect_events_from_scores, model_version=1)
-    safe_call(meteo_sync)
-    safe_call(rebuild_profiles, 1)
-    safe_call(uloz_manometry_parquet)
-    safe_call(uloz_kalorimetry_parquet)
-    safe_call(uloz_plynomery_parquet)
-    safe_call(uloz_vodomery_parquet)
-
-
 
 
 # každou hodinu

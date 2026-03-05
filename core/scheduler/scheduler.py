@@ -410,7 +410,7 @@ def main_scheduler():
     # každých 15 minut v X:02,17,32,47
     scheduler.add_job(
         quarter_hour_job,
-        CronTrigger(minute="5,28,35,50", second=5),
+        CronTrigger(minute="5,17,35,50", second=5),
         id="quarter_hour_job",
     )
     #
@@ -455,7 +455,7 @@ def main_scheduler():
     #     monthly_job,
     #     CronTrigger(
     #         day=1,  # první den v měsíci
-    #         hour=0,
+    #         hour=5,
     #         minute=0,
     #         second=5,
     #     ),

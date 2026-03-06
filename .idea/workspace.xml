@@ -4,7 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="13c8bcca-584b-46c9-b514-2786f5a09530" name="Changes" comment="synchronizace">
+    <list default="true" id="13c8bcca-584b-46c9-b514-2786f5a09530" name="Changes" comment="výchozí bod před API alertingem">
+      <change afterPath="$PROJECT_DIR$/moduly/evidence/revize/database/models.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/moduly/evidence/revize/import_z_excel.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/moduly/evidence/revize/import_z_excelu/import_F.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/moduly/evidence/revize/import_z_excelu/import_core.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/core/scheduler/scheduler.py" beforeDir="false" afterPath="$PROJECT_DIR$/core/scheduler/scheduler.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -13,7 +18,8 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="36" />
+    <option name="cachedIndexableFilesCount" value="49" />
+    <option name="fileBasedEmbeddingIndicesEnabled" value="true" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -24,6 +30,7 @@
   </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+    <option name="RESET_MODE" value="HARD" />
   </component>
   <component name="GitHubPullRequestSearchHistory">{
   &quot;lastFilter&quot;: {
@@ -53,40 +60,45 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ASKED_MARK_IGNORED_FILES_AS_EXCLUDED&quot;: &quot;true&quot;,
-    &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Python.SCVK_data_z_dotazu.executor&quot;: &quot;Run&quot;,
-    &quot;Python.SOFTLINK_data_z_dotazu.executor&quot;: &quot;Run&quot;,
-    &quot;Python.SOFTLINK_to_database.executor&quot;: &quot;Run&quot;,
-    &quot;Python.email.executor&quot;: &quot;Run&quot;,
-    &quot;Python.main.executor&quot;: &quot;Run&quot;,
-    &quot;Python.meteo_sync.executor&quot;: &quot;Run&quot;,
-    &quot;Python.scheduler.executor&quot;: &quot;Run&quot;,
-    &quot;Python.sms.executor&quot;: &quot;Run&quot;,
-    &quot;Python.time_utils.executor&quot;: &quot;Run&quot;,
-    &quot;Python.vodomery_prediction.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
-    &quot;SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
-    &quot;ai.playground.ignore.import.keys.banner.in.settings&quot;: &quot;true&quot;,
-    &quot;com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;junie.onboarding.icon.badge.shown&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;to.speed.mode.migration.done&quot;: &quot;true&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ASKED_MARK_IGNORED_FILES_AS_EXCLUDED": "true",
+    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.SCVK_data_z_dotazu.executor": "Run",
+    "Python.SOFTLINK_data_z_dotazu.executor": "Run",
+    "Python.SOFTLINK_to_database.executor": "Run",
+    "Python.email.executor": "Run",
+    "Python.import_F.executor": "Run",
+    "Python.import_z_excel.executor": "Run",
+    "Python.import_z_excelu.executor": "Run",
+    "Python.main.executor": "Run",
+    "Python.meteo_sync.executor": "Run",
+    "Python.models.executor": "Run",
+    "Python.scheduler.executor": "Run",
+    "Python.sms.executor": "Run",
+    "Python.time_utils.executor": "Run",
+    "Python.vodomery_prediction.executor": "Run",
+    "RunOnceActivity.MCP Project settings loaded": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "ai.playground.ignore.import.keys.banner.in.settings": "true",
+    "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
+    "git-widget-placeholder": "master",
+    "junie.onboarding.icon.badge.shown": "true",
+    "last_opened_file_path": "C:/Users/tra/Desktop/tra/Python/PycharmProjects/monitorovaci_platforma",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "to.speed.mode.migration.done": "true",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RecapSpentCounter">
     <option name="endsOfQuotaMs" value="1773493207568" />
     <option name="spentUsd" value="0.20954789" />
@@ -96,11 +108,11 @@
   </component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma\moduly\evidence" />
       <recent name="C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma\moduly\apps" />
       <recent name="C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma\moduly\mereni" />
       <recent name="C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma\moduly" />
       <recent name="C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma" />
-      <recent name="C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma\app" />
     </key>
   </component>
   <component name="SharedIndexes">
@@ -118,7 +130,10 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1772604874336</updated>
-      <workItem from="1772604875379" duration="18996000" />
+      <workItem from="1772604875379" duration="19387000" />
+      <workItem from="1772714250626" duration="1203000" />
+      <workItem from="1772719172437" duration="1774000" />
+      <workItem from="1772775657715" duration="18026000" />
     </task>
     <task id="LOCAL-00001" summary="transfer na server">
       <option name="closed" value="true" />
@@ -136,13 +151,13 @@
       <option name="project" value="LOCAL" />
       <updated>1772631468959</updated>
     </task>
-    <task id="LOCAL-00003" summary="synchronizace">
+    <task id="LOCAL-00003" summary="opraveny streamlit web_search">
       <option name="closed" value="true" />
-      <created>1772705128437</created>
+      <created>1772634061190</created>
       <option name="number" value="00003" />
       <option name="presentableId" value="LOCAL-00003" />
       <option name="project" value="LOCAL" />
-      <updated>1772705128437</updated>
+      <updated>1772634061190</updated>
     </task>
     <option name="localTasksCounter" value="4" />
     <servers />
@@ -150,22 +165,37 @@
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
   </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="transfer na server" />
     <MESSAGE value="chyba" />
-    <MESSAGE value="synchronizace" />
-    <option name="LAST_COMMIT_MESSAGE" value="synchronizace" />
+    <MESSAGE value="opraveny streamlit web_search" />
+    <option name="LAST_COMMIT_MESSAGE" value="opraveny streamlit web_search" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/monitorovaci_platforma$time_utils.coverage" NAME="time_utils Coverage Results" MODIFIED="1772621206756" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/app" />
     <SUITE FILE_PATH="coverage/monitorovaci_platforma$sms.coverage" NAME="sms Coverage Results" MODIFIED="1772610599851" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/app/channels" />
     <SUITE FILE_PATH="coverage/monitorovaci_platforma$vodomery_prediction.coverage" NAME="vodomery_prediction Coverage Results" MODIFIED="1772609382815" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/moduly/vodomery" />
+    <SUITE FILE_PATH="coverage/monitorovaci_platforma$import_z_excel.coverage" NAME="import_z_excel Coverage Results" MODIFIED="1772806542754" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/moduly/evidence/revize" />
     <SUITE FILE_PATH="coverage/monitorovaci_platforma$SCVK_data_z_dotazu.coverage" NAME="SCVK_data_z_dotazu Coverage Results" MODIFIED="1772621607167" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/moduly/mereni/vodomery/SCVK" />
     <SUITE FILE_PATH="coverage/monitorovaci_platforma$scheduler.coverage" NAME="scheduler Coverage Results" MODIFIED="1772630829498" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/core/scheduler" />
-    <SUITE FILE_PATH="coverage/monitorovaci_platforma$SOFTLINK_data_z_dotazu.coverage" NAME="SOFTLINK_data_z_dotazu Coverage Results" MODIFIED="1772610965345" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/moduly/elektromery/SOFTLINK" />
     <SUITE FILE_PATH="coverage/monitorovaci_platforma$SOFTLINK_to_database.coverage" NAME="SOFTLINK_to_database Coverage Results" MODIFIED="1772629642039" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/moduly/mereni/elektromery/SOFTLINK" />
+    <SUITE FILE_PATH="coverage/monitorovaci_platforma$import_z_excelu.coverage" NAME="import_z_excelu Coverage Results" MODIFIED="1772804878865" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/moduly/evidence/revize" />
+    <SUITE FILE_PATH="coverage/monitorovaci_platforma$import_F.coverage" NAME="import_F Coverage Results" MODIFIED="1772807141646" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/moduly/evidence/revize/import_z_excelu" />
+    <SUITE FILE_PATH="coverage/monitorovaci_platforma$SOFTLINK_data_z_dotazu.coverage" NAME="SOFTLINK_data_z_dotazu Coverage Results" MODIFIED="1772610965345" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/moduly/elektromery/SOFTLINK" />
     <SUITE FILE_PATH="coverage/monitorovaci_platforma$meteo_sync.coverage" NAME="meteo_sync Coverage Results" MODIFIED="1772630686889" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/moduly/apps/meteo" />
-    <SUITE FILE_PATH="coverage/monitorovaci_platforma$main.coverage" NAME="main Coverage Results" MODIFIED="1772630853366" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/monitorovaci_platforma$main.coverage" NAME="main Coverage Results" MODIFIED="1772775861429" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/monitorovaci_platforma$email.coverage" NAME="email Coverage Results" MODIFIED="1772607053767" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/core/channels" />
+    <SUITE FILE_PATH="coverage/monitorovaci_platforma$models.coverage" NAME="models Coverage Results" MODIFIED="1772806409319" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/moduly/evidence/revize/database" />
   </component>
 </project>

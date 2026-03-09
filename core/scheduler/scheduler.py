@@ -333,17 +333,18 @@ def locked_job(fn):
 # každých 15 minut
 @locked_job
 def quarter_hour_job():
-    safe_call(vodomery_db_import)
-    safe_call(score_new_measurements, model_version=1)
-    safe_call(detect_events_from_scores, model_version=1)
-    safe_call(meteo_sync)
-    safe_call(rebuild_profiles, 1)
-    safe_call(uloz_manometry_parquet)
-    safe_call(uloz_kalorimetry_parquet)
-    safe_call(uloz_plynomery_parquet)
-    safe_call(uloz_vodomery_parquet)
-    safe_call(daily_web_monitor_job)
-    safe_call(SOFTLINK_save_to_database_all)
+    # safe_call(vodomery_db_import)
+    # safe_call(score_new_measurements, model_version=1)
+    # safe_call(detect_events_from_scores, model_version=1)
+    # safe_call(meteo_sync)
+    # safe_call(rebuild_profiles, 1)
+    # safe_call(uloz_manometry_parquet)
+    # safe_call(uloz_kalorimetry_parquet)
+    # safe_call(uloz_plynomery_parquet)
+    # safe_call(uloz_vodomery_parquet)
+    # safe_call(daily_web_monitor_job)
+    # safe_call(SOFTLINK_save_to_database_all)
+    safe_call(SCVK_save_to_database_all)
 
 
 # každou hodinu
@@ -418,7 +419,7 @@ def main_scheduler():
     # každých 15 minut v X:02,17,32,47
     scheduler.add_job(
         quarter_hour_job,
-        CronTrigger(minute="5,28,45,50", second=5),
+        CronTrigger(minute="16,28,45,50", second=5),
         id="quarter_hour_job",
     )
     #
@@ -503,7 +504,7 @@ lock = threading.Lock()
 # -------------------------
 # Start
 # -------------------------
-# if __name__ == "__main__":
-#     main_scheduler()
+if __name__ == "__main__":
+    main_scheduler()
 
 

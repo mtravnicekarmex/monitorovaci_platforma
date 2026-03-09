@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from core.db.connect import ENGINE_PG
 from moduly.evidence.revize.import_z_excelu.import_core import import_revize
 from pathlib import Path
@@ -30,7 +32,7 @@ REVIZE_MAPPING_COLUMNS = {
 
 # Mapování názvu řádku → typ tabulky zařízení
 TYP_MAP = {
-    "rozdody plynu": "PLYNOVÁ ZAŘÍZENÍ",
+    "rozvody plynu": "PLYNOVÁ ZAŘÍZENÍ",
     "plynové kotle": "PLYNOVÁ ZAŘÍZENÍ",
     "plynové zářiče": "PLYNOVÁ ZAŘÍZENÍ",
     "spalinové cesty kotle": "SPALINOVÉ CESTY",

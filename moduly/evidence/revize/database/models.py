@@ -1,6 +1,5 @@
-from datetime import datetime, date
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy import Integer, String, Date, Text, Index, UniqueConstraint, ForeignKey
+from sqlalchemy import Integer, String, Date, Text, Index, UniqueConstraint, ForeignKey, Numeric
 from core.db.connect import ENGINE_PG
 
 
@@ -21,8 +20,10 @@ class Revize(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True) # Primární klíč
     budova: Mapped[str] = mapped_column(String(50), nullable=False)  # Budova / objekt, ze kterého soubor pochází
     datum: Mapped[Date] = mapped_column(Date, nullable=False)  # Datum provedení revize
-    delka_platnosti: Mapped[int] = mapped_column(Integer, nullable=False) # Délka platnosti
+    delka_platnosti: Mapped[float] = mapped_column(Numeric(4, 2), nullable=False) # Délka platnosti v rocích
     datum_platnosti: Mapped[Date] = mapped_column(Date, nullable=True) # Datum platnosti (datum + délka platnosti)
+    typ_zarizeni: Mapped[str | None] = mapped_column(String(100), nullable=True) # Typ zařízení, kterého se revize týká
+    nazev_revize: Mapped[str | None] = mapped_column(String(255), nullable=True) # Název revize odvozený z Excelu
     dodavatel: Mapped[str | None] = mapped_column(String(200), nullable=True) # Dodavatel revize
     servisni_smlouva: Mapped[str | None] = mapped_column(String(500), nullable=True) # Odkaz na smlouvu, pokud existuje
     soubor: Mapped[str | None] = mapped_column(String(500), nullable=True) # Odkaz na soubor revize
@@ -58,3 +59,4 @@ class Revize_zarizeni(Base):
         return f"{self.id} - {self.revize_id} - {self.typ_zarizeni} - {self.zarizeni_id}"
 
 
+# Revize_zarizeni.__table__.create(bind=ENGINE_PG, checkfirst=True)

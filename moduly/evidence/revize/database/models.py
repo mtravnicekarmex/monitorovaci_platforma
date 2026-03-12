@@ -59,4 +59,4 @@ class Revize_zarizeni(Base):
         return f"{self.id} - {self.revize_id} - {self.typ_zarizeni} - {self.zarizeni_id}"
 
 
-# Revize_zarizeni.__table__.create(bind=ENGINE_PG, checkfirst=True)
+# Revize.__table__.create(bind=ENGINE_PG, checkfirst=True)

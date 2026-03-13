@@ -4,10 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="13c8bcca-584b-46c9-b514-2786f5a09530" name="Changes" comment="fukční export z excelu do db, před migrací na common">
+    <list default="true" id="13c8bcca-584b-46c9-b514-2786f5a09530" name="Changes" comment="dashboard">
+      <change afterPath="$PROJECT_DIR$/moduly/mereni/vodomery/SCVK/historie_vetve.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/moduly/evidence/revize/database/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/evidence/revize/database/models.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/moduly/evidence/revize/import_z_excelu/import_F.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/evidence/revize/import_z_excelu/import_F.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/moduly/mereni/vodomery/database/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/mereni/vodomery/database/models.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/moduly/mereni/vodomery/vodomery_events.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/mereni/vodomery/vodomery_events.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -15,7 +16,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="71" />
+    <option name="cachedIndexableFilesCount" value="68" />
     <option name="fileBasedEmbeddingIndicesEnabled" value="true" />
   </component>
   <component name="FileTemplateManagerImpl">
@@ -139,7 +140,7 @@
       <workItem from="1773126703941" duration="3416000" />
       <workItem from="1773209996118" duration="22903000" />
       <workItem from="1773294219263" duration="13799000" />
-      <workItem from="1773317595674" duration="5568000" />
+      <workItem from="1773317595674" duration="31925000" />
     </task>
     <task id="LOCAL-00001" summary="transfer na server">
       <option name="closed" value="true" />
@@ -197,7 +198,15 @@
       <option name="project" value="LOCAL" />
       <updated>1773224586881</updated>
     </task>
-    <option name="localTasksCounter" value="8" />
+    <task id="LOCAL-00008" summary="dashboard">
+      <option name="closed" value="true" />
+      <created>1773325394260</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1773325394260</updated>
+    </task>
+    <option name="localTasksCounter" value="9" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -221,7 +230,8 @@
     <MESSAGE value="rozpracovaný import z excelu" />
     <MESSAGE value="rozpracovaný import z excelu, upravený SCVK dotaz, lepší error handling" />
     <MESSAGE value="fukční export z excelu do db, před migrací na common" />
-    <option name="LAST_COMMIT_MESSAGE" value="fukční export z excelu do db, před migrací na common" />
+    <MESSAGE value="dashboard" />
+    <option name="LAST_COMMIT_MESSAGE" value="dashboard" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

@@ -1,5 +1,6 @@
 from sqlalchemy import select
 from moduly.mereni.vodomery.database.models import *
+from moduly.mereni.vodomery.database.expected_zero import ensure_expected_zero_table
 from core.db.connect import ENGINE_PG
 from sqlalchemy.orm import Session
 from app.time_utils import utc_now_naive
@@ -23,10 +24,15 @@ EVENT_CONFIG = {
         "threshold": None,
         "min_consecutive": 12,
     },
+    "EXPECTED_ZERO_USAGE": {
+        "threshold": None,
+        "min_consecutive": 1,
+    },
 }
 
 
 def detect_events_from_scores(model_version: int, batch_size: int = 50000):
+    ensure_expected_zero_table()
 
     with Session(ENGINE_PG, autoflush=False, expire_on_commit=False) as session:
 
@@ -73,6 +79,14 @@ def detect_events_from_scores(model_version: int, batch_size: int = 50000):
 
         max_processed_id = new_scores[-1].id
         idents = {s.identifikace for s in new_scores}
+        expected_zero_idents = {
+            row[0]
+            for row in session.execute(
+                select(VodomeryExpectedZero.identifikace).where(
+                    VodomeryExpectedZero.identifikace.in_(idents)
+                )
+            ).all()
+        }
 
         # =====================================================
         # 3️⃣ Načti states
@@ -138,7 +152,9 @@ def detect_events_from_scores(model_version: int, batch_size: int = 50000):
                 # TRIGGER LOGIKA
                 # -------------------------------------------------
                 if event_type == "ZERO_FLOW":
-                    triggered = score.actual_value == 0
+                    triggered = score.actual_value == 0 and ident not in expected_zero_idents
+                elif event_type == "EXPECTED_ZERO_USAGE":
+                    triggered = ident in expected_zero_idents and score.actual_value > 0
                 elif event_type == "NIGHT_USAGE":
                     triggered = (
                         is_night_time(ts)

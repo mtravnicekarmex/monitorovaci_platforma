@@ -247,6 +247,31 @@ class VodomeryProfilesAnomaly(Base):
 
 
 
+# areálové + SČVK vodoměry se stavem expected zero
+class VodomeryExpectedZero(Base):
+    __tablename__ = "vodomery_expected_zero"
+    __table_args__ = {"schema": "monitoring"}
+
+    identifikace: Mapped[str] = mapped_column(
+        String(250),
+        ForeignKey("qgis.vodoměry.identifikace", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    updated_by: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        onupdate=text("now()"),
+        nullable=False,
+    )
+
+
+
 
 # areálové + SČVK vodoměry anomaly score
 class VodomeryAnomalyScore(Base):
@@ -297,7 +322,7 @@ class VodomeryScoringState(Base):
 class VodomeryAnomalyEvent(Base):
     __tablename__ = "vodomery_anomaly_events"
     __table_args__ = (
-        CheckConstraint("event_type IN ('NIGHT_USAGE','SPIKE','LONG_LEAK','ZERO_FLOW')", name="ck_event_type_valid"), # povolené typy eventů
+        CheckConstraint("event_type IN ('NIGHT_USAGE','SPIKE','LONG_LEAK','ZERO_FLOW','EXPECTED_ZERO_USAGE')", name="ck_event_type_valid"), # povolené typy eventů
         Index("uq_event_active_true","identifikace", "event_type", "model_version", unique=True, postgresql_where=text("is_active = true")), # 🔥 klíčový partial unique index, dovolí jen 1 aktivní event pro danou kombinaci
         Index("ix_event_lookup","identifikace", "event_type", "model_version"), # běžný index pro rychlé filtrování historie
 

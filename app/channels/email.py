@@ -47,7 +47,7 @@ def send_email_gmail(email_receiver, subject, body, file_path=None, is_html=True
 
 
 
-def send_email_outlook(email_receiver, subject, body, sender_alias=None, file_path=None, is_html=False):
+def send_email_outlook(email_receiver, subject, body, sender_alias=None, file_path=None, is_html=False, attachments=None):
     """ Send email with attachment"""
     email_sender = config('O_EMAIL')
     email_password = config('O_APP')
@@ -76,6 +76,15 @@ def send_email_outlook(email_receiver, subject, body, sender_alias=None, file_pa
                               maintype='application',
                               subtype='octet-stream',
                               filename=os.path.basename(file_path))
+
+    if attachments:
+        for filename, content, maintype, subtype in attachments:
+            msg.add_attachment(
+                content,
+                maintype=maintype,
+                subtype=subtype,
+                filename=filename,
+            )
 
     # Log in and send the email
     with smtplib.SMTP('smtp.office365.com', 587, timeout=30) as smtp:

@@ -69,7 +69,7 @@ class Kalorimetr_areal_Mereni(Base):
 
 class Kalorimetr_areal_Zarizeni_QGIS(Base):
     __tablename__ = 'kalorimetry'
-    __table_args__ = {'schema': 'qgis'}
+    __table_args__ = {'schema': 'evidence'}
 
     identifikace: Mapped[str] = mapped_column(String(250), primary_key=True, nullable=False, unique=True)
     geom: Mapped[Geometry] = mapped_column(Geometry(geometry_type='POINT', srid=5514, spatial_index=True), nullable=True)

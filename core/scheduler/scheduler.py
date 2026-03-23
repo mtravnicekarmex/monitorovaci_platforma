@@ -12,6 +12,7 @@ import os
 import traceback
 import time
 import logging
+from pathlib import Path
 from logging.handlers import TimedRotatingFileHandler
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -22,6 +23,8 @@ from decouple import config
 from moduly.mereni.vodomery.database.vodomery_db_vse import vodomery_db_import
 from moduly.mereni.vodomery.vodomery_prediction import rebuild_profiles
 from moduly.mereni.vodomery.vodomery_anomaly import score_new_measurements
+from moduly.mereni.vodomery.alerting import process_vodomery_alerts
+from moduly.mereni.vodomery.reporting import send_monthly_vodomery_consumption_report
 from moduly.mereni.vodomery.vodomery_events import detect_events_from_scores
 from moduly.apps.meteo.meteo_sync import meteo_sync
 
@@ -30,31 +33,44 @@ from moduly.apps.meteo.meteo_sync import meteo_sync
 # Logger
 # -------------------------
 
+SCHEDULER_DIR = Path(__file__).resolve().parent
+SCHEDULER_LOGS_DIR = SCHEDULER_DIR / "logs"
+SCHEDULER_LOG_PATH = SCHEDULER_LOGS_DIR / "scheduler.log"
+
 
 def setup_logging():
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
+    SCHEDULER_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
     formatter = logging.Formatter(
         "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
     )
 
-    # --- Console handler ---
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-
-    # --- File handler (rotace každý den, uchová 14 dní) ---
-    file_handler = TimedRotatingFileHandler(
-        "scheduler.log",
-        when="midnight",
-        interval=1,
-        backupCount=14,
-        encoding="utf-8"
+    has_console_handler = any(
+        isinstance(handler, logging.StreamHandler) and getattr(handler, "stream", None) is sys.stdout
+        for handler in logger.handlers
     )
-    file_handler.setFormatter(formatter)
+    if not has_console_handler:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
 
-    logger.addHandler(console_handler)
-    logger.addHandler(file_handler)
+    has_file_handler = any(
+        isinstance(handler, TimedRotatingFileHandler)
+        and Path(getattr(handler, "baseFilename", "")).resolve() == SCHEDULER_LOG_PATH.resolve()
+        for handler in logger.handlers
+    )
+    if not has_file_handler:
+        file_handler = TimedRotatingFileHandler(
+            SCHEDULER_LOG_PATH,
+            when="midnight",
+            interval=1,
+            backupCount=14,
+            encoding="utf-8"
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
 
     # potlačí SQLAlchemy spam
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
@@ -335,16 +351,8 @@ def locked_job(fn):
 def quarter_hour_job():
     safe_call(vodomery_db_import)
     safe_call(score_new_measurements, model_version=1)
-    safe_call(detect_events_from_scores, model_version=1)
-    # safe_call(meteo_sync)
-    # safe_call(rebuild_profiles, 1)
-    # safe_call(uloz_manometry_parquet)
-    # safe_call(uloz_kalorimetry_parquet)
-    # safe_call(uloz_plynomery_parquet)
-    # safe_call(uloz_vodomery_parquet)
-    # safe_call(daily_web_monitor_job)
-    # safe_call(SOFTLINK_save_to_database_all)
-    safe_call(SCVK_save_to_database_all)
+    event_result = safe_call(detect_events_from_scores, model_version=1)
+    safe_call(process_vodomery_alerts, active_event_ids=event_result.get("active_event_ids", []), resolved_event_ids=event_result.get("resolved_event_ids", []),)
 
 
 # každou hodinu
@@ -359,7 +367,6 @@ def working_time_hourly_job():
     safe_call(uloz_manometry_parquet)
     safe_call(uloz_kalorimetry_parquet)
     safe_call(uloz_plynomery_parquet)
-    safe_call(uloz_vodomery_parquet)
 
 
 # každý den v 7 a ve 14
@@ -384,7 +391,7 @@ def weekly_job():
 # každý měsíc prvního ráno
 @locked_job
 def monthly_job():
-    safe_call(SCVK_save_to_database_all)
+    safe_call(send_monthly_vodomery_consumption_report)
 
 
 
@@ -419,57 +426,57 @@ def main_scheduler():
     # každých 15 minut v X:02,17,32,47
     scheduler.add_job(
         quarter_hour_job,
-        CronTrigger(minute="16,28,45,50", second=5),
+        CronTrigger(minute="5,20,35,50", second=5),
         id="quarter_hour_job",
     )
-    #
-    # # každou hodinu v X:02
-    # scheduler.add_job(
-    #     hourly_job,
-    #     CronTrigger(minute=2, second=5),
-    #     id="hourly_job",
-    #     max_instances=1,
-    # )
-    #
-    # # # každou hodinu v X:03 v pracovní dny od 6 do 16
-    # # scheduler.add_job(
-    # #     working_time_hourly_job,
-    # #     CronTrigger(hour="6-16", minute=3, day_of_week="mon-fri"),
-    # #     id="working_time_hourly_job",
-    # # )
-    #
-    # # každý den v X:00 7 a 14
-    # scheduler.add_job(
-    #     daily_seven_and_two_job,
-    #     CronTrigger(hour="7,14", minute=0),
-    #     id="daily_seven_and_two_job",
-    # )
-    #
-    # # každý den v 0:05
-    # scheduler.add_job(
-    #     daily_pulnoc_job,
-    #     CronTrigger(hour=0, minute=15, second=5),
-    #     id="daily_job",
-    # )
-    #
-    # # každý týden v pondělí v 6:10
-    # scheduler.add_job(
-    #     weekly_job,
-    #     CronTrigger(day_of_week="1", hour=0, minute=10, second=5),
-    #     id="weekly_job",
-    # )
 
-    # # každý první den v měsíci v 0:00
-    # scheduler.add_job(
-    #     monthly_job,
-    #     CronTrigger(
-    #         day=1,  # první den v měsíci
-    #         hour=0,
-    #         minute=0,
-    #         second=5,
-    #     ),
-    #     id="monthly_job",
-    # )
+    # každou hodinu v X:02
+    scheduler.add_job(
+        hourly_job,
+        CronTrigger(minute=2, second=5),
+        id="hourly_job",
+        max_instances=1,
+    )
+
+    # každou hodinu v X:03 v pracovní dny od 6 do 16
+    scheduler.add_job(
+        working_time_hourly_job,
+        CronTrigger(hour="6-16", minute=3, day_of_week="mon-fri"),
+        id="working_time_hourly_job",
+    )
+
+    # každý den v X:00 7 a 14
+    scheduler.add_job(
+        daily_seven_and_two_job,
+        CronTrigger(hour="7,14", minute=0),
+        id="daily_seven_and_two_job",
+    )
+
+    # každý den v 0:05
+    scheduler.add_job(
+        daily_pulnoc_job,
+        CronTrigger(hour=0, minute=15, second=5),
+        id="daily_job",
+    )
+
+    # každý týden v pondělí v 6:10
+    scheduler.add_job(
+        weekly_job,
+        CronTrigger(day_of_week="1", hour=0, minute=10, second=5),
+        id="weekly_job",
+    )
+
+    # každý první den v měsíci po noční aktualizaci
+    scheduler.add_job(
+        monthly_job,
+        CronTrigger(
+            day=1,
+            hour=0,
+            minute=20,
+            second=5,
+        ),
+        id="monthly_job",
+    )
 
 
     # --- Listeners ---

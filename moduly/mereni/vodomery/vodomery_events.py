@@ -75,6 +75,10 @@ def detect_events_from_scores(model_version: int, batch_size: int = 50000):
                 "processed": 0,
                 "created": 0,
                 "resolved": 0,
+                "last_score_id": last_id,
+                "created_event_ids": [],
+                "active_event_ids": [],
+                "resolved_event_ids": [],
             }
 
         max_processed_id = new_scores[-1].id
@@ -119,6 +123,9 @@ def detect_events_from_scores(model_version: int, batch_size: int = 50000):
 
         created_events = 0
         resolved_events = 0
+        created_event_objects = []
+        active_event_candidates = {}
+        resolved_event_candidates = {}
 
         # =====================================================
         # 5️⃣ Hlavní smyčka
@@ -198,6 +205,8 @@ def detect_events_from_scores(model_version: int, batch_size: int = 50000):
 
                         session.add(new_event)
                         active_lookup[key] = new_event
+                        created_event_objects.append(new_event)
+                        active_event_candidates[key] = new_event
                         created_events += 1
 
                     elif state.is_event_active:
@@ -230,6 +239,7 @@ def detect_events_from_scores(model_version: int, batch_size: int = 50000):
                             )
 
                             event.last_score_time = ts
+                            active_event_candidates[key] = event
 
                 # =================================================
                 # EVENT KONČÍ
@@ -244,6 +254,7 @@ def detect_events_from_scores(model_version: int, batch_size: int = 50000):
                             event.resolved = True
                             event.resolved_at = ts
                             event.end_time = ts
+                            resolved_event_candidates[key] = event
                             resolved_events += 1
 
                         state.is_event_active = False
@@ -262,11 +273,18 @@ def detect_events_from_scores(model_version: int, batch_size: int = 50000):
 
         session.commit()
 
+        created_event_ids = [event.id for event in created_event_objects if event.id is not None]
+        active_event_ids = [event.id for event in active_event_candidates.values() if event.id is not None]
+        resolved_event_ids = [event.id for event in resolved_event_candidates.values() if event.id is not None]
+
         return {
             "processed": len(new_scores),
             "created": created_events,
             "resolved": resolved_events,
             "last_score_id": max_processed_id,
+            "created_event_ids": created_event_ids,
+            "active_event_ids": active_event_ids,
+            "resolved_event_ids": resolved_event_ids,
         }
 
 

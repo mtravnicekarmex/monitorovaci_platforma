@@ -142,10 +142,10 @@ class Vodomer_areal_Mereni(Base):
 
 
 
-# areálové + SČVK vodoměry qgis na PG
+# areálové + SČVK vodoměry evidence na PG
 class Vodomer_areal_Zarizeni_QGIS(Base):
     __tablename__ = 'vodoměry'
-    __table_args__ = {'schema': 'qgis'}
+    __table_args__ = {'schema': 'evidence'}
 
 
     identifikace: Mapped[str] = mapped_column(String(250), primary_key=True, nullable=False, unique=True)
@@ -195,7 +195,7 @@ class Mereni_vodomery(Base):
     # původní recid z MS (pro inkrementální sync)
     source_recid: Mapped[int] = mapped_column(BigInteger, index=True, nullable=True)
 
-    identifikace: Mapped[str] = mapped_column(String(250), ForeignKey('qgis.vodoměry.identifikace', ondelete="RESTRICT", onupdate="CASCADE"), nullable=False)
+    identifikace: Mapped[str] = mapped_column(String(250), ForeignKey('evidence.vodoměry.identifikace', ondelete="RESTRICT", onupdate="CASCADE"), nullable=False)
     seriove_cislo: Mapped[str] = mapped_column(String(250), nullable=False)
     date: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
     objem: Mapped[float] = mapped_column(Float, nullable=False)
@@ -232,7 +232,7 @@ class VodomeryProfilesAnomaly(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    identifikace: Mapped[str] = mapped_column(String(250), ForeignKey('qgis.vodoměry.identifikace', ondelete="CASCADE"), nullable=False)
+    identifikace: Mapped[str] = mapped_column(String(250), ForeignKey('evidence.vodoměry.identifikace', ondelete="CASCADE"), nullable=False)
     interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     day_of_week: Mapped[int] = mapped_column(Integer, nullable=False)
     slot: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -254,7 +254,7 @@ class VodomeryExpectedZero(Base):
 
     identifikace: Mapped[str] = mapped_column(
         String(250),
-        ForeignKey("qgis.vodoměry.identifikace", ondelete="CASCADE"),
+        ForeignKey("evidence.vodoměry.identifikace", ondelete="CASCADE"),
         primary_key=True,
     )
     updated_by: Mapped[str | None] = mapped_column(String(150), nullable=True)
@@ -330,7 +330,7 @@ class VodomeryAnomalyEvent(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    identifikace: Mapped[str] = mapped_column(String(250), ForeignKey("qgis.vodoměry.identifikace", ondelete="CASCADE"), nullable=False)
+    identifikace: Mapped[str] = mapped_column(String(250), ForeignKey("evidence.vodoměry.identifikace", ondelete="CASCADE"), nullable=False)
     event_type: Mapped[str] = mapped_column(String(30), nullable=False)
     model_version: Mapped[int] = mapped_column(Integer, nullable=False)
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
@@ -345,6 +345,107 @@ class VodomeryAnomalyEvent(Base):
     resolved_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=True)
     last_score_time: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=text("now()"), nullable=False)
+
+
+
+
+
+# konfigurace alertingu pro vodoměry
+class VodomeryAlertRule(Base):
+    __tablename__ = "vodomery_alert_rules"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IS NULL OR event_type IN ('NIGHT_USAGE','SPIKE','LONG_LEAK','ZERO_FLOW','EXPECTED_ZERO_USAGE')",
+            name="ck_alert_rule_event_type_valid",
+        ),
+        CheckConstraint(
+            "severity_min IN ('LOW','MEDIUM','HIGH','CRITICAL')",
+            name="ck_alert_rule_severity_min_valid",
+        ),
+        CheckConstraint(
+            "send_on IN ('ACTIVE','RESOLVED','BOTH')",
+            name="ck_alert_rule_send_on_valid",
+        ),
+        CheckConstraint(
+            "min_duration_minutes >= 0",
+            name="ck_alert_rule_min_duration_non_negative",
+        ),
+        Index("ix_alert_rule_enabled", "enabled"),
+        Index("ix_alert_rule_ident_event", "identifikace", "event_type", "enabled"),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rule_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    identifikace: Mapped[str | None] = mapped_column(
+        String(250),
+        ForeignKey("evidence.vodoměry.identifikace", ondelete="CASCADE"),
+        nullable=True,
+    )
+    event_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    severity_min: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'HIGH'"))
+    min_duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("120"))
+    send_on: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'ACTIVE'"))
+    recipient_email: Mapped[str] = mapped_column(String(250), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=text("now()"), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        onupdate=text("now()"),
+        nullable=False,
+    )
+
+
+
+
+# audit odeslání alertů; více alertů může být seskupeno do jednoho souhrnného emailu
+class VodomeryAlertDelivery(Base):
+    __tablename__ = "vodomery_alert_deliveries"
+    __table_args__ = (
+        CheckConstraint(
+            "alert_state IN ('ACTIVE_THRESHOLD','RESOLVED')",
+            name="ck_alert_delivery_state_valid",
+        ),
+        CheckConstraint(
+            "status IN ('PENDING','SENT','FAILED','SKIPPED')",
+            name="ck_alert_delivery_status_valid",
+        ),
+        UniqueConstraint(
+            "event_id",
+            "rule_id",
+            "alert_state",
+            "recipient_email",
+            name="uq_alert_delivery_event_rule_state_recipient",
+        ),
+        Index("ix_alert_delivery_status", "status"),
+        Index("ix_alert_delivery_recipient_created", "recipient_email", "created_at"),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("monitoring.vodomery_anomaly_events.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    rule_id: Mapped[int | None] = mapped_column(
+        ForeignKey("monitoring.vodomery_alert_rules.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    recipient_email: Mapped[str] = mapped_column(String(250), nullable=False)
+    alert_state: Mapped[str] = mapped_column(String(20), nullable=False)
+    summary_group_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'PENDING'"))
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=text("now()"), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
 
 
 
@@ -383,3 +484,158 @@ class VodomeryEventEngineState(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=text("now()"), nullable=False)
 
 
+
+
+
+# pomocná tabulka pro Aleting
+class VodomeryAlertSubscription(Base):
+    __tablename__ = "vodomery_alert_subscriptions"
+    __table_args__ = (
+        CheckConstraint(
+            "channel IN ('EMAIL','SMS')",
+            name="ck_vodomery_alert_subscriptions_channel",
+        ),
+        CheckConstraint(
+            "alert_type IN ('CREATED','RESOLVED','BOTH')",
+            name="ck_vodomery_alert_subscriptions_alert_type",
+        ),
+        CheckConstraint(
+            "severity_min IN ('LOW','MEDIUM','HIGH','CRITICAL')",
+            name="ck_vodomery_alert_subscriptions_severity_min",
+        ),
+        CheckConstraint(
+            "event_type IS NULL OR event_type IN "
+            "('NIGHT_USAGE','SPIKE','LONG_LEAK','ZERO_FLOW','EXPECTED_ZERO_USAGE')",
+            name="ck_vodomery_alert_subscriptions_event_type",
+        ),
+        Index(
+            "ix_vodomery_alert_subscriptions_enabled",
+            "enabled",
+        ),
+        Index(
+            "ix_vodomery_alert_subscriptions_lookup",
+            "identifikace",
+            "event_type",
+            "severity_min",
+            "enabled",
+        ),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    identifikace: Mapped[str | None] = mapped_column(
+        String(250),
+        ForeignKey("evidence.vodoměry.identifikace", ondelete="CASCADE"),
+        nullable=True,
+    )
+    event_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    severity_min: Mapped[str] = mapped_column(String(20), nullable=False, default="HIGH")
+    channel: Mapped[str] = mapped_column(String(10), nullable=False)
+    recipient: Mapped[str] = mapped_column(String(250), nullable=False)
+    recipient_label: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    alert_type: Mapped[str] = mapped_column(String(10), nullable=False, default="BOTH")
+    enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("true"),
+    )
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        onupdate=text("now()"),
+        nullable=False,
+    )
+
+
+#
+# # pomocná tabulka pro Aleting
+# class VodomeryAlertDelivery(Base):
+#     __tablename__ = "vodomery_alert_deliveries"
+#     __table_args__ = (
+#         CheckConstraint(
+#             "channel IN ('EMAIL','SMS')",
+#             name="ck_vodomery_alert_deliveries_channel",
+#         ),
+#         CheckConstraint(
+#             "alert_type IN ('CREATED','RESOLVED')",
+#             name="ck_vodomery_alert_deliveries_alert_type",
+#         ),
+#         CheckConstraint(
+#             "status IN ('PENDING','SENT','FAILED','SKIPPED')",
+#             name="ck_vodomery_alert_deliveries_status",
+#         ),
+#         UniqueConstraint(
+#             "event_id",
+#             "alert_type",
+#             "channel",
+#             "recipient",
+#             name="uq_vodomery_alert_deliveries_once",
+#         ),
+#         Index(
+#             "ix_vodomery_alert_deliveries_event",
+#             "event_id",
+#         ),
+#         Index(
+#             "ix_vodomery_alert_deliveries_status",
+#             "status",
+#         ),
+#         Index(
+#             "ix_vodomery_alert_deliveries_ident",
+#             "identifikace",
+#             "created_at",
+#         ),
+#         {"schema": "monitoring"},
+#     )
+#
+#     id: Mapped[int] = mapped_column(primary_key=True)
+#     event_id: Mapped[int] = mapped_column(
+#         ForeignKey("monitoring.vodomery_anomaly_events.id", ondelete="CASCADE"),
+#         nullable=False,
+#     )
+#     subscription_id: Mapped[int | None] = mapped_column(
+#         ForeignKey("monitoring.vodomery_alert_subscriptions.id", ondelete="SET NULL"),
+#         nullable=True,
+#     )
+#
+#     # denormalizace kvůli auditu a snadnému reportingu
+#     identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
+#     event_type: Mapped[str] = mapped_column(String(30), nullable=False)
+#     severity: Mapped[str] = mapped_column(String(20), nullable=False)
+#
+#     alert_type: Mapped[str] = mapped_column(String(10), nullable=False)
+#     channel: Mapped[str] = mapped_column(String(10), nullable=False)
+#     recipient: Mapped[str] = mapped_column(String(250), nullable=False)
+#
+#     status: Mapped[str] = mapped_column(
+#         String(20),
+#         nullable=False,
+#         server_default=text("'PENDING'"),
+#     )
+#     subject: Mapped[str | None] = mapped_column(String(250), nullable=True)
+#     body: Mapped[str | None] = mapped_column(Text, nullable=True)
+#     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+#
+#     attempt_count: Mapped[int] = mapped_column(
+#         Integer,
+#         nullable=False,
+#         server_default=text("0"),
+#     )
+#     last_attempt_at: Mapped[datetime | None] = mapped_column(
+#         DateTime(timezone=False),
+#         nullable=True,
+#     )
+#     sent_at: Mapped[datetime | None] = mapped_column(
+#         DateTime(timezone=False),
+#         nullable=True,
+#     )
+#     created_at: Mapped[datetime] = mapped_column(
+#         DateTime(timezone=False),
+#         server_default=text("now()"),
+#         nullable=False,
+#     )

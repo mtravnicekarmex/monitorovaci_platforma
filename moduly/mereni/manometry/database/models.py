@@ -63,7 +63,7 @@ class Mereni_manometry(Base):
 # areálové manometry QGIS na PG
 class Manometr_areal_Zarizeni_QGIS(Base):
     __tablename__ = 'manometry'
-    __table_args__ = {'schema': 'qgis'}
+    __table_args__ = {'schema': 'evidence'}
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, nullable=False)
     geom: Mapped[Geometry] = mapped_column(Geometry(geometry_type='POINT', srid=5514, spatial_index=True), nullable=True)

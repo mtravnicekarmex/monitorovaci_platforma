@@ -495,7 +495,7 @@ def filter_valid_rows(session, rows, source_name):
         return []
 
     # -------------------------------------------------
-    # 2️⃣ validace proti QGIS tabulce (FK logika)
+    # 2️⃣ validace proti mapové tabulce ve schema evidence (FK logika)
     # -------------------------------------------------
     valid_idents = set()
     ident_list = list(set(r["identifikace"] for r in sanitized))
@@ -537,7 +537,7 @@ def filter_valid_rows(session, rows, source_name):
             f"{source_name} dropped rows - "
             f"invalid: {dropped_invalid}, "
             f"future_ts: {dropped_future}, "
-            f"missing_qgis_identifikace: {dropped_fk}"
+            f"missing_evidence_identifikace: {dropped_fk}"
         )
 
     return filtered

@@ -10,7 +10,7 @@ def build_pg_url() -> str:
     )
 
 
-def build_ms_url() -> URL:
+def signin_info_MS() -> URL:
     return URL.create(
         "mssql+pyodbc",
         username=config("USER"),
@@ -23,6 +23,10 @@ def build_ms_url() -> URL:
             "Encrypt": "no",
         },
     )
+
+
+def build_ms_url() -> URL:
+    return signin_info_MS()
 
 
 ENGINE_PG = create_engine(

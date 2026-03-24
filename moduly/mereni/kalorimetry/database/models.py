@@ -26,9 +26,9 @@ class Kalorimetr_areal_Zarizeni(Base):
     umisteni: Mapped[str] = mapped_column(String(250), nullable=True)
     napaji: Mapped[str] = mapped_column(String(250), nullable=True)
     zdroj: Mapped[str] = mapped_column(String(250), nullable=True)
-    plynomer: Mapped[str] = mapped_column(String(250), nullable=True)
+    zdroj_mereni: Mapped[str] = mapped_column(String(250), nullable=True)
     koncovy_odberatel: Mapped[str] = mapped_column(String(250), nullable=True)
-    platnost_cejchu: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=True)
+    platnost_cejchu: Mapped[datetime] = mapped_column(nullable=True)
     poznamka_kalorimetry: Mapped[str] = mapped_column(String(250), nullable=True)
     foto: Mapped[str] = mapped_column(String(550), nullable=True)
 
@@ -39,8 +39,6 @@ class Kalorimetr_areal_Zarizeni(Base):
 
     def __repr__(self) -> str:
         return f"{self.identifikace} - {self.seriove_cislo}"
-
-
 
 
 
@@ -55,18 +53,19 @@ class Kalorimetr_areal_Mereni(Base):
     spotreba_energie: Mapped[float] = mapped_column(nullable=False, unique=True)
     objem: Mapped[float] = mapped_column(nullable=True)
     platne: Mapped[bool] = mapped_column(nullable=True)
-    date: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=True)
+    date: Mapped[datetime] = mapped_column("datum", nullable=True)
 
     # Relationships
 
     zarizeni: Mapped["Kalorimetr_areal_Zarizeni"] = relationship("Kalorimetr_areal_Zarizeni", back_populates="mereni")
 
     def __repr__(self) -> str:
-        return f"{self.date} - {self.identifikace} - {self.objem}"
+        return f"{self.date} - {self.odberne_misto} - {self.hodnota}"
 
 
 
 
+# areálové kalorimetry QGIS na PG
 class Kalorimetr_areal_Zarizeni_QGIS(Base):
     __tablename__ = 'kalorimetry'
     __table_args__ = {'schema': 'evidence'}
@@ -81,16 +80,12 @@ class Kalorimetr_areal_Zarizeni_QGIS(Base):
     umisteni: Mapped[str] = mapped_column(String(250), nullable=True)
     napaji: Mapped[str] = mapped_column(String(250), nullable=True)
     zdroj: Mapped[str] = mapped_column(String(250), nullable=True)
-    plynomer: Mapped[str] = mapped_column(String(250), nullable=True)
+    zdroj_mereni: Mapped[str] = mapped_column(String(250), nullable=True)
     koncovy_odberatel: Mapped[str] = mapped_column(String(250), nullable=True)
-    platnost_cejchu: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=True)
+    platnost_cejchu: Mapped[datetime] = mapped_column(nullable=True)
     poznamka_kalorimetry: Mapped[str] = mapped_column(String(250), nullable=True)
     foto: Mapped[str] = mapped_column(String(550), nullable=True)
 
 
     def __repr__(self) -> str:
         return f"{self.identifikace} - {self.seriove_cislo}"
-
-
-
-

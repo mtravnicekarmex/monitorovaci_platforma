@@ -1,0 +1,78 @@
+2026-03-17 08:57:34,155 | INFO | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-03-17 08:57:34,157 | INFO | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-03-17 08:57:34,157 | INFO | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-03-17 08:57:34,157 | INFO | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-03-17 08:57:34,157 | INFO | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-03-17 08:57:34,158 | INFO | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-03-17 08:57:34,158 | INFO | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-03-17 08:57:34,159 | INFO | apscheduler.scheduler | Added job "locked_job.<locals>.wrapper" to job store "default"
+2026-03-17 08:57:34,159 | INFO | apscheduler.scheduler | Added job "locked_job.<locals>.wrapper" to job store "default"
+2026-03-17 08:57:34,159 | INFO | apscheduler.scheduler | Added job "locked_job.<locals>.wrapper" to job store "default"
+2026-03-17 08:57:34,159 | INFO | apscheduler.scheduler | Added job "locked_job.<locals>.wrapper" to job store "default"
+2026-03-17 08:57:34,160 | INFO | apscheduler.scheduler | Added job "locked_job.<locals>.wrapper" to job store "default"
+2026-03-17 08:57:34,160 | INFO | apscheduler.scheduler | Added job "locked_job.<locals>.wrapper" to job store "default"
+2026-03-17 08:57:34,160 | INFO | apscheduler.scheduler | Added job "locked_job.<locals>.wrapper" to job store "default"
+2026-03-17 08:57:34,160 | INFO | apscheduler.scheduler | Scheduler started
+2026-03-17 08:57:34,161 | INFO | core.scheduler.scheduler | Scheduler spuštěn
+2026-03-17 09:02:05,004 | INFO | apscheduler.executors.default | Running job "locked_job.<locals>.wrapper (trigger: cron[minute='2', second='5'], next run at: 2026-03-17 09:02:05 CET)" (scheduled at 2026-03-17 09:02:05+01:00)
+2026-03-17 09:02:05,005 | INFO | core.scheduler.scheduler | START SCVK_save_to_database_all
+2026-03-17 09:02:18,247 | INFO | core.scheduler.scheduler | DONE SCVK_save_to_database_all | duration=13.24s
+2026-03-17 09:02:18,247 | INFO | apscheduler.executors.default | Job "locked_job.<locals>.wrapper (trigger: cron[minute='2', second='5'], next run at: 2026-03-17 10:02:05 CET)" executed successfully
+2026-03-17 09:02:18,248 | INFO | core.scheduler.scheduler | JOB SUCCESS | id=hourly_job | scheduled=2026-03-17 09:02:05+01:00
+2026-03-17 09:03:00,013 | INFO | apscheduler.executors.default | Running job "locked_job.<locals>.wrapper (trigger: cron[day_of_week='mon-fri', hour='6-16', minute='3'], next run at: 2026-03-17 10:03:00 CET)" (scheduled at 2026-03-17 09:03:00+01:00)
+2026-03-17 09:03:00,013 | INFO | core.scheduler.scheduler | START uloz_manometry_parquet
+2026-03-17 09:03:00,535 | INFO | core.scheduler.scheduler | DONE uloz_manometry_parquet | duration=0.52s
+2026-03-17 09:03:00,535 | INFO | core.scheduler.scheduler | START uloz_kalorimetry_parquet
+2026-03-17 09:03:04,454 | INFO | core.scheduler.scheduler | DONE uloz_kalorimetry_parquet | duration=3.92s
+2026-03-17 09:03:04,455 | INFO | core.scheduler.scheduler | START uloz_plynomery_parquet
+2026-03-17 09:03:04,805 | INFO | core.scheduler.scheduler | DONE uloz_plynomery_parquet | duration=0.35s
+2026-03-17 09:03:04,805 | INFO | core.scheduler.scheduler | START uloz_vodomery_parquet
+2026-03-17 09:03:13,048 | INFO | core.scheduler.scheduler | DONE uloz_vodomery_parquet | duration=8.24s
+2026-03-17 09:03:13,049 | INFO | apscheduler.executors.default | Job "locked_job.<locals>.wrapper (trigger: cron[day_of_week='mon-fri', hour='6-16', minute='3'], next run at: 2026-03-17 10:03:00 CET)" executed successfully
+2026-03-17 09:03:13,049 | INFO | core.scheduler.scheduler | JOB SUCCESS | id=working_time_hourly_job | scheduled=2026-03-17 09:03:00+01:00
+2026-03-17 09:16:05,012 | INFO | apscheduler.executors.default | Running job "locked_job.<locals>.wrapper (trigger: cron[minute='16,28,45,50', second='5'], next run at: 2026-03-17 09:28:05 CET)" (scheduled at 2026-03-17 09:16:05+01:00)
+2026-03-17 09:16:05,012 | INFO | core.scheduler.scheduler | START vodomery_db_import
+2026-03-17 09:16:06,119 | INFO | core.scheduler.scheduler | DONE vodomery_db_import | duration=1.11s
+2026-03-17 09:16:06,120 | INFO | core.scheduler.scheduler | START score_new_measurements
+2026-03-17 09:16:06,514 | INFO | core.scheduler.scheduler | DONE score_new_measurements | duration=0.39s
+2026-03-17 09:16:06,514 | INFO | core.scheduler.scheduler | START detect_events_from_scores
+2026-03-17 09:16:07,064 | INFO | core.scheduler.scheduler | DONE detect_events_from_scores | duration=0.55s
+2026-03-17 09:16:07,064 | INFO | core.scheduler.scheduler | START process_vodomery_alerts
+2026-03-17 09:16:10,252 | INFO | core.scheduler.scheduler | DONE process_vodomery_alerts | duration=3.19s
+2026-03-17 09:16:10,252 | INFO | apscheduler.executors.default | Job "locked_job.<locals>.wrapper (trigger: cron[minute='16,28,45,50', second='5'], next run at: 2026-03-17 09:28:05 CET)" executed successfully
+2026-03-17 09:16:10,252 | INFO | core.scheduler.scheduler | JOB SUCCESS | id=quarter_hour_job | scheduled=2026-03-17 09:16:05+01:00
+2026-03-17 09:28:05,006 | INFO | apscheduler.executors.default | Running job "locked_job.<locals>.wrapper (trigger: cron[minute='16,28,45,50', second='5'], next run at: 2026-03-17 09:45:05 CET)" (scheduled at 2026-03-17 09:28:05+01:00)
+2026-03-17 09:28:05,007 | INFO | core.scheduler.scheduler | START vodomery_db_import
+2026-03-17 09:28:05,216 | INFO | core.scheduler.scheduler | DONE vodomery_db_import | duration=0.21s
+2026-03-17 09:28:05,217 | INFO | core.scheduler.scheduler | START score_new_measurements
+2026-03-17 09:28:05,567 | INFO | core.scheduler.scheduler | DONE score_new_measurements | duration=0.35s
+2026-03-17 09:28:05,567 | INFO | core.scheduler.scheduler | START detect_events_from_scores
+2026-03-17 09:28:05,590 | INFO | core.scheduler.scheduler | DONE detect_events_from_scores | duration=0.02s
+2026-03-17 09:28:05,590 | INFO | core.scheduler.scheduler | START process_vodomery_alerts
+2026-03-17 09:28:05,590 | INFO | core.scheduler.scheduler | DONE process_vodomery_alerts | duration=0.0s
+2026-03-17 09:28:05,590 | INFO | apscheduler.executors.default | Job "locked_job.<locals>.wrapper (trigger: cron[minute='16,28,45,50', second='5'], next run at: 2026-03-17 09:45:05 CET)" executed successfully
+2026-03-17 09:28:05,590 | INFO | core.scheduler.scheduler | JOB SUCCESS | id=quarter_hour_job | scheduled=2026-03-17 09:28:05+01:00
+2026-03-17 09:45:05,014 | INFO | apscheduler.executors.default | Running job "locked_job.<locals>.wrapper (trigger: cron[minute='16,28,45,50', second='5'], next run at: 2026-03-17 09:50:05 CET)" (scheduled at 2026-03-17 09:45:05+01:00)
+2026-03-17 09:45:05,015 | INFO | core.scheduler.scheduler | START vodomery_db_import
+2026-03-17 09:45:05,927 | INFO | core.scheduler.scheduler | DONE vodomery_db_import | duration=0.91s
+2026-03-17 09:45:05,928 | INFO | core.scheduler.scheduler | START score_new_measurements
+2026-03-17 09:45:06,505 | INFO | core.scheduler.scheduler | DONE score_new_measurements | duration=0.58s
+2026-03-17 09:45:06,505 | INFO | core.scheduler.scheduler | START detect_events_from_scores
+2026-03-17 09:45:07,237 | INFO | core.scheduler.scheduler | DONE detect_events_from_scores | duration=0.73s
+2026-03-17 09:45:07,238 | INFO | core.scheduler.scheduler | START process_vodomery_alerts
+2026-03-17 09:45:07,278 | INFO | core.scheduler.scheduler | DONE process_vodomery_alerts | duration=0.04s
+2026-03-17 09:45:07,278 | INFO | apscheduler.executors.default | Job "locked_job.<locals>.wrapper (trigger: cron[minute='16,28,45,50', second='5'], next run at: 2026-03-17 09:50:05 CET)" executed successfully
+2026-03-17 09:45:07,279 | INFO | core.scheduler.scheduler | JOB SUCCESS | id=quarter_hour_job | scheduled=2026-03-17 09:45:05+01:00
+2026-03-17 09:50:05,010 | INFO | apscheduler.executors.default | Running job "locked_job.<locals>.wrapper (trigger: cron[minute='16,28,45,50', second='5'], next run at: 2026-03-17 10:16:05 CET)" (scheduled at 2026-03-17 09:50:05+01:00)
+2026-03-17 09:50:05,010 | INFO | core.scheduler.scheduler | START vodomery_db_import
+2026-03-17 09:50:05,650 | INFO | core.scheduler.scheduler | DONE vodomery_db_import | duration=0.64s
+2026-03-17 09:50:05,650 | INFO | core.scheduler.scheduler | START score_new_measurements
+2026-03-17 09:50:06,162 | INFO | core.scheduler.scheduler | DONE score_new_measurements | duration=0.51s
+2026-03-17 09:50:06,162 | INFO | core.scheduler.scheduler | START detect_events_from_scores
+2026-03-17 09:50:06,683 | INFO | core.scheduler.scheduler | DONE detect_events_from_scores | duration=0.52s
+2026-03-17 09:50:06,683 | INFO | core.scheduler.scheduler | START process_vodomery_alerts
+2026-03-17 09:50:07,962 | INFO | core.scheduler.scheduler | DONE process_vodomery_alerts | duration=1.28s
+2026-03-17 09:50:07,962 | INFO | apscheduler.executors.default | Job "locked_job.<locals>.wrapper (trigger: cron[minute='16,28,45,50', second='5'], next run at: 2026-03-17 10:16:05 CET)" executed successfully
+2026-03-17 09:50:07,962 | INFO | core.scheduler.scheduler | JOB SUCCESS | id=quarter_hour_job | scheduled=2026-03-17 09:50:05+01:00
+2026-03-17 09:51:13,608 | INFO | core.scheduler.scheduler | Ukončuji scheduler...
+2026-03-17 09:51:13,619 | INFO | apscheduler.scheduler | Scheduler has been shut down

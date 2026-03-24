@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+from pathlib import Path
+import sys
+
+import streamlit as st
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from moduly.apps.dashboard.auth import (
+    any_dashboard_users,
+    current_username,
+    get_accessible_page_definitions,
+    get_default_target_page,
+    get_page_sidebar_location,
+    init_auth_state,
+    login,
+    render_sidebar_footer,
+    render_sidebar_nav,
+)
+from moduly.apps.dashboard.database.db_init import ensure_dashboard_tables
+from moduly.apps.dashboard.navigation_config import format_page_label, get_page_definition
+
+
+st.set_page_config(
+    page_title="Login",
+    page_icon="🔐",
+    layout="centered",
+)
+
+
+ensure_dashboard_tables()
+init_auth_state()
+
+
+def default_target_page() -> str:
+    return get_default_target_page()
+
+
+def render_login_page() -> None:
+    st.title("Login do dashboardu")
+    st.caption("Uvodni stranka pro pristup k interni aplikaci monitorovaci platformy.")
+
+    if not any_dashboard_users():
+        st.warning("V databazi zatim neni zadny uzivatel dashboardu.")
+        st.code(
+            "py moduly\\apps\\dashboard\\database\\create_user.py "
+            "--username admin --password tvoje_heslo --admin",
+            language="powershell",
+        )
+
+    if st.session_state["authenticated"]:
+        st.success(f"Prihlasen jako {current_username()}.")
+        accessible_pages = get_accessible_page_definitions("main")
+        if accessible_pages:
+            for page in accessible_pages:
+                st.page_link(page.path, label=f"Pokracovat na stranku {format_page_label(page.key, include_section=True)}")
+        else:
+            account_page = get_page_definition("muj_ucet")
+            if account_page is not None:
+                st.page_link(account_page.path, label=f"Pokracovat na stranku {account_page.title}")
+    else:
+        with st.form("login_form"):
+            username = st.text_input("Uzivatel")
+            password = st.text_input("Heslo", type="password")
+            submitted = st.form_submit_button("Prihlasit")
+
+        if submitted:
+            if login(username.strip(), password):
+                st.session_state["post_login_redirect"] = default_target_page()
+                st.rerun()
+            else:
+                st.error("Neplatne prihlasovaci udaje.")
+
+
+def build_navigation():
+    pages = [
+        st.Page(render_login_page, title="Login", icon="🔐", default=True),
+    ]
+
+    if st.session_state["authenticated"]:
+        for page in get_accessible_page_definitions("main"):
+            pages.append(st.Page(page.path, title=page.title, icon=page.icon))
+        for page in get_accessible_page_definitions("footer"):
+            pages.append(st.Page(page.path, title=page.title, icon=page.icon))
+
+    return pages
+
+
+pages = build_navigation()
+current_page = st.navigation(pages, position="hidden")
+nav_pages = [page for page in pages if get_page_sidebar_location(page) == "main"]
+render_sidebar_nav(nav_pages, current_page)
+
+redirect_target = st.session_state.get("post_login_redirect", "")
+if redirect_target:
+    st.session_state["post_login_redirect"] = ""
+    redirect_path = (Path(__file__).resolve().parent / redirect_target).resolve()
+    for page in pages:
+        if getattr(page, "_page", None) == redirect_path:
+            st.switch_page(page)
+    st.switch_page(redirect_target)
+
+current_page.run()
+render_sidebar_footer(pages, current_page)

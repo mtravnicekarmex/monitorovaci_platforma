@@ -1,0 +1,88 @@
+2026-03-04 14:13:39,162 | INFO | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-03-04 14:13:39,163 | INFO | apscheduler.scheduler | Added job "locked_job.<locals>.wrapper" to job store "default"
+2026-03-04 14:13:39,163 | INFO | apscheduler.scheduler | Scheduler started
+2026-03-04 14:13:39,163 | INFO | core.scheduler.scheduler | Scheduler spuštěn
+2026-03-04 14:14:05,003 | INFO | apscheduler.executors.default | Running job "locked_job.<locals>.wrapper (trigger: cron[minute='5,14,35,50', second='5'], next run at: 2026-03-04 14:14:05 CET)" (scheduled at 2026-03-04 14:14:05+01:00)
+2026-03-04 14:14:05,005 | INFO | core.scheduler.scheduler | START vodomery_db_import
+2026-03-04 14:14:05,285 | INFO | core.scheduler.scheduler | DONE vodomery_db_import | duration=0.28s
+2026-03-04 14:14:05,285 | INFO | core.scheduler.scheduler | START score_new_measurements
+2026-03-04 14:14:05,613 | INFO | core.scheduler.scheduler | DONE score_new_measurements | duration=0.33s
+2026-03-04 14:14:05,613 | INFO | core.scheduler.scheduler | START detect_events_from_scores
+2026-03-04 14:14:05,627 | INFO | core.scheduler.scheduler | DONE detect_events_from_scores | duration=0.01s
+2026-03-04 14:14:05,627 | INFO | core.scheduler.scheduler | START SCVK_save_to_database_all
+2026-03-04 14:14:11,316 | INFO | core.scheduler.scheduler | DONE SCVK_save_to_database_all | duration=5.69s
+2026-03-04 14:14:11,316 | INFO | core.scheduler.scheduler | START daily_web_monitor_job
+2026-03-04 14:14:15,366 | INFO | core.scheduler.scheduler | Web monitor job dokončen
+2026-03-04 14:14:15,366 | INFO | core.scheduler.scheduler | DONE daily_web_monitor_job | duration=4.05s
+2026-03-04 14:14:15,366 | INFO | core.scheduler.scheduler | START SOFTLINK_save_to_database_all
+2026-03-04 14:14:25,523 | INFO | core.scheduler.scheduler | DONE SOFTLINK_save_to_database_all | duration=10.16s
+2026-03-04 14:14:25,523 | INFO | core.scheduler.scheduler | START moduly.apps.meteo.meteo_sync
+2026-03-04 14:14:25,523 | ERROR | core.scheduler.scheduler | FAIL moduly.apps.meteo.meteo_sync
+Traceback (most recent call last):
+  File "C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma\core\scheduler\scheduler.py", line 295, in safe_call
+    return fn(*args, **kwargs)
+TypeError: 'module' object is not callable
+2026-03-04 14:14:25,525 | INFO | core.scheduler.scheduler | DONE moduly.apps.meteo.meteo_sync | duration=0.0s
+2026-03-04 14:14:25,525 | ERROR | core.scheduler.scheduler | Chyba v quarter_hour_job
+Traceback (most recent call last):
+  File "C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma\core\scheduler\scheduler.py", line 316, in wrapper
+    fn(*args, **kwargs)
+    ~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma\core\scheduler\scheduler.py", line 342, in quarter_hour_job
+    safe_call(meteo_sync)
+    ~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma\core\scheduler\scheduler.py", line 295, in safe_call
+    return fn(*args, **kwargs)
+TypeError: 'module' object is not callable
+2026-03-04 14:14:25,528 | ERROR | apscheduler.executors.default | Job "locked_job.<locals>.wrapper (trigger: cron[minute='5,14,35,50', second='5'], next run at: 2026-03-04 14:35:05 CET)" raised an exception
+Traceback (most recent call last):
+  File "C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma\.venv\Lib\site-packages\apscheduler\executors\base.py", line 131, in run_job
+    retval = job.func(*job.args, **job.kwargs)
+  File "C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma\core\scheduler\scheduler.py", line 316, in wrapper
+    fn(*args, **kwargs)
+    ~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma\core\scheduler\scheduler.py", line 342, in quarter_hour_job
+    safe_call(meteo_sync)
+    ~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma\core\scheduler\scheduler.py", line 295, in safe_call
+    return fn(*args, **kwargs)
+TypeError: 'module' object is not callable
+2026-03-04 14:14:25,532 | ERROR | core.scheduler.scheduler | JOB ERROR | id=quarter_hour_job | scheduled=2026-03-04 14:14:05+01:00
+NoneType: None
+2026-03-04 14:24:40,213 | INFO | core.scheduler.scheduler | Ukončuji scheduler...
+2026-03-04 14:24:40,214 | INFO | apscheduler.scheduler | Scheduler has been shut down
+2026-03-04 14:26:41,972 | INFO | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-03-04 14:26:41,973 | INFO | apscheduler.scheduler | Added job "locked_job.<locals>.wrapper" to job store "default"
+2026-03-04 14:26:41,973 | INFO | apscheduler.scheduler | Scheduler started
+2026-03-04 14:26:41,974 | INFO | core.scheduler.scheduler | Scheduler spuštěn
+2026-03-04 14:26:57,207 | INFO | core.scheduler.scheduler | Ukončuji scheduler...
+2026-03-04 14:26:57,207 | INFO | apscheduler.scheduler | Scheduler has been shut down
+2026-03-04 14:27:35,087 | INFO | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-03-04 14:27:35,088 | INFO | apscheduler.scheduler | Added job "locked_job.<locals>.wrapper" to job store "default"
+2026-03-04 14:27:35,088 | INFO | apscheduler.scheduler | Scheduler started
+2026-03-04 14:27:35,088 | INFO | core.scheduler.scheduler | Scheduler spuštěn
+2026-03-04 14:28:05,012 | INFO | apscheduler.executors.default | Running job "locked_job.<locals>.wrapper (trigger: cron[minute='5,28,35,50', second='5'], next run at: 2026-03-04 14:35:05 CET)" (scheduled at 2026-03-04 14:28:05+01:00)
+2026-03-04 14:28:05,013 | INFO | core.scheduler.scheduler | START vodomery_db_import
+2026-03-04 14:28:05,979 | INFO | core.scheduler.scheduler | DONE vodomery_db_import | duration=0.97s
+2026-03-04 14:28:05,979 | INFO | core.scheduler.scheduler | START score_new_measurements
+2026-03-04 14:28:06,444 | INFO | core.scheduler.scheduler | DONE score_new_measurements | duration=0.47s
+2026-03-04 14:28:06,444 | INFO | core.scheduler.scheduler | START detect_events_from_scores
+2026-03-04 14:28:06,939 | INFO | core.scheduler.scheduler | DONE detect_events_from_scores | duration=0.5s
+2026-03-04 14:28:06,940 | INFO | core.scheduler.scheduler | START meteo_sync
+2026-03-04 14:28:06,940 | INFO | root | Meteo sync started
+2026-03-04 14:28:06,949 | INFO | root | Meteo sync: nothing to update
+2026-03-04 14:28:06,951 | INFO | core.scheduler.scheduler | DONE meteo_sync | duration=0.01s
+2026-03-04 14:28:06,951 | INFO | core.scheduler.scheduler | START rebuild_profiles
+2026-03-04 14:28:14,452 | INFO | core.scheduler.scheduler | DONE rebuild_profiles | duration=7.5s
+2026-03-04 14:28:14,452 | INFO | core.scheduler.scheduler | START uloz_manometry_parquet
+2026-03-04 14:28:14,928 | INFO | core.scheduler.scheduler | DONE uloz_manometry_parquet | duration=0.48s
+2026-03-04 14:28:14,929 | INFO | core.scheduler.scheduler | START uloz_kalorimetry_parquet
+2026-03-04 14:28:18,776 | INFO | core.scheduler.scheduler | DONE uloz_kalorimetry_parquet | duration=3.85s
+2026-03-04 14:28:18,776 | INFO | core.scheduler.scheduler | START uloz_plynomery_parquet
+2026-03-04 14:28:19,165 | INFO | core.scheduler.scheduler | DONE uloz_plynomery_parquet | duration=0.39s
+2026-03-04 14:28:19,165 | INFO | core.scheduler.scheduler | START uloz_vodomery_parquet
+2026-03-04 14:28:26,811 | INFO | core.scheduler.scheduler | DONE uloz_vodomery_parquet | duration=7.65s
+2026-03-04 14:28:26,811 | INFO | apscheduler.executors.default | Job "locked_job.<locals>.wrapper (trigger: cron[minute='5,28,35,50', second='5'], next run at: 2026-03-04 14:35:05 CET)" executed successfully
+2026-03-04 14:28:26,812 | INFO | core.scheduler.scheduler | JOB SUCCESS | id=quarter_hour_job | scheduled=2026-03-04 14:28:05+01:00
+2026-03-04 14:28:35,083 | INFO | core.scheduler.scheduler | Ukončuji scheduler...
+2026-03-04 14:28:35,092 | INFO | apscheduler.scheduler | Scheduler has been shut down

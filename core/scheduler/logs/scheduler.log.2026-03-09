@@ -1,0 +1,48 @@
+2026-03-09 08:08:55,368 | INFO | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-03-09 08:08:55,373 | INFO | apscheduler.scheduler | Added job "locked_job.<locals>.wrapper" to job store "default"
+2026-03-09 08:08:55,373 | INFO | apscheduler.scheduler | Scheduler started
+2026-03-09 08:08:55,374 | INFO | __main__ | Scheduler spuštěn
+2026-03-09 08:09:05,004 | INFO | apscheduler.executors.default | Running job "locked_job.<locals>.wrapper (trigger: cron[minute='9,28,45,50', second='5'], next run at: 2026-03-09 08:28:05 CET)" (scheduled at 2026-03-09 08:09:05+01:00)
+2026-03-09 08:09:05,007 | INFO | __main__ | START vodomery_db_import
+2026-03-09 08:09:05,255 | INFO | __main__ | DONE vodomery_db_import | duration=0.25s
+2026-03-09 08:09:05,255 | INFO | __main__ | START score_new_measurements
+2026-03-09 08:09:05,599 | INFO | __main__ | DONE score_new_measurements | duration=0.34s
+2026-03-09 08:09:05,600 | INFO | __main__ | START detect_events_from_scores
+2026-03-09 08:09:05,613 | INFO | __main__ | DONE detect_events_from_scores | duration=0.01s
+2026-03-09 08:09:05,613 | INFO | __main__ | START meteo_sync
+2026-03-09 08:09:05,613 | INFO | root | Meteo sync started
+2026-03-09 08:09:05,620 | INFO | root | Meteo syncing day: 2026-03-08
+2026-03-09 08:09:05,898 | INFO | root | Meteo sync finished successfully
+2026-03-09 08:09:05,898 | INFO | __main__ | DONE meteo_sync | duration=0.29s
+2026-03-09 08:09:05,898 | INFO | __main__ | START rebuild_profiles
+2026-03-09 08:09:13,044 | INFO | __main__ | DONE rebuild_profiles | duration=7.15s
+2026-03-09 08:09:13,044 | INFO | __main__ | START uloz_manometry_parquet
+2026-03-09 08:09:13,531 | INFO | __main__ | DONE uloz_manometry_parquet | duration=0.49s
+2026-03-09 08:09:13,532 | INFO | __main__ | START uloz_kalorimetry_parquet
+2026-03-09 08:09:17,504 | INFO | __main__ | DONE uloz_kalorimetry_parquet | duration=3.97s
+2026-03-09 08:09:17,504 | INFO | __main__ | START uloz_plynomery_parquet
+2026-03-09 08:09:17,865 | INFO | __main__ | DONE uloz_plynomery_parquet | duration=0.36s
+2026-03-09 08:09:17,866 | INFO | __main__ | START uloz_vodomery_parquet
+2026-03-09 08:09:25,880 | INFO | __main__ | DONE uloz_vodomery_parquet | duration=8.01s
+2026-03-09 08:09:25,880 | INFO | __main__ | START daily_web_monitor_job
+2026-03-09 08:09:33,181 | INFO | __main__ | Web monitor job dokončen
+2026-03-09 08:09:33,181 | INFO | __main__ | DONE daily_web_monitor_job | duration=7.3s
+2026-03-09 08:09:33,181 | INFO | __main__ | START SOFTLINK_save_to_database_all
+2026-03-09 08:10:26,504 | INFO | __main__ | DONE SOFTLINK_save_to_database_all | duration=53.32s
+2026-03-09 08:10:26,505 | INFO | __main__ | START SCVK_save_to_database_all
+2026-03-09 08:10:28,863 | INFO | __main__ | DONE SCVK_save_to_database_all | duration=2.36s
+2026-03-09 08:10:28,863 | INFO | apscheduler.executors.default | Job "locked_job.<locals>.wrapper (trigger: cron[minute='9,28,45,50', second='5'], next run at: 2026-03-09 08:28:05 CET)" executed successfully
+2026-03-09 08:10:28,863 | INFO | __main__ | JOB SUCCESS | id=quarter_hour_job | scheduled=2026-03-09 08:09:05+01:00
+2026-03-09 08:15:10,814 | INFO | __main__ | Ukončuji scheduler...
+2026-03-09 08:15:10,823 | INFO | apscheduler.scheduler | Scheduler has been shut down
+2026-03-09 08:15:14,768 | INFO | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-03-09 08:15:14,768 | INFO | apscheduler.scheduler | Added job "locked_job.<locals>.wrapper" to job store "default"
+2026-03-09 08:15:14,769 | INFO | apscheduler.scheduler | Scheduler started
+2026-03-09 08:15:14,769 | INFO | __main__ | Scheduler spuštěn
+2026-03-09 08:16:05,008 | INFO | apscheduler.executors.default | Running job "locked_job.<locals>.wrapper (trigger: cron[minute='16,28,45,50', second='5'], next run at: 2026-03-09 08:28:05 CET)" (scheduled at 2026-03-09 08:16:05+01:00)
+2026-03-09 08:16:05,008 | INFO | __main__ | START SCVK_save_to_database_all
+2026-03-09 08:16:19,615 | INFO | __main__ | DONE SCVK_save_to_database_all | duration=14.61s
+2026-03-09 08:16:19,615 | INFO | apscheduler.executors.default | Job "locked_job.<locals>.wrapper (trigger: cron[minute='16,28,45,50', second='5'], next run at: 2026-03-09 08:28:05 CET)" executed successfully
+2026-03-09 08:16:19,615 | INFO | __main__ | JOB SUCCESS | id=quarter_hour_job | scheduled=2026-03-09 08:16:05+01:00
+2026-03-09 08:16:33,403 | INFO | __main__ | Ukončuji scheduler...
+2026-03-09 08:16:33,404 | INFO | apscheduler.scheduler | Scheduler has been shut down

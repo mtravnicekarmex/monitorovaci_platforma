@@ -14,6 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from moduly.apps.dashboard.api_client import DashboardApiError
 from moduly.apps.dashboard.auth import require_page_access
 from moduly.apps.dashboard.vodomery_shared import (
     format_consumption_dataframe,
@@ -521,6 +522,6 @@ def render_dashboard() -> None:
 
 try:
     render_dashboard()
-except SQLAlchemyError as exc:
-    st.error("Nepodarilo se nacist data z databaze.")
+except (SQLAlchemyError, DashboardApiError) as exc:
+    st.error("Nepodarilo se nacist data pro vodomery.")
     st.exception(exc)

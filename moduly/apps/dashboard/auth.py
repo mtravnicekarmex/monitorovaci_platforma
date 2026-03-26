@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 import sys
 
@@ -11,12 +10,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import streamlit as st
 
-from moduly.apps.dashboard.database.users import (
-    any_users_exist,
-    authenticate_user,
-    resolve_user_pages,
-    resolve_user_sections,
-    update_last_login,
+from moduly.apps.dashboard.api_client import DashboardApiError
+from moduly.apps.dashboard.api_client import (
+    any_dashboard_users_exist,
+    get_me as api_get_me,
+    login as api_login,
+    logout as api_logout,
 )
 from moduly.apps.dashboard.navigation_config import (
     SECTIONS,
@@ -30,16 +29,36 @@ from moduly.apps.dashboard.navigation_config import (
 
 def init_auth_state() -> None:
     st.session_state.setdefault("authenticated", False)
+    st.session_state.setdefault("auth_token", "")
+    st.session_state.setdefault("auth_token_expires_at", None)
     st.session_state.setdefault("auth_user", "")
+    st.session_state.setdefault("auth_email", None)
     st.session_state.setdefault("auth_is_admin", False)
     st.session_state.setdefault("auth_allowed_sections", ())
     st.session_state.setdefault("auth_allowed_pages", ())
     st.session_state.setdefault("auth_allowed_devices", ())
+    st.session_state.setdefault("auth_last_login_at", None)
     st.session_state.setdefault("post_login_redirect", "")
 
 
 def any_dashboard_users() -> bool:
-    return any_users_exist()
+    return any_dashboard_users_exist()
+
+
+def get_auth_token() -> str:
+    init_auth_state()
+    return str(st.session_state["auth_token"])
+
+
+def current_user_email() -> str | None:
+    init_auth_state()
+    email = st.session_state.get("auth_email")
+    return str(email) if email else None
+
+
+def current_user_last_login_at():
+    init_auth_state()
+    return st.session_state.get("auth_last_login_at")
 
 
 def get_allowed_devices() -> tuple[str, ...]:
@@ -114,38 +133,76 @@ def get_default_target_page() -> str:
     return "pages/3_muj_ucet.py"
 
 
-def login(username: str, password: str) -> bool:
-    user = authenticate_user(username, password)
-    if user is None:
-        return False
-
-    allowed_devices = tuple(user.get_seznam_zarizeni())
-    allowed_sections = tuple(resolve_user_sections(user))
-    allowed_pages = tuple(resolve_user_pages(user, list(allowed_sections)))
+def apply_authenticated_user(
+    user_payload: dict[str, object],
+    *,
+    access_token: str | None = None,
+    expires_at: object = None,
+) -> None:
     st.session_state["authenticated"] = True
-    st.session_state["auth_user"] = user.uzivatel
-    st.session_state["auth_is_admin"] = bool(user.is_admin)
-    st.session_state["auth_allowed_sections"] = allowed_sections
-    st.session_state["auth_allowed_pages"] = allowed_pages
-    st.session_state["auth_allowed_devices"] = allowed_devices
-    update_last_login(user.uzivatel, datetime.utcnow())
+    if access_token is not None:
+        st.session_state["auth_token"] = access_token
+    if expires_at is not None:
+        st.session_state["auth_token_expires_at"] = expires_at
+    st.session_state["auth_user"] = str(user_payload.get("username") or "")
+    st.session_state["auth_email"] = user_payload.get("email")
+    st.session_state["auth_is_admin"] = bool(user_payload.get("is_admin"))
+    st.session_state["auth_allowed_sections"] = tuple(user_payload.get("allowed_sections") or ())
+    st.session_state["auth_allowed_pages"] = tuple(user_payload.get("allowed_pages") or ())
+    st.session_state["auth_allowed_devices"] = tuple(user_payload.get("allowed_devices") or ())
+    st.session_state["auth_last_login_at"] = user_payload.get("last_login_at")
+
+
+def login(username: str, password: str) -> bool:
+    session_payload = api_login(username, password)
+    apply_authenticated_user(
+        session_payload.user,
+        access_token=session_payload.access_token,
+        expires_at=session_payload.expires_at,
+    )
     return True
 
 
 def logout() -> None:
+    access_token = get_auth_token()
+    if access_token:
+        try:
+            api_logout(access_token)
+        except DashboardApiError:
+            pass
     st.session_state["authenticated"] = False
+    st.session_state["auth_token"] = ""
+    st.session_state["auth_token_expires_at"] = None
     st.session_state["auth_user"] = ""
+    st.session_state["auth_email"] = None
     st.session_state["auth_is_admin"] = False
     st.session_state["auth_allowed_sections"] = ()
     st.session_state["auth_allowed_pages"] = ()
     st.session_state["auth_allowed_devices"] = ()
+    st.session_state["auth_last_login_at"] = None
     st.session_state["post_login_redirect"] = ""
+
+
+def refresh_current_user() -> bool:
+    access_token = get_auth_token()
+    if not access_token:
+        return False
+    try:
+        user_payload = api_get_me(access_token)
+    except DashboardApiError:
+        logout()
+        return False
+    apply_authenticated_user(user_payload)
+    return True
 
 
 def require_login() -> None:
     init_auth_state()
     if not st.session_state["authenticated"]:
         st.warning("Nejprve se prihlas na strance Login.")
+        st.stop()
+    if not refresh_current_user():
+        st.warning("Prihlaseni expirovalo nebo API neni dostupne. Prihlas se znovu.")
         st.stop()
 
 

@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from moduly.apps.dashboard.auth import (
+    DashboardApiError,
     any_dashboard_users,
     current_username,
     get_accessible_page_definitions,
@@ -21,7 +22,6 @@ from moduly.apps.dashboard.auth import (
     render_sidebar_footer,
     render_sidebar_nav,
 )
-from moduly.apps.dashboard.database.db_init import ensure_dashboard_tables
 from moduly.apps.dashboard.navigation_config import format_page_label, get_page_definition
 
 
@@ -32,7 +32,6 @@ st.set_page_config(
 )
 
 
-ensure_dashboard_tables()
 init_auth_state()
 
 
@@ -44,7 +43,13 @@ def render_login_page() -> None:
     st.title("Login do dashboardu")
     st.caption("Uvodni stranka pro pristup k interni aplikaci monitorovaci platformy.")
 
-    if not any_dashboard_users():
+    try:
+        users_exist = any_dashboard_users()
+    except DashboardApiError as exc:
+        st.error(str(exc))
+        users_exist = True
+
+    if not users_exist:
         st.warning("V databazi zatim neni zadny uzivatel dashboardu.")
         st.code(
             "py moduly\\apps\\dashboard\\database\\create_user.py "
@@ -69,11 +74,13 @@ def render_login_page() -> None:
             submitted = st.form_submit_button("Prihlasit")
 
         if submitted:
-            if login(username.strip(), password):
+            try:
+                login(username.strip(), password)
+            except DashboardApiError as exc:
+                st.error(str(exc))
+            else:
                 st.session_state["post_login_redirect"] = default_target_page()
                 st.rerun()
-            else:
-                st.error("Neplatne prihlasovaci udaje.")
 
 
 def build_navigation():

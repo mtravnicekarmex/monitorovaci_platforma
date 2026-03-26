@@ -10,8 +10,20 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from moduly.apps.dashboard.auth import current_username, is_admin, require_page_access
-from moduly.apps.dashboard.database.users import get_user, update_email, update_password, verify_user_password
+from moduly.apps.dashboard.api_client import DashboardApiError
+from moduly.apps.dashboard.api_client import (
+    change_my_password,
+    update_my_email,
+)
+from moduly.apps.dashboard.auth import (
+    apply_authenticated_user,
+    current_user_email,
+    current_username,
+    get_auth_token,
+    is_admin,
+    refresh_current_user,
+    require_page_access,
+)
 
 
 st.set_page_config(
@@ -25,8 +37,8 @@ require_page_access("muj_ucet")
 
 
 username = current_username()
-user = get_user(username)
-current_email = user.email if user else None
+refresh_current_user()
+current_email = current_user_email()
 
 st.title("Můj účet")
 st.caption("Správa vlastního přístupu do dashboardu")
@@ -54,9 +66,14 @@ if email_submitted:
     if normalized_email and "@" not in normalized_email:
         st.error("Email musí obsahovat znak @.")
     else:
-        update_email(username, normalized_email or None)
-        st.success("Email byl uložen.")
-        st.rerun()
+        try:
+            user_payload = update_my_email(get_auth_token(), normalized_email or None)
+        except DashboardApiError as exc:
+            st.error(str(exc))
+        else:
+            apply_authenticated_user(user_payload)
+            st.success("Email byl uložen.")
+            st.rerun()
 
 st.markdown("---")
 st.subheader("Změna hesla")
@@ -70,12 +87,14 @@ with st.form("change_password_form"):
 if submitted:
     if not current_password or not new_password or not new_password_confirm:
         st.error("Vyplň všechna pole.")
-    elif not verify_user_password(username, current_password):
-        st.error("Současné heslo není spravně.")
     elif new_password != new_password_confirm:
         st.error("Nové heslo a potvrzení se neshoduji.")
     elif len(new_password) < 8:
         st.error("Nové heslo musí mít alespoň 8 znaků.")
     else:
-        update_password(username, new_password)
-        st.success("Heslo bylo změněno.")
+        try:
+            change_my_password(get_auth_token(), current_password, new_password)
+        except DashboardApiError as exc:
+            st.error(str(exc))
+        else:
+            st.success("Heslo bylo změněno.")

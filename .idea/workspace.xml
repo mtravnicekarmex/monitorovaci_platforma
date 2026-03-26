@@ -4,9 +4,20 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="13c8bcca-584b-46c9-b514-2786f5a09530" name="Changes" comment="připojené plynoměry">
+    <list default="true" id="13c8bcca-584b-46c9-b514-2786f5a09530" name="Changes" comment="připojené plynoměry a kalorimtery">
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/moduly/mereni/kalorimetry/database/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/mereni/kalorimetry/database/models.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/moduly/apps/dashboard/auth.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/apps/dashboard/auth.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/moduly/apps/dashboard/login.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/apps/dashboard/login.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/moduly/apps/dashboard/pages/1_sprava_uzivatelu.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/apps/dashboard/pages/1_sprava_uzivatelu.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/moduly/apps/dashboard/pages/2_vodomery.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/apps/dashboard/pages/2_vodomery.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/moduly/apps/dashboard/pages/3_muj_ucet.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/apps/dashboard/pages/3_muj_ucet.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/moduly/apps/dashboard/pages/4_vodomery_anomalie_eventy.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/apps/dashboard/pages/4_vodomery_anomalie_eventy.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/moduly/apps/dashboard/pages/5_vodomery_detail.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/apps/dashboard/pages/5_vodomery_detail.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/moduly/apps/dashboard/pages/6_expected_zero.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/apps/dashboard/pages/6_expected_zero.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/moduly/apps/dashboard/pages/7_vodomery_alerting.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/apps/dashboard/pages/7_vodomery_alerting.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/moduly/apps/dashboard/pages/8_prehled_vetve.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/apps/dashboard/pages/8_prehled_vetve.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/moduly/apps/dashboard/vodomery_shared.py" beforeDir="false" afterPath="$PROJECT_DIR$/moduly/apps/dashboard/vodomery_shared.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -14,7 +25,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="91" />
+    <option name="cachedIndexableFilesCount" value="115" />
     <option name="fileBasedEmbeddingIndicesEnabled" value="true" />
   </component>
   <component name="FileTemplateManagerImpl">
@@ -147,7 +158,8 @@
       <workItem from="1774247378717" duration="689000" />
       <workItem from="1774248301645" duration="5073000" />
       <workItem from="1774261310622" duration="10665000" />
-      <workItem from="1774332180216" duration="583000" />
+      <workItem from="1774332180216" duration="17678000" />
+      <workItem from="1774448647302" duration="60000" />
     </task>
     <task id="LOCAL-00001" summary="transfer na server">
       <option name="closed" value="true" />
@@ -245,7 +257,15 @@
       <option name="project" value="LOCAL" />
       <updated>1774261448259</updated>
     </task>
-    <option name="localTasksCounter" value="13" />
+    <task id="LOCAL-00013" summary="připojené plynoměry a kalorimtery">
+      <option name="closed" value="true" />
+      <created>1774332841744</created>
+      <option name="number" value="00013" />
+      <option name="presentableId" value="LOCAL-00013" />
+      <option name="project" value="LOCAL" />
+      <updated>1774332841745</updated>
+    </task>
+    <option name="localTasksCounter" value="14" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -274,7 +294,8 @@
     <MESSAGE value="před aplikací alertingu" />
     <MESSAGE value="fungující alerting pro vodoměry, funkční vše, stable version" />
     <MESSAGE value="připojené plynoměry" />
-    <option name="LAST_COMMIT_MESSAGE" value="připojené plynoměry" />
+    <MESSAGE value="připojené plynoměry a kalorimtery" />
+    <option name="LAST_COMMIT_MESSAGE" value="připojené plynoměry a kalorimtery" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

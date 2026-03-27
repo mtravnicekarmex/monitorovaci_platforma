@@ -1,0 +1,17 @@
+API START
+cd /d C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma_v1.5
+set API_TOKEN_SECRET=monitoring-platforma-local-dev-secret
+.venv\Scripts\python.exe -m uvicorn services.api.main:app --host 127.0.0.1 --port 8000 --reload
+
+DASHBOARD START
+cd /d C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma_v1.5
+set DASHBOARD_API_BASE_URL=http://127.0.0.1:8000
+.venv\Scripts\python.exe -m streamlit run moduly\apps\dashboard\login.py --server.address 127.0.0.1 --server.port 8001
+
+WEB_SEARCH START
+cd /d C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma_v1.5
+.venv\Scripts\python.exe -m streamlit run moduly\apps\web_search\web_search.py --server.address 127.0.0.1 --server.port 8002
+
+SCHEDULER START
+cd /d C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma_v1.5
+.venv\Scripts\python.exe main.py

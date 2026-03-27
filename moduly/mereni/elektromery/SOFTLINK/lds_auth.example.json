@@ -1,0 +1,15 @@
+{
+  "cookies": [
+    {
+      "name": "CEMAPI",
+      "value": "change-me",
+      "domain": "cem2.softlink.cz",
+      "path": "/cemapi",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": []
+}

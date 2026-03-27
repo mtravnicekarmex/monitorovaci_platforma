@@ -48,7 +48,7 @@ PAGES: tuple[DashboardPage, ...] = (
         title="Přehled větve",
         icon="🌿",
         section_key="vodomery",
-        configurable=True,
+        admin_only=True,
     ),
     DashboardPage(
         key="vodomery_anomalie_eventy",
@@ -227,15 +227,15 @@ def format_page_label(page_key: str, include_section: bool = True) -> str:
 
 
 def get_default_section_keys(is_admin: bool, allowed_devices: Iterable[str]) -> list[str]:
+    del allowed_devices
     if is_admin:
         return get_configurable_section_keys()
-    return get_configurable_section_keys() if any(allowed_devices) else []
+    return []
 
 
 def get_default_page_keys(is_admin: bool, section_keys: Iterable[str], allowed_devices: Iterable[str]) -> list[str]:
+    del allowed_devices
     resolved_sections = normalize_section_keys(section_keys)
     if is_admin:
         return get_configurable_page_keys(resolved_sections)
-    if not any(allowed_devices):
-        return []
-    return get_configurable_page_keys(resolved_sections)
+    return []

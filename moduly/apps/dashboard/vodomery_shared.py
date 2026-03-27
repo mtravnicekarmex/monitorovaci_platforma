@@ -8,6 +8,7 @@ from collections.abc import Iterable
 import pandas as pd
 import streamlit as st
 
+from app.time_utils import prague_today
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
@@ -19,7 +20,6 @@ from moduly.apps.dashboard.api_client import (
     get_vodomery_device_detail as api_get_vodomery_device_detail,
     get_vodomery_devices as api_get_vodomery_devices,
     get_vodomery_event_history as api_get_vodomery_event_history,
-    get_vodomery_expected_zero as api_get_vodomery_expected_zero,
     get_vodomery_measurement_series as api_get_vodomery_measurement_series,
     get_vodomery_open_events as api_get_vodomery_open_events,
     get_vodomery_overview_metrics as api_get_vodomery_overview_metrics,
@@ -132,9 +132,9 @@ def get_vodomery_access_context() -> tuple[bool, tuple[str, ...]]:
 def init_filter_state() -> None:
     st.session_state.setdefault(FILTER_SOURCE_KEY, "VSE")
     st.session_state.setdefault(FILTER_DEVICE_KEY, "")
-    default_start = datetime.datetime.now() - datetime.timedelta(days=1)
-    default_end = datetime.datetime.now()
-    st.session_state.setdefault(FILTER_DATE_RANGE_KEY, (default_start.date(), default_end.date()))
+    default_end = prague_today()
+    default_start = default_end - datetime.timedelta(days=1)
+    st.session_state.setdefault(FILTER_DATE_RANGE_KEY, (default_start, default_end))
 
 
 def normalize_date_range(value: object) -> tuple[datetime.date, datetime.date]:
@@ -146,7 +146,7 @@ def normalize_date_range(value: object) -> tuple[datetime.date, datetime.date]:
         start_date = end_date = value
 
     if not isinstance(start_date, datetime.date):
-        start_date = datetime.datetime.now().date()
+        start_date = prague_today()
     if not isinstance(end_date, datetime.date):
         end_date = start_date
     if start_date > end_date:
@@ -165,34 +165,6 @@ def require_dashboard_api_token() -> str:
     if not access_token:
         raise DashboardApiError("Chybi bearer token pro dashboard API.")
     return access_token
-
-
-@st.cache_data(ttl=60)
-def load_expected_zero_idents() -> tuple[str, ...]:
-    access_token = require_dashboard_api_token()
-    rows = api_get_vodomery_expected_zero(access_token)
-    return tuple(sorted(str(row["identifikace"]) for row in rows if row.get("identifikace")))
-
-
-def filter_expected_zero_events(df: pd.DataFrame, identifikace: str | None = None) -> pd.DataFrame:
-    if df.empty or "event_type" not in df.columns:
-        return df
-    expected_zero_idents = set(load_expected_zero_idents())
-    if not expected_zero_idents:
-        return df
-
-    filtered = df.copy()
-    if "identifikace" in filtered.columns:
-        return filtered.loc[
-            ~(
-                (filtered["event_type"] == "ZERO_FLOW")
-                & (filtered["identifikace"].isin(expected_zero_idents))
-            )
-        ].copy()
-
-    if identifikace and identifikace in expected_zero_idents:
-        return filtered.loc[filtered["event_type"] != "ZERO_FLOW"].copy()
-    return filtered
 
 
 def filter_min_duration_events(df: pd.DataFrame) -> pd.DataFrame:
@@ -402,7 +374,7 @@ def load_all_open_events(
             "severity",
         ],
     )
-    return filter_min_duration_events(filter_expected_zero_events(df))
+    return filter_min_duration_events(df)
 
 
 @st.cache_data(ttl=60)
@@ -432,7 +404,7 @@ def load_recent_resolved_events(
             "severity",
         ],
     )
-    return filter_min_duration_events(filter_expected_zero_events(df))
+    return filter_min_duration_events(df)
 
 
 @st.cache_data(ttl=60)
@@ -473,7 +445,7 @@ def load_event_history(
             "resolved",
         ],
     )
-    return filter_min_duration_events(filter_expected_zero_events(df, identifikace))
+    return filter_min_duration_events(df)
 
 
 def render_sidebar_filters(

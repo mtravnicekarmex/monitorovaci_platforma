@@ -21,6 +21,7 @@ from moduly.apps.dashboard.auth import (
     current_username,
     get_auth_token,
     is_admin,
+    logout,
     refresh_current_user,
     require_page_access,
 )
@@ -45,56 +46,57 @@ st.caption("Správa vlastního přístupu do dashboardu")
 
 user_is_admin = is_admin()
 
-if user_is_admin:
-    info_col_1, info_col_2 = st.columns(2)
-    info_col_1.metric("Uživatel", username)
-    info_col_2.metric("Role", "admin")
-else:
-    st.metric("Uživatel", username)
+info_col_1, info_col_2 = st.columns(2)
+info_col_1.metric("Uživatel", username)
+info_col_2.metric("Email", current_email or "-")
 
-st.metric("Email", current_email or "-")
+if user_is_admin:
+    st.caption("Role: admin")
 
 st.markdown("---")
-st.subheader("Email")
+email_col, password_col = st.columns(2, gap="large")
 
-with st.form("change_email_form"):
-    email_value = st.text_input("Email", value=current_email or "")
-    email_submitted = st.form_submit_button("Uložit email")
+with email_col:
+    st.subheader("Email")
+    with st.form("change_email_form"):
+        email_value = st.text_input("Email", value=current_email or "")
+        email_submitted = st.form_submit_button("Uložit email")
 
 if email_submitted:
     normalized_email = email_value.strip()
     if normalized_email and "@" not in normalized_email:
-        st.error("Email musí obsahovat znak @.")
+        email_col.error("Email musí obsahovat znak @.")
     else:
         try:
             user_payload = update_my_email(get_auth_token(), normalized_email or None)
         except DashboardApiError as exc:
-            st.error(str(exc))
+            email_col.error(str(exc))
         else:
             apply_authenticated_user(user_payload)
-            st.success("Email byl uložen.")
+            email_col.success("Email byl uložen.")
             st.rerun()
 
-st.markdown("---")
-st.subheader("Změna hesla")
-
-with st.form("change_password_form"):
-    current_password = st.text_input("Současné heslo", type="password")
-    new_password = st.text_input("Nové heslo", type="password")
-    new_password_confirm = st.text_input("Potvrzení nového hesla", type="password")
-    submitted = st.form_submit_button("Změnit heslo")
+with password_col:
+    st.subheader("Změna hesla")
+    with st.form("change_password_form"):
+        current_password = st.text_input("Současné heslo", type="password")
+        new_password = st.text_input("Nové heslo", type="password")
+        new_password_confirm = st.text_input("Potvrzení nového hesla", type="password")
+        submitted = st.form_submit_button("Změnit heslo")
 
 if submitted:
     if not current_password or not new_password or not new_password_confirm:
-        st.error("Vyplň všechna pole.")
+        password_col.error("Vyplň všechna pole.")
     elif new_password != new_password_confirm:
-        st.error("Nové heslo a potvrzení se neshoduji.")
+        password_col.error("Nové heslo a potvrzení se neshoduji.")
     elif len(new_password) < 8:
-        st.error("Nové heslo musí mít alespoň 8 znaků.")
+        password_col.error("Nové heslo musí mít alespoň 8 znaků.")
     else:
         try:
             change_my_password(get_auth_token(), current_password, new_password)
         except DashboardApiError as exc:
-            st.error(str(exc))
+            password_col.error(str(exc))
         else:
-            st.success("Heslo bylo změněno.")
+            logout()
+            st.session_state["auth_notice"] = "Heslo bylo změněno. Přihlaste se znovu."
+            st.switch_page("login.py")

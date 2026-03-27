@@ -10,6 +10,7 @@ from decouple import config
 from sqlalchemy import bindparam, text
 
 from app.channels.email import send_email_outlook
+from app.time_utils import prague_today
 from core.db.connect import ENGINE_PG
 from moduly.mereni.vodomery.SCVK.historie_vetve import (
     INTERVALY_vetev_L,
@@ -146,7 +147,7 @@ def _load_recipients() -> list[str]:
 
 
 def _get_previous_month_period(reference_date: date | None = None) -> ReportPeriod:
-    base_date = reference_date or datetime.now().date()
+    base_date = reference_date or prague_today()
     current_month_start = base_date.replace(day=1)
     previous_month_end = current_month_start - timedelta(days=1)
     previous_month_start = previous_month_end.replace(day=1)

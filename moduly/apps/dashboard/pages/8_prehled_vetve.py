@@ -9,6 +9,8 @@ import pandas as pd
 import streamlit as st
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.time_utils import prague_today
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
@@ -38,7 +40,7 @@ require_page_access("vodomery_branch_overview")
 
 
 def init_page_state() -> None:
-    st.session_state.setdefault(DATE_KEY, datetime.datetime.now().date())
+    st.session_state.setdefault(DATE_KEY, prague_today())
 
 
 def render_sidebar_filters() -> datetime.date:
@@ -48,7 +50,7 @@ def render_sidebar_filters() -> datetime.date:
         st.subheader("Filtry")
         selected_date = st.date_input("Den", key=DATE_KEY)
     if not isinstance(selected_date, datetime.date):
-        return datetime.datetime.now().date()
+        return prague_today()
     return selected_date
 
 

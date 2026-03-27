@@ -42,6 +42,9 @@ def default_target_page() -> str:
 def render_login_page() -> None:
     st.title("Login do dashboardu")
     st.caption("Uvodni stranka pro pristup k interni aplikaci monitorovaci platformy.")
+    auth_notice = str(st.session_state.pop("auth_notice", "") or "")
+    if auth_notice:
+        st.success(auth_notice)
 
     try:
         users_exist = any_dashboard_users()

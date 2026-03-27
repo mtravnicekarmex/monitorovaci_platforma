@@ -9,6 +9,8 @@ import pandas as pd
 import streamlit as st
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.time_utils import prague_today
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
@@ -182,7 +184,7 @@ def render_dashboard() -> None:
     measurements_df = load_measurement_series(
         selected_ident,
         datetime.date(2000, 1, 1),
-        datetime.datetime.now().date(),
+        prague_today(),
         allowed_devices,
         user_is_admin,
     )

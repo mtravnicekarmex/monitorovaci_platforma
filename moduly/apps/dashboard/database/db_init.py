@@ -20,6 +20,10 @@ def ensure_streamlit_user_columns() -> None:
         alter_statements.append('ALTER TABLE dashboard."Streamlit_Users" ADD COLUMN dostupne_sekce TEXT')
     if "dostupne_stranky" not in columns:
         alter_statements.append('ALTER TABLE dashboard."Streamlit_Users" ADD COLUMN dostupne_stranky TEXT')
+    if "token_version" not in columns:
+        alter_statements.append(
+            'ALTER TABLE dashboard."Streamlit_Users" ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0'
+        )
 
     if not alter_statements:
         return

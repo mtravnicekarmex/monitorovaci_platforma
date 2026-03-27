@@ -10,6 +10,8 @@ import pandas as pd
 import streamlit as st
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.time_utils import prague_today
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
@@ -53,10 +55,10 @@ require_page_access("vodomery_overview")
 
 
 def init_overview_state() -> None:
-    default_start = datetime.datetime.now() - datetime.timedelta(days=1)
-    default_end = datetime.datetime.now()
+    default_end = prague_today()
+    default_start = default_end - datetime.timedelta(days=1)
     st.session_state.setdefault(SOURCE_FILTER_KEY, "VSE")
-    st.session_state.setdefault(DATE_RANGE_KEY, (default_start.date(), default_end.date()))
+    st.session_state.setdefault(DATE_RANGE_KEY, (default_start, default_end))
     st.session_state.setdefault(DETAIL_KEY, "Ne")
     st.session_state.setdefault(GRAPH_KEY, "Ne")
     st.session_state.setdefault(APPLIED_KEY, False)
@@ -384,7 +386,7 @@ def render_graphs(
 
     use_line_chart = detail_level == "Hodinově"
     prediction_available = has_prediction_data(detail_df)
-    today = datetime.datetime.now().date()
+    today = prague_today()
     use_full_day_today_prediction = (
         detail_level == "Hodinově"
         and start_date == end_date == today
@@ -592,7 +594,7 @@ def render_dashboard() -> None:
             render_graphs(measurements_df, detail_df, detail_level, start_date, end_date, profiles_df)
             show_prediction_legend = has_prediction_data(detail_df) or (
                 detail_level == "Hodinově"
-                and start_date == end_date == datetime.datetime.now().date()
+                and start_date == end_date == prague_today()
                 and not profiles_df.empty
             )
             render_graph_legend(show_prediction_legend)

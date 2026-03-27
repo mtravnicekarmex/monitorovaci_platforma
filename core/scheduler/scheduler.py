@@ -1,22 +1,23 @@
 import sys
+from dataclasses import dataclass
+from functools import wraps
 from moduly.mereni.vodomery.SCVK.SCVK_to_database import SCVK_save_to_database_all
 from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_to_database import SOFTLINK_to_database_mereni
 from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_data_z_dotazu import SOFTLINK_dotaz
 from core.db.connect import get_session_pg
 from core.db.database_nyni import df_vodomery_vse_join, df_elektromery_vse_join, df_plynomery_vse_join, df_kalorimetry_vse_join, df_manometry_vse_join
-from moduly.apps.web_search.web_search import hledat_nove_vyskyt, poslat_email_html_vyraz
+from moduly.apps.web_search.service import hledat_nove_vyskyt, poslat_email_html_vyraz
 from moduly.apps.web_search.database.models import *
 import json
 import threading
 import os
-import traceback
 import time
 import logging
 from pathlib import Path
 from logging.handlers import TimedRotatingFileHandler
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MISSED, EVENT_JOB_EXECUTED
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
 from app.channels.email import send_email_outlook
 from app.time_utils import utc_now_naive
 from decouple import config
@@ -85,7 +86,48 @@ def setup_logging():
 # -------------------------
 
 
+@dataclass(frozen=True)
+class SkippedJobResult:
+    reason: str
+    lock_names: tuple[str, ...]
+
+
+def _format_scheduler_reason(error) -> str | None:
+    if error is None:
+        return None
+    reason = str(error).strip()
+    if reason:
+        return reason
+    return type(error).__name__
+
+
+def _send_scheduler_alert(*, job_id: str, status_text: str, scheduled_time, reason: str | None = None) -> None:
+    body_lines = [
+        f"Cas: {scheduled_time}",
+        f"Job: {job_id}",
+        f"Stav: {status_text}",
+    ]
+    if reason:
+        body_lines.append(f"Duvod: {reason}")
+
+    send_email_outlook(
+        email_receiver='m.travnicek@armex.cz',
+        sender_alias=config('O_EMAIL_ALARM'),
+        subject=f"[ALERT] Scheduler | {job_id}",
+        body="\n".join(body_lines),
+    )
+
+
 def job_success_listener(event):
+    if isinstance(event.retval, SkippedJobResult):
+        logger.warning(
+            "JOB SKIPPED | id=%s | scheduled=%s | reason=%s | locks=%s",
+            event.job_id,
+            event.scheduled_run_time,
+            event.retval.reason,
+            ",".join(event.retval.lock_names),
+        )
+        return
     logger.info(
         "JOB SUCCESS | id=%s | scheduled=%s",
         event.job_id,
@@ -96,31 +138,17 @@ def job_success_listener(event):
 
 def job_error_listener(event):
     if event.exception:
-        error_text = "".join(
-                        traceback.format_exception(
-                            type(event.exception),
-                            event.exception,
-                            event.exception.__traceback__
-                        )
-                    )
-
         logger.exception(
             "JOB ERROR | id=%s | scheduled=%s",
             event.job_id,
             event.scheduled_run_time
         )
 
-        send_email_outlook(
-            email_receiver='m.travnicek@armex.cz',
-            sender_alias=config('O_EMAIL_ALARM'),
-            subject=f"[ALERT] Job {event.job_id} spadl",
-            body=f"""
-Job ID: {event.job_id}
-Naplánovaný čas: {event.scheduled_run_time}
-
-Traceback:
-{error_text}
-"""
+        _send_scheduler_alert(
+            job_id=event.job_id,
+            status_text="spadl",
+            scheduled_time=event.scheduled_run_time,
+            reason=_format_scheduler_reason(event.exception),
         )
 
     elif event.code == EVENT_JOB_MISSED:
@@ -130,16 +158,20 @@ Traceback:
             event.scheduled_run_time
         )
 
-        send_email_outlook(
-            email_receiver='m.travnicek@armex.cz',
-            sender_alias=config('O_EMAIL_ALARM'),
-            subject=f"[ALERT] Job {event.job_id} nebyl spuštěn",
-            body=f"""
-Job ID: {event.job_id}
-Naplánovaný čas: {event.scheduled_run_time}
-Důvod: job byl zmeškán (misfire).
-"""
+        _send_scheduler_alert(
+            job_id=event.job_id,
+            status_text="nebyl spusten",
+            scheduled_time=event.scheduled_run_time,
+            reason="job byl zmeskan (misfire)",
         )
+
+
+def job_max_instances_listener(event):
+    logger.warning(
+        "JOB SKIPPED | id=%s | scheduled=%s | reason=max_instances",
+        event.job_id,
+        ",".join(str(run_time) for run_time in event.scheduled_run_times),
+    )
 
 
 
@@ -322,20 +354,34 @@ def safe_call(fn, *args, **kwargs):
 # -------------------------
 # Wrapper pro zamezení paralelního běhu
 # -------------------------
-def locked_job(fn):
+def _build_locked_job(fn, decorator_lock_names):
+    resolved_lock_names = tuple(dict.fromkeys(decorator_lock_names or (fn.__name__,)))
+
+    @wraps(fn)
     def wrapper(*args, **kwargs):
-        if not lock.acquire(blocking=False):
-            msg = f"{fn.__name__} přeskočen – jiný job běží"
-            logger.error(msg)
-            raise RuntimeError(msg)
+        resolved_locks = tuple(_get_lock(lock_name) for lock_name in sorted(resolved_lock_names))
+        acquired_locks = []
+        for job_lock in resolved_locks:
+            if not job_lock.acquire(blocking=False):
+                for acquired_lock in reversed(acquired_locks):
+                    acquired_lock.release()
+                return SkippedJobResult(reason="lock_busy", lock_names=resolved_lock_names)
+            acquired_locks.append(job_lock)
         try:
-            fn(*args, **kwargs)
+            return fn(*args, **kwargs)
         except Exception:
             logger.exception(f"Chyba v {fn.__name__}")
             raise
         finally:
-            lock.release()
+            for acquired_lock in reversed(acquired_locks):
+                acquired_lock.release()
     return wrapper
+
+
+def locked_job(*decorator_args):
+    if decorator_args and callable(decorator_args[0]) and len(decorator_args) == 1:
+        return _build_locked_job(decorator_args[0], ())
+    return lambda fn: _build_locked_job(fn, decorator_args)
 
 
 
@@ -346,22 +392,28 @@ def locked_job(fn):
 # Definice jednotlivých jobů
 # -------------------------
 
-# každých 15 minut
+# každých 15 minut v X:05,20,35,50
 @locked_job
 def quarter_hour_job():
     safe_call(vodomery_db_import)
     safe_call(score_new_measurements, model_version=1)
     event_result = safe_call(detect_events_from_scores, model_version=1)
     safe_call(process_vodomery_alerts, active_event_ids=event_result.get("active_event_ids", []), resolved_event_ids=event_result.get("resolved_event_ids", []),)
+    safe_call(SCVK_save_to_database_all)
+    safe_call(SOFTLINK_save_to_database_all)
+    safe_call(daily_web_monitor_job)
+    safe_call(meteo_sync)
+    safe_call(rebuild_profiles, 1)
+    safe_call(send_monthly_vodomery_consumption_report)
 
 
-# každou hodinu
+# každou hodinu v X:02:05
 @locked_job
 def hourly_job():
     safe_call(SCVK_save_to_database_all)
 
 
-# každou hodinu od 6 do 16 pracovní den
+# každou hodinu v pracovní dny od 6:03 do 16:03
 @locked_job
 def working_time_hourly_job():
     safe_call(uloz_manometry_parquet)
@@ -369,26 +421,26 @@ def working_time_hourly_job():
     safe_call(uloz_plynomery_parquet)
 
 
-# každý den v 7 a ve 14
+# každý den v 7:00 a 14:00
 @locked_job
 def daily_seven_and_two_job():
     safe_call(daily_web_monitor_job)
 
 
-# každý den o půlnoci
+# každý den v 0:15:05
 @locked_job
 def daily_pulnoc_job():
     safe_call(SOFTLINK_save_to_database_all)
     safe_call(meteo_sync)
 
 
-# každý týden v pondělí ráno
+# každý týden v pondělí v 6:10:05
 @locked_job
 def weekly_job():
     safe_call(rebuild_profiles, 1)
 
 
-# každý měsíc prvního ráno
+# každý první den v měsíci v 0:20:05
 @locked_job
 def monthly_job():
     safe_call(send_monthly_vodomery_consumption_report)
@@ -423,14 +475,14 @@ def main_scheduler():
     # Naplánování jobů
     # -------------------------
 
-    # každých 15 minut v X:02,17,32,47
+    # každých 15 minut v X:05,20,35,50
     scheduler.add_job(
         quarter_hour_job,
         CronTrigger(minute="5,20,35,50", second=5),
         id="quarter_hour_job",
     )
 
-    # každou hodinu v X:02
+    # každou hodinu v X:02:05
     scheduler.add_job(
         hourly_job,
         CronTrigger(minute=2, second=5),
@@ -441,32 +493,32 @@ def main_scheduler():
     # každou hodinu v X:03 v pracovní dny od 6 do 16
     scheduler.add_job(
         working_time_hourly_job,
-        CronTrigger(hour="6-16", minute=3, day_of_week="mon-fri"),
+        CronTrigger(hour="6-16", minute=3, second=5, day_of_week="mon-fri"),
         id="working_time_hourly_job",
     )
 
-    # každý den v X:00 7 a 14
+    # každý den v 7:00 a 14:00
     scheduler.add_job(
         daily_seven_and_two_job,
-        CronTrigger(hour="7,14", minute=0),
+        CronTrigger(hour="7,14", minute=0, second=5),
         id="daily_seven_and_two_job",
     )
 
-    # každý den v 0:05
+    # každý den v 0:15:05
     scheduler.add_job(
         daily_pulnoc_job,
         CronTrigger(hour=0, minute=15, second=5),
         id="daily_job",
     )
 
-    # každý týden v pondělí v 6:10
+    # každý týden v pondělí v 6:10:05
     scheduler.add_job(
         weekly_job,
-        CronTrigger(day_of_week="1", hour=0, minute=10, second=5),
+        CronTrigger(day_of_week="mon", hour=6, minute=10, second=5),
         id="weekly_job",
     )
 
-    # každý první den v měsíci po noční aktualizaci
+    # každý první den v měsíci po noční aktualizaci v 0:20:05
     scheduler.add_job(
         monthly_job,
         CronTrigger(
@@ -482,6 +534,7 @@ def main_scheduler():
     # --- Listeners ---
     scheduler.add_listener(job_error_listener, EVENT_JOB_ERROR | EVENT_JOB_MISSED)
     scheduler.add_listener(job_success_listener, EVENT_JOB_EXECUTED)
+    scheduler.add_listener(job_max_instances_listener, EVENT_JOB_MAX_INSTANCES)
 
     # --- Start scheduleru ---
     scheduler.start()
@@ -506,7 +559,17 @@ logger = setup_logging()
 # -------------------------
 # Lock
 # -------------------------
-lock = threading.Lock()
+_LOCK_REGISTRY_GUARD = threading.Lock()
+_JOB_LOCKS = {}
+
+
+def _get_lock(lock_name):
+    with _LOCK_REGISTRY_GUARD:
+        job_lock = _JOB_LOCKS.get(lock_name)
+        if job_lock is None:
+            job_lock = threading.Lock()
+            _JOB_LOCKS[lock_name] = job_lock
+        return job_lock
 
 # -------------------------
 # Start

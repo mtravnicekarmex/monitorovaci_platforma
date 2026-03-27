@@ -10,6 +10,8 @@ import streamlit as st
 import pandas as pd
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.time_utils import prague_today
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
@@ -53,9 +55,9 @@ require_page_access("plynomery_overview")
 
 
 def init_overview_state() -> None:
-    default_start = datetime.datetime.now() - datetime.timedelta(days=1)
-    default_end = datetime.datetime.now()
-    st.session_state.setdefault(DATE_RANGE_KEY, (default_start.date(), default_end.date()))
+    default_end = prague_today()
+    default_start = default_end - datetime.timedelta(days=1)
+    st.session_state.setdefault(DATE_RANGE_KEY, (default_start, default_end))
     st.session_state.setdefault(DETAIL_KEY, "Ne")
     st.session_state.setdefault(GRAPH_KEY, "Ne")
     st.session_state.setdefault(APPLIED_KEY, False)

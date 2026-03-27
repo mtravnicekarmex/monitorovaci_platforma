@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 
+from app.time_utils import utc_now_naive
 from core.db.connect import get_session_pg
 from moduly.apps.dashboard.database.models import Streamlit_Users
 from moduly.apps.dashboard.navigation_config import (
@@ -57,6 +57,20 @@ def list_users() -> list[dict[str, object]]:
             }
             for row in rows
         ]
+    finally:
+        session.close()
+
+
+def count_active_admin_users(*, exclude_username: str | None = None) -> int:
+    session = get_session_pg()
+    try:
+        query = session.query(Streamlit_Users).filter(
+            Streamlit_Users.is_admin.is_(True),
+            Streamlit_Users.is_active.is_(True),
+        )
+        if exclude_username:
+            query = query.filter(Streamlit_Users.uzivatel != exclude_username)
+        return int(query.count())
     finally:
         session.close()
 
@@ -120,7 +134,7 @@ def update_last_login(username: str, login_time) -> None:
         user = session.get(Streamlit_Users, username)
         if user is None:
             return
-        user.last_login_at = login_time or datetime.utcnow()
+        user.last_login_at = login_time or utc_now_naive()
         session.commit()
     finally:
         session.close()
@@ -133,6 +147,7 @@ def update_password(username: str, new_password: str) -> None:
         if user is None:
             raise ValueError("Uzivatel neexistuje.")
         user.heslo = hash_password(new_password)
+        user.token_version = int(user.token_version or 0) + 1
         session.commit()
     finally:
         session.close()
@@ -209,6 +224,7 @@ def upsert_user(
         else:
             if password:
                 user.heslo = hash_password(password)
+                user.token_version = int(user.token_version or 0) + 1
             user.email = email.strip() if email else None
             user.dostupne_sekce = serialized_sections
             user.dostupne_stranky = serialized_pages
@@ -229,5 +245,18 @@ def delete_user(username: str) -> None:
             return
         session.delete(user)
         session.commit()
+    finally:
+        session.close()
+
+
+def revoke_user_tokens(username: str) -> int | None:
+    session = get_session_pg()
+    try:
+        user = session.get(Streamlit_Users, username)
+        if user is None:
+            return None
+        user.token_version = int(user.token_version or 0) + 1
+        session.commit()
+        return int(user.token_version)
     finally:
         session.close()

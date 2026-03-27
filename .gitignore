@@ -1,4 +1,16 @@
 .env
-.idea/workspace.xml
+.env.*
+!.env.example
+.venv/
 __pycache__/
 *.py[cod]
+*.log
+
+.idea/workspace.xml
+
+core/scheduler/logs/
+core/scheduler/data/*.parquet
+data/*.parquet
+scheduler.log
+
+moduly/mereni/elektromery/SOFTLINK/lds_auth.json

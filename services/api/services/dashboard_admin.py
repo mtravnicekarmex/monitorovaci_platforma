@@ -8,6 +8,7 @@ from moduly.apps.dashboard.database.users import (
     list_users,
     upsert_user,
 )
+from moduly.mereni.elektromery.database.models import Elektromer_areal_Mereni
 from moduly.mereni.kalorimetry.database.models import Kalorimetr_areal_Mereni
 from moduly.mereni.plynomery.database.models import Plynomer_areal_Mereni
 from moduly.mereni.vodomery.database.models import Mereni_vodomery
@@ -87,6 +88,14 @@ def list_all_device_options(user_context: DashboardUserContext) -> list[str]:
             .all()
         )
         identifiers.update(str(row[0]) for row in plynomery_rows if row[0])
+
+        elektromery_rows = (
+            session_ms.query(Elektromer_areal_Mereni.identifikace)
+            .distinct()
+            .order_by(Elektromer_areal_Mereni.identifikace)
+            .all()
+        )
+        identifiers.update(str(row[0]) for row in elektromery_rows if row[0])
 
         kalorimetry_rows = (
             session_ms.query(Kalorimetr_areal_Mereni.identifikace)

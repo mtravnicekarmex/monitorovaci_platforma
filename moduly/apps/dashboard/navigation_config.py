@@ -29,6 +29,7 @@ class DashboardPage:
 SECTIONS: tuple[DashboardSection, ...] = (
     DashboardSection(key="vodomery", label="Vodoměry", icon="💧"),
     DashboardSection(key="plynomery", label="Plynoměry", icon="🔥"),
+    DashboardSection(key="elektromery", label="Elektroměry", icon="⚡"),
     DashboardSection(key="kalorimetry", label="Kalorimetry", icon="♨️"),
 )
 
@@ -80,6 +81,22 @@ PAGES: tuple[DashboardPage, ...] = (
         title="Detail",
         icon="🧭",
         section_key="plynomery",
+        configurable=True,
+    ),
+    DashboardPage(
+        key="elektromery_overview",
+        path="pages/13_elektromery.py",
+        title="Přehled",
+        icon="⚡",
+        section_key="elektromery",
+        configurable=True,
+    ),
+    DashboardPage(
+        key="elektromery_detail",
+        path="pages/14_elektromery_detail.py",
+        title="Detail",
+        icon="🧭",
+        section_key="elektromery",
         configurable=True,
     ),
     DashboardPage(

@@ -399,12 +399,6 @@ def quarter_hour_job():
     safe_call(score_new_measurements, model_version=1)
     event_result = safe_call(detect_events_from_scores, model_version=1)
     safe_call(process_vodomery_alerts, active_event_ids=event_result.get("active_event_ids", []), resolved_event_ids=event_result.get("resolved_event_ids", []),)
-    safe_call(SCVK_save_to_database_all)
-    safe_call(SOFTLINK_save_to_database_all)
-    safe_call(daily_web_monitor_job)
-    safe_call(meteo_sync)
-    safe_call(rebuild_profiles, 1)
-    safe_call(send_monthly_vodomery_consumption_report)
 
 
 # každou hodinu v X:02:05

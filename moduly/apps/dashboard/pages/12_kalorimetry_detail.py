@@ -44,6 +44,7 @@ require_page_access("kalorimetry_detail")
 
 
 DETAIL_DEVICE_KEY = "kalorimetry_detail_identifikace"
+DAY_OF_WEEK_LABELS = ("Po", "Út", "St", "Čt", "Pá", "So", "Ne")
 
 
 def render_detail_sidebar(user_is_admin: bool, allowed_devices: tuple[str, ...]) -> str:
@@ -98,6 +99,76 @@ def build_daily_history(history_df: pd.DataFrame, days: int) -> pd.DataFrame:
     daily_history = daily_history[daily_history["date"] >= start_window].copy()
     daily_history["day_label"] = daily_history["date"].dt.strftime("%d.%m.")
     return daily_history
+
+
+def build_average_consumption_summary(history_df: pd.DataFrame) -> dict[str, object]:
+    if history_df.empty:
+        return {"monthly": None, "weekly": None, "weekday": {}}
+
+    daily_totals = (
+        history_df.set_index("date")
+        .resample("D")
+        .agg(spotreba=("spotreba", "sum"))
+        .reset_index()
+    )
+    daily_totals = daily_totals[daily_totals["spotreba"].notna()].copy()
+    if daily_totals.empty:
+        return {"monthly": None, "weekly": None, "weekday": {}}
+
+    daily_totals["spotreba"] = pd.to_numeric(daily_totals["spotreba"], errors="coerce").fillna(0.0)
+    monthly_totals = (
+        daily_totals.assign(month_period=daily_totals["date"].dt.to_period("M"))
+        .groupby("month_period")["spotreba"]
+        .sum()
+    )
+    iso_calendar = daily_totals["date"].dt.isocalendar()
+    weekly_totals = (
+        daily_totals.assign(iso_year=iso_calendar.year, iso_week=iso_calendar.week)
+        .groupby(["iso_year", "iso_week"])["spotreba"]
+        .sum()
+    )
+    weekday_totals = (
+        daily_totals.assign(day_of_week=daily_totals["date"].dt.dayofweek)
+        .groupby("day_of_week")["spotreba"]
+        .mean()
+    )
+
+    return {
+        "monthly": round(float(monthly_totals.mean()), 3) if not monthly_totals.empty else None,
+        "weekly": round(float(weekly_totals.mean()), 3) if not weekly_totals.empty else None,
+        "weekday": {
+            int(day_of_week): round(float(value), 3)
+            for day_of_week, value in weekday_totals.items()
+        },
+    }
+
+
+def render_average_consumption_section(history_df: pd.DataFrame) -> None:
+    with st.container(border=True):
+        st.subheader("Průměrná spotřeba energie")
+        if history_df.empty:
+            st.info("Pro tento kalorimetr zatím není dostatek dat pro výpočet průměrné spotřeby.")
+            return
+
+        averages = build_average_consumption_summary(history_df)
+        top_cols = st.columns(2)
+        top_cols[0].metric(
+            "Průměrná měsíční spotřeba",
+            format_energy_metric(averages["monthly"]),
+        )
+        top_cols[1].metric(
+            "Průměrná týdenní spotřeba",
+            format_energy_metric(averages["weekly"]),
+        )
+
+        st.caption("Průměrná denní spotřeba podle dne v týdnu")
+        weekday_cols = st.columns(7)
+        weekday_values = averages["weekday"]
+        for index, label in enumerate(DAY_OF_WEEK_LABELS):
+            weekday_cols[index].metric(
+                label,
+                format_energy_metric(weekday_values.get(index)),
+            )
 
 
 def build_daily_chart(daily_history: pd.DataFrame) -> alt.Chart:
@@ -233,6 +304,8 @@ def render_dashboard() -> None:
             midpoint = (len(metadata_df) + 1) // 2
             meta_col_1.dataframe(metadata_df.iloc[:midpoint], width="stretch", hide_index=True)
             meta_col_2.dataframe(metadata_df.iloc[midpoint:], width="stretch", hide_index=True)
+
+    render_average_consumption_section(history_df)
 
     chart_col, status_col = st.columns([3, 2])
 

@@ -1,10 +1,19 @@
+import logging
 import json
 
 import streamlit as st
 
 from core.db.connect import get_session_pg
 from moduly.apps.web_search.database.models import Monitor, Result
-from moduly.apps.web_search.service import hledat_nove_vyskyt
+from moduly.apps.web_search.service import (
+    find_matching_monitor,
+    hledat_nove_vyskyt,
+    normalize_expressions,
+    normalize_monitor_url,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -43,37 +52,61 @@ with st.container():
             if not url or not vyrazy:
                 st.warning("Zadej URL a hledané výrazy!")
             else:
-                session = get_session_pg()
-
-                # vytvoření dočasného monitoru pro hledání
-                temp_monitor = Monitor(
-                    url=url,
-                    vyrazy=json.dumps([]),  # dočasně prázdný seznam
-                    email=""
-                )
-                session.add(temp_monitor)
-                session.commit()  # uložíme, aby měl ID
-
-                # seznam hledaných výrazů
-                vyrazy_list = [v.strip() for v in vyrazy.split(",")]
-
-                # hledání nových výskytů
-                nove_vyskyt = hledat_nove_vyskyt(temp_monitor, vyrazy_list, session)
-
-                # smažeme dočasný monitor
-                session.delete(temp_monitor)
-                session.commit()
-                session.close()
-
-                # zobrazení výsledků
-                if not nove_vyskyt:
-                    st.info("Žádné nové výskyty.")
+                normalized_url = normalize_monitor_url(url)
+                vyrazy_list = normalize_expressions(vyrazy.split(","))
+                if not normalized_url:
+                    st.warning("Zadej platnou URL.")
+                elif not vyrazy_list:
+                    st.warning("Zadej alespoň jeden platný výraz.")
                 else:
-                    for vyraz, snippet, odkaz in nove_vyskyt:
-                        if odkaz:
-                            st.markdown(f'- **"{vyraz}"**: [Otevřít odkaz]({odkaz})')
-                        else:
-                            st.markdown(f"- **{vyraz}**: …{snippet}…")
+                    session = get_session_pg()
+                    temp_monitor_id = None
+                    nove_vyskyt = []
+                    search_failed = False
+
+                    try:
+                        # vytvoření dočasného monitoru pro hledání
+                        temp_monitor = Monitor(
+                            url=normalized_url,
+                            vyrazy=json.dumps([]),  # dočasně prázdný seznam
+                            email=""
+                        )
+                        session.add(temp_monitor)
+                        session.commit()  # uložíme, aby měl ID
+                        temp_monitor_id = temp_monitor.id
+
+                        # hledání nových výskytů
+                        nove_vyskyt = hledat_nove_vyskyt(temp_monitor, vyrazy_list, session)
+                    except Exception:
+                        session.rollback()
+                        search_failed = True
+                        logger.exception("Okamzite hledani web monitoru selhalo pro %s", normalized_url)
+                        st.error("Hledání se nezdařilo.")
+                    finally:
+                        if temp_monitor_id is not None:
+                            try:
+                                temp_monitor = session.get(Monitor, temp_monitor_id)
+                                if temp_monitor is not None:
+                                    session.delete(temp_monitor)
+                                    session.commit()
+                            except Exception:
+                                session.rollback()
+                                logger.exception(
+                                    "Nepodarilo se odstranit docasny monitor %s pro %s",
+                                    temp_monitor_id,
+                                    normalized_url,
+                                )
+                        session.close()
+
+                    # zobrazení výsledků
+                    if nove_vyskyt:
+                        for vyraz, snippet, odkaz in nove_vyskyt:
+                            if odkaz:
+                                st.markdown(f'- **"{vyraz}"**: [Otevřít odkaz]({odkaz})')
+                            else:
+                                st.markdown(f"- **{vyraz}**: …{snippet}…")
+                    elif temp_monitor_id is not None and not search_failed:
+                        st.info("Žádné nové výskyty.")
 
 
     with col4:
@@ -81,26 +114,47 @@ with st.container():
             if not (url and vyrazy and email):
                 st.warning("Vyplň všechny pole!")
             else:
-                session = get_session_pg()
-                vyrazy_list = [v.strip() for v in vyrazy.split(",")]
-                exist_monitor = session.query(Monitor).filter_by(url=url).first()
-
-                if exist_monitor:
-                    exist_vyrazy = json.loads(exist_monitor.vyrazy)
-                    nove_vyrazy = [v for v in vyrazy_list if v not in exist_vyrazy]
-                    if not nove_vyrazy:
-                        st.info("Tento monitor již obsahuje všechny zadané výrazy.")
-                    else:
-                        exist_monitor.vyrazy = json.dumps(exist_vyrazy + nove_vyrazy)
-                        exist_monitor.email = email
-                        session.commit()
-                        st.success(f"Aktualizován monitor, přidány nové výrazy: {', '.join(nove_vyrazy)}")
+                normalized_url = normalize_monitor_url(url)
+                clean_email = email.strip()
+                vyrazy_list = normalize_expressions(vyrazy.split(","))
+                if not normalized_url:
+                    st.warning("Zadej platnou URL.")
+                elif not clean_email:
+                    st.warning("Vyplň email.")
+                elif not vyrazy_list:
+                    st.warning("Zadej alespoň jeden platný výraz.")
                 else:
-                    monitor = Monitor(url=url, vyrazy=json.dumps(vyrazy_list), email=email)
-                    session.add(monitor)
-                    session.commit()
-                    st.success("Nový monitor uložen!")
-                session.close()
+                    session = get_session_pg()
+                    monitory = session.query(Monitor).all()
+                    exist_monitor = find_matching_monitor(monitory, normalized_url, clean_email)
+
+                    if exist_monitor:
+                        changed_identity = (
+                            exist_monitor.url != normalized_url
+                            or exist_monitor.email != clean_email
+                        )
+                        exist_monitor.url = normalized_url
+                        exist_monitor.email = clean_email
+                        exist_vyrazy = json.loads(exist_monitor.vyrazy)
+                        nove_vyrazy = [v for v in vyrazy_list if v not in exist_vyrazy]
+                        if not nove_vyrazy:
+                            if changed_identity:
+                                session.commit()
+                            st.info("Tento monitor již obsahuje všechny zadané výrazy.")
+                        else:
+                            exist_monitor.vyrazy = json.dumps(exist_vyrazy + nove_vyrazy)
+                            session.commit()
+                            st.success(f"Aktualizován monitor, přidány nové výrazy: {', '.join(nove_vyrazy)}")
+                    else:
+                        monitor = Monitor(
+                            url=normalized_url,
+                            vyrazy=json.dumps(vyrazy_list),
+                            email=clean_email,
+                        )
+                        session.add(monitor)
+                        session.commit()
+                        st.success("Nový monitor uložen!")
+                    session.close()
 
     col5, col6 = st.columns(2)
 
@@ -175,15 +229,33 @@ with st.container():
                     with col_save:
                         save_pressed = st.form_submit_button("💾 Uložit změny")
                         if save_pressed:
-                            monitor.url = new_url.strip()
-                            monitor.email = new_email.strip()
-                            monitor.vyrazy = json.dumps(
-                                [v.strip() for v in new_vyrazy.split(",") if v.strip()]
-                            )
-                            session.commit()
-                            st.success("Monitor upraven.")
-                            st.session_state['refresh'] = True  # trigger rerun
-                            st.rerun()
+                            normalized_url = normalize_monitor_url(new_url)
+                            clean_email = new_email.strip()
+                            normalized_vyrazy = normalize_expressions(new_vyrazy.split(","))
+
+                            if not normalized_url:
+                                st.warning("Zadej platnou URL.")
+                            elif not clean_email:
+                                st.warning("Vyplň email.")
+                            elif not normalized_vyrazy:
+                                st.warning("Zadej alespoň jeden platný výraz.")
+                            else:
+                                duplicate_monitor = find_matching_monitor(
+                                    monitory,
+                                    normalized_url,
+                                    clean_email,
+                                    exclude_monitor_id=monitor.id,
+                                )
+                                if duplicate_monitor is not None:
+                                    st.warning("Monitor pro tuto URL a email už existuje.")
+                                else:
+                                    monitor.url = normalized_url
+                                    monitor.email = clean_email
+                                    monitor.vyrazy = json.dumps(normalized_vyrazy)
+                                    session.commit()
+                                    st.success("Monitor upraven.")
+                                    st.session_state['refresh'] = True  # trigger rerun
+                                    st.rerun()
 
                     with col_delete:
                         confirm_delete = st.checkbox(

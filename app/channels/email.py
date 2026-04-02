@@ -1,6 +1,7 @@
 import ssl
 from email.message import EmailMessage
 import os
+import re
 import smtplib
 from decouple import config
 
@@ -47,6 +48,15 @@ def send_email_gmail(email_receiver, subject, body, file_path=None, is_html=True
 
 
 
+def _html_to_plain_text(body: str) -> str:
+    """Provide a simple plain-text fallback for HTML emails."""
+    text = re.sub(r"<br\s*/?>", "\n", body, flags=re.IGNORECASE)
+    text = re.sub(r"</p\s*>", "\n\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = text.replace("&nbsp;", " ")
+    return text.strip()
+
+
 def send_email_outlook(email_receiver, subject, body, sender_alias=None, file_path=None, is_html=False, attachments=None):
     """ Send email with attachment"""
     email_sender = config('O_EMAIL')
@@ -65,6 +75,7 @@ def send_email_outlook(email_receiver, subject, body, sender_alias=None, file_pa
     msg['Subject'] = subject
 
     if is_html:
+        msg.set_content(_html_to_plain_text(body))
         msg.add_alternative(body, subtype='html')
     else:
         msg.set_content(body)
@@ -84,6 +95,7 @@ def send_email_outlook(email_receiver, subject, body, sender_alias=None, file_pa
                 maintype=maintype,
                 subtype=subtype,
                 filename=filename,
+                disposition='attachment',
             )
 
     # Log in and send the email

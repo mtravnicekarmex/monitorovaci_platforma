@@ -8,7 +8,7 @@ import pandas as pd
 from sqlalchemy import bindparam, func, text
 
 from app.time_utils import utc_now_naive
-from core.db.connect import ENGINE_PG, get_session_pg
+from core.db.connect import ENGINE_PG, get_session_ms, get_session_pg
 from moduly.mereni.vodomery.SCVK.SCVK_data_z_dotazu import paths as SCVK_PATHS
 from moduly.mereni.vodomery.SCVK.historie_vetve import (
     INTERVALY_vetev_L,
@@ -23,7 +23,7 @@ from moduly.mereni.vodomery.SCVK.historie_vetve import (
 from moduly.mereni.vodomery.database.expected_zero import get_expected_zero_device_set
 from moduly.mereni.vodomery.database.models import (
     Mereni_vodomery,
-    Vodomer_areal_Zarizeni_QGIS,
+    Vodomer_areal_Zarizeni,
     VodomeryAnomalyEvent,
     VodomeryProfilesAnomaly,
     VodomeryAnomalyScore,
@@ -640,31 +640,30 @@ def load_device_detail(
     require_section_access(user_context, "vodomery")
     require_device_access(user_context, identifikace)
 
-    session = get_session_pg()
+    session_ms = get_session_ms()
     try:
         device = (
-            session.query(Vodomer_areal_Zarizeni_QGIS)
-            .filter(Vodomer_areal_Zarizeni_QGIS.identifikace == identifikace)
+            session_ms.query(Vodomer_areal_Zarizeni)
+            .filter(Vodomer_areal_Zarizeni.identifikace == identifikace)
             .one_or_none()
         )
-        if device is None:
-            return None
-
-        return {
-            "identifikace": str(device.identifikace),
-            "seriove_cislo": str(device.seriove_cislo) if device.seriove_cislo is not None else None,
-            "mbus": str(device.MBUS) if device.MBUS is not None else None,
-            "objekt": str(device.objekt) if device.objekt is not None else None,
-            "patro": str(device.patro) if device.patro is not None else None,
-            "mistnost": str(device.mistnost) if device.mistnost is not None else None,
-            "umisteni": str(device.umisteni) if device.umisteni is not None else None,
-            "napaji": str(device.napaji) if device.napaji is not None else None,
-            "koncovy_odberatel": str(device.koncovy_odberatel) if device.koncovy_odberatel is not None else None,
-            "platnost_cejchu": device.platnost_cejchu,
-            "poznamka": str(device.poznamka_vodomery) if device.poznamka_vodomery is not None else None,
-        }
+        if device is not None:
+            return {
+                "identifikace": str(device.identifikace),
+                "seriove_cislo": str(device.seriove_cislo) if device.seriove_cislo is not None else None,
+                "mbus": str(device.MBUS) if device.MBUS is not None else None,
+                "objekt": str(device.objekt) if device.objekt is not None else None,
+                "patro": str(device.patro) if device.patro is not None else None,
+                "mistnost": str(device.mistnost) if device.mistnost is not None else None,
+                "umisteni": str(device.umisteni) if device.umisteni is not None else None,
+                "napaji": str(device.napaji) if device.napaji is not None else None,
+                "koncovy_odberatel": str(device.koncovy_odberatel) if device.koncovy_odberatel is not None else None,
+                "platnost_cejchu": device.platnost_cejchu,
+                "poznamka": str(device.poznamka_vodomery) if device.poznamka_vodomery is not None else None,
+            }
     finally:
-        session.close()
+        session_ms.close()
+    return None
 
 
 def load_branch_day_overview(

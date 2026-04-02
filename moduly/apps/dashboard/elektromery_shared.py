@@ -6,14 +6,13 @@ import sys
 
 import pandas as pd
 import streamlit as st
-from sqlalchemy.exc import ProgrammingError
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.db.connect import get_session_ms, get_session_pg
+from core.db.connect import get_session_ms
 from moduly.apps.dashboard.auth import get_allowed_devices, is_admin
 from moduly.apps.dashboard.vodomery_shared import (
     format_consumption_dataframe,
@@ -26,7 +25,6 @@ from moduly.apps.dashboard.vodomery_shared import (
 from moduly.mereni.elektromery.database.models import (
     Elektromer_areal_Mereni,
     Elektromer_areal_Zarizeni,
-    Elektromer_areal_Zarizeni_QGIS,
 )
 
 
@@ -100,7 +98,7 @@ def load_measurement_series(
         session.close()
 
 
-def _serialize_device_detail(device: Elektromer_areal_Zarizeni | Elektromer_areal_Zarizeni_QGIS) -> dict[str, object]:
+def _serialize_device_detail(device: Elektromer_areal_Zarizeni) -> dict[str, object]:
     return {
         "identifikace": device.identifikace,
         "seriove_cislo": device.seriove_cislo,
@@ -129,22 +127,6 @@ def _serialize_device_detail(device: Elektromer_areal_Zarizeni | Elektromer_area
 def load_device_detail(identifikace: str, allowed_devices: tuple[str, ...], user_is_admin: bool) -> dict[str, object] | None:
     if not user_is_admin and identifikace not in allowed_devices:
         return None
-
-    session_pg = get_session_pg()
-    try:
-        try:
-            device = (
-                session_pg.query(Elektromer_areal_Zarizeni_QGIS)
-                .filter(Elektromer_areal_Zarizeni_QGIS.identifikace == identifikace)
-                .one_or_none()
-            )
-        except ProgrammingError:
-            session_pg.rollback()
-            device = None
-        if device is not None:
-            return _serialize_device_detail(device)
-    finally:
-        session_pg.close()
 
     session_ms = get_session_ms()
     try:

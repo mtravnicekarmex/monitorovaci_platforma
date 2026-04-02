@@ -9,31 +9,6 @@ from moduly.apps.web_search.service import hledat_nove_vyskyt
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # -------------------------
 # Streamlit UI
 # -------------------------

@@ -349,7 +349,7 @@ def render_dashboard() -> None:
     with st.container(border=True):
         st.subheader("Detail odberného místa")
         if device_detail is None:
-            st.info("Metadata zařízení nebyla nalezena v mapové tabulce.")
+            st.info("Metadata zařízení nebyla nalezena.")
         else:
             metadata_pairs = [
                 ("Identifikace", format_value(device_detail["identifikace"])),

@@ -1,4 +1,6 @@
+import html
 import sys
+from datetime import datetime
 from dataclasses import dataclass
 from functools import wraps
 from moduly.mereni.vodomery.SCVK.SCVK_to_database import SCVK_save_to_database_all
@@ -92,30 +94,175 @@ class SkippedJobResult:
     lock_names: tuple[str, ...]
 
 
+class SchedulerContextError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        alert_targets=(),
+        alert_reason: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.alert_targets = _normalize_alert_targets(alert_targets)
+        self.alert_reason = alert_reason.strip() if isinstance(alert_reason, str) else alert_reason
+
+
+def _normalize_alert_targets(targets) -> tuple[str, ...]:
+    if not targets:
+        return ()
+
+    normalized_targets = []
+    for target in targets:
+        target_text = str(target).strip()
+        if target_text and target_text not in normalized_targets:
+            normalized_targets.append(target_text)
+
+    return tuple(normalized_targets)
+
+
 def _format_scheduler_reason(error) -> str | None:
     if error is None:
         return None
+    explicit_reason = getattr(error, "alert_reason", None)
+    if isinstance(explicit_reason, str):
+        explicit_reason = explicit_reason.strip()
+        if explicit_reason:
+            return explicit_reason
     reason = str(error).strip()
     if reason:
         return reason
     return type(error).__name__
 
 
-def _send_scheduler_alert(*, job_id: str, status_text: str, scheduled_time, reason: str | None = None) -> None:
-    body_lines = [
-        f"Cas: {scheduled_time}",
-        f"Job: {job_id}",
-        f"Stav: {status_text}",
+def _format_scheduler_time(value) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, datetime):
+        try:
+            value = value.astimezone()
+        except ValueError:
+            pass
+        return value.strftime("%Y-%m-%d %H:%M:%S %Z").strip()
+    return str(value)
+
+
+def _extract_scheduler_targets(error) -> tuple[str, ...]:
+    return _normalize_alert_targets(getattr(error, "alert_targets", ()))
+
+
+def _format_monitor_failures(failures, *, max_items: int = 5) -> str:
+    if not failures:
+        return "-"
+
+    parts = []
+    for target, reason in failures[:max_items]:
+        if reason:
+            parts.append(f"{target} ({reason})")
+        else:
+            parts.append(target)
+
+    remaining = len(failures) - max_items
+    if remaining > 0:
+        parts.append(f"... a dalsich {remaining}")
+
+    return "; ".join(parts)
+
+
+def _build_scheduler_alert_body(
+    *,
+    job_id: str,
+    status_text: str,
+    description: str,
+    scheduled_time,
+    reason: str | None = None,
+    targets: tuple[str, ...] = (),
+) -> str:
+    detail_rows = [
+        ("Job", job_id),
+        ("Stav", status_text),
+        ("Planovany cas", _format_scheduler_time(scheduled_time)),
+        ("Detekovano", _format_scheduler_time(datetime.now().astimezone())),
     ]
+
+    row_html = "".join(
+        (
+            "<tr>"
+            f"<td style='padding:6px 10px;border:1px solid #d0d7de;background:#f6f8fa;'><strong>{html.escape(label)}</strong></td>"
+            f"<td style='padding:6px 10px;border:1px solid #d0d7de;'>{html.escape(value)}</td>"
+            "</tr>"
+        )
+        for label, value in detail_rows
+    )
+
+    reason_html = ""
     if reason:
-        body_lines.append(f"Duvod: {reason}")
+        reason_html = (
+            "<p style='margin:16px 0 6px;'><strong>Duvod</strong></p>"
+            f"<p style='margin:0;'>{html.escape(reason)}</p>"
+        )
+
+    targets_html = ""
+    if targets:
+        target_items = "".join(
+            f"<li>{html.escape(target)}</li>"
+            for target in targets
+        )
+        targets_html = (
+            "<p style='margin:16px 0 6px;'><strong>Cile</strong></p>"
+            f"<ul style='margin:0 0 0 18px;padding:0;'>{target_items}</ul>"
+        )
+
+    return (
+        "<html><body style='font-family:Segoe UI,Arial,sans-serif;color:#1f2328;'>"
+        "<h2 style='margin:0 0 12px;'>Scheduler alert</h2>"
+        f"<p style='margin:0 0 16px;'>{html.escape(description)}</p>"
+        "<table style='border-collapse:collapse;font-size:14px;'>"
+        f"{row_html}"
+        "</table>"
+        f"{reason_html}"
+        f"{targets_html}"
+        "</body></html>"
+    )
+
+
+def _send_scheduler_alert(
+    *,
+    job_id: str,
+    status_text: str,
+    description: str,
+    scheduled_time,
+    reason: str | None = None,
+    targets: tuple[str, ...] = (),
+) -> None:
+    body = _build_scheduler_alert_body(
+        job_id=job_id,
+        status_text=status_text,
+        description=description,
+        scheduled_time=scheduled_time,
+        reason=reason,
+        targets=targets,
+    )
 
     send_email_outlook(
         email_receiver='m.travnicek@armex.cz',
         sender_alias=config('O_EMAIL_ALARM'),
-        subject=f"[ALERT] Scheduler | {job_id}",
-        body="\n".join(body_lines),
+        subject=f"[ALERT] Scheduler | {job_id} | {status_text.upper()}",
+        body=body,
+        is_html=True,
     )
+
+
+def _deliver_scheduler_alert(**kwargs) -> None:
+    try:
+        _send_scheduler_alert(**kwargs)
+    except Exception as alert_error:
+        logger.error(
+            "SCHEDULER ALERT FAILED | id=%s | scheduled=%s | reason=%s",
+            kwargs.get("job_id"),
+            kwargs.get("scheduled_time"),
+            _format_scheduler_reason(alert_error),
+            exc_info=True,
+        )
 
 
 def job_success_listener(event):
@@ -138,17 +285,32 @@ def job_success_listener(event):
 
 def job_error_listener(event):
     if event.exception:
-        logger.exception(
-            "JOB ERROR | id=%s | scheduled=%s",
+        reason = _format_scheduler_reason(event.exception)
+        targets = _extract_scheduler_targets(event.exception)
+        log_message = "JOB ERROR | id=%s | scheduled=%s | reason=%s"
+        log_args = [
             event.job_id,
-            event.scheduled_run_time
-        )
+            event.scheduled_run_time,
+            reason or "-",
+        ]
+        if targets:
+            log_message += " | targets=%s"
+            log_args.append(",".join(targets))
 
-        _send_scheduler_alert(
+        event_traceback = (getattr(event, "traceback", None) or "").strip()
+        if event_traceback:
+            log_message = f"{log_message}\n%s"
+            log_args.append(event_traceback)
+
+        logger.error(log_message, *log_args)
+
+        _deliver_scheduler_alert(
             job_id=event.job_id,
             status_text="spadl",
+            description="Naplanovany job scheduleru skoncil chybou a vyzaduje kontrolu.",
             scheduled_time=event.scheduled_run_time,
-            reason=_format_scheduler_reason(event.exception),
+            reason=reason,
+            targets=targets,
         )
 
     elif event.code == EVENT_JOB_MISSED:
@@ -158,9 +320,10 @@ def job_error_listener(event):
             event.scheduled_run_time
         )
 
-        _send_scheduler_alert(
+        _deliver_scheduler_alert(
             job_id=event.job_id,
             status_text="nebyl spusten",
+            description="Job scheduleru nebyl spusten v planovanem case.",
             scheduled_time=event.scheduled_run_time,
             reason="job byl zmeskan (misfire)",
         )
@@ -273,10 +436,11 @@ def SOFTLINK_save_to_database_all():
 
 def daily_web_monitor_job():
     session = get_session_pg()
-    monitory = session.query(Monitor).all()
-    had_error = False
+    failures = []
+    first_error = None
 
     try:
+        monitory = session.query(Monitor).all()
         for monitor in monitory:
             try:
                 vyrazy = json.loads(monitor.vyrazy)
@@ -297,16 +461,22 @@ def daily_web_monitor_job():
 
                 session.commit()
 
-            except Exception:
-                had_error = True
+            except Exception as exc:
                 session.rollback()  # reset session po chybě v transakci
-                logger.exception(f"Monitor selhal: {monitor.url}")
+                failures.append((monitor.url, _format_scheduler_reason(exc)))
+                if first_error is None:
+                    first_error = exc
+
+        if failures:
+            failure_summary = _format_monitor_failures(failures)
+            raise SchedulerContextError(
+                f"Web monitor selhal pro {len(failures)} cil(e): {failure_summary}",
+                alert_targets=tuple(url for url, _ in failures),
+                alert_reason=failure_summary,
+            ) from first_error
 
     finally:
         session.close()
-
-    if had_error:
-        raise RuntimeError("Některé monitory selhaly")
 
     logger.info("Web monitor job dokončen")
 
@@ -321,9 +491,14 @@ def safe_call(fn, *args, **kwargs):
     try:
         logger.info("START %s", fn.__name__)
         return fn(*args, **kwargs)
-    except Exception:
-        logger.exception("FAIL %s", fn.__name__)
+    except SchedulerContextError:
         raise
+    except Exception as exc:
+        raise SchedulerContextError(
+            f"Selhal krok '{fn.__name__}'",
+            alert_targets=(fn.__name__,),
+            alert_reason=_format_scheduler_reason(exc),
+        ) from exc
     finally:
         duration = round(time.time() - start, 2)
         logger.info("DONE %s | duration=%ss", fn.__name__, duration)
@@ -349,9 +524,6 @@ def _build_locked_job(fn, decorator_lock_names):
             acquired_locks.append(job_lock)
         try:
             return fn(*args, **kwargs)
-        except Exception:
-            logger.exception(f"Chyba v {fn.__name__}")
-            raise
         finally:
             for acquired_lock in reversed(acquired_locks):
                 acquired_lock.release()
@@ -452,7 +624,7 @@ def main_scheduler():
     # každých 15 minut v X:05,20,35,50
     scheduler.add_job(
         quarter_hour_job,
-        CronTrigger(minute="5,20,25,50", second=5),
+        CronTrigger(minute="5,16,35,50", second=5),
         id="quarter_hour_job",
     )
 

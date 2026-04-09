@@ -39,6 +39,12 @@ Poznamky:
 - `POST /api/v1/admin/users`
 - `PATCH /api/v1/admin/users/{username}`
 - `DELETE /api/v1/admin/users/{username}`
+- `POST /api/v1/web-search/preview`
+- `GET /api/v1/web-search/monitors`
+- `POST /api/v1/web-search/monitors`
+- `PATCH /api/v1/web-search/monitors/{monitor_id}`
+- `DELETE /api/v1/web-search/monitors/{monitor_id}`
+- `GET /api/v1/web-search/results`
 - `GET /api/v1/vodomery/devices`
 - `GET /api/v1/vodomery/branch-day-overview`
 - `GET /api/v1/vodomery/overview-metrics`

@@ -10,6 +10,7 @@ from services.api.routes.admin import router as admin_router
 from services.api.routes.auth import router as auth_router
 from services.api.routes.health import router as health_router
 from services.api.routes.vodomery import router as vodomery_router
+from services.api.routes.web_search import router as web_search_router
 
 
 settings = get_api_settings()
@@ -34,3 +35,4 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(vodomery_router)
+app.include_router(web_search_router)

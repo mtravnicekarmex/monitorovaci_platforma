@@ -278,6 +278,95 @@ def build_pdf_attachments(
     return attachments
 
 
+def _load_search_page(url: str) -> tuple[list[tuple[str, str | None]], list[str]]:
+    response = requests.get(url, headers=REQUEST_HEADERS, timeout=10)
+    response.raise_for_status()
+    html = response.text
+
+    soup = BeautifulSoup(html, "html.parser")
+    text_length = len(soup.get_text(strip=True))
+    is_dynamic = text_length < 200 or (not soup.find("p") and not soup.find("div"))
+
+    if is_dynamic:
+        options = Options()
+        options.headless = True
+        driver = webdriver.Chrome(options=options)
+        try:
+            driver.get(url)
+            body_elem = driver.find_element("tag name", "body")
+            text = body_elem.text
+            link_entries = [
+                (link.text, link.get_attribute("href"))
+                for link in driver.find_elements("tag name", "a")
+            ]
+        finally:
+            driver.quit()
+
+        link_text_set = {text.strip() for text, _ in link_entries if text and text.strip()}
+        lines = [
+            line.strip()
+            for line in text.split("\n")
+            if line.strip() and line.strip() not in link_text_set
+        ]
+        return link_entries, lines
+
+    link_entries = [
+        (anchor.get_text(), anchor.get("href"))
+        for anchor in soup.find_all("a")
+    ]
+    text_soup = BeautifulSoup(html, "html.parser")
+    for anchor in text_soup.find_all("a"):
+        anchor.decompose()
+    text = text_soup.get_text(separator="\n")
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    return link_entries, lines
+
+
+def scan_web_hits(
+    url: str,
+    vyrazy: Iterable[str],
+) -> list[tuple[str, str | None, str | None]]:
+    normalized_vyrazy = normalize_expressions(vyrazy)
+    if not normalized_vyrazy:
+        return []
+
+    normalized_url = ensure_url_scheme(url)
+    try:
+        link_entries, lines = _load_search_page(normalized_url)
+    except requests.RequestException as exc:
+        logger.warning("Chyba pri nacitani %s: %s", normalized_url, exc)
+        return []
+
+    hits: list[tuple[str, str | None, str | None]] = []
+    seen_link_hits: set[tuple[str, str]] = set()
+    seen_snippet_hits: set[tuple[str, str]] = set()
+
+    for vyraz in normalized_vyrazy:
+        pattern = re.compile(re.escape(vyraz), re.IGNORECASE)
+
+        for link_text, href in link_entries:
+            if not pattern.search(link_text or ""):
+                continue
+            odkaz = urljoin(normalized_url, href) if href else normalized_url
+            key = (vyraz, odkaz)
+            if key in seen_link_hits:
+                continue
+            hits.append((vyraz, None, odkaz))
+            seen_link_hits.add(key)
+
+        for line in lines:
+            if not pattern.search(line):
+                continue
+            snippet = line.strip()
+            key = (vyraz, snippet)
+            if key in seen_snippet_hits:
+                continue
+            hits.append((vyraz, snippet, None))
+            seen_snippet_hits.add(key)
+
+    return hits
+
+
 def hledat_nove_vyskyt(
     monitor: Monitor,
     vyrazy: list[str],
@@ -293,45 +382,9 @@ def hledat_nove_vyskyt(
         return []
 
     url = ensure_url_scheme(monitor.url)
-    try:
-        response = requests.get(url, headers=REQUEST_HEADERS, timeout=10)
-        response.raise_for_status()
-        html = response.text
-    except requests.RequestException as exc:
-        logger.warning("Chyba pri nacitani %s: %s", url, exc)
+    candidate_hits = scan_web_hits(url, vyrazy)
+    if not candidate_hits:
         return []
-
-    soup = BeautifulSoup(html, "html.parser")
-    text_length = len(soup.get_text(strip=True))
-    is_dynamic = text_length < 200 or (not soup.find("p") and not soup.find("div"))
-
-    if is_dynamic:
-        options = Options()
-        options.headless = True
-        driver = webdriver.Chrome(options=options)
-        try:
-            driver.get(url)
-            body_elem = driver.find_element("tag name", "body")
-            text = body_elem.text
-            links = driver.find_elements("tag name", "a")
-        finally:
-            driver.quit()
-
-        link_text_set = {link.text.strip() for link in links if link.text.strip()}
-        lines = [
-            line.strip()
-            for line in text.split("\n")
-            if line.strip() and line.strip() not in link_text_set
-        ]
-    else:
-        links = soup.find_all("a")
-        text_soup = BeautifulSoup(html, "html.parser")
-        for anchor in text_soup.find_all("a"):
-            anchor.decompose()
-        text = text_soup.get_text(separator="\n")
-        lines = [line.strip() for line in text.split("\n") if line.strip()]
-
-    nove_vyskyt = []
 
     existing_rows = (
         session.query(Result.vyraz, Result.snippet, Result.odkaz)
@@ -348,49 +401,74 @@ def hledat_nove_vyskyt(
         (row.vyraz, row.snippet) for row in existing_rows if row.snippet
     }
 
-    for vyraz in vyrazy:
-        pattern = re.compile(re.escape(vyraz), re.IGNORECASE)
-        for link in links:
-            link_text = link.text if is_dynamic else link.get_text()
-            if pattern.search(link_text):
-                href = link.get_attribute("href") if is_dynamic else link.get("href")
-                odkaz = urljoin(url, href) if href else url
-                key = (vyraz, odkaz)
+    nove_vyskyt = []
+    for vyraz, snippet, odkaz in candidate_hits:
+        if odkaz:
+            key = (vyraz, odkaz)
+            if key in existing_link_hits:
+                continue
+            result = Result(
+                monitor_id=monitor.id,
+                url=url,
+                vyraz=vyraz,
+                snippet=None,
+                odkaz=odkaz,
+                datum=utc_now_naive(),
+                notified=False,
+            )
+            session.add(result)
+            nove_vyskyt.append((vyraz, None, odkaz))
+            existing_link_hits.add(key)
+            continue
 
-                if key not in existing_link_hits:
-                    result = Result(
-                        monitor_id=monitor.id,
-                        url=url,
-                        vyraz=vyraz,
-                        snippet=None,
-                        odkaz=odkaz,
-                        datum=utc_now_naive(),
-                        notified=False,
-                    )
-                    session.add(result)
-                    nove_vyskyt.append((vyraz, None, odkaz))
-                    existing_link_hits.add(key)
-
-        for line in lines:
-            if pattern.search(line):
-                snippet = line.strip()
-                key = (vyraz, snippet)
-
-                if key not in existing_snippet_hits:
-                    result = Result(
-                        monitor_id=monitor.id,
-                        url=url,
-                        vyraz=vyraz,
-                        snippet=snippet,
-                        odkaz=None,
-                        datum=utc_now_naive(),
-                        notified=False,
-                    )
-                    session.add(result)
-                    nove_vyskyt.append((vyraz, snippet, None))
-                    existing_snippet_hits.add(key)
+        if not snippet:
+            continue
+        key = (vyraz, snippet)
+        if key in existing_snippet_hits:
+            continue
+        result = Result(
+            monitor_id=monitor.id,
+            url=url,
+            vyraz=vyraz,
+            snippet=snippet,
+            odkaz=None,
+            datum=utc_now_naive(),
+            notified=False,
+        )
+        session.add(result)
+        nove_vyskyt.append((vyraz, snippet, None))
+        existing_snippet_hits.add(key)
 
     return nove_vyskyt
+
+
+def notify_new_results_for_monitor(
+    session: Session,
+    monitor: Monitor,
+    vyskyt_list: list[tuple[str, str | None, str | None]],
+) -> int:
+    if not vyskyt_list:
+        return 0
+
+    new_results = [
+        obj
+        for obj in session.new
+        if isinstance(obj, Result) and getattr(obj, "monitor_id", None) == monitor.id
+    ]
+    if not new_results:
+        return 0
+
+    session.flush()
+    poslat_email_html_vyraz(
+        monitor.email,
+        f"Nový výskyt na {monitor.url}",
+        vyskyt_list,
+        source_url=monitor.url,
+    )
+    for result in new_results:
+        result.notified = True
+
+    return len(new_results)
 
 
 def poslat_email_html_vyraz(
@@ -436,3 +514,4 @@ def poslat_email_html_vyraz(
         logger.info("HTML email odeslan na %s", to_email)
     except Exception as exc:
         logger.exception("Chyba pri odesilani emailu na %s: %s", to_email, exc)
+        raise

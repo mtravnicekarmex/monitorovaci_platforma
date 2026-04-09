@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from moduly.apps.dashboard.auto_refresh import enable_scheduled_page_refresh
 from moduly.apps.dashboard.api_client import DashboardApiError
 from moduly.apps.dashboard.auth import require_page_access
 from moduly.apps.dashboard.vodomery_shared import (
@@ -31,6 +32,10 @@ st.set_page_config(
 
 
 require_page_access("vodomery_anomalie_eventy")
+enable_scheduled_page_refresh(
+    "vodomery_anomalie_eventy",
+    cache_clearers=(load_all_open_events.clear, load_recent_resolved_events.clear),
+)
 
 
 def format_events_table(events_df):

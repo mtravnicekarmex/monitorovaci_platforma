@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from moduly.apps.dashboard.auto_refresh import enable_scheduled_page_refresh
 from moduly.apps.dashboard.api_client import DashboardApiError
 from moduly.apps.dashboard.auth import require_page_access
 from moduly.apps.dashboard.vodomery_shared import (
@@ -27,6 +28,7 @@ from moduly.apps.dashboard.vodomery_shared import (
 
 
 DATE_KEY = "vodomery_branch_overview_date"
+DONUT_LABELS_MAX_HEIGHT_PX = 360
 
 
 st.set_page_config(
@@ -41,6 +43,30 @@ require_page_access("vodomery_branch_overview")
 
 def init_page_state() -> None:
     st.session_state.setdefault(DATE_KEY, prague_today())
+
+
+def render_branch_layout_styles() -> None:
+    st.markdown(
+        f"""
+        <style>
+        .branch-donut-label-list {{
+            max-height: {DONUT_LABELS_MAX_HEIGHT_PX}px;
+            overflow-y: auto;
+            padding-right: 0.25rem;
+        }}
+
+        .branch-donut-label-list::-webkit-scrollbar {{
+            width: 0.45rem;
+        }}
+
+        .branch-donut-label-list::-webkit-scrollbar-thumb {{
+            background: #cbd5e1;
+            border-radius: 999px;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_sidebar_filters() -> datetime.date:
@@ -82,6 +108,18 @@ def build_branch_chart(hourly_df):
     return (limit_chart + expected_chart + connected_prediction_chart + actual_chart + billing_chart).interactive()
 
 
+def format_expected_deviation_percent(value: object) -> str:
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        return "N/A"
+    if pd.isna(numeric_value):
+        return "N/A"
+    if abs(numeric_value) < 0.05:
+        numeric_value = 0.0
+    return f"{numeric_value:+.1f} %"
+
+
 def prepare_branch_donut_data(device_consumption_df: pd.DataFrame) -> pd.DataFrame:
     if device_consumption_df.empty:
         return pd.DataFrame()
@@ -89,6 +127,10 @@ def prepare_branch_donut_data(device_consumption_df: pd.DataFrame) -> pd.DataFra
     chart_data = device_consumption_df.loc[device_consumption_df["spotreba"] > 0].copy()
     if chart_data.empty:
         return pd.DataFrame()
+    if "ocekavana_spotreba" not in chart_data.columns:
+        chart_data["ocekavana_spotreba"] = pd.NA
+    if "odchylka_od_ocekavani_procent" not in chart_data.columns:
+        chart_data["odchylka_od_ocekavani_procent"] = pd.NA
 
     palette = [
         "#4c78a8",
@@ -104,8 +146,14 @@ def prepare_branch_donut_data(device_consumption_df: pd.DataFrame) -> pd.DataFra
     ]
     chart_data["color_hex"] = [palette[index % len(palette)] for index in range(len(chart_data))]
     chart_data["color_order"] = range(len(chart_data))
+    chart_data["odchylka_od_ocekavani_label"] = chart_data["odchylka_od_ocekavani_procent"].apply(
+        format_expected_deviation_percent
+    )
     chart_data["label"] = chart_data.apply(
-        lambda row: f"{row['identifikace']} {format_consumption_with_unit(row['spotreba'])} ({row['podil_procent']:.1f} %)",
+        lambda row: (
+            f"{row['identifikace']} {format_consumption_with_unit(row['spotreba'])} "
+            f"({row['podil_procent']:.1f} %, {row['odchylka_od_ocekavani_label']} vs očekávání)"
+        ),
         axis=1,
     )
     return chart_data
@@ -127,10 +175,12 @@ def build_branch_donut_chart(chart_data: pd.DataFrame):
             alt.Tooltip("identifikace:N", title="Odběrné místo"),
             alt.Tooltip("spotreba:Q", title="Spotřeba [m³]", format=".3f"),
             alt.Tooltip("podil_procent:Q", title="Podíl [%]", format=".1f"),
+            alt.Tooltip("ocekavana_spotreba:Q", title="Očekávaná spotřeba [m³]", format=".3f"),
+            alt.Tooltip("odchylka_od_ocekavani_label:N", title="Odchylka vs očekávání"),
         ],
     )
 
-    donut_chart = base_chart.mark_arc(innerRadius=38, outerRadius=64).properties(width=150, height=150)
+    donut_chart = base_chart.mark_arc(innerRadius=58, outerRadius=96).properties(width=240, height=240)
     return donut_chart.configure_view(stroke=None)
 
 
@@ -212,12 +262,16 @@ def render_branch_donut_labels(chart_data: pd.DataFrame) -> None:
                 '<div style="line-height:1.2;">'
                 f'<div style="font-size:0.85rem;font-weight:600;color:#0f172a;">{row.identifikace}</div>'
                 f'<div style="font-size:0.8rem;color:#475569;">{format_consumption_with_unit(row.spotreba)} ({row.podil_procent:.1f} %)</div>'
+                f'<div style="font-size:0.78rem;color:#64748b;">vs. očekávání: {row.odchylka_od_ocekavani_label}</div>'
                 "</div>"
                 "</div>"
             )
         )
 
-    st.markdown("".join(label_rows), unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="branch-donut-label-list">{"".join(label_rows)}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def render_branch_legend() -> None:
@@ -299,33 +353,32 @@ def render_branch_card(branch_data: dict[str, object], selected_date: datetime.d
 
         chart_data = prepare_branch_donut_data(device_consumption_df)
 
-        st.altair_chart(build_branch_chart(hourly_df), width="stretch")
-        render_branch_legend()
-
-        detail_chart_col, donut_col = st.columns((5.3, 1.15))
-        with detail_chart_col:
+        charts_col, donut_col = st.columns((4.2, 1.8))
+        with charts_col:
+            with st.container(border=True):
+                st.altair_chart(build_branch_chart(hourly_df), width="stretch")
+                render_branch_legend()
             area_chart = build_branch_stacked_area_chart(
                 device_hourly_df,
                 hourly_df,
                 chart_data,
                 last_actual_timestamp,
             )
-            st.caption("Okamžitá spotřeba podle odběrných míst a hodinová predikce pro celý den")
-            if area_chart is None:
-                st.info("Pro vybraný den zatím není k dispozici hodinová spotřeba odběrných míst.")
-            else:
-                st.altair_chart(area_chart, width="stretch")
+            with st.container(border=True):
+                st.caption("Okamžitá spotřeba podle odběrných míst a hodinová predikce pro celý den")
+                if area_chart is None:
+                    st.info("Pro vybraný den zatím není k dispozici hodinová spotřeba odběrných míst.")
+                else:
+                    st.altair_chart(area_chart, width="stretch")
 
         with donut_col:
-            st.caption("Podíl odběrných míst na skutečné spotřebě celé větve")
-            donut_chart = build_branch_donut_chart(chart_data)
-            if donut_chart is None:
-                st.info("Pro vybraný den zatím není k dispozici skutečná spotřeba odběrných míst.")
-            else:
-                donut_graph_col, donut_labels_col = st.columns((1.0, 1.1))
-                with donut_graph_col:
-                    st.altair_chart(donut_chart, width="content")
-                with donut_labels_col:
+            with st.container(border=True, height="stretch"):
+                st.caption("Podíl odběrných míst na skutečné spotřebě celé větve")
+                donut_chart = build_branch_donut_chart(chart_data)
+                if donut_chart is None:
+                    st.info("Pro vybraný den zatím není k dispozici skutečná spotřeba odběrných míst.")
+                else:
+                    st.altair_chart(donut_chart, width="stretch")
                     render_branch_donut_labels(chart_data)
 
 
@@ -334,8 +387,14 @@ def render_dashboard() -> None:
         "Přehled větve",
         "Denní součty skutečné spotřeby a predikce pro jednotlivé SČVK větve.",
     )
+    render_branch_layout_styles()
     user_is_admin, allowed_devices = get_vodomery_access_context()
     selected_date = render_sidebar_filters()
+    if selected_date == prague_today():
+        enable_scheduled_page_refresh(
+            "vodomery_branch_overview",
+            cache_clearers=(load_branch_day_overview.clear,),
+        )
 
     st.caption(
         "Modrá linka zobrazuje kumulovanou skutečnou spotřebu odběrných míst na větvi, "

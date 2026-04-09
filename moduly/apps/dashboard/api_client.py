@@ -193,6 +193,65 @@ def delete_admin_user(access_token: str, username: str) -> None:
     )
 
 
+def preview_web_search_hits(access_token: str, payload: dict[str, object]) -> dict[str, object]:
+    response = _request(
+        "POST",
+        "/api/v1/web-search/preview",
+        access_token=access_token,
+        json_payload=payload,
+    )
+    return dict(response.json())
+
+
+def list_web_search_monitors(access_token: str) -> list[dict[str, object]]:
+    response = _request(
+        "GET",
+        "/api/v1/web-search/monitors",
+        access_token=access_token,
+    )
+    payload = response.json()
+    return [dict(item) for item in payload.get("rows", [])]
+
+
+def create_web_search_monitor(access_token: str, payload: dict[str, object]) -> dict[str, object]:
+    response = _request(
+        "POST",
+        "/api/v1/web-search/monitors",
+        access_token=access_token,
+        json_payload=payload,
+    )
+    return dict(response.json())
+
+
+def update_web_search_monitor(access_token: str, monitor_id: int, payload: dict[str, object]) -> dict[str, object]:
+    response = _request(
+        "PATCH",
+        f"/api/v1/web-search/monitors/{monitor_id}",
+        access_token=access_token,
+        json_payload=payload,
+    )
+    return dict(response.json())
+
+
+def delete_web_search_monitor(access_token: str, monitor_id: int) -> None:
+    _request(
+        "DELETE",
+        f"/api/v1/web-search/monitors/{monitor_id}",
+        access_token=access_token,
+    )
+
+
+def list_web_search_results(access_token: str, limit: int = 200) -> list[dict[str, object]]:
+    response = _request(
+        "GET",
+        "/api/v1/web-search/results",
+        access_token=access_token,
+        query_params={"limit": limit},
+    )
+    payload = response.json()
+    return [dict(item) for item in payload.get("rows", [])]
+
+
 def get_vodomery_devices(access_token: str, source_filter: str = "VSE", limit: int = 500) -> list[str]:
     response = _request(
         "GET",

@@ -7,6 +7,7 @@ from datetime import date, datetime, time, timedelta
 import pandas as pd
 from sqlalchemy import bindparam, func, text
 
+from app.metrics_utils import calculate_percentage_deviation
 from app.time_utils import utc_now_naive
 from core.db.connect import ENGINE_PG, get_session_ms, get_session_pg
 from moduly.mereni.vodomery.SCVK.SCVK_data_z_dotazu import paths as SCVK_PATHS
@@ -199,7 +200,18 @@ def _serialize_dataframe_rows(df: pd.DataFrame) -> list[dict[str, object]]:
     serialized = df.copy()
     for column in serialized.columns:
         if pd.api.types.is_datetime64_any_dtype(serialized[column]):
-            serialized[column] = serialized[column].dt.to_pydatetime()
+            serialized[column] = pd.Series(
+                [
+                    None
+                    if pd.isna(value)
+                    else value.to_pydatetime()
+                    if isinstance(value, pd.Timestamp)
+                    else value
+                    for value in serialized[column]
+                ],
+                index=serialized.index,
+                dtype="object",
+            )
     serialized = serialized.where(pd.notna(serialized), None)
     records: list[dict[str, object]] = []
     for row in serialized.to_dict(orient="records"):
@@ -814,7 +826,9 @@ def load_branch_day_overview(
 
             hourly_rows: list[dict[str, object]] = []
             device_actual_totals = {identifier: 0.0 for identifier in active_devices}
+            device_expected_totals = {identifier: 0.0 for identifier in active_devices}
             device_hourly_rows: list[dict[str, object]] = []
+            last_actual_hour = pd.Timestamp(last_actual_timestamp).floor("h") if last_actual_timestamp is not None else None
             for hour_start in pd.date_range(start=day_start, periods=24, freq="h"):
                 midpoint = hour_start.to_pydatetime() + timedelta(minutes=30)
                 active_hour_devices = tuple(dict.fromkeys(config_item.membership_resolver(midpoint)))
@@ -822,13 +836,20 @@ def load_branch_day_overview(
                     identifier: round(float(hourly_actual_lookup.get((identifier, hour_start), 0.0)), 3)
                     for identifier in active_hour_devices
                 }
+                predicted_values_by_device = {
+                    identifier: round(float(hourly_prediction_lookup.get((identifier, hour_start), 0.0)), 3)
+                    for identifier in active_hour_devices
+                }
                 actual_sum = round(sum(actual_values_by_device.values()), 3)
-                predicted_sum = round(
-                    sum(hourly_prediction_lookup.get((identifier, hour_start), 0.0) for identifier in active_hour_devices),
-                    3,
-                )
+                predicted_sum = round(sum(predicted_values_by_device.values()), 3)
                 for identifier, actual_value in actual_values_by_device.items():
                     device_actual_totals[identifier] = round(device_actual_totals.get(identifier, 0.0) + actual_value, 3)
+                if last_actual_hour is not None and hour_start <= last_actual_hour:
+                    for identifier, expected_value in predicted_values_by_device.items():
+                        device_expected_totals[identifier] = round(
+                            device_expected_totals.get(identifier, 0.0) + expected_value,
+                            3,
+                        )
                 for identifier in active_devices:
                     device_hourly_rows.append(
                         {
@@ -899,6 +920,11 @@ def load_branch_day_overview(
                     {
                         "identifikace": identifier,
                         "spotreba": round(float(device_actual_totals.get(identifier, 0.0)), 3),
+                        "ocekavana_spotreba": round(float(device_expected_totals.get(identifier, 0.0)), 3),
+                        "odchylka_od_ocekavani_procent": calculate_percentage_deviation(
+                            device_actual_totals.get(identifier, 0.0),
+                            device_expected_totals.get(identifier, 0.0),
+                        ),
                     }
                     for identifier in active_devices
                 )

@@ -124,6 +124,14 @@ PAGES: tuple[DashboardPage, ...] = (
         admin_only=True,
     ),
     DashboardPage(
+        key="web_search_monitor",
+        path="pages/15_web_search.py",
+        title="Web search",
+        icon="🔍",
+        sidebar_location="footer",
+        admin_only=True,
+    ),
+    DashboardPage(
         key="expected_zero",
         path="pages/6_expected_zero.py",
         title="Expected zero",

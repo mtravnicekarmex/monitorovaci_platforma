@@ -263,7 +263,9 @@ class VodomeryBranchHourlyRow(BaseModel):
 class VodomeryBranchDeviceConsumptionRow(BaseModel):
     identifikace: str
     spotreba: float
+    ocekavana_spotreba: float | None = None
     podil_procent: float | None = None
+    odchylka_od_ocekavani_procent: float | None = None
 
 
 class VodomeryBranchDeviceHourlyRow(BaseModel):

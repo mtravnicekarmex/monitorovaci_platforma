@@ -6,7 +6,7 @@ from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_to_database import SOFTLINK_to_
 from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_data_z_dotazu import SOFTLINK_dotaz
 from core.db.connect import get_session_pg
 from core.db.database_nyni import df_vodomery_vse_join, df_elektromery_vse_join, df_plynomery_vse_join, df_kalorimetry_vse_join, df_manometry_vse_join
-from moduly.apps.web_search.service import hledat_nove_vyskyt, poslat_email_html_vyraz
+from moduly.apps.web_search.service import hledat_nove_vyskyt, notify_new_results_for_monitor
 from moduly.apps.web_search.database.models import *
 import json
 import threading
@@ -292,28 +292,8 @@ def daily_web_monitor_job():
                 monitor.last_run = utc_now_naive()
 
                 if nove_vyskyt:
-                    # Připrav seznam pro email
-                    vyskyt_list = [
-                        (vyraz, snippet, odkaz)
-                        for vyraz, snippet, odkaz in nove_vyskyt
-                    ]
-
-                    # Odeslání emailu
-                    poslat_email_html_vyraz(
-                        monitor.email,
-                        f"Nový výskyt na {monitor.url}",
-                        vyskyt_list
-                    )
-
-                    # Označit právě přidané výsledky jako notified=True
-                    now = utc_now_naive()
-                    session.query(Result).filter(
-                        Result.monitor_id == monitor.id,
-                        Result.notified == False,
-                        Result.datum <= now
-                    ).update({"notified": True}, synchronize_session=False)
-
-                    logger.info(f'Nové výskyty na "{monitor.url}": {len(nove_vyskyt)}')
+                    notified_count = notify_new_results_for_monitor(session, monitor, nove_vyskyt)
+                    logger.info(f'Nové výskyty na "{monitor.url}": {notified_count}')
 
                 session.commit()
 
@@ -395,11 +375,11 @@ def locked_job(*decorator_args):
 # každých 15 minut v X:05,20,35,50
 @locked_job
 def quarter_hour_job():
-    safe_call(vodomery_db_import)
-    safe_call(score_new_measurements, model_version=1)
-    event_result = safe_call(detect_events_from_scores, model_version=1)
-    safe_call(process_vodomery_alerts, active_event_ids=event_result.get("active_event_ids", []), resolved_event_ids=event_result.get("resolved_event_ids", []),)
-
+    # safe_call(vodomery_db_import)
+    # safe_call(score_new_measurements, model_version=1)
+    # event_result = safe_call(detect_events_from_scores, model_version=1)
+    # safe_call(process_vodomery_alerts, active_event_ids=event_result.get("active_event_ids", []), resolved_event_ids=event_result.get("resolved_event_ids", []),)
+    safe_call(daily_web_monitor_job)
 
 # každou hodinu v X:02:05
 @locked_job
@@ -472,57 +452,57 @@ def main_scheduler():
     # každých 15 minut v X:05,20,35,50
     scheduler.add_job(
         quarter_hour_job,
-        CronTrigger(minute="5,20,35,50", second=5),
+        CronTrigger(minute="5,29,46,50", second=5),
         id="quarter_hour_job",
     )
 
-    # každou hodinu v X:02:05
-    scheduler.add_job(
-        hourly_job,
-        CronTrigger(minute=2, second=5),
-        id="hourly_job",
-        max_instances=1,
-    )
-
-    # každou hodinu v X:03 v pracovní dny od 6 do 16
-    scheduler.add_job(
-        working_time_hourly_job,
-        CronTrigger(hour="6-16", minute=3, second=5, day_of_week="mon-fri"),
-        id="working_time_hourly_job",
-    )
-
-    # každý den v 7:00 a 14:00
-    scheduler.add_job(
-        daily_seven_and_two_job,
-        CronTrigger(hour="7,14", minute=0, second=5),
-        id="daily_seven_and_two_job",
-    )
-
-    # každý den v 0:15:05
-    scheduler.add_job(
-        daily_pulnoc_job,
-        CronTrigger(hour=0, minute=15, second=5),
-        id="daily_job",
-    )
-
-    # každý týden v pondělí v 6:10:05
-    scheduler.add_job(
-        weekly_job,
-        CronTrigger(day_of_week="mon", hour=6, minute=10, second=5),
-        id="weekly_job",
-    )
-
-    # každý první den v měsíci po noční aktualizaci v 0:20:05
-    scheduler.add_job(
-        monthly_job,
-        CronTrigger(
-            day=1,
-            hour=0,
-            minute=20,
-            second=5,
-        ),
-        id="monthly_job",
-    )
+    # # každou hodinu v X:02:05
+    # scheduler.add_job(
+    #     hourly_job,
+    #     CronTrigger(minute=2, second=5),
+    #     id="hourly_job",
+    #     max_instances=1,
+    # )
+    #
+    # # každou hodinu v X:03 v pracovní dny od 6 do 16
+    # scheduler.add_job(
+    #     working_time_hourly_job,
+    #     CronTrigger(hour="6-16", minute=3, second=5, day_of_week="mon-fri"),
+    #     id="working_time_hourly_job",
+    # )
+    #
+    # # každý den v 7:00 a 14:00
+    # scheduler.add_job(
+    #     daily_seven_and_two_job,
+    #     CronTrigger(hour="7,14", minute=0, second=5),
+    #     id="daily_seven_and_two_job",
+    # )
+    #
+    # # každý den v 0:15:05
+    # scheduler.add_job(
+    #     daily_pulnoc_job,
+    #     CronTrigger(hour=0, minute=15, second=5),
+    #     id="daily_job",
+    # )
+    #
+    # # každý týden v pondělí v 6:10:05
+    # scheduler.add_job(
+    #     weekly_job,
+    #     CronTrigger(day_of_week="mon", hour=6, minute=10, second=5),
+    #     id="weekly_job",
+    # )
+    #
+    # # každý první den v měsíci po noční aktualizaci v 0:20:05
+    # scheduler.add_job(
+    #     monthly_job,
+    #     CronTrigger(
+    #         day=1,
+    #         hour=0,
+    #         minute=20,
+    #         second=5,
+    #     ),
+    #     id="monthly_job",
+    # )
 
 
     # --- Listeners ---

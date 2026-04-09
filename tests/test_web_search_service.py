@@ -1,6 +1,9 @@
+import datetime
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -41,15 +44,21 @@ class FakeQuery:
 
 
 class FakeSession:
-    def __init__(self, rows=None):
+    def __init__(self, rows=None, new=None):
         self.rows = rows or []
         self.added = []
+        self.new = list(new or [])
+        self.flushed = False
 
     def query(self, *args, **kwargs):
         return FakeQuery(self.rows)
 
     def add(self, obj):
         self.added.append(obj)
+        self.new.append(obj)
+
+    def flush(self):
+        self.flushed = True
 
 
 class FakeHttpResponse:
@@ -331,6 +340,104 @@ def test_poslat_email_html_vyraz_sends_html_email_and_escapes_content(monkeypatc
     assert "<strong>Body</strong>: …A&amp;B &lt;b&gt;snippet&lt;/b&gt;…" in captured["body"]
     assert "A&amp;B &lt;b&gt;snippet&lt;/b&gt;" in captured["body"]
     assert 'href="https://example.com/doc.pdf?x=1&amp;y=2"' in captured["body"]
+
+
+def test_poslat_email_html_vyraz_reraises_delivery_failures(monkeypatch):
+    monkeypatch.setattr(service, "build_pdf_attachments", lambda *args, **kwargs: [])
+    monkeypatch.setattr(service, "config", lambda key: "Monitoring")
+
+    def raise_delivery_error(**kwargs):
+        raise RuntimeError("smtp down")
+
+    monkeypatch.setattr(service, "send_email_outlook", raise_delivery_error)
+
+    with pytest.raises(RuntimeError, match="smtp down"):
+        service.poslat_email_html_vyraz(
+            "to@example.com",
+            "Subject",
+            [("Alpha", None, "https://example.com/docs")],
+            source_url="example.com/page",
+        )
+
+
+def test_notify_new_results_for_monitor_marks_only_current_pending_results(monkeypatch):
+    monitor = SimpleNamespace(id=7, email="to@example.com", url="https://example.com")
+    pending_result = service.Result(
+        monitor_id=7,
+        url=monitor.url,
+        vyraz="Alpha",
+        snippet=None,
+        odkaz="https://example.com/docs",
+        datum=datetime.datetime(2026, 4, 9, 10, 0),
+        notified=False,
+    )
+    older_result = service.Result(
+        monitor_id=7,
+        url=monitor.url,
+        vyraz="Beta",
+        snippet="Older hit",
+        odkaz=None,
+        datum=datetime.datetime(2026, 4, 9, 9, 0),
+        notified=False,
+    )
+    session = FakeSession(new=[pending_result])
+    captured = {}
+
+    monkeypatch.setattr(
+        service,
+        "poslat_email_html_vyraz",
+        lambda to_email, subject, vyskyt_list, source_url=None: captured.update(
+            {
+                "to_email": to_email,
+                "subject": subject,
+                "vyskyt_list": vyskyt_list,
+                "source_url": source_url,
+            }
+        ),
+    )
+
+    notified_count = service.notify_new_results_for_monitor(
+        session,
+        monitor,
+        [("Alpha", None, "https://example.com/docs")],
+    )
+
+    assert session.flushed is True
+    assert notified_count == 1
+    assert pending_result.notified is True
+    assert older_result.notified is False
+    assert captured["to_email"] == "to@example.com"
+    assert captured["source_url"] == "https://example.com"
+
+
+def test_notify_new_results_for_monitor_leaves_results_unnotified_on_email_failure(monkeypatch):
+    monitor = SimpleNamespace(id=7, email="to@example.com", url="https://example.com")
+    pending_result = service.Result(
+        monitor_id=7,
+        url=monitor.url,
+        vyraz="Alpha",
+        snippet=None,
+        odkaz="https://example.com/docs",
+        datum=datetime.datetime(2026, 4, 9, 10, 0),
+        notified=False,
+    )
+    session = FakeSession(new=[pending_result])
+
+    monkeypatch.setattr(
+        service,
+        "poslat_email_html_vyraz",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("smtp down")),
+    )
+
+    with pytest.raises(RuntimeError, match="smtp down"):
+        service.notify_new_results_for_monitor(
+            session,
+            monitor,
+            [("Alpha", None, "https://example.com/docs")],
+        )
+
+    assert session.flushed is True
+    assert pending_result.notified is False
 
 
 def test_send_email_outlook_builds_plain_html_and_attachment(monkeypatch):

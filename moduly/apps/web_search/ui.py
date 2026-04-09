@@ -23,7 +23,7 @@ def render_web_search_page() -> None:
         st.subheader("Monitor webových stránek")
         st.write(
             "Upozornění na nové výskyty hledaných výrazů z vybraných webových stránek "
-            "jsou odesílána e-mailem každý den v 6:00 a 14:00."
+            "jsou odesílána e-mailem podle aktuální konfigurace scheduleru."
         )
 
         col1, col2 = st.columns(2)

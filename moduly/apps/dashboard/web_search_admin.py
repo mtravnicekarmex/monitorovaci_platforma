@@ -108,6 +108,7 @@ def render_web_search_admin_page() -> None:
         "Admin rozhraní pro správu monitorů a ruční preview hledaných výrazů. "
         "Dashboard používá pouze API přístup."
     )
+    st.caption("Automatické odesílání upozornění běží podle aktuální konfigurace scheduleru.")
 
     monitors = load_monitors(access_token)
     results = load_results(access_token)

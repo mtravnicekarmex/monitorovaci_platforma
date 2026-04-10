@@ -168,3 +168,65 @@ def test_daily_web_monitor_job_aggregates_failed_targets(monkeypatch):
     assert exc_info.value.__cause__.__class__ is RuntimeError
     assert session.rollback_calls == 1
     assert session.closed is True
+
+
+def test_monthly_job_calls_both_monthly_reports(monkeypatch):
+    calls = []
+
+    def fake_vodomery_report():
+        return None
+
+    def fake_b1_report():
+        return None
+
+    monkeypatch.setattr(scheduler, "send_monthly_vodomery_consumption_report", fake_vodomery_report)
+    monkeypatch.setattr(scheduler, "send_monthly_b1_consumption_report", fake_b1_report)
+    monkeypatch.setattr(
+        scheduler,
+        "safe_call",
+        lambda fn, *args, **kwargs: calls.append((fn, args, kwargs)),
+    )
+
+    scheduler.monthly_job()
+
+    assert [fn for fn, _, _ in calls] == [fake_vodomery_report, fake_b1_report]
+
+
+def test_main_scheduler_registers_monthly_job(monkeypatch):
+    fake_logger = FakeLogger()
+
+    class FakeScheduler:
+        def __init__(self, *args, **kwargs):
+            self.jobs = []
+            self.listeners = []
+
+        def add_job(self, fn, trigger, id=None, **kwargs):
+            self.jobs.append({"fn": fn, "trigger": trigger, "id": id, "kwargs": kwargs})
+
+        def add_listener(self, fn, mask):
+            self.listeners.append((fn, mask))
+
+        def start(self):
+            return None
+
+        def shutdown(self):
+            return None
+
+    fake_scheduler = FakeScheduler()
+
+    monkeypatch.setattr(scheduler, "logger", fake_logger)
+    monkeypatch.setattr(scheduler, "BackgroundScheduler", lambda *args, **kwargs: fake_scheduler)
+    monkeypatch.setattr(
+        scheduler.time,
+        "sleep",
+        lambda seconds: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+
+    scheduler.main_scheduler()
+
+    monthly_job = next(job for job in fake_scheduler.jobs if job["id"] == "monthly_job")
+
+    assert monthly_job["fn"] is scheduler.monthly_job
+    assert "day='1'" in str(monthly_job["trigger"])
+    assert "minute='20'" in str(monthly_job["trigger"])
+    assert "second='5'" in str(monthly_job["trigger"])

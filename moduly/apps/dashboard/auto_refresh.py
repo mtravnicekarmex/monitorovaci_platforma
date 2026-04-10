@@ -9,7 +9,8 @@ import streamlit as st
 from app.time_utils import prague_now_naive
 
 
-SENSOR_REFRESH_MINUTES: tuple[int, ...] = (5, 20, 35, 40)
+SENSOR_DB_WRITE_MINUTES: tuple[int, ...] = (5, 16, 35, 50)
+SENSOR_REFRESH_BUFFER_MINUTES = 1
 
 
 def normalize_refresh_minutes(refresh_minutes: Sequence[int]) -> tuple[int, ...]:
@@ -19,6 +20,21 @@ def normalize_refresh_minutes(refresh_minutes: Sequence[int]) -> tuple[int, ...]
     if any(minute < 0 or minute > 59 for minute in normalized):
         raise ValueError("Refresh minutes must be in range 0-59.")
     return normalized
+
+
+def build_post_write_refresh_minutes(
+    write_minutes: Sequence[int] = SENSOR_DB_WRITE_MINUTES,
+    *,
+    buffer_minutes: int = SENSOR_REFRESH_BUFFER_MINUTES,
+) -> tuple[int, ...]:
+    normalized_write_minutes = normalize_refresh_minutes(write_minutes)
+    normalized_buffer = int(buffer_minutes)
+    if normalized_buffer < 0 or normalized_buffer > 59:
+        raise ValueError("Refresh buffer must be in range 0-59 minutes.")
+    return tuple(sorted({(minute + normalized_buffer) % 60 for minute in normalized_write_minutes}))
+
+
+SENSOR_REFRESH_MINUTES: tuple[int, ...] = build_post_write_refresh_minutes()
 
 
 def get_next_scheduled_refresh(

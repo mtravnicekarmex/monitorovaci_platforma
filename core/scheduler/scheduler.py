@@ -27,7 +27,10 @@ from moduly.mereni.vodomery.database.vodomery_db_vse import vodomery_db_import
 from moduly.mereni.vodomery.vodomery_prediction import rebuild_profiles
 from moduly.mereni.vodomery.vodomery_anomaly import score_new_measurements
 from moduly.mereni.vodomery.alerting import process_vodomery_alerts
-from moduly.mereni.vodomery.reporting import send_monthly_vodomery_consumption_report
+from moduly.mereni.vodomery.reporting import (
+    send_monthly_b1_consumption_report,
+    send_monthly_vodomery_consumption_report,
+)
 from moduly.mereni.vodomery.vodomery_events import detect_events_from_scores
 from moduly.apps.meteo.meteo_sync import meteo_sync
 
@@ -590,6 +593,8 @@ def weekly_job():
 @locked_job
 def monthly_job():
     safe_call(send_monthly_vodomery_consumption_report)
+    safe_call(send_monthly_b1_consumption_report)
+
 
 
 
@@ -675,6 +680,7 @@ def main_scheduler():
         ),
         id="monthly_job",
     )
+
 
 
     # --- Listeners ---

@@ -246,6 +246,57 @@ class VodomeryProfilesAnomaly(Base):
     sample_size: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
+class VodomeryModelValidationRun(Base):
+    __tablename__ = "vodomery_model_validation_runs"
+    __table_args__ = (
+        Index("ix_model_validation_runs_model_created", "model_version", "created_at"),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    train_start: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    train_end: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    validation_start: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    validation_end: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    deploy_start: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    deploy_end: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    selected_device_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    inserted_profile_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=text("now()"), nullable=False)
+
+
+class VodomeryModelValidationMetric(Base):
+    __tablename__ = "vodomery_model_validation_metrics"
+    __table_args__ = (
+        UniqueConstraint("run_id", "identifikace", "strategy_key", name="uq_validation_metric_run_ident_strategy"),
+        Index("ix_validation_metric_run", "run_id"),
+        Index("ix_validation_metric_model_selected", "model_version", "selected"),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("monitoring.vodomery_model_validation_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    identifikace: Mapped[str] = mapped_column(
+        String(250),
+        ForeignKey("evidence.vodoměry.identifikace", ondelete="CASCADE"),
+        nullable=False,
+    )
+    strategy_key: Mapped[str] = mapped_column(String(50), nullable=False)
+    validation_total_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    matched_validation_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    coverage: Mapped[float] = mapped_column(Float, nullable=False)
+    mae: Mapped[float] = mapped_column(Float, nullable=False)
+    rmse: Mapped[float] = mapped_column(Float, nullable=False)
+    bias: Mapped[float] = mapped_column(Float, nullable=False)
+    selected: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=text("now()"), nullable=False)
+
+
 
 # areálové + SČVK vodoměry se stavem expected zero
 class VodomeryExpectedZero(Base):

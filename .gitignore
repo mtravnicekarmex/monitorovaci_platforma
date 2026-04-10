@@ -14,3 +14,6 @@ data/*.parquet
 scheduler.log
 
 moduly/mereni/elektromery/SOFTLINK/lds_auth.json
+
+run.txt
+

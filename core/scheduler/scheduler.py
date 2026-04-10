@@ -18,10 +18,11 @@ import logging
 from pathlib import Path
 from logging.handlers import TimedRotatingFileHandler
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
 from app.channels.email import send_email_outlook
 from app.time_utils import utc_now_naive
+from core.scheduler.job_schedule import SCHEDULER_TIMEZONE_NAME, get_scheduler_job_specs
+from core.scheduler.metrics import get_metrics_store
 from decouple import config
 from moduly.mereni.vodomery.database.vodomery_db_vse import vodomery_db_import
 from moduly.mereni.vodomery.vodomery_prediction import rebuild_profiles
@@ -269,7 +270,10 @@ def _deliver_scheduler_alert(**kwargs) -> None:
 
 
 def job_success_listener(event):
+    metrics = get_metrics_store()
     if isinstance(event.retval, SkippedJobResult):
+        metrics.record_job_skipped(event.job_id, event.retval.reason)
+        _sync_job_next_run(event.job_id)
         logger.warning(
             "JOB SKIPPED | id=%s | scheduled=%s | reason=%s | locks=%s",
             event.job_id,
@@ -278,6 +282,8 @@ def job_success_listener(event):
             ",".join(event.retval.lock_names),
         )
         return
+    metrics.record_job_success(event.job_id)
+    _sync_job_next_run(event.job_id)
     logger.info(
         "JOB SUCCESS | id=%s | scheduled=%s",
         event.job_id,
@@ -287,7 +293,10 @@ def job_success_listener(event):
 
 
 def job_error_listener(event):
+    metrics = get_metrics_store()
     if event.exception:
+        metrics.record_job_error(event.job_id)
+        _sync_job_next_run(event.job_id)
         reason = _format_scheduler_reason(event.exception)
         targets = _extract_scheduler_targets(event.exception)
         log_message = "JOB ERROR | id=%s | scheduled=%s | reason=%s"
@@ -317,6 +326,8 @@ def job_error_listener(event):
         )
 
     elif event.code == EVENT_JOB_MISSED:
+        metrics.record_job_error(event.job_id)
+        _sync_job_next_run(event.job_id)
         logger.error(
             "JOB MISSED | id=%s | scheduled=%s",
             event.job_id,
@@ -333,6 +344,8 @@ def job_error_listener(event):
 
 
 def job_max_instances_listener(event):
+    get_metrics_store().record_job_skipped(event.job_id, "max_instances")
+    _sync_job_next_run(event.job_id)
     logger.warning(
         "JOB SKIPPED | id=%s | scheduled=%s | reason=max_instances",
         event.job_id,
@@ -493,10 +506,17 @@ def safe_call(fn, *args, **kwargs):
     start = time.time()
     try:
         logger.info("START %s", fn.__name__)
-        return fn(*args, **kwargs)
+        result = fn(*args, **kwargs)
+        duration = round(time.time() - start, 2)
+        get_metrics_store().record_job_success(fn.__name__, duration)
+        return result
     except SchedulerContextError:
+        duration = round(time.time() - start, 2)
+        get_metrics_store().record_job_error(fn.__name__, duration)
         raise
     except Exception as exc:
+        duration = round(time.time() - start, 2)
+        get_metrics_store().record_job_error(fn.__name__, duration)
         raise SchedulerContextError(
             f"Selhal krok '{fn.__name__}'",
             alert_targets=(fn.__name__,),
@@ -613,7 +633,7 @@ def monthly_job():
 # -------------------------
 def main_scheduler():
     scheduler = BackgroundScheduler(
-        timezone="Europe/Prague",
+        timezone=SCHEDULER_TIMEZONE_NAME,
         job_defaults={
             "coalesce": True,
             "misfire_grace_time": 60,
@@ -625,61 +645,22 @@ def main_scheduler():
     # -------------------------
     # Naplánování jobů
     # -------------------------
-
-    # každých 15 minut v X:05,20,35,50
-    scheduler.add_job(
-        quarter_hour_job,
-        CronTrigger(minute="5,16,35,50", second=5),
-        id="quarter_hour_job",
-    )
-
-    # každou hodinu v X:02:05
-    scheduler.add_job(
-        hourly_job,
-        CronTrigger(minute=2, second=5),
-        id="hourly_job",
-        max_instances=1,
-    )
-
-    # každou hodinu v X:03 v pracovní dny od 6 do 16
-    scheduler.add_job(
-        working_time_hourly_job,
-        CronTrigger(hour="6-16", minute=3, second=5, day_of_week="mon-fri"),
-        id="working_time_hourly_job",
-    )
-
-    # každý den v 7:00 a 14:00
-    scheduler.add_job(
-        daily_seven_and_two_job,
-        CronTrigger(hour="7,14", minute=0, second=5),
-        id="daily_seven_and_two_job",
-    )
-
-    # každý den v 0:15:05
-    scheduler.add_job(
-        daily_pulnoc_job,
-        CronTrigger(hour=0, minute=15, second=5),
-        id="daily_job",
-    )
-
-    # každý týden v pondělí v 6:10:05
-    scheduler.add_job(
-        weekly_job,
-        CronTrigger(day_of_week="mon", hour=6, minute=10, second=5),
-        id="weekly_job",
-    )
-
-    # každý první den v měsíci po noční aktualizaci v 0:20:05
-    scheduler.add_job(
-        monthly_job,
-        CronTrigger(
-            day=1,
-            hour=0,
-            minute=20,
-            second=5,
-        ),
-        id="monthly_job",
-    )
+    job_functions = {
+        "quarter_hour_job": quarter_hour_job,
+        "hourly_job": hourly_job,
+        "working_time_hourly_job": working_time_hourly_job,
+        "daily_seven_and_two_job": daily_seven_and_two_job,
+        "daily_job": daily_pulnoc_job,
+        "weekly_job": weekly_job,
+        "monthly_job": monthly_job,
+    }
+    for job_spec in get_scheduler_job_specs():
+        scheduler.add_job(
+            job_functions[job_spec.id],
+            job_spec.build_trigger(),
+            id=job_spec.id,
+            **job_spec.scheduler_kwargs,
+        )
 
 
 
@@ -689,15 +670,23 @@ def main_scheduler():
     scheduler.add_listener(job_max_instances_listener, EVENT_JOB_MAX_INSTANCES)
 
     # --- Start scheduleru ---
+    _set_scheduler_instance(scheduler)
     scheduler.start()
+    scheduler_metrics = get_metrics_store()
+    scheduler_metrics.mark_scheduler_started()
+    _sync_all_job_next_runs()
     logger.info("Scheduler spuštěn")
 
     try:
         while True:
+            scheduler_metrics.heartbeat()
+            _sync_all_job_next_runs()
             time.sleep(60)
     except KeyboardInterrupt:
         logger.info("Ukončuji scheduler...")
         scheduler.shutdown()
+        scheduler_metrics.mark_scheduler_stopped()
+        _set_scheduler_instance(None)
 
 
 
@@ -713,6 +702,7 @@ logger = setup_logging()
 # -------------------------
 _LOCK_REGISTRY_GUARD = threading.Lock()
 _JOB_LOCKS = {}
+_SCHEDULER_INSTANCE = None
 
 
 def _get_lock(lock_name):
@@ -722,6 +712,34 @@ def _get_lock(lock_name):
             job_lock = threading.Lock()
             _JOB_LOCKS[lock_name] = job_lock
         return job_lock
+
+
+def _set_scheduler_instance(scheduler_instance):
+    global _SCHEDULER_INSTANCE
+    _SCHEDULER_INSTANCE = scheduler_instance
+
+
+def _sync_job_next_run(job_id: str) -> None:
+    scheduler_instance = _SCHEDULER_INSTANCE
+    if scheduler_instance is None or not hasattr(scheduler_instance, "get_job"):
+        return
+
+    job = scheduler_instance.get_job(job_id)
+    next_run = None if job is None else getattr(job, "next_run_time", None)
+    get_metrics_store().set_job_next_run(job_id, next_run)
+
+
+def _sync_all_job_next_runs() -> None:
+    scheduler_instance = _SCHEDULER_INSTANCE
+    if scheduler_instance is None or not hasattr(scheduler_instance, "get_jobs"):
+        return
+
+    get_metrics_store().update_job_next_runs(
+        {
+            job.id: getattr(job, "next_run_time", None)
+            for job in scheduler_instance.get_jobs()
+        }
+    )
 
 # -------------------------
 # Start

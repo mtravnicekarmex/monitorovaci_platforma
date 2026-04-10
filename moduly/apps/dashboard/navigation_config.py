@@ -148,6 +148,14 @@ PAGES: tuple[DashboardPage, ...] = (
         admin_only=True,
     ),
     DashboardPage(
+        key="scheduler_health",
+        path="pages/16_scheduler_health.py",
+        title="Health scheduleru",
+        icon="🩺",
+        sidebar_location="footer",
+        admin_only=True,
+    ),
+    DashboardPage(
         key="muj_ucet",
         path="pages/3_muj_ucet.py",
         title="Můj účet",

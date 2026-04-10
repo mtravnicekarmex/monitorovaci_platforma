@@ -47,3 +47,28 @@ class AdminUserUpdateRequest(BaseModel):
     device_ids: list[str] | None = None
     is_active: bool | None = None
     is_admin: bool | None = None
+
+
+class SchedulerJobHealth(BaseModel):
+    id: str
+    last_run: datetime | None = None
+    last_status: str
+    last_duration_seconds: float | None = None
+    next_run: datetime | None = None
+    failure_rate_24h: float = Field(ge=0.0, le=1.0)
+    avg_duration_24h: float | None = None
+
+
+class SchedulerScheduledRun(BaseModel):
+    job_id: str
+    job_label: str
+    description: str
+    scheduled_at: datetime
+
+
+class SchedulerHealthResponse(BaseModel):
+    status: str = Field(..., pattern="^(ok|degraded|error)$")
+    scheduler_running: bool
+    jobs: list[SchedulerJobHealth]
+    schedule: list[SchedulerScheduledRun] = Field(default_factory=list)
+    checked_at: datetime

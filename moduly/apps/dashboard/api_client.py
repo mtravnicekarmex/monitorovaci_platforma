@@ -193,6 +193,15 @@ def delete_admin_user(access_token: str, username: str) -> None:
     )
 
 
+def get_scheduler_health(access_token: str) -> dict[str, object]:
+    response = _request(
+        "GET",
+        "/health/scheduler",
+        access_token=access_token,
+    )
+    return dict(response.json())
+
+
 def preview_web_search_hits(access_token: str, payload: dict[str, object]) -> dict[str, object]:
     response = _request(
         "POST",

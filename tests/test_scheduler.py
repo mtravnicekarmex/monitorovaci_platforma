@@ -60,7 +60,53 @@ class FakeSession:
         self.closed = True
 
 
-def test_safe_call_wraps_exception_without_error_logging(monkeypatch):
+class FakeMetricsStore:
+    def __init__(self):
+        self.success_calls = []
+        self.error_calls = []
+        self.skipped_calls = []
+        self.next_run_updates = []
+        self.scheduler_running = False
+        self.started = 0
+        self.stopped = 0
+        self.heartbeat_calls = 0
+
+    def record_job_success(self, job_id, duration_seconds=None):
+        self.success_calls.append((job_id, duration_seconds))
+
+    def record_job_error(self, job_id, duration_seconds=None):
+        self.error_calls.append((job_id, duration_seconds))
+
+    def record_job_skipped(self, job_id, reason):
+        self.skipped_calls.append((job_id, reason))
+
+    def set_job_next_run(self, job_id, next_run):
+        self.next_run_updates.append((job_id, next_run))
+
+    def update_job_next_runs(self, next_runs):
+        self.next_run_updates.append(dict(next_runs))
+
+    def mark_scheduler_started(self):
+        self.started += 1
+        self.scheduler_running = True
+
+    def heartbeat(self):
+        self.heartbeat_calls += 1
+        self.scheduler_running = True
+
+    def mark_scheduler_stopped(self):
+        self.stopped += 1
+        self.scheduler_running = False
+
+
+@pytest.fixture
+def fake_metrics_store(monkeypatch):
+    store = FakeMetricsStore()
+    monkeypatch.setattr(scheduler, "get_metrics_store", lambda *args, **kwargs: store)
+    return store
+
+
+def test_safe_call_wraps_exception_without_error_logging(monkeypatch, fake_metrics_store):
     fake_logger = FakeLogger()
     monkeypatch.setattr(scheduler, "logger", fake_logger)
 
@@ -73,10 +119,22 @@ def test_safe_call_wraps_exception_without_error_logging(monkeypatch):
     assert exc_info.value.alert_targets == ("boom",)
     assert exc_info.value.alert_reason == "db timeout"
     assert exc_info.value.__cause__.__class__ is ValueError
+    assert [job_id for job_id, _ in fake_metrics_store.error_calls] == ["boom"]
     assert not [record for record in fake_logger.records if record[0] == "error"]
 
 
-def test_job_error_listener_sends_readable_alert(monkeypatch):
+def test_safe_call_records_success_metrics(monkeypatch, fake_metrics_store):
+    fake_logger = FakeLogger()
+    monkeypatch.setattr(scheduler, "logger", fake_logger)
+
+    def ok():
+        return "done"
+
+    assert scheduler.safe_call(ok) == "done"
+    assert [job_id for job_id, _ in fake_metrics_store.success_calls] == ["ok"]
+
+
+def test_job_error_listener_sends_readable_alert(monkeypatch, fake_metrics_store):
     fake_logger = FakeLogger()
     sent_email = {}
 
@@ -102,6 +160,8 @@ def test_job_error_listener_sends_readable_alert(monkeypatch):
 
     scheduler.job_error_listener(event)
 
+    assert [job_id for job_id, _ in fake_metrics_store.error_calls] == ["daily_seven_and_two_job"]
+
     error_messages = [message for level, message in fake_logger.records if level == "error"]
     assert any("JOB ERROR | id=daily_seven_and_two_job" in message for message in error_messages)
     assert any("targets=https://a.example,https://b.example" in message for message in error_messages)
@@ -115,7 +175,29 @@ def test_job_error_listener_sends_readable_alert(monkeypatch):
     assert "Cile" in sent_email["body"]
 
 
-def test_job_error_listener_handles_alert_delivery_failure(monkeypatch):
+def test_job_success_listener_records_skipped_and_success(monkeypatch, fake_metrics_store):
+    fake_logger = FakeLogger()
+    monkeypatch.setattr(scheduler, "logger", fake_logger)
+
+    skipped_event = SimpleNamespace(
+        job_id="hourly_job",
+        scheduled_run_time=datetime.datetime(2026, 4, 9, 8, 0, tzinfo=datetime.timezone.utc),
+        retval=scheduler.SkippedJobResult(reason="lock_busy", lock_names=("hourly_job",)),
+    )
+    success_event = SimpleNamespace(
+        job_id="weekly_job",
+        scheduled_run_time=datetime.datetime(2026, 4, 9, 8, 0, tzinfo=datetime.timezone.utc),
+        retval=None,
+    )
+
+    scheduler.job_success_listener(skipped_event)
+    scheduler.job_success_listener(success_event)
+
+    assert fake_metrics_store.skipped_calls == [("hourly_job", "lock_busy")]
+    assert [job_id for job_id, _ in fake_metrics_store.success_calls] == ["weekly_job"]
+
+
+def test_job_error_listener_handles_alert_delivery_failure(monkeypatch, fake_metrics_store):
     fake_logger = FakeLogger()
 
     monkeypatch.setattr(scheduler, "logger", fake_logger)
@@ -135,6 +217,8 @@ def test_job_error_listener_handles_alert_delivery_failure(monkeypatch):
     )
 
     scheduler.job_error_listener(event)
+
+    assert [job_id for job_id, _ in fake_metrics_store.error_calls] == ["hourly_job"]
 
     error_messages = [message for level, message in fake_logger.records if level == "error"]
     assert any("JOB ERROR | id=hourly_job" in message for message in error_messages)
@@ -192,7 +276,7 @@ def test_monthly_job_calls_both_monthly_reports(monkeypatch):
     assert [fn for fn, _, _ in calls] == [fake_vodomery_report, fake_b1_report]
 
 
-def test_main_scheduler_registers_monthly_job(monkeypatch):
+def test_main_scheduler_registers_monthly_job(monkeypatch, fake_metrics_store):
     fake_logger = FakeLogger()
 
     class FakeScheduler:
@@ -230,3 +314,6 @@ def test_main_scheduler_registers_monthly_job(monkeypatch):
     assert "day='1'" in str(monthly_job["trigger"])
     assert "minute='20'" in str(monthly_job["trigger"])
     assert "second='5'" in str(monthly_job["trigger"])
+    assert fake_metrics_store.started == 1
+    assert fake_metrics_store.heartbeat_calls == 1
+    assert fake_metrics_store.stopped == 1

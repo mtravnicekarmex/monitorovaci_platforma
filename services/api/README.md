@@ -28,6 +28,7 @@ Poznamky:
 
 - `GET /health/live`
 - `GET /health/ready`
+- `GET /health/scheduler` (admin auth)
 - `POST /api/v1/auth/login`
 - `GET /api/v1/auth/users-exist`
 - `GET /api/v1/auth/me`

@@ -276,6 +276,92 @@ def test_monthly_job_calls_both_monthly_reports(monkeypatch):
     assert [fn for fn, _, _ in calls] == [fake_vodomery_report, fake_b1_report]
 
 
+def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(monkeypatch):
+    calls = []
+    alert_payloads = []
+
+    def fake_safe_call(fn, *args, **kwargs):
+        calls.append((fn.__name__, args, kwargs))
+        return fn(*args, **kwargs)
+
+    def fake_import():
+        return None
+
+    def fake_get_runtime_model_version():
+        return 2
+
+    def fake_score_new_measurements(*, model_version, bootstrap_to_latest_if_missing=False):
+        assert bootstrap_to_latest_if_missing is True
+        return model_version
+
+    def fake_detect_events_from_scores(*, model_version, bootstrap_to_latest_if_missing=False):
+        assert bootstrap_to_latest_if_missing is True
+        return {
+            "active_event_ids": [model_version],
+            "resolved_event_ids": [model_version * 10],
+        }
+
+    def fake_process_vodomery_alerts(*, active_event_ids, resolved_event_ids):
+        alert_payloads.append((active_event_ids, resolved_event_ids))
+        return None
+
+    monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
+    monkeypatch.setattr(scheduler, "vodomery_db_import", fake_import)
+    monkeypatch.setattr(scheduler, "get_runtime_model_version", fake_get_runtime_model_version)
+    monkeypatch.setattr(scheduler, "get_candidate_model_versions", lambda: (1, 2))
+    monkeypatch.setattr(scheduler, "score_new_measurements", fake_score_new_measurements)
+    monkeypatch.setattr(scheduler, "detect_events_from_scores", fake_detect_events_from_scores)
+    monkeypatch.setattr(scheduler, "process_vodomery_alerts", fake_process_vodomery_alerts)
+
+    scheduler.quarter_hour_job()
+
+    assert [name for name, _, _ in calls] == [
+        "fake_import",
+        "fake_get_runtime_model_version",
+        "fake_score_new_measurements",
+        "fake_detect_events_from_scores",
+        "fake_score_new_measurements",
+        "fake_detect_events_from_scores",
+        "fake_process_vodomery_alerts",
+    ]
+    assert alert_payloads == [([2], [20])]
+
+
+def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
+    calls = []
+    rebuild_result = {
+        "selection_run_id": 7,
+        "active_model_version": 2,
+        "active_model_name": "Model 2 - adaptive strategy",
+        "previous_active_model_version": 1,
+        "previous_active_model_name": "Model 1 - baseline MAD",
+        "windows": {},
+        "candidates": [],
+    }
+
+    def fake_safe_call(fn, *args, **kwargs):
+        calls.append((fn.__name__, args, kwargs))
+        return fn(*args, **kwargs)
+
+    def fake_rebuild_profiles():
+        return rebuild_result
+
+    def fake_send_vodomery_model_rebuild_report(result):
+        assert result is rebuild_result
+        return None
+
+    monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
+    monkeypatch.setattr(scheduler, "rebuild_profiles", fake_rebuild_profiles)
+    monkeypatch.setattr(scheduler, "send_vodomery_model_rebuild_report", fake_send_vodomery_model_rebuild_report)
+
+    scheduler.weekly_job()
+
+    assert [name for name, _, _ in calls] == [
+        "fake_rebuild_profiles",
+        "fake_send_vodomery_model_rebuild_report",
+    ]
+
+
 def test_main_scheduler_registers_monthly_job(monkeypatch, fake_metrics_store):
     fake_logger = FakeLogger()
 

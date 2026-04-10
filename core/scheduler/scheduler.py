@@ -25,11 +25,16 @@ from core.scheduler.job_schedule import SCHEDULER_TIMEZONE_NAME, get_scheduler_j
 from core.scheduler.metrics import get_metrics_store
 from decouple import config
 from moduly.mereni.vodomery.database.vodomery_db_vse import vodomery_db_import
-from moduly.mereni.vodomery.vodomery_prediction import rebuild_profiles
+from moduly.mereni.vodomery.vodomery_prediction import (
+    get_candidate_model_versions,
+    get_runtime_model_version,
+    rebuild_profiles,
+)
 from moduly.mereni.vodomery.vodomery_anomaly import score_new_measurements
 from moduly.mereni.vodomery.alerting import process_vodomery_alerts
 from moduly.mereni.vodomery.reporting import (
     send_monthly_b1_consumption_report,
+    send_vodomery_model_rebuild_report,
     send_monthly_vodomery_consumption_report,
 )
 from moduly.mereni.vodomery.vodomery_events import detect_events_from_scores
@@ -571,9 +576,31 @@ def locked_job(*decorator_args):
 @locked_job
 def quarter_hour_job():
     safe_call(vodomery_db_import)
-    safe_call(score_new_measurements, model_version=1)
-    event_result = safe_call(detect_events_from_scores, model_version=1)
-    safe_call(process_vodomery_alerts, active_event_ids=event_result.get("active_event_ids", []), resolved_event_ids=event_result.get("resolved_event_ids", []),)
+    active_model_version = safe_call(get_runtime_model_version)
+    active_event_result = {
+        "active_event_ids": [],
+        "resolved_event_ids": [],
+    }
+
+    for model_version in get_candidate_model_versions():
+        safe_call(
+            score_new_measurements,
+            model_version=model_version,
+            bootstrap_to_latest_if_missing=True,
+        )
+        event_result = safe_call(
+            detect_events_from_scores,
+            model_version=model_version,
+            bootstrap_to_latest_if_missing=True,
+        )
+        if model_version == active_model_version:
+            active_event_result = event_result
+
+    safe_call(
+        process_vodomery_alerts,
+        active_event_ids=active_event_result.get("active_event_ids", []),
+        resolved_event_ids=active_event_result.get("resolved_event_ids", []),
+    )
 
 
 # každou hodinu v X:02:05
@@ -606,7 +633,8 @@ def daily_pulnoc_job():
 # každý týden v pondělí v 6:10:05
 @locked_job
 def weekly_job():
-    safe_call(rebuild_profiles, 1)
+    rebuild_result = safe_call(rebuild_profiles)
+    safe_call(send_vodomery_model_rebuild_report, rebuild_result)
 
 
 # každý první den v měsíci v 0:20:05

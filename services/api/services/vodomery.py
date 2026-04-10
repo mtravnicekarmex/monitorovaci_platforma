@@ -22,6 +22,7 @@ from moduly.mereni.vodomery.SCVK.historie_vetve import (
     ziskej_vetev_grobar,
 )
 from moduly.mereni.vodomery.database.expected_zero import get_expected_zero_device_set
+from moduly.mereni.vodomery.database.model_validation import get_active_vodomery_model_version
 from moduly.mereni.vodomery.database.models import (
     Mereni_vodomery,
     Vodomer_areal_Zarizeni,
@@ -109,6 +110,10 @@ def _source_ident_subquery(session, source_filter: str):
         .filter(Mereni_vodomery.zdroj == source_filter)
         .distinct()
     )
+
+
+def _get_active_model_version(session) -> int:
+    return get_active_vodomery_model_version(session=session, default=1)
 
 
 def _apply_expected_zero_event_filter(query, expected_zero_idents: set[str]):
@@ -261,15 +266,18 @@ def load_overview_metrics(
 
     session = get_session_pg()
     try:
+        active_model_version = _get_active_model_version(session)
         base_measurements = session.query(Mereni_vodomery).filter(
             Mereni_vodomery.date >= start_dt,
             Mereni_vodomery.date <= end_dt,
         )
         base_scores = session.query(VodomeryAnomalyScore).filter(
+            VodomeryAnomalyScore.model_version == active_model_version,
             VodomeryAnomalyScore.date >= start_dt,
             VodomeryAnomalyScore.date <= end_dt,
         )
         base_events = session.query(VodomeryAnomalyEvent).filter(
+            VodomeryAnomalyEvent.model_version == active_model_version,
             VodomeryAnomalyEvent.start_time >= start_dt,
             VodomeryAnomalyEvent.start_time <= end_dt,
             VodomeryAnomalyEvent.duration_minutes > MIN_VISIBLE_EVENT_DURATION_MINUTES,
@@ -389,13 +397,7 @@ def load_prediction_profiles(
 
     session = get_session_pg()
     try:
-        latest_model_version = (
-            session.query(func.max(VodomeryProfilesAnomaly.model_version))
-            .filter(VodomeryProfilesAnomaly.identifikace == identifikace)
-            .scalar()
-        )
-        if latest_model_version is None:
-            return []
+        active_model_version = _get_active_model_version(session)
 
         rows = (
             session.query(
@@ -411,13 +413,15 @@ def load_prediction_profiles(
                 VodomeryProfilesAnomaly.model_version,
             )
             .filter(VodomeryProfilesAnomaly.identifikace == identifikace)
-            .filter(VodomeryProfilesAnomaly.model_version == latest_model_version)
+            .filter(VodomeryProfilesAnomaly.model_version == active_model_version)
             .order_by(
                 VodomeryProfilesAnomaly.day_of_week.asc(),
                 VodomeryProfilesAnomaly.slot.asc(),
             )
             .all()
         )
+        if not rows:
+            return []
         return [
             {
                 "interval_minutes": int(row.interval_minutes),
@@ -454,6 +458,7 @@ def load_recent_anomalies(
 
     session = get_session_pg()
     try:
+        active_model_version = _get_active_model_version(session)
         query = (
             session.query(
                 VodomeryAnomalyScore.date,
@@ -464,6 +469,7 @@ def load_recent_anomalies(
                 VodomeryAnomalyScore.severity,
                 VodomeryAnomalyScore.is_anomaly,
             )
+            .filter(VodomeryAnomalyScore.model_version == active_model_version)
             .filter(VodomeryAnomalyScore.is_anomaly.is_(True))
             .filter(VodomeryAnomalyScore.date >= start_dt, VodomeryAnomalyScore.date <= end_dt)
         )
@@ -501,6 +507,7 @@ def load_all_open_events(
 
     session = get_session_pg()
     try:
+        active_model_version = _get_active_model_version(session)
         expected_zero_idents = get_expected_zero_device_set(session=session)
         query = session.query(
             VodomeryAnomalyEvent.identifikace,
@@ -511,7 +518,10 @@ def load_all_open_events(
             VodomeryAnomalyEvent.max_z_score,
             VodomeryAnomalyEvent.avg_z_score,
             VodomeryAnomalyEvent.severity,
-        ).filter(VodomeryAnomalyEvent.end_time.is_(None))
+        ).filter(
+            VodomeryAnomalyEvent.model_version == active_model_version,
+            VodomeryAnomalyEvent.end_time.is_(None),
+        )
         query = query.filter(VodomeryAnomalyEvent.duration_minutes > MIN_VISIBLE_EVENT_DURATION_MINUTES)
         query = _apply_expected_zero_event_filter(query, expected_zero_idents)
 
@@ -551,6 +561,7 @@ def load_recent_resolved_events(
 
     session = get_session_pg()
     try:
+        active_model_version = _get_active_model_version(session)
         expected_zero_idents = get_expected_zero_device_set(session=session)
         query = session.query(
             VodomeryAnomalyEvent.identifikace,
@@ -562,6 +573,7 @@ def load_recent_resolved_events(
             VodomeryAnomalyEvent.avg_z_score,
             VodomeryAnomalyEvent.severity,
         ).filter(
+            VodomeryAnomalyEvent.model_version == active_model_version,
             VodomeryAnomalyEvent.resolved.is_(True),
             VodomeryAnomalyEvent.end_time.is_not(None),
             VodomeryAnomalyEvent.end_time >= resolved_since,
@@ -604,6 +616,7 @@ def load_event_history(
 
     session = get_session_pg()
     try:
+        active_model_version = _get_active_model_version(session)
         expected_zero_idents = get_expected_zero_device_set(session=session)
         rows = (
             _apply_expected_zero_event_filter(
@@ -618,7 +631,10 @@ def load_event_history(
                     VodomeryAnomalyEvent.is_active,
                     VodomeryAnomalyEvent.resolved,
                 )
-                .filter(VodomeryAnomalyEvent.identifikace == identifikace)
+                .filter(
+                    VodomeryAnomalyEvent.identifikace == identifikace,
+                    VodomeryAnomalyEvent.model_version == active_model_version,
+                )
                 .filter(VodomeryAnomalyEvent.duration_minutes > MIN_VISIBLE_EVENT_DURATION_MINUTES),
                 expected_zero_idents,
             )
@@ -705,10 +721,12 @@ def load_branch_day_overview(
         SELECT identifikace, interval_minutes, day_of_week, slot, mean, model_version
         FROM monitoring."vodomery_anomaly_profiles"
         WHERE identifikace IN :identifiers
+          AND model_version = :model_version
         """
     ).bindparams(bindparam("identifiers", expanding=True))
 
     with ENGINE_PG.connect() as conn:
+        active_model_version = _get_active_model_version(conn)
         branch_payloads: list[dict[str, object]] = []
 
         for config_item in BRANCH_DASHBOARD_CONFIGS:
@@ -779,6 +797,7 @@ def load_branch_day_overview(
                     prediction_statement,
                     {
                         "identifiers": list(active_devices),
+                        "model_version": active_model_version,
                     },
                 ).all()
                 if active_devices
@@ -798,10 +817,6 @@ def load_branch_day_overview(
             )
             hourly_prediction_lookup: dict[tuple[str, pd.Timestamp], float] = {}
             if not prediction_df.empty:
-                prediction_df["latest_model_version"] = prediction_df.groupby("identifikace")["model_version"].transform("max")
-                prediction_df = prediction_df.loc[
-                    prediction_df["model_version"] == prediction_df["latest_model_version"]
-                ].copy()
                 prediction_df = prediction_df.loc[prediction_df["day_of_week"] == target_date.weekday()].copy()
                 if not prediction_df.empty:
                     prediction_df["interval_minutes"] = pd.to_numeric(prediction_df["interval_minutes"], errors="coerce")

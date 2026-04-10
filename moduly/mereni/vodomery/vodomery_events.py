@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from moduly.mereni.vodomery.database.models import *
 from moduly.mereni.vodomery.database.expected_zero import ensure_expected_zero_table
 from core.db.connect import ENGINE_PG
@@ -31,7 +31,12 @@ EVENT_CONFIG = {
 }
 
 
-def detect_events_from_scores(model_version: int, batch_size: int = 50000):
+def detect_events_from_scores(
+    model_version: int,
+    batch_size: int = 50000,
+    *,
+    bootstrap_to_latest_if_missing: bool = False,
+):
     ensure_expected_zero_table()
 
     with Session(ENGINE_PG, autoflush=False, expire_on_commit=False) as session:
@@ -46,13 +51,21 @@ def detect_events_from_scores(model_version: int, batch_size: int = 50000):
         ).scalar_one_or_none()
 
         if engine_state is None:
+            initial_checkpoint = 0
+            if bootstrap_to_latest_if_missing:
+                initial_checkpoint = int(
+                    session.query(func.max(VodomeryAnomalyScore.id))
+                    .filter(VodomeryAnomalyScore.model_version == model_version)
+                    .scalar()
+                    or 0
+                )
             engine_state = VodomeryEventEngineState(
                 model_version=model_version,
-                last_score_id=0,
+                last_score_id=initial_checkpoint,
             )
             session.add(engine_state)
             session.commit()
-            last_id = 0
+            last_id = initial_checkpoint
         else:
             last_id = engine_state.last_score_id
 

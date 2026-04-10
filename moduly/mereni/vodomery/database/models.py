@@ -281,11 +281,7 @@ class VodomeryModelValidationMetric(Base):
         nullable=False,
     )
     model_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    identifikace: Mapped[str] = mapped_column(
-        String(250),
-        ForeignKey("evidence.vodoměry.identifikace", ondelete="CASCADE"),
-        nullable=False,
-    )
+    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
     strategy_key: Mapped[str] = mapped_column(String(50), nullable=False)
     validation_total_count: Mapped[int] = mapped_column(Integer, nullable=False)
     matched_validation_count: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -293,6 +289,52 @@ class VodomeryModelValidationMetric(Base):
     mae: Mapped[float] = mapped_column(Float, nullable=False)
     rmse: Mapped[float] = mapped_column(Float, nullable=False)
     bias: Mapped[float] = mapped_column(Float, nullable=False)
+    selected: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=text("now()"), nullable=False)
+
+
+class VodomeryModelSelectionRun(Base):
+    __tablename__ = "vodomery_model_selection_runs"
+    __table_args__ = (
+        Index("ix_model_selection_runs_created", "created_at"),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    train_start: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    train_end: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    validation_start: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    validation_end: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    deploy_start: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    deploy_end: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    selected_model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    selected_model_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=text("now()"), nullable=False)
+
+
+class VodomeryModelSelectionCandidate(Base):
+    __tablename__ = "vodomery_model_selection_candidates"
+    __table_args__ = (
+        UniqueConstraint("selection_run_id", "model_version", name="uq_model_selection_candidate_run_version"),
+        Index("ix_model_selection_candidates_run", "selection_run_id"),
+        Index("ix_model_selection_candidates_selected", "selected"),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    selection_run_id: Mapped[int] = mapped_column(
+        ForeignKey("monitoring.vodomery_model_selection_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    validation_total_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    matched_validation_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    coverage: Mapped[float] = mapped_column(Float, nullable=False)
+    mae: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rmse: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bias: Mapped[float | None] = mapped_column(Float, nullable=True)
+    profile_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     selected: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=text("now()"), nullable=False)
 

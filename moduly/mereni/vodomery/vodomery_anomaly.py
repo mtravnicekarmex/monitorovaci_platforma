@@ -1,4 +1,4 @@
-from sqlalchemy import select, insert, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session
 from moduly.mereni.vodomery.database.models import *
 from core.db.connect import ENGINE_PG
@@ -6,7 +6,12 @@ from app.time_utils import utc_now_naive
 
 
 
-def score_new_measurements(model_version: int = 1, batch_size: int = 1000):
+def score_new_measurements(
+    model_version: int = 1,
+    batch_size: int = 1000,
+    *,
+    bootstrap_to_latest_if_missing: bool = False,
+):
     """
     Ultra-efektivní inkrementální scoring (FINÁLNÍ VERZE)
 
@@ -25,9 +30,14 @@ def score_new_measurements(model_version: int = 1, batch_size: int = 1000):
         state = session.get(VodomeryScoringState, model_version)
 
         if state is None:
+            initial_checkpoint = 0
+            if bootstrap_to_latest_if_missing:
+                initial_checkpoint = int(
+                    session.query(func.max(Mereni_vodomery.id)).scalar() or 0
+                )
             state = VodomeryScoringState(
                 model_version=model_version,
-                last_measurement_id=0,
+                last_measurement_id=initial_checkpoint,
             )
             session.add(state)
             session.commit()

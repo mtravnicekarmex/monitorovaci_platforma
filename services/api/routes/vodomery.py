@@ -54,7 +54,14 @@ from services.api.services.vodomery import (
 router = APIRouter(prefix="/api/v1/vodomery", tags=["vodomery"])
 
 
-@router.get("/devices", response_model=VodomeryDeviceListResponse)
+@router.get(
+    "/devices",
+    response_model=VodomeryDeviceListResponse,
+    summary="List vodoměry devices",
+    description="Vrací seznam vodoměrů dostupných pro přihlášeného uživatele. "
+    "Filtrace dle source (VSE = všechny, SCVK, AREAL). "
+    "Oprávnění omezena dle konfigurace uživatele.",
+)
 def get_vodomery_devices(
     source: str = Query(default="VSE"),
     limit: int = Query(default=500, ge=1, le=5000),
@@ -75,7 +82,14 @@ def get_vodomery_devices(
     )
 
 
-@router.get("/overview-metrics", response_model=VodomeryOverviewMetricsResponse)
+@router.get(
+    "/overview-metrics",
+    response_model=VodomeryOverviewMetricsResponse,
+    summary="Get vodoměry overview metrics",
+    description="Vrací přehledové metriky spotřeby vody za zvolené období: "
+    "celková spotřeba, počet měřidel, průměrná spotřeba, detekované anomálie. "
+    "Oprávnění omezena dle konfigurace uživatele.",
+)
 def get_vodomery_overview_metrics(
     start_date: date,
     end_date: date,
@@ -103,7 +117,14 @@ def get_vodomery_overview_metrics(
     )
 
 
-@router.get("/measurement-series", response_model=VodomeryMeasurementSeriesResponse)
+@router.get(
+    "/measurement-series",
+    response_model=VodomeryMeasurementSeriesResponse,
+    summary="Get measurement series",
+    description="Vrací časovou řadu měření pro vybraný vodoměr. "
+    "Obsahuje: datum, spotřeba, predikovaná hodnota, anomaly score. "
+    "Oprávnění omezena dle konfigurace uživatele.",
+)
 def get_vodomery_measurement_series(
     identifikace: str,
     start_date: date,
@@ -140,7 +161,14 @@ def get_vodomery_measurement_series(
     )
 
 
-@router.get("/prediction-profiles", response_model=VodomeryPredictionProfilesResponse)
+@router.get(
+    "/prediction-profiles",
+    response_model=VodomeryPredictionProfilesResponse,
+    summary="Get prediction profiles",
+    description="Vrací predikční profily pro vybraný vodoměr. "
+    "Obsahuje: den v týdnu, hodina, průměrná spotřeba, rozptyl. "
+    "Používá se pro predikci a detekci anomálií.",
+)
 def get_vodomery_prediction_profiles(
     identifikace: str,
     current_user: DashboardUserContext = Depends(get_current_vodomery_user),
@@ -168,7 +196,13 @@ def get_vodomery_prediction_profiles(
     )
 
 
-@router.get("/recent-anomalies", response_model=VodomeryRecentAnomaliesResponse)
+@router.get(
+    "/recent-anomalies",
+    response_model=VodomeryRecentAnomaliesResponse,
+    summary="Get recent anomalies",
+    description="Vrací seznam nedávných anomálií (outlierů) za zvolené období. "
+    "Anomálie jsou detekovány pomocí ML modelu na základě odchylky od predikované spotřeby.",
+)
 def get_vodomery_recent_anomalies(
     start_date: date,
     end_date: date,
@@ -207,7 +241,13 @@ def get_vodomery_recent_anomalies(
     )
 
 
-@router.get("/open-events", response_model=VodomeryOpenEventsResponse)
+@router.get(
+    "/open-events",
+    response_model=VodomeryOpenEventsResponse,
+    summary="Get open events",
+    description="Vrací seznam otevřených eventů (aktivních anomálií). "
+    "Event je aktivní když anomálie trvá déle než nastavený práh.",
+)
 def get_vodomery_open_events(
     limit: int = Query(default=500, ge=1, le=5000),
     current_user: DashboardUserContext = Depends(get_current_vodomery_user),
@@ -222,7 +262,13 @@ def get_vodomery_open_events(
     )
 
 
-@router.get("/resolved-events", response_model=VodomeryResolvedEventsResponse)
+@router.get(
+    "/resolved-events",
+    response_model=VodomeryResolvedEventsResponse,
+    summary="Get resolved events",
+    description="Vrací seznam vyřešených eventů za zvolené období. "
+    "Event je vyřešen když spotřeba opět klesne pod práh anomálie.",
+)
 def get_vodomery_resolved_events(
     days: int = Query(default=7, ge=1, le=365),
     limit: int = Query(default=500, ge=1, le=5000),
@@ -240,7 +286,13 @@ def get_vodomery_resolved_events(
     )
 
 
-@router.get("/event-history", response_model=VodomeryEventHistoryResponse)
+@router.get(
+    "/event-history",
+    response_model=VodomeryEventHistoryResponse,
+    summary="Get event history for device",
+    description="Vrací historii eventů pro vybraný vodoměr. "
+    "Obsahuje: začátek, konec, typ, závažnost, notifikace.",
+)
 def get_vodomery_event_history(
     identifikace: str,
     limit: int = Query(default=20, ge=1, le=500),
@@ -265,7 +317,13 @@ def get_vodomery_event_history(
     )
 
 
-@router.get("/device-detail", response_model=VodomeryDeviceDetailResponse)
+@router.get(
+    "/device-detail",
+    response_model=VodomeryDeviceDetailResponse,
+    summary="Get device detail",
+    description="Vrací detailní informace o vybraném vodoměru: "
+    "sériové číslo, pozice, objekt, poslední měření, aktivní alarmy.",
+)
 def get_vodomery_device_detail(
     identifikace: str,
     current_user: DashboardUserContext = Depends(get_current_vodomery_user),
@@ -288,7 +346,13 @@ def get_vodomery_device_detail(
     )
 
 
-@router.get("/branch-day-overview", response_model=VodomeryBranchOverviewResponse)
+@router.get(
+    "/branch-day-overview",
+    response_model=VodomeryBranchOverviewResponse,
+    summary="Get branch day overview",
+    description="Vrací přehled spotřeby vody po větvích pro vybraný den. "
+    "Užitečné pro sledování distribuce spotřeby v objektech.",
+)
 def get_vodomery_branch_day_overview(
     target_date: date,
     current_user: DashboardUserContext = Depends(get_current_vodomery_user),
@@ -304,7 +368,14 @@ def get_vodomery_branch_day_overview(
     )
 
 
-@router.get("/outlier-reviews", response_model=VodomeryOutlierReviewListResponse)
+@router.get(
+    "/outlier-reviews",
+    response_model=VodomeryOutlierReviewListResponse,
+    summary="Get outlier reviews",
+    description="Vrací seznam outlierů k manuálnímu přezkoumání. "
+    "Umožňuje adminovi označit outlier jako reálný ( únik ) nebo false positive. "
+    "Vyžaduje admin oprávnění.",
+)
 def get_vodomery_outlier_reviews(
     review_status: str | None = Query(default="PENDING"),
     identifikace: str | None = Query(default=None),
@@ -329,7 +400,13 @@ def get_vodomery_outlier_reviews(
     return VodomeryOutlierReviewListResponse(total=len(rows), rows=rows)
 
 
-@router.patch("/outlier-reviews/{review_id}", response_model=VodomeryOutlierReviewRow)
+@router.patch(
+    "/outlier-reviews/{review_id}",
+    response_model=VodomeryOutlierReviewRow,
+    summary="Update outlier review",
+    description="Aktualizuje status outlier review (APPROVED/REJECTED) a poznámku. "
+    "Vyžaduje admin oprávnění.",
+)
 def patch_vodomery_outlier_review(
     review_id: int,
     payload: VodomeryOutlierReviewUpdateRequest,
@@ -351,7 +428,14 @@ def patch_vodomery_outlier_review(
     return VodomeryOutlierReviewRow(**row)
 
 
-@router.get("/expected-zero", response_model=VodomeryExpectedZeroListResponse)
+@router.get(
+    "/expected-zero",
+    response_model=VodomeryExpectedZeroListResponse,
+    summary="Get expected zero devices",
+    description="Vrací seznam vodoměrů s očekáváním nulové spotřeby. "
+    "Tyto vodoměry jsou vyloučeny z detekce anomálií. "
+    "Vyžaduje admin oprávnění.",
+)
 def get_vodomery_expected_zero(
     current_user: DashboardUserContext = Depends(get_current_admin_user),
 ) -> VodomeryExpectedZeroListResponse:
@@ -359,7 +443,13 @@ def get_vodomery_expected_zero(
     return VodomeryExpectedZeroListResponse(total=len(rows), rows=rows)
 
 
-@router.put("/expected-zero", response_model=VodomeryExpectedZeroListResponse)
+@router.put(
+    "/expected-zero",
+    response_model=VodomeryExpectedZeroListResponse,
+    summary="Update expected zero devices",
+    description="Nahradí seznam vodoměrů s očekáváním nulové spotřeby. "
+    "Vyžaduje admin oprávnění.",
+)
 def update_vodomery_expected_zero(
     payload: VodomeryExpectedZeroUpdateRequest,
     current_user: DashboardUserContext = Depends(get_current_admin_user),
@@ -371,7 +461,14 @@ def update_vodomery_expected_zero(
     return VodomeryExpectedZeroListResponse(total=len(rows), rows=rows)
 
 
-@router.get("/alert-rules", response_model=VodomeryAlertRulesResponse)
+@router.get(
+    "/alert-rules",
+    response_model=VodomeryAlertRulesResponse,
+    summary="Get alert rules",
+    description="Vrací seznam konfigurovaných alert pravidel pro vodoměry. "
+    "Alert pravidla definují kdy a komu se zasílají upozornění na eventy. "
+    "Vyžaduje admin oprávnění.",
+)
 def get_vodomery_alert_rules(
     current_user: DashboardUserContext = Depends(get_current_admin_user),
 ) -> VodomeryAlertRulesResponse:
@@ -379,7 +476,15 @@ def get_vodomery_alert_rules(
     return VodomeryAlertRulesResponse(total=len(rows), rows=rows)
 
 
-@router.post("/alert-rules", response_model=VodomeryAlertRuleRow, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/alert-rules",
+    response_model=VodomeryAlertRuleRow,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create alert rule",
+    description="Vytvoří nové alert pravidlo pro vodoměry. "
+    "Definuje: filtr zařízení, typ eventu, minimální závažnost, dobu trvání, příjemce. "
+    "Vyžaduje admin oprávnění.",
+)
 def create_vodomery_alert_rule(
     payload: VodomeryAlertRuleUpsertRequest,
     current_user: DashboardUserContext = Depends(get_current_admin_user),
@@ -405,7 +510,13 @@ def create_vodomery_alert_rule(
     return VodomeryAlertRuleRow(**row)
 
 
-@router.patch("/alert-rules/{rule_id}", response_model=VodomeryAlertRuleRow)
+@router.patch(
+    "/alert-rules/{rule_id}",
+    response_model=VodomeryAlertRuleRow,
+    summary="Update alert rule",
+    description="Aktualizuje existující alert pravidlo. "
+    "Vyžaduje admin oprávnění.",
+)
 def update_vodomery_alert_rule(
     rule_id: int,
     payload: VodomeryAlertRuleUpsertRequest,
@@ -433,7 +544,13 @@ def update_vodomery_alert_rule(
     return VodomeryAlertRuleRow(**row)
 
 
-@router.delete("/alert-rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/alert-rules/{rule_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete alert rule",
+    description="Smaže alert pravidlo. "
+    "Vyžaduje admin oprávnění.",
+)
 def delete_vodomery_alert_rule(
     rule_id: int,
     current_user: DashboardUserContext = Depends(get_current_admin_user),

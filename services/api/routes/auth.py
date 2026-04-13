@@ -25,12 +25,24 @@ def _profile_from_context(user_context: DashboardUserContext) -> UserProfileResp
     return UserProfileResponse(**user_context.to_profile_dict())
 
 
-@router.get("/users-exist", response_model=UsersExistResponse)
+@router.get(
+    "/users-exist",
+    response_model=UsersExistResponse,
+    summary="Check if users exist",
+    description="Kontroluje zda existuje alespoň jeden uživatel v systému. "
+    "Používá se pro rozhodnutí zda zobrazit login nebo registrační formulář.",
+)
 def users_exist() -> UsersExistResponse:
     return UsersExistResponse(users_exist=dashboard_users_exist())
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    summary="User login",
+    description="Přihlášení uživatele. Vrací JWT access token a profil uživatele. "
+    "Token je platný po dobu nastavenou v API_TOKEN_EXPIRE_MINUTES.",
+)
 def login(payload: LoginRequest) -> TokenResponse:
     try:
         user_context = authenticate_dashboard_user(payload.username, payload.password)
@@ -56,12 +68,22 @@ def login(payload: LoginRequest) -> TokenResponse:
     )
 
 
-@router.get("/me", response_model=UserProfileResponse)
+@router.get(
+    "/me",
+    response_model=UserProfileResponse,
+    summary="Get current user profile",
+    description="Vrací profil aktuálně přihlášeného uživatele.",
+)
 def me(current_user: DashboardUserContext = Depends(get_current_user)) -> UserProfileResponse:
     return _profile_from_context(current_user)
 
 
-@router.patch("/me/email", response_model=UserProfileResponse)
+@router.patch(
+    "/me/email",
+    response_model=UserProfileResponse,
+    summary="Update current user email",
+    description="Aktualizuje e-mailovou adresu aktuálně přihlášeného uživatele.",
+)
 def update_my_email(
     payload: EmailUpdateRequest,
     current_user: DashboardUserContext = Depends(get_current_user),
@@ -77,7 +99,12 @@ def update_my_email(
     return _profile_from_context(updated_user)
 
 
-@router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/me/password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Change current user password",
+    description="Změna hesla aktuálně přihlášeného uživatele. Vyžaduje zadání stávajícího hesla.",
+)
 def change_my_password(
     payload: PasswordChangeRequest,
     current_user: DashboardUserContext = Depends(get_current_user),
@@ -102,7 +129,12 @@ def change_my_password(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="User logout",
+    description="Odhlášení uživatele. Zruší platnost tokenu.",
+)
 def logout(current_user: DashboardUserContext = Depends(get_current_user)) -> Response:
     logout_dashboard_user(current_user.username)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

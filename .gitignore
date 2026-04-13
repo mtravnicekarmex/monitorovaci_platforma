@@ -5,6 +5,9 @@
 __pycache__/
 *.py[cod]
 *.log
+node_modules/
+.next/
+npm-debug.log*
 
 .idea/workspace.xml
 
@@ -16,4 +19,3 @@ scheduler.log
 moduly/mereni/elektromery/SOFTLINK/lds_auth.json
 
 run.txt
-

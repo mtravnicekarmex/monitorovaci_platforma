@@ -28,7 +28,13 @@ from services.api.services.web_search import (
 router = APIRouter(prefix="/api/v1/web-search", tags=["web-search"])
 
 
-@router.get("/monitors", response_model=WebSearchMonitorsResponse)
+@router.get(
+    "/monitors",
+    response_model=WebSearchMonitorsResponse,
+    summary="List web search monitors",
+    description="Vrací seznam všech nakonfigurovaných web monitorů. "
+    "Vyžaduje admin oprávnění.",
+)
 def get_web_search_monitors(
     current_user: DashboardUserContext = Depends(get_current_admin_user),
 ) -> WebSearchMonitorsResponse:
@@ -36,7 +42,14 @@ def get_web_search_monitors(
     return WebSearchMonitorsResponse(total=len(rows), rows=rows)
 
 
-@router.post("/preview", response_model=WebSearchPreviewResponse)
+@router.post(
+    "/preview",
+    response_model=WebSearchPreviewResponse,
+    summary="Preview web search hits",
+    description="Provede náhledové hledání výrazů na URL bez vytvoření monitoru. "
+    "Užitečné pro testování před vytvořením monitoru. "
+    "Vyžaduje admin oprávnění.",
+)
 def preview_web_search(
     payload: WebSearchPreviewRequest,
     current_user: DashboardUserContext = Depends(get_current_admin_user),
@@ -55,7 +68,13 @@ def preview_web_search(
     return WebSearchPreviewResponse(**preview)
 
 
-@router.get("/results", response_model=WebSearchResultsResponse)
+@router.get(
+    "/results",
+    response_model=WebSearchResultsResponse,
+    summary="List web search results",
+    description="Vrací historii výsledků web monitoringu (nalezené výskyty). "
+    "Vyžaduje admin oprávnění.",
+)
 def get_web_search_results(
     limit: int = Query(default=200, ge=1, le=5000),
     current_user: DashboardUserContext = Depends(get_current_admin_user),
@@ -64,7 +83,14 @@ def get_web_search_results(
     return WebSearchResultsResponse(total=len(rows), rows=rows)
 
 
-@router.post("/monitors", response_model=WebSearchMonitorUpsertResponse)
+@router.post(
+    "/monitors",
+    response_model=WebSearchMonitorUpsertResponse,
+    summary="Create web search monitor",
+    description="Vytvoří nový web monitor pro sledování výskytu výrazů na URL. "
+    "Monitor pravidelně kontroluje stránku a zasílá upozornění při nových výskytech. "
+    "Vyžaduje admin oprávnění.",
+)
 def create_web_search_monitor(
     payload: WebSearchMonitorUpsertRequest,
     current_user: DashboardUserContext = Depends(get_current_admin_user),
@@ -88,7 +114,13 @@ def create_web_search_monitor(
     )
 
 
-@router.patch("/monitors/{monitor_id}", response_model=WebSearchMonitorRecord)
+@router.patch(
+    "/monitors/{monitor_id}",
+    response_model=WebSearchMonitorRecord,
+    summary="Update web search monitor",
+    description="Aktualizuje existující web monitor. "
+    "Vyžaduje admin oprávnění.",
+)
 def update_web_search_monitor(
     monitor_id: int,
     payload: WebSearchMonitorUpsertRequest,
@@ -110,7 +142,13 @@ def update_web_search_monitor(
     return WebSearchMonitorRecord(**row)
 
 
-@router.delete("/monitors/{monitor_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/monitors/{monitor_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete web search monitor",
+    description="Smaže web monitor a jeho historii výsledků. "
+    "Vyžaduje admin oprávnění.",
+)
 def delete_web_search_monitor(
     monitor_id: int,
     current_user: DashboardUserContext = Depends(get_current_admin_user),

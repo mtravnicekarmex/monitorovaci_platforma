@@ -18,7 +18,14 @@ from services.api.services.dashboard_auth import DashboardUserContext
 router = APIRouter(prefix="/health", tags=["health"])
 
 
-@router.get("/scheduler", response_model=SchedulerHealthResponse)
+@router.get(
+    "/scheduler",
+    response_model=SchedulerHealthResponse,
+    summary="Scheduler health status",
+    description="Vrací komplexní přehled o stavu scheduleru: běžící/ zastavený, "
+    "metriky jednotlivých jobů (úspěšnost, doba běhu), naplánované spuštění na 24h dopředu. "
+    "Vyžaduje admin oprávnění.",
+)
 def get_scheduler_health(
     current_user: DashboardUserContext = Depends(get_current_admin_user),
 ) -> SchedulerHealthResponse:

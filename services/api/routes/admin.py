@@ -24,7 +24,13 @@ from services.api.services.dashboard_auth import DashboardUserContext
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
 
-@router.get("/device-options", response_model=AdminDeviceOptionsResponse)
+@router.get(
+    "/device-options",
+    response_model=AdminDeviceOptionsResponse,
+    summary="List all device options",
+    description="Vrací seznam všech dostupných zařízení pro konfiguraci uživatelů. "
+    "Vyžaduje admin oprávnění.",
+)
 def get_admin_device_options(
     current_user: DashboardUserContext = Depends(get_current_admin_user),
 ) -> AdminDeviceOptionsResponse:
@@ -32,7 +38,13 @@ def get_admin_device_options(
     return AdminDeviceOptionsResponse(total=len(devices), devices=devices)
 
 
-@router.get("/users", response_model=AdminUsersResponse)
+@router.get(
+    "/users",
+    response_model=AdminUsersResponse,
+    summary="List all users",
+    description="Vrací seznam všech uživatelů dashboardu. "
+    "Vyžaduje admin oprávnění.",
+)
 def get_admin_users(
     current_user: DashboardUserContext = Depends(get_current_admin_user),
 ) -> AdminUsersResponse:
@@ -40,7 +52,14 @@ def get_admin_users(
     return AdminUsersResponse(total=len(users), users=users)
 
 
-@router.post("/users", response_model=AdminUserRecord, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/users",
+    response_model=AdminUserRecord,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create new user",
+    description="Vytvoří nového uživatele dashboardu. "
+    "Vyžaduje admin oprávnění.",
+)
 def create_user(
     payload: AdminUserCreateRequest,
     current_user: DashboardUserContext = Depends(get_current_admin_user),
@@ -65,7 +84,13 @@ def create_user(
     return AdminUserRecord(**user_record)
 
 
-@router.patch("/users/{username}", response_model=AdminUserRecord)
+@router.patch(
+    "/users/{username}",
+    response_model=AdminUserRecord,
+    summary="Update user",
+    description="Aktualizuje existujícího uživatele (e-mail, oprávnění, zařízení). "
+    "Vyžaduje admin oprávnění.",
+)
 def update_user(
     username: str,
     payload: AdminUserUpdateRequest,
@@ -86,7 +111,13 @@ def update_user(
     return AdminUserRecord(**user_record)
 
 
-@router.delete("/users/{username}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/users/{username}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete user",
+    description="Smaže uživatele dashboardu. "
+    "Vyžaduje admin oprávnění.",
+)
 def delete_user(
     username: str,
     current_user: DashboardUserContext = Depends(get_current_admin_user),

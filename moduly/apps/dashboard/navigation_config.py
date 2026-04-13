@@ -156,6 +156,14 @@ PAGES: tuple[DashboardPage, ...] = (
         admin_only=True,
     ),
     DashboardPage(
+        key="vodomery_outlier_review",
+        path="pages/17_vodomery_outlier_review.py",
+        title="Review outlieru",
+        icon="🔎",
+        sidebar_location="footer",
+        admin_only=True,
+    ),
+    DashboardPage(
         key="muj_ucet",
         path="pages/3_muj_ucet.py",
         title="Můj účet",

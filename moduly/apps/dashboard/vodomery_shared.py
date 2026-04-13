@@ -229,6 +229,7 @@ def load_measurement_series(
             "zdroj",
             "objem",
             "delta",
+            "platne",
             "interval_minutes",
             "day_of_week",
             "slot",

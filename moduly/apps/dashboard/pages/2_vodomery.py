@@ -112,6 +112,8 @@ def prepare_measurements(df: pd.DataFrame) -> pd.DataFrame:
     prepared["spotreba"] = pd.to_numeric(prepared["spotreba"], errors="coerce").fillna(0.0)
     prepared.loc[prepared.index[0], "spotreba"] = 0.0
     prepared.loc[prepared["spotreba"] < 0, "spotreba"] = 0.0
+    if "platne" in prepared.columns:
+        prepared.loc[~prepared["platne"].fillna(True), "spotreba"] = 0.0
     prepared.loc[prepared["reset_detected"].fillna(False), "spotreba"] = 0.0
     prepared["spotreba"] = prepared["spotreba"].round(3)
     prepared["kumulovana_spotreba"] = prepared["spotreba"].cumsum().round(3)

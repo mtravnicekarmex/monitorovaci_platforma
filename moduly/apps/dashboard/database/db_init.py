@@ -7,6 +7,8 @@ from moduly.apps.dashboard.database.models import Base
 from moduly.apps.web_search.database.db_init import ensure_web_search_tables
 from moduly.mereni.vodomery.database.expected_zero import ensure_expected_zero_table
 from moduly.mereni.vodomery.database.alerting import ensure_vodomery_alerting_tables
+from moduly.mereni.vodomery.database.outlier_reviews import ensure_vodomery_outlier_review_table
+from moduly.mereni.vodomery.alerting.outlier_notifications import ensure_vodomery_outlier_email_delivery_table
 
 
 def ensure_streamlit_user_columns() -> None:
@@ -43,6 +45,8 @@ def ensure_dashboard_tables() -> None:
     ensure_web_search_tables()
     ensure_expected_zero_table()
     ensure_vodomery_alerting_tables()
+    ensure_vodomery_outlier_review_table()
+    ensure_vodomery_outlier_email_delivery_table()
 
 
 if __name__ == "__main__":

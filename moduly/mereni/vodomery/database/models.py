@@ -364,6 +364,96 @@ class VodomeryExpectedZero(Base):
     )
 
 
+class VodomeryOutlierReview(Base):
+    __tablename__ = "vodomery_outlier_reviews"
+    __table_args__ = (
+        CheckConstraint(
+            "detection_kind IN ('NORMAL_DELTA','GAP_MEAN')",
+            name="ck_outlier_review_detection_kind_valid",
+        ),
+        CheckConstraint(
+            "review_status IN ('PENDING','CONFIRMED_OUTLIER','CONFIRMED_CONSUMPTION')",
+            name="ck_outlier_review_status_valid",
+        ),
+        UniqueConstraint("identifikace", "date", "zdroj", name="uq_outlier_review_ident_date_source"),
+        Index("ix_outlier_review_status_date", "review_status", "date"),
+        Index("ix_outlier_review_ident_date", "identifikace", "date"),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
+    date: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    zdroj: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_recid: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    seriove_cislo: Mapped[str] = mapped_column(String(250), nullable=False)
+    interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    detection_kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    current_objem: Mapped[float] = mapped_column(Float, nullable=False)
+    baseline_objem: Mapped[float | None] = mapped_column(Float, nullable=True)
+    baseline_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    candidate_delta: Mapped[float] = mapped_column(Float, nullable=False)
+    threshold_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sample_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    median_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p90_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p99_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    std_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    review_status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        server_default=text("'PENDING'"),
+    )
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        nullable=False,
+    )
+
+
+class VodomeryOutlierEmailDelivery(Base):
+    __tablename__ = "vodomery_outlier_email_deliveries"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('PENDING','SENT','FAILED','SKIPPED')",
+            name="ck_outlier_email_delivery_status_valid",
+        ),
+        UniqueConstraint(
+            "review_id",
+            "rule_id",
+            "recipient_email",
+            name="uq_outlier_email_delivery_review_rule_recipient",
+        ),
+        Index("ix_outlier_email_delivery_status", "status"),
+        Index("ix_outlier_email_delivery_recipient_created", "recipient_email", "created_at"),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    review_id: Mapped[int] = mapped_column(
+        ForeignKey("monitoring.vodomery_outlier_reviews.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    rule_id: Mapped[int | None] = mapped_column(
+        ForeignKey("monitoring.vodomery_alert_rules.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
+    review_date: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    zdroj: Mapped[str] = mapped_column(String(20), nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    detection_kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    recipient_email: Mapped[str] = mapped_column(String(250), nullable=False)
+    summary_group_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'PENDING'"))
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=text("now()"), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+
+
 
 
 # areálové + SČVK vodoměry anomaly score
@@ -448,7 +538,7 @@ class VodomeryAlertRule(Base):
     __tablename__ = "vodomery_alert_rules"
     __table_args__ = (
         CheckConstraint(
-            "event_type IS NULL OR event_type IN ('NIGHT_USAGE','SPIKE','LONG_LEAK','ZERO_FLOW','EXPECTED_ZERO_USAGE')",
+            "event_type IS NULL OR event_type IN ('NIGHT_USAGE','SPIKE','LONG_LEAK','ZERO_FLOW','EXPECTED_ZERO_USAGE','OUTLIER_REVIEW')",
             name="ck_alert_rule_event_type_valid",
         ),
         CheckConstraint(
@@ -598,7 +688,7 @@ class VodomeryAlertSubscription(Base):
         ),
         CheckConstraint(
             "event_type IS NULL OR event_type IN "
-            "('NIGHT_USAGE','SPIKE','LONG_LEAK','ZERO_FLOW','EXPECTED_ZERO_USAGE')",
+            "('NIGHT_USAGE','SPIKE','LONG_LEAK','ZERO_FLOW','EXPECTED_ZERO_USAGE','OUTLIER_REVIEW')",
             name="ck_vodomery_alert_subscriptions_event_type",
         ),
         Index(

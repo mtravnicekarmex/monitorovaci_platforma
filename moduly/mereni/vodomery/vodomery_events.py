@@ -1,4 +1,4 @@
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from moduly.mereni.vodomery.database.models import *
 from moduly.mereni.vodomery.database.expected_zero import ensure_expected_zero_table
 from core.db.connect import ENGINE_PG
@@ -69,6 +69,17 @@ def detect_events_from_scores(
         else:
             last_id = engine_state.last_score_id
 
+        if last_id > 0:
+            session.execute(
+                update(VodomeryAnomalyScore)
+                .where(
+                    VodomeryAnomalyScore.model_version == model_version,
+                    VodomeryAnomalyScore.id <= last_id,
+                    VodomeryAnomalyScore.processed.is_(False),
+                )
+                .values(processed=True)
+            )
+
         # =====================================================
         # 2️⃣ Načti nové scores
         # =====================================================
@@ -76,7 +87,7 @@ def detect_events_from_scores(
             session.query(VodomeryAnomalyScore)
             .filter(
                 VodomeryAnomalyScore.model_version == model_version,
-                VodomeryAnomalyScore.id > last_id,
+                VodomeryAnomalyScore.processed.is_(False),
             )
             .order_by(VodomeryAnomalyScore.id)
             .limit(batch_size)
@@ -277,6 +288,14 @@ def detect_events_from_scores(
                     state.event_start_time = None
 
                 state.last_score_time = ts
+
+        processed_score_ids = [score.id for score in new_scores if score.id is not None]
+        if processed_score_ids:
+            session.execute(
+                update(VodomeryAnomalyScore)
+                .where(VodomeryAnomalyScore.id.in_(processed_score_ids))
+                .values(processed=True)
+            )
 
         # =====================================================
         # 6️⃣ Ulož engine state

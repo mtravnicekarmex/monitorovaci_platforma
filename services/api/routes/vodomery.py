@@ -17,6 +17,9 @@ from services.api.schemas.vodomery import (
     VodomeryExpectedZeroUpdateRequest,
     VodomeryMeasurementSeriesResponse,
     VodomeryOpenEventsResponse,
+    VodomeryOutlierReviewListResponse,
+    VodomeryOutlierReviewRow,
+    VodomeryOutlierReviewUpdateRequest,
     VodomeryOverviewMetricsResponse,
     VodomeryPredictionProfilesResponse,
     VodomeryRecentAnomaliesResponse,
@@ -29,7 +32,9 @@ from services.api.services.vodomery_admin import (
     delete_alert_rule_admin,
     list_alert_rules_admin,
     list_expected_zero_devices_admin,
+    list_outlier_reviews_admin,
     replace_expected_zero_devices_admin,
+    update_outlier_review_admin,
     update_alert_rule_admin,
 )
 from services.api.services.vodomery import (
@@ -297,6 +302,53 @@ def get_vodomery_branch_day_overview(
         total=len(rows),
         branches=rows,
     )
+
+
+@router.get("/outlier-reviews", response_model=VodomeryOutlierReviewListResponse)
+def get_vodomery_outlier_reviews(
+    review_status: str | None = Query(default="PENDING"),
+    identifikace: str | None = Query(default=None),
+    source: str = Query(default="VSE"),
+    limit: int = Query(default=200, ge=1, le=1000),
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> VodomeryOutlierReviewListResponse:
+    try:
+        rows = list_outlier_reviews_admin(
+            current_user,
+            review_status=review_status,
+            identifikace=identifikace,
+            source_filter=source,
+            limit=limit,
+        )
+    except VodomeryAdminOperationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return VodomeryOutlierReviewListResponse(total=len(rows), rows=rows)
+
+
+@router.patch("/outlier-reviews/{review_id}", response_model=VodomeryOutlierReviewRow)
+def patch_vodomery_outlier_review(
+    review_id: int,
+    payload: VodomeryOutlierReviewUpdateRequest,
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> VodomeryOutlierReviewRow:
+    try:
+        row = update_outlier_review_admin(
+            current_user,
+            review_id=review_id,
+            review_status=payload.review_status,
+            review_note=payload.review_note,
+        )
+    except VodomeryAdminOperationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return VodomeryOutlierReviewRow(**row)
 
 
 @router.get("/expected-zero", response_model=VodomeryExpectedZeroListResponse)

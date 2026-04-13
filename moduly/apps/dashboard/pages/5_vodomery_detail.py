@@ -73,6 +73,8 @@ def prepare_consumption_history(df: pd.DataFrame) -> pd.DataFrame:
         history_df["spotreba"] = pd.to_numeric(history_df["objem"], errors="coerce").diff()
     history_df["spotreba"] = history_df["spotreba"].fillna(0.0)
     history_df.loc[history_df["spotreba"] < 0, "spotreba"] = 0.0
+    if "platne" in history_df.columns:
+        history_df.loc[~history_df["platne"].fillna(True), "spotreba"] = 0.0
     history_df["nocni_odber"] = history_df["nocni_odber"].fillna(False)
     return history_df
 

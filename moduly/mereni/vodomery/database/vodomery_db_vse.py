@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta
 from time import perf_counter
 from sqlalchemy import select, func, inspect, text
@@ -9,15 +10,28 @@ from moduly.mereni.vodomery.database.models import (
     Vodomer_SCVK_Mereni,
     Vodomer_areal_Zarizeni_QGIS,
 )
+from moduly.mereni.vodomery.alerting.outlier_notifications import process_new_outlier_review_notifications
+from moduly.mereni.vodomery.database.outlier_reviews import (
+    build_outlier_review_key,
+    load_outlier_review_ids_by_keys,
+    upsert_outlier_review_candidates,
+)
 from core.db.connect import ENGINE_MS, ENGINE_PG
 from app.time_utils import utc_now_naive
 
 
 engine = ENGINE_PG
 engine_ms = ENGINE_MS
+logger = logging.getLogger(__name__)
 
 
 CHUNK_SIZE = 5000
+OUTLIER_LOOKBACK_DAYS = 90
+OUTLIER_MIN_HISTORY = 48
+OUTLIER_ABSOLUTE_MIN_DELTA = 10.0
+OUTLIER_P90_SPREAD_MULTIPLIER = 25.0
+OUTLIER_STD_MULTIPLIER = 12.0
+OUTLIER_P99_MULTIPLIER = 8.0
 
 
 def chunked(items, size=CHUNK_SIZE):
@@ -47,7 +61,7 @@ def ensure_destination_table():
 
     if expected_table not in monitoring_tables:
         Mereni_vodomery.__table__.create(bind=engine, checkfirst=True)
-        print(f'Created missing table monitoring."{expected_table}"')
+        logger.info('Created missing table monitoring."%s"', expected_table)
 
 
 
@@ -67,7 +81,7 @@ def fetch_from_ms_areal():
     t0 = perf_counter()
     with Session(engine) as pg_session:
         last_recid = get_last_imported_recid(pg_session, "AREAL")
-    print(f"AREAL last_recid: {last_recid}")
+    logger.info("AREAL last_recid: %s", last_recid)
 
     with Session(engine_ms) as ms_session:
 
@@ -85,7 +99,7 @@ def fetch_from_ms_areal():
         q = q.order_by(Vodomer_areal_Mereni.recid)
 
         rows = ms_session.execute(q).all()
-        print(f"AREAL rows fetched: {len(rows)} in {perf_counter() - t0:.1f}s")
+        logger.info("AREAL rows fetched: %s in %.1fs", len(rows), perf_counter() - t0)
 
         result = []
 
@@ -109,7 +123,7 @@ def fetch_from_ms_scvk():
     t0 = perf_counter()
     with Session(engine) as pg_session:
         last_recid = get_last_imported_recid(pg_session, "SCVK")
-    print(f"SCVK last_recid: {last_recid}")
+    logger.info("SCVK last_recid: %s", last_recid)
 
     # 2️⃣ načteme nová data z PG (SCVK je v PG)
     with Session(engine) as ms_session:
@@ -128,7 +142,7 @@ def fetch_from_ms_scvk():
         q = q.order_by(Vodomer_SCVK_Mereni.recid)
 
         rows = ms_session.execute(q).all()
-        print(f"SCVK rows fetched: {len(rows)} in {perf_counter() - t0:.1f}s")
+        logger.info("SCVK rows fetched: %s in %.1fs", len(rows), perf_counter() - t0)
 
         result = []
 
@@ -169,7 +183,7 @@ def is_night_time(dt: datetime) -> bool:
 # Načtení posledních měření pro dotčené vodoměry
 # -------------------------------------------------
 
-def get_last_measurements(session, affected_idents):
+def get_last_measurements(session, affected_idents, *, only_valid=False):
 
     if not affected_idents:
         return {}
@@ -177,15 +191,17 @@ def get_last_measurements(session, affected_idents):
     all_rows = {}
     idents_list = list(affected_idents)
     for ident_chunk in chunked(idents_list):
-        subq = (
+        subq_query = (
             select(
                 Mereni_vodomery.identifikace,
                 func.max(Mereni_vodomery.date).label("max_date")
             )
             .where(Mereni_vodomery.identifikace.in_(ident_chunk))
-            .group_by(Mereni_vodomery.identifikace)
-            .subquery()
         )
+        if only_valid:
+            subq_query = subq_query.where(Mereni_vodomery.platne.is_(True))
+
+        subq = subq_query.group_by(Mereni_vodomery.identifikace).subquery()
 
         q = (
             select(Mereni_vodomery)
@@ -195,11 +211,140 @@ def get_last_measurements(session, affected_idents):
                 (Mereni_vodomery.date == subq.c.max_date)
             )
         )
+        if only_valid:
+            q = q.where(Mereni_vodomery.platne.is_(True))
         rows = session.execute(q).scalars().all()
         for r in rows:
             all_rows[r.identifikace] = r
 
     return all_rows
+
+
+def get_recent_delta_stats(session, affected_idents, *, reference_time=None):
+
+    if not affected_idents:
+        return {}
+
+    reference_time = reference_time or utc_now_naive()
+    cutoff = reference_time - timedelta(days=OUTLIER_LOOKBACK_DAYS)
+    all_stats = {}
+    idents_list = list(affected_idents)
+
+    for ident_chunk in chunked(idents_list):
+        q = (
+            select(
+                Mereni_vodomery.identifikace,
+                func.count(Mereni_vodomery.id).label("sample_size"),
+                func.percentile_cont(0.5).within_group(Mereni_vodomery.delta).label("median"),
+                func.percentile_cont(0.9).within_group(Mereni_vodomery.delta).label("p90"),
+                func.percentile_cont(0.99).within_group(Mereni_vodomery.delta).label("p99"),
+                func.greatest(
+                    func.coalesce(func.stddev_samp(Mereni_vodomery.delta), 0.0),
+                    0.0001,
+                ).label("std"),
+            )
+            .where(
+                Mereni_vodomery.identifikace.in_(ident_chunk),
+                Mereni_vodomery.date >= cutoff,
+                Mereni_vodomery.synthetic.is_(False),
+                Mereni_vodomery.platne.is_(True),
+                Mereni_vodomery.reset_detected.is_(False),
+                Mereni_vodomery.delta.is_not(None),
+            )
+            .group_by(Mereni_vodomery.identifikace)
+        )
+
+        for row in session.execute(q).all():
+            all_stats[str(row.identifikace)] = {
+                "sample_size": int(row.sample_size or 0),
+                "median": float(row.median or 0.0),
+                "p90": float(row.p90 or 0.0),
+                "p99": float(row.p99 or 0.0),
+                "std": float(row.std or 0.0),
+            }
+
+    return all_stats
+
+
+def compute_outlier_delta_threshold(stats):
+    if not stats:
+        return None
+
+    sample_size = int(stats.get("sample_size") or 0)
+    if sample_size < OUTLIER_MIN_HISTORY:
+        return None
+
+    median = float(stats.get("median") or 0.0)
+    p90 = float(stats.get("p90") or median)
+    p99 = float(stats.get("p99") or p90)
+    std = max(float(stats.get("std") or 0.0), 0.0001)
+    spread = max(p90 - median, 0.0)
+
+    return max(
+        OUTLIER_ABSOLUTE_MIN_DELTA,
+        median + spread * OUTLIER_P90_SPREAD_MULTIPLIER,
+        median + std * OUTLIER_STD_MULTIPLIER,
+        p99 * OUTLIER_P99_MULTIPLIER,
+    )
+
+
+def is_delta_outlier(delta, stats):
+    if delta is None or delta <= 0:
+        return False
+
+    threshold = compute_outlier_delta_threshold(stats)
+    if threshold is None:
+        return False
+
+    return delta > threshold
+
+
+def format_ident_count_summary(counts, *, limit=10):
+    if not counts:
+        return ""
+
+    ordered_counts = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    summary = ", ".join(
+        f"{ident}:{count}"
+        for ident, count in ordered_counts[:limit]
+    )
+
+    if len(ordered_counts) > limit:
+        summary += ", ..."
+
+    return summary
+
+
+def build_outlier_review_payload(
+    *,
+    source_name,
+    row,
+    prev,
+    interval,
+    candidate_delta,
+    stats,
+    detection_kind,
+):
+    threshold = compute_outlier_delta_threshold(stats)
+    return {
+        "identifikace": row["identifikace"],
+        "date": row["date"],
+        "zdroj": source_name,
+        "source_recid": row.get("recid"),
+        "seriove_cislo": str(row.get("seriove_cislo") or ""),
+        "interval_minutes": interval,
+        "detection_kind": detection_kind,
+        "current_objem": float(row["objem"]),
+        "baseline_objem": None if not prev else float(prev["objem"]),
+        "baseline_date": None if not prev else prev["date"],
+        "candidate_delta": float(candidate_delta),
+        "threshold_delta": None if threshold is None else float(threshold),
+        "sample_size": None if not stats else int(stats.get("sample_size") or 0),
+        "median_delta": None if not stats else float(stats.get("median") or 0.0),
+        "p90_delta": None if not stats else float(stats.get("p90") or 0.0),
+        "p99_delta": None if not stats else float(stats.get("p99") or 0.0),
+        "std_delta": None if not stats else float(stats.get("std") or 0.0),
+    }
 
 
 # -------------------------------------------------
@@ -256,7 +401,14 @@ def resolve_gap(ident, prev, current_dt, current_objem, interval, source_name):
 # -------------------------------------------------
 # Příprava řádků k insertu (včetně delta)
 # -------------------------------------------------
-def prepare_rows(session, new_rows, source_name):
+def prepare_rows(
+    session,
+    new_rows,
+    source_name,
+    *,
+    include_outlier_reviews=False,
+    review_overrides=None,
+):
 
     if not new_rows:
         return []
@@ -265,7 +417,16 @@ def prepare_rows(session, new_rows, source_name):
     MIN_NIGHT_DELTA = 0.01
 
     affected_idents = {r["identifikace"] for r in new_rows}
-    last_existing = get_last_measurements(session, affected_idents)
+    last_existing = get_last_measurements(session, affected_idents, only_valid=True)
+    reference_time = max(
+        (r["date"] for r in new_rows if isinstance(r.get("date"), datetime)),
+        default=utc_now_naive(),
+    )
+    recent_delta_stats = get_recent_delta_stats(
+        session,
+        affected_idents,
+        reference_time=reference_time,
+    )
 
     new_rows.sort(key=lambda x: (x["identifikace"], x["date"]))
 
@@ -284,6 +445,10 @@ def prepare_rows(session, new_rows, source_name):
             previous_map[ident] = None
 
     rows_to_insert = []
+    outlier_reviews = []
+    outlier_count = 0
+    outlier_by_ident = {}
+    overrides_by_key = review_overrides or {}
 
     for r in new_rows:
 
@@ -297,6 +462,9 @@ def prepare_rows(session, new_rows, source_name):
 
         delta = None
         gap_detected = False
+        is_valid_row = True
+        ident_stats = recent_delta_stats.get(ident)
+        review_override = overrides_by_key.get((ident, dt, source_name))
 
         # -------------------------------------------------
         # RESET má prioritu – nová baseline
@@ -312,25 +480,93 @@ def prepare_rows(session, new_rows, source_name):
             if actual_diff > expected_interval * MAX_GAP_MULTIPLIER:
 
                 if objem >= prev["objem"]:
+                    total_minutes = int(actual_diff.total_seconds() // 60)
+                    num_slots = total_minutes // interval
+                    mean_gap_delta = None
+                    if num_slots > 0:
+                        mean_gap_delta = round((objem - prev["objem"]) / num_slots, 6)
 
-                    synthetic_rows = resolve_gap(
-                        ident,
-                        prev,
-                        dt,
-                        objem,
-                        interval,
-                        source_name
+                    is_gap_outlier = (
+                        mean_gap_delta is not None
+                        and (
+                            review_override == "CONFIRMED_OUTLIER"
+                            or is_delta_outlier(mean_gap_delta, ident_stats)
+                        )
                     )
 
-                    rows_to_insert.extend(synthetic_rows)
-                    gap_detected = True
+                    if is_gap_outlier:
+                        if review_override == "CONFIRMED_CONSUMPTION":
+                            synthetic_rows = resolve_gap(
+                                ident,
+                                prev,
+                                dt,
+                                objem,
+                                interval,
+                                source_name
+                            )
+
+                            rows_to_insert.extend(synthetic_rows)
+                            gap_detected = True
+                        else:
+                            is_valid_row = False
+                            outlier_count += 1
+                            outlier_by_ident[ident] = outlier_by_ident.get(ident, 0) + 1
+                            if include_outlier_reviews and review_override != "CONFIRMED_OUTLIER":
+                                outlier_reviews.append(
+                                    build_outlier_review_payload(
+                                        source_name=source_name,
+                                        row=r,
+                                        prev=prev,
+                                        interval=interval,
+                                        candidate_delta=mean_gap_delta,
+                                        stats=ident_stats,
+                                        detection_kind="GAP_MEAN",
+                                    )
+                                )
+                    else:
+                        synthetic_rows = resolve_gap(
+                            ident,
+                            prev,
+                            dt,
+                            objem,
+                            interval,
+                            source_name
+                        )
+
+                        rows_to_insert.extend(synthetic_rows)
+                        gap_detected = True
 
             else:
                 # ----------------------------
                 # Normální interval
                 # ----------------------------
                 if objem >= prev["objem"]:
-                    delta = objem - prev["objem"]
+                    candidate_delta = objem - prev["objem"]
+                    is_normal_outlier = (
+                        review_override == "CONFIRMED_OUTLIER"
+                        or is_delta_outlier(candidate_delta, ident_stats)
+                    )
+                    if is_normal_outlier:
+                        if review_override == "CONFIRMED_CONSUMPTION":
+                            delta = candidate_delta
+                        else:
+                            is_valid_row = False
+                            outlier_count += 1
+                            outlier_by_ident[ident] = outlier_by_ident.get(ident, 0) + 1
+                            if include_outlier_reviews and review_override != "CONFIRMED_OUTLIER":
+                                outlier_reviews.append(
+                                    build_outlier_review_payload(
+                                        source_name=source_name,
+                                        row=r,
+                                        prev=prev,
+                                        interval=interval,
+                                        candidate_delta=candidate_delta,
+                                        stats=ident_stats,
+                                        detection_kind="NORMAL_DELTA",
+                                    )
+                                )
+                    else:
+                        delta = candidate_delta
 
         # -------------------------------------------------
         # Finální úprava delta
@@ -345,6 +581,9 @@ def prepare_rows(session, new_rows, source_name):
         # Noční odběr (až po finálním delta)
         # -------------------------------------------------
         nocni_odber = (
+            is_valid_row
+            and not reset_detected
+            and
             delta is not None
             and delta > MIN_NIGHT_DELTA
             and is_night_time(dt)
@@ -364,7 +603,7 @@ def prepare_rows(session, new_rows, source_name):
             "day_of_week": compute_day_of_week(dt),
             "slot": compute_slot(dt, interval),
             "nocni_odber": nocni_odber,
-            "platne": True,
+            "platne": is_valid_row,
             "gap_detected": gap_detected,
             "synthetic": False,
             "zdroj": source_name,
@@ -374,11 +613,31 @@ def prepare_rows(session, new_rows, source_name):
         # -------------------------------------------------
         # Aktualizace previous_map
         # -------------------------------------------------
-        previous_map[ident] = {
-            "objem": objem,
-            "date": dt,
-            "seriove_cislo": r["seriove_cislo"],
-        }
+        if is_valid_row:
+            previous_map[ident] = {
+                "objem": objem,
+                "date": dt,
+                "seriove_cislo": r["seriove_cislo"],
+            }
+
+    if outlier_count:
+        ident_summary = format_ident_count_summary(outlier_by_ident)
+        if ident_summary:
+            logger.warning(
+                "%s detected invalid outlier rows: %s (%s)",
+                source_name,
+                outlier_count,
+                ident_summary,
+            )
+        else:
+            logger.warning(
+                "%s detected invalid outlier rows: %s",
+                source_name,
+                outlier_count,
+            )
+
+    if include_outlier_reviews:
+        return rows_to_insert, outlier_reviews
 
     return rows_to_insert
 
@@ -392,18 +651,32 @@ def prepare_rows(session, new_rows, source_name):
 def import_measurements(session, source_name, ms_rows):
 
     if not ms_rows:
-        return []
+        return {
+            "rows": [],
+            "new_outlier_review_ids": [],
+        }
 
     # new_rows = filter_new_rows(session, source_name, ms_rows)
     new_rows = filter_valid_rows(session, ms_rows, source_name)
 
     if not new_rows:
-        return []
+        return {
+            "rows": [],
+            "new_outlier_review_ids": [],
+        }
 
-    rows_to_insert = prepare_rows(session, new_rows, source_name)
+    rows_to_insert, outlier_reviews = prepare_rows(
+        session,
+        new_rows,
+        source_name,
+        include_outlier_reviews=True,
+    )
 
     if not rows_to_insert:
-        return []
+        return {
+            "rows": [],
+            "new_outlier_review_ids": [],
+        }
 
     inserted_rows = 0
     for batch in chunked(rows_to_insert):
@@ -414,9 +687,27 @@ def import_measurements(session, source_name, ms_rows):
         session.execute(stmt, batch)
 
         inserted_rows += len(batch)
-    print(f"{source_name} prepared for insert: {inserted_rows}")
 
-    return rows_to_insert
+    new_outlier_review_ids = []
+    if outlier_reviews:
+        review_keys = [build_outlier_review_key(row) for row in outlier_reviews]
+        existing_review_ids = load_outlier_review_ids_by_keys(review_keys, session=session)
+        upsert_outlier_review_candidates(outlier_reviews, session=session)
+        inserted_review_keys = [key for key in review_keys if key not in existing_review_ids]
+        if inserted_review_keys:
+            inserted_review_id_map = load_outlier_review_ids_by_keys(inserted_review_keys, session=session)
+            new_outlier_review_ids = [
+                inserted_review_id_map[key]
+                for key in inserted_review_keys
+                if key in inserted_review_id_map
+            ]
+
+    logger.info("%s prepared for insert: %s", source_name, inserted_rows)
+
+    return {
+        "rows": rows_to_insert,
+        "new_outlier_review_ids": new_outlier_review_ids,
+    }
 
 
 
@@ -488,9 +779,11 @@ def filter_valid_rows(session, rows, source_name):
         sanitized.append(r)
 
     if not sanitized:
-        print(
-            f"{source_name} dropped rows - invalid: {dropped_invalid}, "
-            f"future_ts: {dropped_future}"
+        logger.warning(
+            "%s dropped rows - invalid: %s, future_ts: %s",
+            source_name,
+            dropped_invalid,
+            dropped_future,
         )
         return []
 
@@ -520,24 +813,41 @@ def filter_valid_rows(session, rows, source_name):
     if filtered:
 
         affected_idents = {r["identifikace"] for r in filtered}
-        last_existing = get_last_measurements(session, affected_idents)
+        last_existing = get_last_measurements(session, affected_idents, only_valid=True)
 
-        for r in filtered:
+        previous_by_ident = {
+            ident: {
+                "objem": last.objem,
+                "date": last.date,
+                "seriove_cislo": last.seriove_cislo,
+            }
+            for ident, last in last_existing.items()
+            if last is not None
+        }
+
+        for r in sorted(filtered, key=lambda item: (item["identifikace"], item["date"])):
             ident = r["identifikace"]
-            last = last_existing.get(ident)
+            last = previous_by_ident.get(ident)
 
-            if last and r["objem"] < last.objem:
+            if last and r["objem"] < last["objem"]:
                 r["reset_detected"] = True
+
+            previous_by_ident[ident] = {
+                "objem": r["objem"],
+                "date": r["date"],
+                "seriove_cislo": r["seriove_cislo"],
+            }
 
     # -------------------------------------------------
     # Logování
     # -------------------------------------------------
     if dropped_invalid or dropped_future or dropped_fk:
-        print(
-            f"{source_name} dropped rows - "
-            f"invalid: {dropped_invalid}, "
-            f"future_ts: {dropped_future}, "
-            f"missing_evidence_identifikace: {dropped_fk}"
+        logger.warning(
+            "%s dropped rows - invalid: %s, future_ts: %s, missing_evidence_identifikace: %s",
+            source_name,
+            dropped_invalid,
+            dropped_future,
+            dropped_fk,
         )
 
     return filtered
@@ -557,10 +867,43 @@ def vodomery_db_import():
 
             rows_areal = fetch_from_ms_areal()
             inserted_areal = import_measurements(session, "AREAL", rows_areal)
-            print(f"AREAL inserted: {len(inserted_areal)}")
+            logger.info("AREAL inserted: %s", len(inserted_areal["rows"]))
 
             rows_scvk = fetch_from_ms_scvk()
             inserted_scvk = import_measurements(session, "SCVK", rows_scvk)
-            print(f"SCVK inserted: {len(inserted_scvk)}")
+            logger.info("SCVK inserted: %s", len(inserted_scvk["rows"]))
+
+        new_outlier_review_ids = list(
+            inserted_areal["new_outlier_review_ids"] + inserted_scvk["new_outlier_review_ids"]
+        )
+        notification_result = {
+            "matched": 0,
+            "emails_sent": 0,
+            "deliveries_sent": 0,
+            "deliveries_failed": 0,
+        }
+        if new_outlier_review_ids:
+            try:
+                notification_result = process_new_outlier_review_notifications(new_outlier_review_ids)
+            except Exception:
+                logger.exception(
+                    "Failed to process new outlier review notifications for review IDs: %s",
+                    new_outlier_review_ids,
+                )
+            else:
+                logger.info(
+                    "Outlier review notifications processed: matched=%s, emails_sent=%s, deliveries_sent=%s, deliveries_failed=%s",
+                    notification_result["matched"],
+                    notification_result["emails_sent"],
+                    notification_result["deliveries_sent"],
+                    notification_result["deliveries_failed"],
+                )
+
+        return {
+            "inserted_areal": len(inserted_areal["rows"]),
+            "inserted_scvk": len(inserted_scvk["rows"]),
+            "new_outlier_review_ids": new_outlier_review_ids,
+            "notification_result": notification_result,
+        }
 
 

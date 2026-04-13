@@ -15,6 +15,10 @@ from services.api.core.vodomery_alert_rule_validation import (
     normalize_alert_rule_send_on,
     normalize_alert_rule_severity,
 )
+from moduly.mereni.vodomery.database.outlier_reviews import (
+    normalize_review_note,
+    normalize_review_status,
+)
 
 
 class VodomeryDeviceListResponse(BaseModel):
@@ -40,6 +44,7 @@ class VodomeryMeasurementSeriesRow(BaseModel):
     zdroj: str
     objem: float
     delta: float | None = None
+    platne: bool
     interval_minutes: int
     day_of_week: int
     slot: int
@@ -244,6 +249,52 @@ class VodomeryAlertRuleUpsertRequest(BaseModel):
     @classmethod
     def validate_note(cls, value: str | None) -> str | None:
         return normalize_alert_rule_note(value)
+
+
+class VodomeryOutlierReviewRow(BaseModel):
+    id: int
+    identifikace: str
+    date: datetime
+    zdroj: str
+    source_recid: int | None = None
+    seriove_cislo: str
+    interval_minutes: int
+    detection_kind: str
+    current_objem: float
+    baseline_objem: float | None = None
+    baseline_date: datetime | None = None
+    candidate_delta: float
+    threshold_delta: float | None = None
+    sample_size: int | None = None
+    median_delta: float | None = None
+    p90_delta: float | None = None
+    p99_delta: float | None = None
+    std_delta: float | None = None
+    review_status: str
+    review_note: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime
+
+
+class VodomeryOutlierReviewListResponse(BaseModel):
+    total: int
+    rows: list[VodomeryOutlierReviewRow]
+
+
+class VodomeryOutlierReviewUpdateRequest(BaseModel):
+    review_status: str
+    review_note: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("review_status")
+    @classmethod
+    def validate_review_status(cls, value: str) -> str:
+        return normalize_review_status(value)
+
+    @field_validator("review_note")
+    @classmethod
+    def validate_review_note(cls, value: str | None) -> str | None:
+        return normalize_review_note(value)
 
 
 class VodomeryBranchHourlyRow(BaseModel):

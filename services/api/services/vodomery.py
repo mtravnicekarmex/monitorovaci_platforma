@@ -192,6 +192,8 @@ def _prepare_branch_measurements(df: pd.DataFrame) -> pd.DataFrame:
         item["spotreba"] = item["delta"].where(item["delta"].notna(), diff_from_volume)
         item["spotreba"] = pd.to_numeric(item["spotreba"], errors="coerce").fillna(0.0)
         item.loc[item["spotreba"] < 0, "spotreba"] = 0.0
+        if "platne" in item.columns:
+            item.loc[~item["platne"].fillna(True), "spotreba"] = 0.0
         item.loc[item["reset_detected"].fillna(False), "spotreba"] = 0.0
         item["spotreba"] = item["spotreba"].round(3)
         grouped_frames.append(item)
@@ -348,6 +350,7 @@ def load_measurement_series(
             Mereni_vodomery.zdroj,
             Mereni_vodomery.objem,
             Mereni_vodomery.delta,
+            Mereni_vodomery.platne,
             Mereni_vodomery.interval_minutes,
             Mereni_vodomery.day_of_week,
             Mereni_vodomery.slot,
@@ -373,6 +376,7 @@ def load_measurement_series(
                 "zdroj": str(row.zdroj) if row.zdroj is not None else None,
                 "objem": float(row.objem),
                 "delta": float(row.delta) if row.delta is not None else None,
+                "platne": bool(row.platne),
                 "interval_minutes": int(row.interval_minutes),
                 "day_of_week": int(row.day_of_week),
                 "slot": int(row.slot),
@@ -708,7 +712,7 @@ def load_branch_day_overview(
 
     measurement_statement = text(
         """
-        SELECT date, identifikace, objem, delta, reset_detected
+        SELECT date, identifikace, objem, delta, platne, reset_detected
         FROM monitoring."Mereni_vodomery_vse"
         WHERE identifikace IN :identifiers
           AND date >= :day_start
@@ -766,7 +770,7 @@ def load_branch_day_overview(
             measurements_df = _prepare_branch_measurements(
                 pd.DataFrame(
                     measurement_rows,
-                    columns=["date", "identifikace", "objem", "delta", "reset_detected"],
+                    columns=["date", "identifikace", "objem", "delta", "platne", "reset_detected"],
                 )
             )
             last_actual_timestamp = None if measurements_df.empty else pd.to_datetime(measurements_df["date"]).max()

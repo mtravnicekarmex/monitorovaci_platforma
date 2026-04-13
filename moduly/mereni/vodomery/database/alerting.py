@@ -1,17 +1,38 @@
 from __future__ import annotations
 
+from sqlalchemy import inspect, text
+
 from core.db.connect import ENGINE_PG, get_session_pg
 from moduly.mereni.vodomery.database.models import Mereni_vodomery, VodomeryAlertDelivery, VodomeryAlertRule
 
 
-EVENT_TYPE_OPTIONS = ("", "NIGHT_USAGE", "SPIKE", "LONG_LEAK", "ZERO_FLOW", "EXPECTED_ZERO_USAGE")
+EVENT_TYPE_OPTIONS = ("", "NIGHT_USAGE", "SPIKE", "LONG_LEAK", "ZERO_FLOW", "EXPECTED_ZERO_USAGE", "OUTLIER_REVIEW")
+NON_EMPTY_EVENT_TYPE_OPTIONS = tuple(option for option in EVENT_TYPE_OPTIONS if option)
 SEVERITY_OPTIONS = ("LOW", "MEDIUM", "HIGH", "CRITICAL")
 SEND_ON_OPTIONS = ("ACTIVE", "RESOLVED", "BOTH")
 
 
 def ensure_vodomery_alerting_tables() -> None:
-    VodomeryAlertRule.__table__.create(bind=ENGINE_PG, checkfirst=True)
-    VodomeryAlertDelivery.__table__.create(bind=ENGINE_PG, checkfirst=True)
+    with ENGINE_PG.begin() as conn:
+        conn.execute(text("CREATE SCHEMA IF NOT EXISTS monitoring"))
+        VodomeryAlertRule.__table__.create(bind=conn, checkfirst=True)
+        VodomeryAlertDelivery.__table__.create(bind=conn, checkfirst=True)
+        _ensure_alert_rule_event_type_constraint(conn)
+
+
+def _ensure_alert_rule_event_type_constraint(conn) -> None:
+    inspector = inspect(conn)
+    if "vodomery_alert_rules" not in inspector.get_table_names(schema="monitoring"):
+        return
+
+    allowed_values = ", ".join(f"'{value}'" for value in NON_EMPTY_EVENT_TYPE_OPTIONS)
+    conn.execute(text("ALTER TABLE monitoring.vodomery_alert_rules DROP CONSTRAINT IF EXISTS ck_alert_rule_event_type_valid"))
+    conn.execute(
+        text(
+            "ALTER TABLE monitoring.vodomery_alert_rules "
+            f"ADD CONSTRAINT ck_alert_rule_event_type_valid CHECK (event_type IS NULL OR event_type IN ({allowed_values}))"
+        )
+    )
 
 
 def list_alert_rules() -> list[dict[str, object]]:

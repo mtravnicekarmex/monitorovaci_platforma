@@ -462,6 +462,47 @@ def get_vodomery_expected_zero(access_token: str) -> list[dict[str, object]]:
     return [dict(item) for item in payload.get("rows", [])]
 
 
+def list_vodomery_outlier_reviews(
+    access_token: str,
+    *,
+    review_status: str | None = "PENDING",
+    identifikace: str | None = None,
+    source_filter: str = "VSE",
+    limit: int = 200,
+) -> list[dict[str, object]]:
+    query_params: dict[str, object] = {
+        "source": source_filter,
+        "limit": limit,
+    }
+    if review_status is not None:
+        query_params["review_status"] = review_status
+    if identifikace:
+        query_params["identifikace"] = identifikace
+
+    response = _request(
+        "GET",
+        "/api/v1/vodomery/outlier-reviews",
+        access_token=access_token,
+        query_params=query_params,
+    )
+    payload = response.json()
+    return [dict(item) for item in payload.get("rows", [])]
+
+
+def update_vodomery_outlier_review(
+    access_token: str,
+    review_id: int,
+    payload: dict[str, object],
+) -> dict[str, object]:
+    response = _request(
+        "PATCH",
+        f"/api/v1/vodomery/outlier-reviews/{review_id}",
+        access_token=access_token,
+        json_payload=payload,
+    )
+    return dict(response.json())
+
+
 def update_vodomery_expected_zero(access_token: str, identifikace_list: list[str]) -> list[dict[str, object]]:
     response = _request(
         "PUT",

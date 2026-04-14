@@ -1,0 +1,72 @@
+[
+  {
+    "name": "_GRECAPTCHA",
+    "value": "09AKhCRwgyxt6zaReEHdZYXChIJkxzB-dT-q1NH_KUPvJ5sxc61kn1Zxo-qso4V4YjeFqEilEbSX_eYo1amzKSgcU",
+    "domain": "www.google.com",
+    "path": "/recaptcha",
+    "expires": 1791725239.051334,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "None"
+  },
+  {
+    "name": "__RequestVerificationToken",
+    "value": "Gic-6e6JkLhk39M5pa8XhL2Ocycg_ufi0-TMumevmdU2fZCG-7IVlaSnAW5Xz6X1LxQcfZ2kxXYCLe_KzkvAf2TRBRPZQZrYRFHOvEwpR181",
+    "domain": "portal.smartfuelpass.com",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "Ultima_LanguageCode",
+    "value": "cs",
+    "domain": "portal.smartfuelpass.com",
+    "path": "/",
+    "expires": 1810720041,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "_ga",
+    "value": "GA1.1.217454881.1776160042",
+    "domain": ".smartfuelpass.com",
+    "path": "/",
+    "expires": 1810733240.774911,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "ASP.NET_SessionId",
+    "value": "5pkoicx1n0jyjcngitj2ixtw",
+    "domain": "portal.smartfuelpass.com",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": ".AspNet.ApplicationCookie",
+    "value": "buKbOIhfMXnfxj3n2beW3N4Wv37UVtCTsheICpDReOJEiybX77o5VTLBvaAn-AHIRppK7k1KN9bt1pJ_ZRz14d88zrUvgT2YTSt_f0P0C1qr6U2aAR6GZqO3En6VYIT4s37Qp6DQQ68TfTnKb3csw23jAUGXQupv9V4Ja5_-fBp-4wipgplux7ymXVaWKGcRtQ_JEPEQyy-6l1BlHV_S4m9R7GZ_7iZnS1veQwQLuvgQouVSSHEQK3thgyf4HhhFcWYgNv5nYDCyUw3j_-5zWzdMZVyfLuKdN4Yk3o05E-ZTlri3AZZXy2FuvG-fIHM-0ZFCGoPh6FxsYa6E_g1ISOTJKL3wce4OEd4brHqBwNQZc_f9IC6iwiv0S7arjmDG4LhTqIU6FePK-4pu3LQaKS_ux9Y5EYoE-w8yo-MtJsz3i7PCD2Z4gHU-oWPF2gdsJ8pSgwpm5OaJA53iP2oWS7FYc4vqaBZqccHetcRcPHTwY_HLLNBinP0w3WBGQLwnOLx1aU_oaOM66UZylePwxzP5obftjJVskLQGefEppuDu-V3Hm_VBBOA5CFXVuxajEn4G_G3EIsHS5t0SCNjT8hVrHrFehUP8rNcEhq4LZaCdlVC-t1qnJjtRDqkv6FtO",
+    "domain": "portal.smartfuelpass.com",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "_ga_EJMFQ39DDL",
+    "value": "GS2.1.s1776173207$o2$g1$t1776173240$j27$l0$h0",
+    "domain": ".smartfuelpass.com",
+    "path": "/",
+    "expires": 1810733240.779934,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  }
+]

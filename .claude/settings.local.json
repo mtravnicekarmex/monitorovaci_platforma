@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(.venv/Scripts/python.exe:*)",
-      "Bash(python -m pytest tests/ -v --tb=short)"
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(ollama launch:*)",
+      "Bash(python -c \"from moduly.mereni.vodomery.SCVK import historie_vetve_pdf; historie_vetve_pdf.generate_pdf\\('test_timeline.pdf'\\); print\\('OK'\\)\")",
+      "Bash(python -c \"from moduly.mereni.vodomery.SCVK import historie_vetve_pdf; historie_vetve_pdf.generate_pdf\\('historie_vetvi.pdf'\\); print\\('OK'\\)\")",
+      "Read(//c/Windows/Fonts/**)"
     ]
   }
 }

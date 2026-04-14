@@ -1,4 +1,8 @@
-from moduly.apps.dashboard.navigation_config import get_dashboard_pages
+from moduly.apps.dashboard.navigation_config import (
+    get_configurable_page_keys,
+    get_configurable_section_keys,
+    get_dashboard_pages,
+)
 
 
 def test_web_search_footer_page_is_before_expected_zero():
@@ -17,3 +21,11 @@ def test_scheduler_health_footer_page_is_after_vodomery_alerting():
     assert "muj_ucet" in footer_page_keys
     assert footer_page_keys.index("vodomery_alerting") < footer_page_keys.index("scheduler_health")
     assert footer_page_keys.index("scheduler_health") < footer_page_keys.index("muj_ucet")
+
+
+def test_manometry_section_and_page_are_configurable():
+    section_keys = get_configurable_section_keys()
+    page_keys = get_configurable_page_keys(section_keys)
+
+    assert "manometry" in section_keys
+    assert "manometry_overview" in page_keys

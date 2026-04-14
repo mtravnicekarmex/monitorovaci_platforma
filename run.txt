@@ -8,5 +8,13 @@ DASHBOARD START
 set DASHBOARD_API_BASE_URL=http://127.0.0.1:8000
 .venv\Scripts\python.exe -m streamlit run moduly\apps\dashboard\login.py --server.port 8001
 
+WEB FRONTEND START
+cd /d C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma_v1.5\frontend_next
+set BACKEND_API_BASE_URL=http://127.0.0.1:8000
+npm run dev -- --hostname 127.0.0.1 --port 3000
+
+WEB FRONTEND STOP
+for /f "tokens=5" %a in ('netstat -ano ^| findstr :3000 ^| findstr LISTENING') do taskkill /PID %a /F
+
 SCHEDULER START
 .venv\Scripts\python.exe main.py

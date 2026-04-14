@@ -10,6 +10,7 @@ from moduly.apps.dashboard.database.users import (
 )
 from moduly.mereni.elektromery.database.models import Elektromer_areal_Mereni
 from moduly.mereni.kalorimetry.database.models import Kalorimetr_areal_Mereni
+from moduly.mereni.manometry.database.models import Manometr_areal_Zarizeni, Mereni_manometry
 from moduly.mereni.plynomery.database.models import Plynomer_areal_Mereni
 from moduly.mereni.vodomery.database.models import Mereni_vodomery
 from services.api.services.dashboard_auth import AuthorizationError, DashboardUserContext
@@ -104,6 +105,22 @@ def list_all_device_options(user_context: DashboardUserContext) -> list[str]:
             .all()
         )
         identifiers.update(str(row[0]) for row in kalorimetry_rows if row[0])
+
+        manometry_device_rows = (
+            session_ms.query(Manometr_areal_Zarizeni.identifikace)
+            .distinct()
+            .order_by(Manometr_areal_Zarizeni.identifikace)
+            .all()
+        )
+        identifiers.update(str(row[0]) for row in manometry_device_rows if row[0])
+
+        manometry_measurement_rows = (
+            session_ms.query(Mereni_manometry.identifikace)
+            .distinct()
+            .order_by(Mereni_manometry.identifikace)
+            .all()
+        )
+        identifiers.update(str(row[0]) for row in manometry_measurement_rows if row[0])
     finally:
         session_ms.close()
 

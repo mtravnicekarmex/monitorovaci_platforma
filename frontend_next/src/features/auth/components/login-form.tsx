@@ -3,6 +3,8 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { resolveSafeNextPath } from "@/lib/auth/next-path";
+
 
 type LoginFormState = {
   username: string;
@@ -20,7 +22,8 @@ export function LoginForm() {
   });
   const [errorMessage, setErrorMessage] = useState("");
 
-  const nextPath = searchParams.get("next") || "/";
+  const nextPath = resolveSafeNextPath(searchParams.get("next"));
+  const urlErrorMessage = searchParams.get("error") || "";
 
   function updateField(field: keyof LoginFormState, value: string) {
     setFormState((current) => ({
@@ -57,7 +60,9 @@ export function LoginForm() {
   }
 
   return (
-    <form className="login-form" onSubmit={handleSubmit}>
+    <form action="/api/auth/login" className="login-form" method="post" onSubmit={handleSubmit}>
+      <input name="next" type="hidden" value={nextPath} />
+
       <label className="field">
         <span>Uzivatelske jmeno</span>
         <input
@@ -83,7 +88,7 @@ export function LoginForm() {
         />
       </label>
 
-      {errorMessage ? <p className="form-error">{errorMessage}</p> : null}
+      {errorMessage || urlErrorMessage ? <p className="form-error">{errorMessage || urlErrorMessage}</p> : null}
 
       <button className="primary-button" disabled={isPending} type="submit">
         {isPending ? "Prihlasuji..." : "Prihlasit"}

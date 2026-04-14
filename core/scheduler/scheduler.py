@@ -7,12 +7,10 @@ from moduly.mereni.vodomery.SCVK.SCVK_to_database import SCVK_save_to_database_a
 from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_to_database import SOFTLINK_to_database_mereni
 from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_data_z_dotazu import SOFTLINK_dotaz
 from core.db.connect import get_session_pg
-from core.db.database_nyni import df_vodomery_vse_join, df_elektromery_vse_join, df_plynomery_vse_join, df_kalorimetry_vse_join, df_manometry_vse_join
 from moduly.apps.web_search.service import hledat_nove_vyskyt, notify_new_results_for_monitor
 from moduly.apps.web_search.database.models import *
 import json
 import threading
-import os
 import time
 import logging
 from pathlib import Path
@@ -359,98 +357,6 @@ def job_max_instances_listener(event):
 
 
 
-# -------------------------
-# Definice jednotlivých funkc
-# -------------------------
-def uloz_vodomery_parquet(path1="data/vodomery_latest.parquet",
-                          path2=r"\\SERVER1A\Company\Holding\Správa Majetku\Budovy\xEvidence\Měření v areálu\aktuální stavy\vodomery_latest.parquet"):
-    """Uloží výsledek df_vse_join_new() do Parquet souboru."""
-
-    # vytvoření adresáře, pokud neexistuje
-    os.makedirs(os.path.dirname(path1), exist_ok=True)
-    os.makedirs(os.path.dirname(path2), exist_ok=True)
-
-    # načtení a uložení
-    df = df_vodomery_vse_join()
-    df.to_parquet(path1, index=False, compression="snappy")
-    df.to_parquet(path2, index=False, compression="snappy")
-    print(f'Uloženo do {path1} a {path2}')
-
-    return path1, path2
-
-
-
-def uloz_elektromery_parquet(path1="data/elektromery_latest.parquet",
-                          path2=r"\\SERVER1A\Company\Holding\Správa Majetku\Budovy\xEvidence\Měření v areálu\aktuální stavy\elektromery_latest.parquet"):
-    """Uloží výsledek df_vse_join_new() do Parquet souboru."""
-
-    # vytvoření adresáře, pokud neexistuje
-    os.makedirs(os.path.dirname(path1), exist_ok=True)
-    os.makedirs(os.path.dirname(path2), exist_ok=True)
-
-    # načtení a uložení
-    df = df_elektromery_vse_join()
-    df.to_parquet(path1, index=False, compression="snappy")
-    df.to_parquet(path2, index=False, compression="snappy")
-    print(f'Uloženo do {path1} a {path2}')
-
-    return path1, path2
-
-
-
-def uloz_plynomery_parquet(path1="data/plynomery_latest.parquet",
-                          path2=r"\\SERVER1A\Company\Holding\Správa Majetku\Budovy\xEvidence\Měření v areálu\aktuální stavy\plynomery_latest.parquet"):
-    """Uloží výsledek df_vse_join_new() do Parquet souboru."""
-
-    # vytvoření adresáře, pokud neexistuje
-    os.makedirs(os.path.dirname(path1), exist_ok=True)
-    os.makedirs(os.path.dirname(path2), exist_ok=True)
-
-    # načtení a uložení
-    df = df_plynomery_vse_join()
-    df.to_parquet(path1, index=False, compression="snappy")
-    df.to_parquet(path2, index=False, compression="snappy")
-    print(f'Uloženo do {path1} a {path2}')
-
-    return path1, path2
-
-
-
-def uloz_kalorimetry_parquet(path1="data/kalorimetry_latest.parquet",
-                          path2=r"\\SERVER1A\Company\Holding\Správa Majetku\Budovy\xEvidence\Měření v areálu\aktuální stavy\kalorimetry_latest.parquet"):
-    """Uloží výsledek df_vse_join_new() do Parquet souboru."""
-
-    # vytvoření adresáře, pokud neexistuje
-    os.makedirs(os.path.dirname(path1), exist_ok=True)
-    os.makedirs(os.path.dirname(path2), exist_ok=True)
-
-    # načtení a uložení
-    df = df_kalorimetry_vse_join()
-    df.to_parquet(path1, index=False, compression="snappy")
-    df.to_parquet(path2, index=False, compression="snappy")
-    print(f'Uloženo do {path1} a {path2}')
-
-    return path1, path2
-
-
-def uloz_manometry_parquet(path1="data/manometry_latest.parquet",
-                          path2=r"\\SERVER1A\Company\Holding\Správa Majetku\Budovy\xEvidence\Měření v areálu\aktuální stavy\manometry_latest.parquet"):
-    """Uloží výsledek df_vse_join_new() do Parquet souboru."""
-
-    # vytvoření adresáře, pokud neexistuje
-    os.makedirs(os.path.dirname(path1), exist_ok=True)
-    os.makedirs(os.path.dirname(path2), exist_ok=True)
-
-    # načtení a uložení
-    df = df_manometry_vse_join()
-    df.to_parquet(path1, index=False, compression="snappy")
-    df.to_parquet(path2, index=False, compression="snappy")
-    print(f'Uloženo do {path1} a {path2}')
-
-    return path1, path2
-
-
-
 def SOFTLINK_save_to_database_all():
     SOFTLINK_to_database_mereni(SOFTLINK_dotaz())
 
@@ -609,14 +515,6 @@ def hourly_job():
     safe_call(SCVK_save_to_database_all)
 
 
-# každou hodinu v pracovní dny od 6:03 do 16:03
-@locked_job
-def working_time_hourly_job():
-    safe_call(uloz_manometry_parquet)
-    safe_call(uloz_kalorimetry_parquet)
-    safe_call(uloz_plynomery_parquet)
-
-
 # každý den v 7:00 a 14:00
 @locked_job
 def daily_seven_and_two_job():
@@ -676,7 +574,6 @@ def main_scheduler():
     job_functions = {
         "quarter_hour_job": quarter_hour_job,
         "hourly_job": hourly_job,
-        "working_time_hourly_job": working_time_hourly_job,
         "daily_seven_and_two_job": daily_seven_and_two_job,
         "daily_job": daily_pulnoc_job,
         "weekly_job": weekly_job,

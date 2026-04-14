@@ -46,17 +46,6 @@ SCHEDULER_JOB_SPECS: tuple[SchedulerJobSpec, ...] = (
         scheduler_kwargs={"max_instances": 1},
     ),
     SchedulerJobSpec(
-        id="working_time_hourly_job",
-        label="Working time hourly",
-        description="Export manometru, kalorimetru a plynomeru do parquetu.",
-        trigger_kwargs={
-            "hour": "6-16",
-            "minute": 3,
-            "second": 5,
-            "day_of_week": "mon-fri",
-        },
-    ),
-    SchedulerJobSpec(
         id="daily_seven_and_two_job",
         label="Daily 7 and 14",
         description="Web search monitoring.",

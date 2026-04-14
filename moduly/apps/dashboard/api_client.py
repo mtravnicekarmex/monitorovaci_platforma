@@ -261,6 +261,56 @@ def list_web_search_results(access_token: str, limit: int = 200) -> list[dict[st
     return [dict(item) for item in payload.get("rows", [])]
 
 
+def get_manometry_devices(access_token: str, limit: int = 500) -> list[str]:
+    response = _request(
+        "GET",
+        "/api/v1/manometry/devices",
+        access_token=access_token,
+        query_params={"limit": limit},
+    )
+    payload = response.json()
+    return [str(item) for item in payload.get("devices", [])]
+
+
+def get_manometry_measurement_series(
+    access_token: str,
+    *,
+    identifikace: str,
+    start_date: str,
+    end_date: str,
+) -> list[dict[str, object]]:
+    response = _request(
+        "GET",
+        "/api/v1/manometry/measurement-series",
+        access_token=access_token,
+        query_params={
+            "identifikace": identifikace,
+            "start_date": start_date,
+            "end_date": end_date,
+        },
+    )
+    payload = response.json()
+    return [dict(item) for item in payload.get("rows", [])]
+
+
+def get_manometry_device_detail(
+    access_token: str,
+    *,
+    identifikace: str,
+) -> dict[str, object] | None:
+    response = _request(
+        "GET",
+        "/api/v1/manometry/device-detail",
+        access_token=access_token,
+        query_params={"identifikace": identifikace},
+    )
+    payload = response.json()
+    if not payload.get("found"):
+        return None
+    device = payload.get("device")
+    return dict(device) if isinstance(device, dict) else None
+
+
 def get_vodomery_devices(access_token: str, source_filter: str = "VSE", limit: int = 500) -> list[str]:
     response = _request(
         "GET",

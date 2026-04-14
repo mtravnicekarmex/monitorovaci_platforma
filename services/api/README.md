@@ -46,6 +46,7 @@ curl http://localhost:8000/api/v1/vodomery/devices \
 |------------|-------|
 | `get_current_user` | jakýkoliv přihlášený uživatel |
 | `get_current_vodomery_user` | uživatel s přístupem k vodoměrům |
+| `get_current_manometry_user` | uživatel s přístupem k manometrům |
 | `get_current_admin_user` | administrátor |
 
 ## API Dokumentace
@@ -115,6 +116,13 @@ Automaticky generovaná dokumentace je dostupná na:
 | POST | `/api/v1/vodomery/alert-rules` | Vytvoření alert pravidla (admin) |
 | PATCH | `/api/v1/vodomery/alert-rules/{id}` | Úprava alert pravidla (admin) |
 | DELETE | `/api/v1/vodomery/alert-rules/{id}` | Smazání alert pravidla (admin) |
+
+#### Manometry
+| Metoda | Cesta | Popis |
+|--------|-------|-------|
+| GET | `/api/v1/manometry/devices` | Seznam manometrů |
+| GET | `/api/v1/manometry/measurement-series` | Časová řada měření |
+| GET | `/api/v1/manometry/device-detail` | Detail zařízení a lifetime statistiky |
 
 ## Konfigurace
 

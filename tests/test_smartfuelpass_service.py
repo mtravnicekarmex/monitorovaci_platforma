@@ -530,8 +530,9 @@ def test_build_charge_sessions_report_summarizes_last_week_previous_month_and_to
     assert report.last_week_rows[0].date_range_label == "11.04.2026 13:56 - 14:29"
     assert report.last_week_rows[0].kwh_label == "33,489 kWh"
     assert report.last_week_rows[0].tariff_label == "ARMEX HOLDING 15Kč + 20,00%"
-    assert len(report.current_month_rows) == 1
-    assert report.current_month_rows[0].date_range_label == "02.04.2026 10:50 - 11:20"
+    assert len(report.current_month_rows) == 3
+    assert report.current_month_rows[0].date_range_label == "11.04.2026 13:56 - 14:29"
+    assert report.current_month_rows[-1].date_range_label == "02.04.2026 10:50 - 11:20"
     assert report.previous_month_rows[0].tariff_label == "ARMEX HOLDING 15Kč + 20,00%"
 
 
@@ -567,6 +568,7 @@ def test_build_charge_sessions_report_html_contains_summary_sections():
     html = service.build_charge_sessions_report_html(report)
 
     assert "data:image/svg+xml;base64," in html
+    assert "data:image/png;base64," in html
     assert "Poslední týden" in html
     assert "Tento měsíc" in html
     assert "Minulý měsíc" in html
@@ -583,7 +585,85 @@ def test_build_charge_sessions_report_html_contains_summary_sections():
     assert ">Cena<" in html
     assert "120,50 Kč" in html
     assert html.count("11.04.2026 13:56 - 14:29") == 1
+    assert "<h2>Poslední týden</h2>" not in html
     assert "První relace:" not in html
     assert "Poslední relace:" not in html
     assert "Souhrn za poslední týden" not in html
     assert "Smart Fuel Pass logo" in html
+    assert "ARMEX logo" in html
+
+
+def test_send_charge_sessions_report_email_generates_pdf_and_sends_attachment(monkeypatch, tmp_path):
+    dataframe = pd.DataFrame(
+        [
+            {
+                "Hodnoty měřidel": "13.04.2026 09:15",
+                "Čas spuštění": "11.04.2026 13:56 Vzdálené zahájení přes backend systém",
+                "Čas ukončení": "11.04.2026 14:29 Ukončeno nabíječkou",
+                "Název EV lokace": "Armex - Budova E null",
+                "Konektor EVSE ID": "A1",
+                "Veřejné ID": "Domácí nabíjení Dokončeno 0 kW 33,489 kWh 79 % null AdHoc nabíjení - OPT (pax16**128150) ARMEX HOLDING 15Kč + 20,00 % (ARMEX HOLDING 15Kč) 0,00 Kč (120,50 Kč)",
+                "Suma": "120,50 Kč",
+            },
+            {
+                "Hodnoty měřidel": "20.03.2026 08:30",
+                "Čas spuštění": "20.03.2026 07:45 Vzdálené zahájení přes backend systém",
+                "Čas ukončení": "20.03.2026 08:30 Ukončeno nabíječkou",
+                "Název EV lokace": "Praha",
+                "Konektor EVSE ID": "B1",
+                "Veřejné ID": "Domácí nabíjení Dokončeno 0 kW 12,500 kWh 71 % null AdHoc nabíjení - Web (Google pay) ARMEX HOLDING 15Kč + 20,00 % (ARMEX HOLDING 15Kč) 0,00 Kč (300,00 Kč)",
+                "Suma": "300,00 Kč",
+            },
+        ]
+    )
+    report = service.build_charge_sessions_report(
+        dataframe,
+        reference_datetime=datetime.datetime(2026, 4, 14, 8, 30),
+        subject_name="ARMEX HOLDING, a.s.",
+    )
+    pdf_bytes = b"%PDF-1.4\n%fake"
+    sent_messages = []
+
+    monkeypatch.setattr(
+        service,
+        "build_charge_sessions_report_from_portal",
+        lambda **kwargs: report,
+    )
+    monkeypatch.setattr(
+        service,
+        "render_charge_sessions_report_pdf",
+        lambda generated_report: pdf_bytes,
+    )
+    monkeypatch.setattr(
+        service,
+        "send_email_outlook",
+        lambda **kwargs: sent_messages.append(kwargs),
+    )
+
+    def fake_config(key, default=""):
+        mapping = {
+            "SMARTFUELPASS_WEEKLY_REPORT_RECIPIENTS": "first@example.com, second@example.com",
+            "SMARTFUELPASS_WEEKLY_REPORT_SENDER_ALIAS": "upozorneni@example.com",
+            "O_EMAIL_UPOZORNENI": "upozorneni@example.com",
+        }
+        return mapping.get(key, default)
+
+    monkeypatch.setattr(service, "config", fake_config)
+
+    result = service.send_charge_sessions_report_email(reference_datetime=datetime.datetime(2026, 4, 14, 8, 30))
+
+    assert result["recipient_count"] == 2
+    assert result["pdf_filename"] == "smartfuelpass_charge_sessions_20260414_083000.pdf"
+    assert result["pdf_size_bytes"] == len(pdf_bytes)
+    assert len(sent_messages) == 2
+    assert sent_messages[0]["email_receiver"] == "first@example.com"
+    assert sent_messages[1]["email_receiver"] == "second@example.com"
+    assert sent_messages[0]["sender_alias"] == "upozorneni@example.com"
+    assert sent_messages[0]["is_html"] is True
+    assert sent_messages[0]["attachments"] == [
+        ("smartfuelpass_charge_sessions_20260414_083000.pdf", pdf_bytes, "application", "pdf")
+    ]
+    assert "Smart Fuel Pass | report nabijecich relaci | 14.04.2026" == sent_messages[0]["subject"]
+    assert "V příloze je přiložen aktuální PDF report" in sent_messages[0]["body"]
+    assert "smartfuelpass_charge_sessions_20260414_083000.pdf" in sent_messages[0]["body"]
+    assert "Poslední týden" in sent_messages[0]["body"]

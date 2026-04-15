@@ -19,6 +19,7 @@ import requests
 from bs4 import BeautifulSoup
 from decouple import config
 
+from app.channels.email import send_email_outlook
 from app.time_utils import utc_now_naive
 
 if TYPE_CHECKING:
@@ -29,7 +30,6 @@ DEFAULT_BASE_URL = "https://portal.smartfuelpass.com/"
 DEFAULT_LOGIN_URL = "https://portal.smartfuelpass.com/User/Login"
 DEFAULT_SESSION_COOKIE_PATH = Path("data") / "smartfuelpass" / "session_cookies.json"
 DEFAULT_REPORT_EXPORT_PATH = Path("data") / "smartfuelpass" / "reporting_snapshot.json"
-DEFAULT_REPORTS_DIR = Path("data") / "smartfuelpass" / "reports"
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_LOGIN_TIMEOUT_SECONDS = 300
 DEFAULT_TABLE_WAIT_TIMEOUT_SECONDS = 45
@@ -39,7 +39,9 @@ DEFAULT_DASHBOARD_PATH = "/Fuel/Merchant/Dashboard?contractId=12147&accountId=0"
 DEFAULT_CHARGING_SESSIONS_LABEL = "Nabíjecí relace"
 DEFAULT_SUMMARY_LABEL = "Celkově"
 DEFAULT_REPORT_SUBJECT_NAME = "ARMEX HOLDING, a.s."
+DEFAULT_WEEKLY_REPORT_RECIPIENTS = "m.travnicek@armex.cz"
 DEFAULT_LOGO_PATH = Path("data") / "smartfuelpass" / "smfp_logo_white.svg"
+DEFAULT_ARMEX_LOGO_PATH = Path("data") / "ARMEX" / "logo_ARMEX.png"
 LOGIN_PATH_FRAGMENT = "/User/Login"
 
 
@@ -165,11 +167,34 @@ def _smartfuel_logo_path() -> Path:
     )
 
 
-def _smartfuel_reports_dir() -> Path:
+def _armex_logo_path() -> Path:
     return _resolve_path(
-        config("SMARTFUELPASS_REPORTS_DIR", default=str(DEFAULT_REPORTS_DIR)),
-        DEFAULT_REPORTS_DIR,
+        config("SMARTFUELPASS_ARMEX_LOGO_PATH", default=str(DEFAULT_ARMEX_LOGO_PATH)),
+        DEFAULT_ARMEX_LOGO_PATH,
     )
+
+
+def _smartfuel_weekly_report_recipients() -> tuple[str, ...]:
+    raw_recipients = config(
+        "SMARTFUELPASS_WEEKLY_REPORT_RECIPIENTS",
+        default=DEFAULT_WEEKLY_REPORT_RECIPIENTS,
+    )
+    recipients = tuple(
+        item.strip()
+        for item in raw_recipients.split(",")
+        if item.strip()
+    )
+    if not recipients:
+        raise SmartFuelPassError("Neni nastavena promenna SMARTFUELPASS_WEEKLY_REPORT_RECIPIENTS.")
+    return recipients
+
+
+def _smartfuel_weekly_report_sender_alias() -> str | None:
+    sender_alias = config(
+        "SMARTFUELPASS_WEEKLY_REPORT_SENDER_ALIAS",
+        default=config("O_EMAIL_UPOZORNENI", default=""),
+    ).strip()
+    return sender_alias or None
 
 
 def _smartfuel_email() -> str:
@@ -1454,9 +1479,6 @@ def build_charge_sessions_report(
     current_month_rows = prepared[
         prepared["session_at"].between(current_month_start, current_month_end, inclusive="both")
     ].copy()
-    current_month_rows = current_month_rows[
-        ~current_month_rows["session_at"].between(last_week_start, last_week_end, inclusive="both")
-    ].copy()
     previous_month_rows = prepared[
         prepared["session_at"].between(previous_month_start, previous_month_end, inclusive="both")
     ].copy()
@@ -1507,13 +1529,12 @@ def _format_date_range(start: datetime | None, end: datetime | None) -> str:
     return f"{start.strftime('%d.%m.%Y')} - {end.strftime('%d.%m.%Y')}"
 
 
-def _load_logo_data_uri() -> str:
-    logo_path = _smartfuel_logo_path()
-    if not logo_path.exists():
-        raise SmartFuelPassError(f"Logo file was not found: {logo_path}")
+def _load_image_data_uri(image_path: Path) -> str:
+    if not image_path.exists():
+        raise SmartFuelPassError(f"Logo file was not found: {image_path}")
 
-    mime_type = mimetypes.guess_type(str(logo_path))[0] or "image/png"
-    encoded = base64.b64encode(logo_path.read_bytes()).decode("ascii")
+    mime_type = mimetypes.guess_type(str(image_path))[0] or "image/png"
+    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
     return f"data:{mime_type};base64,{encoded}"
 
 
@@ -1565,8 +1586,59 @@ def _build_rows_section(title: str, rows: Iterable[SmartFuelPassChargeSessionRow
     )
 
 
+def _build_charge_sessions_report_email_subject(report: SmartFuelPassChargeSessionsReport) -> str:
+    return f"Smart Fuel Pass | report nabijecich relaci | {report.generated_at:%d.%m.%Y}"
+
+
+def _build_charge_sessions_report_pdf_filename(
+    report: SmartFuelPassChargeSessionsReport,
+) -> str:
+    return f"smartfuelpass_charge_sessions_{report.generated_at:%Y%m%d_%H%M%S}.pdf"
+
+
+def _build_charge_sessions_report_email_body(
+    report: SmartFuelPassChargeSessionsReport,
+    pdf_filename: str,
+) -> str:
+    summary_rows = "".join(
+        (
+            "<tr>"
+            f"<td style='padding:8px 10px;border:1px solid #d0d7de;background:#f6f8fa;'><strong>{escape(summary.label)}</strong></td>"
+            f"<td style='padding:8px 10px;border:1px solid #d0d7de;text-align:right;'>{summary.session_count}</td>"
+            f"<td style='padding:8px 10px;border:1px solid #d0d7de;text-align:right;'>{escape(format_czk(summary.total_amount))}</td>"
+            f"<td style='padding:8px 10px;border:1px solid #d0d7de;text-align:right;'>{summary.location_count}</td>"
+            f"<td style='padding:8px 10px;border:1px solid #d0d7de;text-align:right;'>{summary.connector_count}</td>"
+            "</tr>"
+        )
+        for summary in (report.last_week, report.previous_month, report.total)
+    )
+
+    return (
+        "<html><body style='font-family:Segoe UI,Arial,sans-serif;color:#1f2328;'>"
+        "<h2 style='margin:0 0 12px;'>Smart Fuel Pass report nabíjecích relací</h2>"
+        "<p style='margin:0 0 12px;'>"
+        "V příloze je přiložen aktuální PDF report nabíjecích relací ze Smart Fuel Pass."
+        "</p>"
+        f"<p style='margin:0 0 16px;'><strong>Subjekt:</strong> {escape(report.subject_name)}<br>"
+        f"<strong>Vygenerováno:</strong> {escape(_format_datetime(report.generated_at))}<br>"
+        f"<strong>Soubor:</strong> {escape(pdf_filename)}</p>"
+        "<table style='border-collapse:collapse;font-size:14px;'>"
+        "<tr>"
+        "<th style='padding:8px 10px;border:1px solid #d0d7de;background:#f6f8fa;text-align:left;'>Období</th>"
+        "<th style='padding:8px 10px;border:1px solid #d0d7de;background:#f6f8fa;text-align:right;'>Relace</th>"
+        "<th style='padding:8px 10px;border:1px solid #d0d7de;background:#f6f8fa;text-align:right;'>Částka</th>"
+        "<th style='padding:8px 10px;border:1px solid #d0d7de;background:#f6f8fa;text-align:right;'>Lokace</th>"
+        "<th style='padding:8px 10px;border:1px solid #d0d7de;background:#f6f8fa;text-align:right;'>Konektory</th>"
+        "</tr>"
+        f"{summary_rows}"
+        "</table>"
+        "</body></html>"
+    )
+
+
 def build_charge_sessions_report_html(report: SmartFuelPassChargeSessionsReport) -> str:
-    logo_data_uri = _load_logo_data_uri()
+    logo_data_uri = _load_image_data_uri(_smartfuel_logo_path())
+    armex_logo_data_uri = _load_image_data_uri(_armex_logo_path())
 
     return f"""<!DOCTYPE html>
 <html lang="cs">
@@ -1586,80 +1658,119 @@ def build_charge_sessions_report_html(report: SmartFuelPassChargeSessionsReport)
       margin: 0;
     }}
     .header {{
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 2px solid #0f4c81;
-      padding-bottom: 12px;
-      margin-bottom: 18px;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: flex-start;
+      gap: 18px;
+      border-bottom: 1.5px solid #0f4c81;
+      padding-bottom: 10px;
+      margin-bottom: 14px;
     }}
     .brand {{
       display: flex;
       align-items: center;
       background: #0f4c81;
-      border-radius: 10px;
-      padding: 10px 16px;
+      border-radius: 8px;
+      padding: 6px 10px;
+      box-shadow: 0 4px 12px rgba(15, 76, 129, 0.12);
+      justify-self: start;
     }}
     .brand img {{
-      max-height: 68px;
-      max-width: 260px;
+      max-height: 26px;
+      max-width: 102px;
       object-fit: contain;
+      display: block;
+    }}
+    .partner-brand {{
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      height: 42px;
+      justify-self: center;
+    }}
+    .partner-brand img {{
+      height: 42px;
+      max-width: 180px;
+      object-fit: contain;
+      display: block;
     }}
     .meta {{
+      min-width: 260px;
       color: #52606d;
-      font-size: 12px;
+      font-size: 11px;
       text-align: right;
-      line-height: 1.6;
+      line-height: 1.45;
+      justify-self: end;
+    }}
+    .meta strong {{
+      color: #16202a;
     }}
     .summary-grid {{
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 12px;
-      margin-bottom: 18px;
+      gap: 10px;
+      margin-bottom: 14px;
     }}
     .summary-card {{
-      border: 1px solid #d7dee5;
+      border: 1px solid #d8e1eb;
       border-radius: 10px;
-      background: #f8fafc;
-      padding: 12px;
+      background: linear-gradient(180deg, #ffffff 0%, #f7fafc 100%);
+      padding: 10px 12px 11px;
       break-inside: avoid;
+      box-shadow: 0 2px 8px rgba(15, 76, 129, 0.06);
+    }}
+    .summary-card::before {{
+      content: "";
+      display: block;
+      width: 38px;
+      height: 3px;
+      margin-bottom: 8px;
+      border-radius: 999px;
+      background: #0f4c81;
     }}
     .summary-title {{
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 700;
       color: #0f4c81;
     }}
     .summary-range {{
-      margin: 4px 0 10px;
+      margin: 3px 0 9px;
       color: #52606d;
-      font-size: 11px;
+      font-size: 10px;
     }}
     .summary-metrics {{
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      gap: 8px 10px;
+      gap: 7px 10px;
     }}
     .metric-label {{
       display: block;
       color: #6b7280;
       text-transform: uppercase;
-      font-size: 10px;
-      letter-spacing: 0.04em;
+      font-size: 9px;
+      letter-spacing: 0.08em;
     }}
     .metric-value {{
       display: block;
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 700;
-      margin-top: 2px;
+      margin-top: 1px;
     }}
     .section {{
-      margin-top: 18px;
+      margin-top: 14px;
+      border: 1px solid #d8e1eb;
+      border-radius: 10px;
+      overflow: hidden;
+      background: #ffffff;
       break-inside: avoid;
     }}
     .section h2 {{
-      margin: 0 0 8px;
-      font-size: 16px;
+      margin: 0;
+      padding: 10px 12px 8px;
+      font-size: 15px;
       color: #0f4c81;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+      border-bottom: 1px solid #e5e7eb;
     }}
     table {{
       width: 100%;
@@ -1667,10 +1778,12 @@ def build_charge_sessions_report_html(report: SmartFuelPassChargeSessionsReport)
     }}
     thead th {{
       text-align: left;
-      padding: 8px;
+      padding: 7px 8px;
       background: #0f4c81;
       color: #ffffff;
-      font-size: 10px;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }}
     tbody td {{
       padding: 7px 8px;
@@ -1680,12 +1793,16 @@ def build_charge_sessions_report_html(report: SmartFuelPassChargeSessionsReport)
     tbody tr:nth-child(even) {{
       background: #f8fafc;
     }}
+    tbody tr:last-child td {{
+      border-bottom: none;
+    }}
     .amount {{
       text-align: right;
       white-space: nowrap;
     }}
     .empty-state {{
       margin: 0;
+      padding: 12px;
       color: #52606d;
     }}
   </style>
@@ -1694,6 +1811,9 @@ def build_charge_sessions_report_html(report: SmartFuelPassChargeSessionsReport)
   <div class="header">
     <div class="brand">
       <img src="{logo_data_uri}" alt="Smart Fuel Pass logo">
+    </div>
+    <div class="partner-brand">
+      <img src="{armex_logo_data_uri}" alt="ARMEX logo">
     </div>
     <div class="meta">
       <strong>Subjekt:</strong> {escape(report.subject_name)}<br>
@@ -1707,22 +1827,16 @@ def build_charge_sessions_report_html(report: SmartFuelPassChargeSessionsReport)
     {_build_summary_card(report.total)}
   </div>
 
-  {_build_rows_section("Poslední týden", report.last_week_rows)}
   {_build_rows_section("Tento měsíc", report.current_month_rows)}
   {_build_rows_section("Minulý měsíc", report.previous_month_rows)}
 </body>
 </html>"""
 
 
-def save_charge_sessions_report_pdf(
+def render_charge_sessions_report_pdf(
     report: SmartFuelPassChargeSessionsReport,
-    *,
-    output_path: str | Path | None = None,
-) -> Path:
+) -> bytes:
     sync_playwright, _ = _load_playwright_api()
-    default_output_path = _smartfuel_reports_dir() / f"smartfuelpass_charge_sessions_{report.generated_at:%Y%m%d_%H%M%S}.pdf"
-    resolved_output_path = _resolve_path(output_path or default_output_path, default_output_path)
-    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
     html = build_charge_sessions_report_html(report)
 
     with sync_playwright() as playwright:
@@ -1731,16 +1845,13 @@ def save_charge_sessions_report_pdf(
             page = browser.new_page()
             page.set_content(html, wait_until="load")
             page.emulate_media(media="screen")
-            page.pdf(
-                path=str(resolved_output_path),
+            return page.pdf(
                 format="A4",
                 print_background=True,
                 margin={"top": "12mm", "right": "10mm", "bottom": "12mm", "left": "10mm"},
             )
         finally:
             browser.close()
-
-    return resolved_output_path
 
 
 def build_charge_sessions_report_from_portal(
@@ -1761,18 +1872,45 @@ def build_charge_sessions_report_from_portal(
     )
 
 
-def generate_charge_sessions_report_pdf(
+def send_charge_sessions_report_email(
     *,
+    recipients: Iterable[str] | None = None,
     cookie_path: str | Path | None = None,
-    output_path: str | Path | None = None,
     reference_datetime: datetime | None = None,
     subject_name: str | None = None,
     headless: bool = True,
-) -> Path:
+) -> dict[str, Any]:
+    resolved_recipients = tuple(recipients or _smartfuel_weekly_report_recipients())
     report = build_charge_sessions_report_from_portal(
         cookie_path=cookie_path,
         reference_datetime=reference_datetime,
         subject_name=subject_name,
         headless=headless,
     )
-    return save_charge_sessions_report_pdf(report, output_path=output_path)
+    pdf_bytes = render_charge_sessions_report_pdf(report)
+    pdf_filename = _build_charge_sessions_report_pdf_filename(report)
+    subject = _build_charge_sessions_report_email_subject(report)
+    body = _build_charge_sessions_report_email_body(report, pdf_filename)
+    sender_alias = _smartfuel_weekly_report_sender_alias()
+
+    for recipient in resolved_recipients:
+        send_email_outlook(
+            email_receiver=recipient,
+            subject=subject,
+            body=body,
+            sender_alias=sender_alias,
+            is_html=True,
+            attachments=[(pdf_filename, pdf_bytes, "application", "pdf")],
+        )
+
+    return {
+        "title": subject,
+        "recipient_count": len(resolved_recipients),
+        "recipients": resolved_recipients,
+        "pdf_filename": pdf_filename,
+        "pdf_size_bytes": len(pdf_bytes),
+        "generated_at": report.generated_at.isoformat(),
+        "last_week_sessions": report.last_week.session_count,
+        "previous_month_sessions": report.previous_month.session_count,
+        "total_sessions": report.total.session_count,
+    }

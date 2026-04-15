@@ -1,3 +1,15 @@
+"""
+Scheduler pro automatizované úlohy monitorovací platformy.
+
+Spravuje plánování a spouštění periodických úloh:
+- Čtvrtletní job (každých 15 minut)
+- Hodinový job (každou hodinu)
+- Denní job (7:00 a 14:00)
+- Noční job (0:15)
+- Týdenní job (každé pondělí)
+- Měsíční job (první den v měsíci)
+"""
+
 import html
 import sys
 from datetime import datetime
@@ -37,6 +49,59 @@ from moduly.mereni.vodomery.reporting import (
 )
 from moduly.mereni.vodomery.vodomery_events import detect_events_from_scores
 from moduly.apps.meteo.meteo_sync import meteo_sync
+from moduly.apps.smartfuelpass import send_charge_sessions_report_email
+
+
+# -------------------------
+# Logger
+# -------------------------
+
+SCHEDULER_DIR = Path(__file__).resolve().parent
+SCHEDULER_LOGS_DIR = SCHEDULER_DIR / "logs"
+SCHEDULER_LOG_PATH = SCHEDULER_LOGS_DIR / "scheduler.log"
+
+
+def setup_logging():
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    SCHEDULER_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+    )
+
+    has_console_handler = any(
+        isinstance(handler, logging.StreamHandler) and getattr(handler, "stream", None) is sys.stdout
+        for handler in logger.handlers
+    )
+    if not has_console_handler:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
+    has_file_handler = any(
+        isinstance(handler, TimedRotatingFileHandler)
+        and Path(getattr(handler, "baseFilename", "")).resolve() == SCHEDULER_LOG_PATH.resolve()
+        for handler in logger.handlers
+    )
+    if not has_file_handler:
+        file_handler = TimedRotatingFileHandler(
+            SCHEDULER_LOG_PATH,
+            when="midnight",
+            interval=1,
+            backupCount=14,
+            encoding="utf-8"
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+    # potlačí SQLAlchemy spam
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
+    return logging.getLogger(__name__)
+
+
+logger = setup_logging()
 
 
 # -------------------------
@@ -251,7 +316,7 @@ def _send_scheduler_alert(
     )
 
     send_email_outlook(
-        email_receiver='m.travnicek@armex.cz',
+        email_receiver=config('MY_EMAIL'),
         sender_alias=config('O_EMAIL_ALARM'),
         subject=f"[ALERT] Scheduler | {job_id} | {status_text.upper()}",
         body=body,
@@ -274,24 +339,27 @@ def _deliver_scheduler_alert(**kwargs) -> None:
 
 def job_success_listener(event):
     metrics = get_metrics_store()
-    if isinstance(event.retval, SkippedJobResult):
-        metrics.record_job_skipped(event.job_id, event.retval.reason)
+    try:
+        if isinstance(event.retval, SkippedJobResult):
+            metrics.record_job_skipped(event.job_id, event.retval.reason)
+            _sync_job_next_run(event.job_id)
+            logger.warning(
+                "JOB SKIPPED | id=%s | scheduled=%s | reason=%s | locks=%s",
+                event.job_id,
+                event.scheduled_run_time,
+                event.retval.reason,
+                ",".join(event.retval.lock_names),
+            )
+            return
+        metrics.record_job_success(event.job_id)
         _sync_job_next_run(event.job_id)
-        logger.warning(
-            "JOB SKIPPED | id=%s | scheduled=%s | reason=%s | locks=%s",
+        logger.info(
+            "JOB SUCCESS | id=%s | scheduled=%s",
             event.job_id,
-            event.scheduled_run_time,
-            event.retval.reason,
-            ",".join(event.retval.lock_names),
+            event.scheduled_run_time
         )
-        return
-    metrics.record_job_success(event.job_id)
-    _sync_job_next_run(event.job_id)
-    logger.info(
-        "JOB SUCCESS | id=%s | scheduled=%s",
-        event.job_id,
-        event.scheduled_run_time
-    )
+    except Exception as e:
+        logger.error("JOB SUCCESS LISTENER FAILED | id=%s | reason=%s", event.job_id, e, exc_info=True)
 
 
 
@@ -364,7 +432,6 @@ def SOFTLINK_save_to_database_all():
 def daily_web_monitor_job():
     session = get_session_pg()
     failures = []
-    first_error = None
 
     try:
         monitory = session.query(Monitor).all()
@@ -391,8 +458,6 @@ def daily_web_monitor_job():
             except Exception as exc:
                 session.rollback()  # reset session po chybě v transakci
                 failures.append((monitor.url, _format_scheduler_reason(exc)))
-                if first_error is None:
-                    first_error = exc
 
         if failures:
             failure_summary = _format_monitor_failures(failures)
@@ -400,7 +465,7 @@ def daily_web_monitor_job():
                 f"Web monitor selhal pro {len(failures)} cil(e): {failure_summary}",
                 alert_targets=tuple(url for url, _ in failures),
                 alert_reason=failure_summary,
-            ) from first_error
+            )
 
     finally:
         session.close()
@@ -418,16 +483,13 @@ def safe_call(fn, *args, **kwargs):
     try:
         logger.info("START %s", fn.__name__)
         result = fn(*args, **kwargs)
-        duration = round(time.time() - start, 2)
-        get_metrics_store().record_job_success(fn.__name__, duration)
+        get_metrics_store().record_job_success(fn.__name__, round(time.time() - start, 2))
         return result
     except SchedulerContextError:
-        duration = round(time.time() - start, 2)
-        get_metrics_store().record_job_error(fn.__name__, duration)
+        get_metrics_store().record_job_error(fn.__name__, round(time.time() - start, 2))
         raise
     except Exception as exc:
-        duration = round(time.time() - start, 2)
-        get_metrics_store().record_job_error(fn.__name__, duration)
+        get_metrics_store().record_job_error(fn.__name__, round(time.time() - start, 2))
         raise SchedulerContextError(
             f"Selhal krok '{fn.__name__}'",
             alert_targets=(fn.__name__,),
@@ -468,6 +530,7 @@ def locked_job(*decorator_args):
     if decorator_args and callable(decorator_args[0]) and len(decorator_args) == 1:
         return _build_locked_job(decorator_args[0], ())
     return lambda fn: _build_locked_job(fn, decorator_args)
+
 
 
 
@@ -535,6 +598,12 @@ def weekly_job():
     safe_call(send_vodomery_model_rebuild_report, rebuild_result)
 
 
+# každé úterý v 6:55:05
+@locked_job
+def smartfuelpass_weekly_report_job():
+    safe_call(send_charge_sessions_report_email)
+
+
 # každý první den v měsíci v 0:20:05
 @locked_job
 def monthly_job():
@@ -577,6 +646,7 @@ def main_scheduler():
         "daily_seven_and_two_job": daily_seven_and_two_job,
         "daily_job": daily_pulnoc_job,
         "weekly_job": weekly_job,
+        "smartfuelpass_weekly_report_job": smartfuelpass_weekly_report_job,
         "monthly_job": monthly_job,
     }
     for job_spec in get_scheduler_job_specs():
@@ -606,7 +676,7 @@ def main_scheduler():
         while True:
             scheduler_metrics.heartbeat()
             _sync_all_job_next_runs()
-            time.sleep(60)
+            time.sleep(300)
     except KeyboardInterrupt:
         logger.info("Ukončuji scheduler...")
         scheduler.shutdown()
@@ -616,11 +686,6 @@ def main_scheduler():
 
 
 
-
-# -------------------------
-# Logger
-# -------------------------
-logger = setup_logging()
 
 # -------------------------
 # Lock
@@ -665,6 +730,7 @@ def _sync_all_job_next_runs() -> None:
             for job in scheduler_instance.get_jobs()
         }
     )
+
 
 # -------------------------
 # Start

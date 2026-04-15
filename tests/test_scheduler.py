@@ -362,7 +362,25 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
     ]
 
 
-def test_main_scheduler_registers_monthly_job(monkeypatch, fake_metrics_store):
+def test_smartfuelpass_weekly_report_job_sends_email_report(monkeypatch):
+    calls = []
+
+    def fake_safe_call(fn, *args, **kwargs):
+        calls.append((fn.__name__, args, kwargs))
+        return fn(*args, **kwargs)
+
+    def fake_send_charge_sessions_report_email():
+        return {"recipient_count": 1}
+
+    monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
+    monkeypatch.setattr(scheduler, "send_charge_sessions_report_email", fake_send_charge_sessions_report_email)
+
+    scheduler.smartfuelpass_weekly_report_job()
+
+    assert [name for name, _, _ in calls] == ["fake_send_charge_sessions_report_email"]
+
+
+def test_main_scheduler_registers_monthly_and_smartfuelpass_jobs(monkeypatch, fake_metrics_store):
     fake_logger = FakeLogger()
 
     class FakeScheduler:
@@ -395,11 +413,17 @@ def test_main_scheduler_registers_monthly_job(monkeypatch, fake_metrics_store):
     scheduler.main_scheduler()
 
     monthly_job = next(job for job in fake_scheduler.jobs if job["id"] == "monthly_job")
+    smartfuelpass_job = next(job for job in fake_scheduler.jobs if job["id"] == "smartfuelpass_weekly_report_job")
 
     assert monthly_job["fn"] is scheduler.monthly_job
     assert "day='1'" in str(monthly_job["trigger"])
     assert "minute='20'" in str(monthly_job["trigger"])
     assert "second='5'" in str(monthly_job["trigger"])
+    assert smartfuelpass_job["fn"] is scheduler.smartfuelpass_weekly_report_job
+    assert "day_of_week='tue'" in str(smartfuelpass_job["trigger"])
+    assert "hour='6'" in str(smartfuelpass_job["trigger"])
+    assert "minute='55'" in str(smartfuelpass_job["trigger"])
+    assert "second='5'" in str(smartfuelpass_job["trigger"])
     assert fake_metrics_store.started == 1
     assert fake_metrics_store.heartbeat_calls == 1
     assert fake_metrics_store.stopped == 1

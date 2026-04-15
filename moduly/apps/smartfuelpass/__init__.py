@@ -15,7 +15,6 @@ from moduly.apps.smartfuelpass.service import (
     current_month_period,
     fetch_charge_sessions_dataframe,
     fetch_reporting_snapshots,
-    generate_charge_sessions_report_pdf,
     last_completed_week_period,
     login_and_save_session_with_playwright,
     open_charging_sessions,
@@ -24,7 +23,7 @@ from moduly.apps.smartfuelpass.service import (
     open_summary,
     parse_report_targets,
     previous_month_period,
-    save_charge_sessions_report_pdf,
+    send_charge_sessions_report_email,
     save_reporting_export,
 )
 
@@ -45,7 +44,6 @@ __all__ = [
     "current_month_period",
     "fetch_charge_sessions_dataframe",
     "fetch_reporting_snapshots",
-    "generate_charge_sessions_report_pdf",
     "last_completed_week_period",
     "login_and_save_session_with_playwright",
     "open_charging_sessions",
@@ -54,6 +52,6 @@ __all__ = [
     "open_summary",
     "parse_report_targets",
     "previous_month_period",
-    "save_charge_sessions_report_pdf",
+    "send_charge_sessions_report_email",
     "save_reporting_export",
 ]

@@ -311,6 +311,68 @@ class VodomeryBranchHourlyRow(BaseModel):
     denni_limit: float | None = None
 
 
+class VodomeryBillingOptionRow(BaseModel):
+    key: str
+    title: str
+    billing_ident: str
+
+
+class VodomeryBillingOptionsResponse(BaseModel):
+    total: int
+    rows: list[VodomeryBillingOptionRow]
+
+
+class VodomeryBillingDeviceRow(BaseModel):
+    identifikace: str
+    spotreba: float
+    podil_na_podruznych_procent: float
+    podil_na_fakturacnim_procent: float | None = None
+    rozpoctena_fakturacni_spotreba: float | None = None
+    active_segment_count: int
+    segments_with_data_count: int
+    segments_without_data_count: int
+    active_from: datetime | None = None
+    active_to: datetime | None = None
+
+
+class VodomeryBillingAssignmentRow(BaseModel):
+    identifikace: str
+    start_time: datetime
+    end_time: datetime
+    duration_hours: float
+
+
+class VodomeryBillingSegmentRow(BaseModel):
+    start_time: datetime
+    end_time: datetime
+    active_devices: list[str]
+    device_count: int
+    devices_with_data_count: int
+    devices_without_data_count: int
+    submeter_consumption: float
+    billing_consumption: float | None = None
+    difference: float | None = None
+
+
+class VodomeryBillingPeriodResponse(BaseModel):
+    branch_key: str
+    branch_title: str
+    billing_ident: str
+    start_date: date
+    end_date: date
+    billing_start_value: float | None = None
+    billing_end_value: float | None = None
+    billing_consumption: float | None = None
+    submeter_consumption_total: float
+    difference: float | None = None
+    coverage_percent: float | None = None
+    active_device_count: int
+    active_segment_count: int
+    device_rows: list[VodomeryBillingDeviceRow]
+    assignment_rows: list[VodomeryBillingAssignmentRow]
+    segment_rows: list[VodomeryBillingSegmentRow]
+
+
 class VodomeryBranchDeviceConsumptionRow(BaseModel):
     identifikace: str
     spotreba: float

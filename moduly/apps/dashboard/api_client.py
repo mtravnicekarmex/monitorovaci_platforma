@@ -325,6 +325,36 @@ def get_vodomery_devices(access_token: str, source_filter: str = "VSE", limit: i
     return [str(item) for item in payload.get("devices", [])]
 
 
+def get_vodomery_billing_options(access_token: str) -> list[dict[str, object]]:
+    response = _request(
+        "GET",
+        "/api/v1/vodomery/billing-options",
+        access_token=access_token,
+    )
+    payload = response.json()
+    return [dict(item) for item in payload.get("rows", [])]
+
+
+def get_vodomery_billing_period(
+    access_token: str,
+    *,
+    billing_ident: str,
+    start_date: str,
+    end_date: str,
+) -> dict[str, object]:
+    response = _request(
+        "GET",
+        "/api/v1/vodomery/billing-period",
+        access_token=access_token,
+        query_params={
+            "billing_ident": billing_ident,
+            "start_date": start_date,
+            "end_date": end_date,
+        },
+    )
+    return dict(response.json())
+
+
 def get_vodomery_overview_metrics(
     access_token: str,
     *,

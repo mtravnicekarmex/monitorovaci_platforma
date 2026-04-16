@@ -43,6 +43,8 @@ from moduly.mereni.vodomery.vodomery_prediction import (
 from moduly.mereni.vodomery.vodomery_anomaly import score_new_measurements
 from moduly.mereni.vodomery.alerting import process_vodomery_alerts
 from moduly.mereni.vodomery.reporting import (
+    send_daily_vodomery_branch_report,
+    send_monthly_vodomery_branch_report,
     send_monthly_b1_consumption_report,
     send_vodomery_model_rebuild_report,
     send_monthly_vodomery_consumption_report,
@@ -432,6 +434,7 @@ def SOFTLINK_save_to_database_all():
 def daily_web_monitor_job():
     session = get_session_pg()
     failures = []
+    failure_causes = []
 
     try:
         monitory = session.query(Monitor).all()
@@ -458,14 +461,18 @@ def daily_web_monitor_job():
             except Exception as exc:
                 session.rollback()  # reset session po chybě v transakci
                 failures.append((monitor.url, _format_scheduler_reason(exc)))
+                failure_causes.append(exc)
 
         if failures:
             failure_summary = _format_monitor_failures(failures)
-            raise SchedulerContextError(
+            error = SchedulerContextError(
                 f"Web monitor selhal pro {len(failures)} cil(e): {failure_summary}",
                 alert_targets=tuple(url for url, _ in failures),
                 alert_reason=failure_summary,
             )
+            if len(failure_causes) == 1:
+                raise error from failure_causes[0]
+            raise error
 
     finally:
         session.close()
@@ -591,6 +598,12 @@ def daily_pulnoc_job():
     safe_call(meteo_sync)
 
 
+# každý den v 6:00:05
+@locked_job
+def daily_vodomery_branch_report_job():
+    safe_call(send_daily_vodomery_branch_report)
+
+
 # každý týden v pondělí v 6:10:05
 @locked_job
 def weekly_job():
@@ -604,10 +617,11 @@ def smartfuelpass_weekly_report_job():
     safe_call(send_charge_sessions_report_email)
 
 
-# každý první den v měsíci v 0:20:05
+# každý první den v měsíci v 6:20:05
 @locked_job
 def monthly_job():
     safe_call(send_monthly_vodomery_consumption_report)
+    safe_call(send_monthly_vodomery_branch_report)
     safe_call(send_monthly_b1_consumption_report)
 
 
@@ -645,6 +659,7 @@ def main_scheduler():
         "hourly_job": hourly_job,
         "daily_seven_and_two_job": daily_seven_and_two_job,
         "daily_job": daily_pulnoc_job,
+        "daily_vodomery_branch_report_job": daily_vodomery_branch_report_job,
         "weekly_job": weekly_job,
         "smartfuelpass_weekly_report_job": smartfuelpass_weekly_report_job,
         "monthly_job": monthly_job,

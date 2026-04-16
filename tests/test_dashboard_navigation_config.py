@@ -29,3 +29,11 @@ def test_manometry_section_and_page_are_configurable():
 
     assert "manometry" in section_keys
     assert "manometry_overview" in page_keys
+
+
+def test_vodomery_billing_page_is_in_main_navigation_after_branch_overview():
+    main_page_keys = [page.key for page in get_dashboard_pages("main")]
+
+    assert "vodomery_branch_overview" in main_page_keys
+    assert "vodomery_billing" in main_page_keys
+    assert main_page_keys.index("vodomery_branch_overview") < main_page_keys.index("vodomery_billing")

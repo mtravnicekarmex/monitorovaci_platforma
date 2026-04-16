@@ -16,6 +16,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from moduly.apps.dashboard.api_client import (
     DashboardApiError,
+    get_vodomery_billing_options as api_get_vodomery_billing_options,
+    get_vodomery_billing_period as api_get_vodomery_billing_period,
     get_vodomery_branch_day_overview as api_get_vodomery_branch_day_overview,
     get_vodomery_device_detail as api_get_vodomery_device_detail,
     get_vodomery_devices as api_get_vodomery_devices,
@@ -268,6 +270,38 @@ def load_prediction_profiles(
             "model_version",
         ],
     )
+
+
+@st.cache_data(ttl=60)
+def load_billing_options() -> list[dict[str, object]]:
+    access_token = require_dashboard_api_token()
+    return api_get_vodomery_billing_options(access_token)
+
+
+@st.cache_data(ttl=60)
+def load_billing_period(
+    billing_ident: str,
+    start_date: datetime.date,
+    end_date: datetime.date,
+) -> dict[str, object]:
+    access_token = require_dashboard_api_token()
+    payload = api_get_vodomery_billing_period(
+        access_token,
+        billing_ident=billing_ident,
+        start_date=start_date.isoformat(),
+        end_date=end_date.isoformat(),
+    )
+    for row in payload.get("device_rows", []):
+        row["active_from"] = pd.to_datetime(row.get("active_from"), errors="coerce")
+        row["active_to"] = pd.to_datetime(row.get("active_to"), errors="coerce")
+    for row in payload.get("assignment_rows", []):
+        row["start_time"] = pd.to_datetime(row.get("start_time"), errors="coerce")
+        row["end_time"] = pd.to_datetime(row.get("end_time"), errors="coerce")
+    for row in payload.get("segment_rows", []):
+        row["start_time"] = pd.to_datetime(row.get("start_time"), errors="coerce")
+        row["end_time"] = pd.to_datetime(row.get("end_time"), errors="coerce")
+    return payload
+
 
 @st.cache_data(ttl=60)
 def load_branch_day_overview(

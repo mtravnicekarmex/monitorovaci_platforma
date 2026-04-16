@@ -43,10 +43,11 @@ def test_build_schedule_runs_returns_expected_next_24h_runs():
         hours=24,
     )
 
-    assert len(runs) == 123
+    assert len(runs) == 124
     assert runs[0].job_id == "hourly_job"
     assert runs[0].scheduled_at == datetime(2026, 4, 10, 10, 2, 5, tzinfo=ZoneInfo("Europe/Prague"))
     assert any(run.job_id == "daily_job" for run in runs)
+    assert any(run.job_id == "daily_vodomery_branch_report_job" for run in runs)
     assert any(run.job_id == "daily_seven_and_two_job" for run in runs)
     assert not any(run.job_id == "weekly_job" for run in runs)
 

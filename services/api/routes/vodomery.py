@@ -9,6 +9,8 @@ from services.api.schemas.vodomery import (
     VodomeryAlertRuleRow,
     VodomeryAlertRulesResponse,
     VodomeryAlertRuleUpsertRequest,
+    VodomeryBillingOptionsResponse,
+    VodomeryBillingPeriodResponse,
     VodomeryBranchOverviewResponse,
     VodomeryDeviceDetailResponse,
     VodomeryDeviceListResponse,
@@ -38,8 +40,10 @@ from services.api.services.vodomery_admin import (
     update_alert_rule_admin,
 )
 from services.api.services.vodomery import (
+    list_branch_billing_options,
     list_accessible_devices,
     load_all_open_events,
+    load_branch_billing_period,
     load_branch_day_overview,
     load_device_detail,
     load_event_history,
@@ -80,6 +84,20 @@ def get_vodomery_devices(
         total=len(devices),
         devices=devices,
     )
+
+
+@router.get(
+    "/billing-options",
+    response_model=VodomeryBillingOptionsResponse,
+    summary="List billing branches",
+    description="Vrací seznam fakturačních vodoměrů a větví dostupných pro fakturaci. "
+    "Vyžaduje admin oprávnění.",
+)
+def get_vodomery_billing_options(
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> VodomeryBillingOptionsResponse:
+    rows = list_branch_billing_options(current_user)
+    return VodomeryBillingOptionsResponse(total=len(rows), rows=rows)
 
 
 @router.get(
@@ -366,6 +384,36 @@ def get_vodomery_branch_day_overview(
         total=len(rows),
         branches=rows,
     )
+
+
+@router.get(
+    "/billing-period",
+    response_model=VodomeryBillingPeriodResponse,
+    summary="Get billing allocation period",
+    description="Vrací rozpočítání spotřeby fakturačního vodoměru na podružné vodoměry "
+    "pro zadané období včetně přehledu aktivních přiřazení z historie větví. "
+    "Vyžaduje admin oprávnění.",
+)
+def get_vodomery_billing_period(
+    billing_ident: str,
+    start_date: date,
+    end_date: date,
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> VodomeryBillingPeriodResponse:
+    try:
+        payload = load_branch_billing_period(
+            current_user,
+            billing_ident=billing_ident,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    return VodomeryBillingPeriodResponse(**payload)
 
 
 @router.get(

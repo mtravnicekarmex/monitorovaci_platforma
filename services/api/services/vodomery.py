@@ -31,6 +31,7 @@ from moduly.mereni.vodomery.database.models import (
     VodomeryAnomalyScore,
 )
 from services.api.services.dashboard_auth import (
+    AuthorizationError,
     DashboardUserContext,
     require_device_access,
     require_section_access,
@@ -86,6 +87,10 @@ BRANCH_DASHBOARD_CONFIGS: tuple[BranchDashboardConfig, ...] = (
     ),
 )
 
+BRANCH_DASHBOARD_CONFIG_BY_BILLING_IDENT = {
+    config_item.billing_ident: config_item for config_item in BRANCH_DASHBOARD_CONFIGS
+}
+
 
 def _normalize_source_filter(source_filter: str) -> str:
     normalized = (source_filter or "VSE").strip().upper()
@@ -102,6 +107,40 @@ def _build_datetime_range(start_date: date, end_date: date) -> tuple[datetime, d
     start_dt = datetime.combine(start_date, time.min)
     end_dt = datetime.combine(end_date, time.max)
     return start_dt, end_dt
+
+
+def _build_exclusive_datetime_range(start_date: date, end_date: date) -> tuple[datetime, datetime]:
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+    start_dt = datetime.combine(start_date, time.min)
+    end_dt = datetime.combine(end_date, time.min) + timedelta(days=1)
+    return start_dt, end_dt
+
+
+def _to_rounded_float(value: object) -> float | None:
+    if value is None:
+        return None
+    numeric_value = float(value)
+    if pd.isna(numeric_value):
+        return None
+    return round(numeric_value, 3)
+
+
+def _compute_consumption_between_values(start_value: float | None, end_value: float | None) -> float | None:
+    if start_value is None or end_value is None or end_value < start_value:
+        return None
+    return round(end_value - start_value, 3)
+
+
+def _normalize_branch_billing_ident(billing_ident: str) -> BranchDashboardConfig:
+    normalized = (billing_ident or "").strip().upper()
+    config_item = BRANCH_DASHBOARD_CONFIG_BY_BILLING_IDENT.get(normalized)
+    if config_item is None:
+        allowed_values = ", ".join(sorted(BRANCH_DASHBOARD_CONFIG_BY_BILLING_IDENT))
+        raise ValueError(
+            f"Neznamy fakturacni vodomer '{billing_ident}'. Povolené hodnoty: {allowed_values}."
+        )
+    return config_item
 
 
 def _source_ident_subquery(session, source_filter: str):
@@ -231,6 +270,214 @@ def _serialize_dataframe_rows(df: pd.DataFrame) -> list[dict[str, object]]:
     return records
 
 
+def _load_last_valid_measurements_at_or_before(
+    conn,
+    identifiers: Iterable[str],
+    cutoff: datetime,
+) -> dict[str, float | None]:
+    unique_identifiers = list(dict.fromkeys(str(identifier) for identifier in identifiers if identifier))
+    if not unique_identifiers:
+        return {}
+
+    statement = text(
+        """
+        WITH ranked_measurements AS (
+            SELECT
+                identifikace,
+                objem,
+                ROW_NUMBER() OVER (
+                    PARTITION BY identifikace
+                    ORDER BY date DESC, id DESC
+                ) AS row_num
+            FROM monitoring."Mereni_vodomery_vse"
+            WHERE identifikace IN :identifiers
+              AND date <= :cutoff
+              AND platne = TRUE
+              AND objem IS NOT NULL
+        )
+        SELECT identifikace, objem
+        FROM ranked_measurements
+        WHERE row_num = 1
+        """
+    ).bindparams(bindparam("identifiers", expanding=True))
+
+    rows = conn.execute(
+        statement,
+        {
+            "identifiers": unique_identifiers,
+            "cutoff": cutoff,
+        },
+    ).all()
+    return {str(identifikace): _to_rounded_float(objem) for identifikace, objem in rows}
+
+
+def _to_display_end(exclusive_end: datetime) -> datetime:
+    return exclusive_end - timedelta(seconds=1)
+
+
+def _collect_device_assignment_intervals(
+    effective_segments: Iterable[tuple[datetime, datetime, tuple[str, ...]]],
+) -> dict[str, list[tuple[datetime, datetime]]]:
+    device_intervals: dict[str, list[tuple[datetime, datetime]]] = {}
+    for segment_start, segment_end, identifiers in effective_segments:
+        for identifier in identifiers:
+            intervals = device_intervals.setdefault(identifier, [])
+            if intervals and intervals[-1][1] == segment_start:
+                intervals[-1] = (intervals[-1][0], segment_end)
+            else:
+                intervals.append((segment_start, segment_end))
+    return device_intervals
+
+
+def _build_branch_billing_payload(
+    *,
+    config_item: BranchDashboardConfig,
+    start_date: date,
+    end_date: date,
+    period_start: datetime,
+    period_end: datetime,
+    effective_segments: list[tuple[datetime, datetime, tuple[str, ...]]],
+    snapshot_cache: dict[datetime, dict[str, float | None]],
+) -> dict[str, object]:
+    all_active_devices = tuple(
+        dict.fromkeys(
+            identifier
+            for _, _, segment_identifiers in effective_segments
+            for identifier in segment_identifiers
+        )
+    )
+    device_totals = {identifier: 0.0 for identifier in all_active_devices}
+    device_active_segment_counts = {identifier: 0 for identifier in all_active_devices}
+    device_segments_with_data_counts = {identifier: 0 for identifier in all_active_devices}
+
+    segment_rows: list[dict[str, object]] = []
+    for segment_start, segment_end, active_devices in effective_segments:
+        segment_consumptions: list[float] = []
+        devices_with_data_count = 0
+        for identifier in active_devices:
+            device_active_segment_counts[identifier] = device_active_segment_counts.get(identifier, 0) + 1
+            consumption = _compute_consumption_between_values(
+                snapshot_cache.get(segment_start, {}).get(identifier),
+                snapshot_cache.get(segment_end, {}).get(identifier),
+            )
+            if consumption is None:
+                continue
+            device_totals[identifier] = round(device_totals.get(identifier, 0.0) + consumption, 3)
+            device_segments_with_data_counts[identifier] = device_segments_with_data_counts.get(identifier, 0) + 1
+            devices_with_data_count += 1
+            segment_consumptions.append(consumption)
+
+        billing_consumption = _compute_consumption_between_values(
+            snapshot_cache.get(segment_start, {}).get(config_item.billing_ident),
+            snapshot_cache.get(segment_end, {}).get(config_item.billing_ident),
+        )
+        submeter_consumption = round(sum(segment_consumptions), 3) if segment_consumptions else 0.0
+        difference = None
+        if billing_consumption is not None:
+            difference = round(billing_consumption - submeter_consumption, 3)
+
+        segment_rows.append(
+            {
+                "start_time": segment_start,
+                "end_time": _to_display_end(segment_end),
+                "active_devices": list(active_devices),
+                "device_count": len(active_devices),
+                "devices_with_data_count": devices_with_data_count,
+                "devices_without_data_count": len(active_devices) - devices_with_data_count,
+                "submeter_consumption": submeter_consumption,
+                "billing_consumption": billing_consumption,
+                "difference": difference,
+            }
+        )
+
+    device_interval_map = _collect_device_assignment_intervals(effective_segments)
+    assignment_rows: list[dict[str, object]] = []
+    for identifier, intervals in sorted(device_interval_map.items()):
+        for interval_start, interval_end in intervals:
+            assignment_rows.append(
+                {
+                    "identifikace": identifier,
+                    "start_time": interval_start,
+                    "end_time": _to_display_end(interval_end),
+                    "duration_hours": round((interval_end - interval_start).total_seconds() / 3600, 2),
+                }
+            )
+
+    billing_start_value = snapshot_cache.get(period_start, {}).get(config_item.billing_ident)
+    billing_end_value = snapshot_cache.get(period_end, {}).get(config_item.billing_ident)
+    billing_consumption = _compute_consumption_between_values(billing_start_value, billing_end_value)
+    if billing_consumption is None and segment_rows:
+        candidate_values = [row["billing_consumption"] for row in segment_rows if row["billing_consumption"] is not None]
+        if candidate_values:
+            billing_consumption = round(sum(candidate_values), 3)
+
+    submeter_consumption_total = round(sum(device_totals.values()), 3) if device_totals else 0.0
+    difference = None
+    coverage_percent = None
+    if billing_consumption is not None:
+        difference = round(billing_consumption - submeter_consumption_total, 3)
+        if billing_consumption > 0:
+            coverage_percent = round(submeter_consumption_total / billing_consumption * 100, 1)
+
+    device_rows: list[dict[str, object]] = []
+    for identifier in all_active_devices:
+        device_consumption = round(device_totals.get(identifier, 0.0), 3)
+        share_of_submeters = (
+            round(device_consumption / submeter_consumption_total * 100, 1)
+            if submeter_consumption_total > 0
+            else 0.0
+        )
+        share_of_billing = (
+            round(device_consumption / billing_consumption * 100, 1)
+            if billing_consumption is not None and billing_consumption > 0
+            else None
+        )
+        allocated_billing_consumption = (
+            round(billing_consumption * device_consumption / submeter_consumption_total, 3)
+            if billing_consumption is not None and submeter_consumption_total > 0
+            else None
+        )
+        intervals = device_interval_map.get(identifier, [])
+        device_rows.append(
+            {
+                "identifikace": identifier,
+                "spotreba": device_consumption,
+                "podil_na_podruznych_procent": share_of_submeters,
+                "podil_na_fakturacnim_procent": share_of_billing,
+                "rozpoctena_fakturacni_spotreba": allocated_billing_consumption,
+                "active_segment_count": device_active_segment_counts.get(identifier, 0),
+                "segments_with_data_count": device_segments_with_data_counts.get(identifier, 0),
+                "segments_without_data_count": (
+                    device_active_segment_counts.get(identifier, 0)
+                    - device_segments_with_data_counts.get(identifier, 0)
+                ),
+                "active_from": intervals[0][0] if intervals else None,
+                "active_to": _to_display_end(intervals[-1][1]) if intervals else None,
+            }
+        )
+
+    device_rows.sort(key=lambda row: (-float(row["spotreba"]), str(row["identifikace"])))
+
+    return {
+        "branch_key": config_item.key,
+        "branch_title": config_item.title,
+        "billing_ident": config_item.billing_ident,
+        "start_date": start_date,
+        "end_date": end_date,
+        "billing_start_value": billing_start_value,
+        "billing_end_value": billing_end_value,
+        "billing_consumption": billing_consumption,
+        "submeter_consumption_total": submeter_consumption_total,
+        "difference": difference,
+        "coverage_percent": coverage_percent,
+        "active_device_count": len(all_active_devices),
+        "active_segment_count": len(effective_segments),
+        "device_rows": device_rows,
+        "assignment_rows": assignment_rows,
+        "segment_rows": segment_rows,
+    }
+
+
 def list_accessible_devices(
     user_context: DashboardUserContext,
     *,
@@ -252,6 +499,76 @@ def list_accessible_devices(
         return [str(row[0]) for row in rows if row[0]]
     finally:
         session.close()
+
+
+def list_branch_billing_options(user_context: DashboardUserContext) -> list[dict[str, object]]:
+    require_section_access(user_context, "vodomery")
+    return [
+        {
+            "key": config_item.key,
+            "title": config_item.title,
+            "billing_ident": config_item.billing_ident,
+        }
+        for config_item in BRANCH_DASHBOARD_CONFIGS
+    ]
+
+
+def load_branch_billing_period(
+    user_context: DashboardUserContext,
+    *,
+    billing_ident: str,
+    start_date: date,
+    end_date: date,
+) -> dict[str, object]:
+    require_section_access(user_context, "vodomery")
+    config_item = _normalize_branch_billing_ident(billing_ident)
+    period_start, period_end = _build_exclusive_datetime_range(start_date, end_date)
+    effective_segments = _resolve_branch_segments(
+        config_item,
+        period_start,
+        period_end,
+        merge_adjacent=True,
+    )
+
+    required_identifiers = tuple(
+        dict.fromkeys(
+            [
+                config_item.billing_ident,
+                *(
+                    identifier
+                    for _, _, segment_identifiers in effective_segments
+                    for identifier in segment_identifiers
+                ),
+            ]
+        )
+    )
+    if not user_context.is_admin and required_identifiers:
+        missing_devices = [identifier for identifier in required_identifiers if identifier not in user_context.allowed_devices]
+        if missing_devices:
+            raise AuthorizationError("Na zvolenou fakturacni vetev nemate opravneni.")
+
+    snapshot_cutoffs = sorted({
+        period_start,
+        period_end,
+        *(segment_start for segment_start, _, _ in effective_segments),
+        *(segment_end for _, segment_end, _ in effective_segments),
+    })
+
+    with ENGINE_PG.connect() as conn:
+        snapshot_cache = {
+            cutoff: _load_last_valid_measurements_at_or_before(conn, required_identifiers, cutoff)
+            for cutoff in snapshot_cutoffs
+        }
+
+    return _build_branch_billing_payload(
+        config_item=config_item,
+        start_date=min(start_date, end_date),
+        end_date=max(start_date, end_date),
+        period_start=period_start,
+        period_end=period_end,
+        effective_segments=effective_segments,
+        snapshot_cache=snapshot_cache,
+    )
 
 
 def load_overview_metrics(

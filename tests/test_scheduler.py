@@ -260,10 +260,14 @@ def test_monthly_job_calls_both_monthly_reports(monkeypatch):
     def fake_vodomery_report():
         return None
 
+    def fake_monthly_branch_report():
+        return None
+
     def fake_b1_report():
         return None
 
     monkeypatch.setattr(scheduler, "send_monthly_vodomery_consumption_report", fake_vodomery_report)
+    monkeypatch.setattr(scheduler, "send_monthly_vodomery_branch_report", fake_monthly_branch_report)
     monkeypatch.setattr(scheduler, "send_monthly_b1_consumption_report", fake_b1_report)
     monkeypatch.setattr(
         scheduler,
@@ -273,7 +277,25 @@ def test_monthly_job_calls_both_monthly_reports(monkeypatch):
 
     scheduler.monthly_job()
 
-    assert [fn for fn, _, _ in calls] == [fake_vodomery_report, fake_b1_report]
+    assert [fn for fn, _, _ in calls] == [fake_vodomery_report, fake_monthly_branch_report, fake_b1_report]
+
+
+def test_daily_vodomery_branch_report_job_sends_email_report(monkeypatch):
+    calls = []
+
+    def fake_safe_call(fn, *args, **kwargs):
+        calls.append((fn.__name__, args, kwargs))
+        return fn(*args, **kwargs)
+
+    def fake_send_daily_vodomery_branch_report():
+        return {"recipient_count": 1}
+
+    monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
+    monkeypatch.setattr(scheduler, "send_daily_vodomery_branch_report", fake_send_daily_vodomery_branch_report)
+
+    scheduler.daily_vodomery_branch_report_job()
+
+    assert [name for name, _, _ in calls] == ["fake_send_daily_vodomery_branch_report"]
 
 
 def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(monkeypatch):
@@ -380,7 +402,7 @@ def test_smartfuelpass_weekly_report_job_sends_email_report(monkeypatch):
     assert [name for name, _, _ in calls] == ["fake_send_charge_sessions_report_email"]
 
 
-def test_main_scheduler_registers_monthly_and_smartfuelpass_jobs(monkeypatch, fake_metrics_store):
+def test_main_scheduler_registers_monthly_and_daily_report_jobs(monkeypatch, fake_metrics_store):
     fake_logger = FakeLogger()
 
     class FakeScheduler:
@@ -414,9 +436,11 @@ def test_main_scheduler_registers_monthly_and_smartfuelpass_jobs(monkeypatch, fa
 
     monthly_job = next(job for job in fake_scheduler.jobs if job["id"] == "monthly_job")
     smartfuelpass_job = next(job for job in fake_scheduler.jobs if job["id"] == "smartfuelpass_weekly_report_job")
+    daily_branch_job = next(job for job in fake_scheduler.jobs if job["id"] == "daily_vodomery_branch_report_job")
 
     assert monthly_job["fn"] is scheduler.monthly_job
     assert "day='1'" in str(monthly_job["trigger"])
+    assert "hour='6'" in str(monthly_job["trigger"])
     assert "minute='20'" in str(monthly_job["trigger"])
     assert "second='5'" in str(monthly_job["trigger"])
     assert smartfuelpass_job["fn"] is scheduler.smartfuelpass_weekly_report_job
@@ -424,6 +448,10 @@ def test_main_scheduler_registers_monthly_and_smartfuelpass_jobs(monkeypatch, fa
     assert "hour='6'" in str(smartfuelpass_job["trigger"])
     assert "minute='55'" in str(smartfuelpass_job["trigger"])
     assert "second='5'" in str(smartfuelpass_job["trigger"])
+    assert daily_branch_job["fn"] is scheduler.daily_vodomery_branch_report_job
+    assert "hour='6'" in str(daily_branch_job["trigger"])
+    assert "minute='0'" in str(daily_branch_job["trigger"])
+    assert "second='5'" in str(daily_branch_job["trigger"])
     assert fake_metrics_store.started == 1
     assert fake_metrics_store.heartbeat_calls == 1
     assert fake_metrics_store.stopped == 1

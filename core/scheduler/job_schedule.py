@@ -58,6 +58,12 @@ SCHEDULER_JOB_SPECS: tuple[SchedulerJobSpec, ...] = (
         trigger_kwargs={"hour": 0, "minute": 15, "second": 5},
     ),
     SchedulerJobSpec(
+        id="daily_vodomery_branch_report_job",
+        label="Daily vodomery branch report",
+        description="Denni PDF report vetvi vodomeru emailem.",
+        trigger_kwargs={"hour": 6, "minute": 0, "second": 5},
+    ),
+    SchedulerJobSpec(
         id="weekly_job",
         label="Weekly",
         description="Rebuild prediction profilu.",
@@ -73,7 +79,7 @@ SCHEDULER_JOB_SPECS: tuple[SchedulerJobSpec, ...] = (
         id="monthly_job",
         label="Monthly",
         description="Mesicni reporty spotreb.",
-        trigger_kwargs={"day": 1, "hour": 0, "minute": 20, "second": 5},
+        trigger_kwargs={"day": 1, "hour": 6, "minute": 20, "second": 5},
     ),
 )
 

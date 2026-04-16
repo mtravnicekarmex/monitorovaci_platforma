@@ -23,11 +23,16 @@ from moduly.mereni.vodomery.database.models import (
 
 MODEL_VERSION_BASELINE = 1
 MODEL_VERSION_LEARNING = 2
+MODEL_VERSION_HIERARCHICAL = 3
 DEFAULT_MODEL_VERSION = MODEL_VERSION_BASELINE
 MODEL_SELECTION_LOOKBACK_DAYS = 120
 MODEL_SELECTION_VALIDATION_WINDOW_DAYS = 7
 MODEL_SELECTION_COVERAGE_THRESHOLD = 0.85
 MODEL_EVALUATION_VERSION_OFFSET = 1000
+MODEL_V3_RECENCY_HALF_LIFE_DAYS = 21.0
+MODEL_V3_DOW_WEIGHT_TARGET = 4.0
+MODEL_V3_WORKDAY_WEIGHT_TARGET = 10.0
+MODEL_V3_SLOT_WEIGHT_TARGET = 14.0
 
 STRATEGY_DOW_SLOT_MEAN = "dow_slot_mean"
 STRATEGY_WORKDAY_SLOT_MEAN = "workday_slot_mean"
@@ -58,6 +63,10 @@ CANDIDATE_MODELS: tuple[CandidateModelDefinition, ...] = (
     CandidateModelDefinition(
         model_version=MODEL_VERSION_LEARNING,
         model_name="Model 2 - adaptive strategy",
+    ),
+    CandidateModelDefinition(
+        model_version=MODEL_VERSION_HIERARCHICAL,
+        model_name="Model 3 - recency weighted blend",
     ),
 )
 MODEL_NAME_BY_VERSION = {
@@ -360,6 +369,8 @@ def _rebuild_candidate_model(
         return _rebuild_model_1_candidate(session, definition=definition, windows=windows)
     if definition.model_version == MODEL_VERSION_LEARNING:
         return _rebuild_model_2_candidate(session, definition=definition, windows=windows)
+    if definition.model_version == MODEL_VERSION_HIERARCHICAL:
+        return _rebuild_model_3_candidate(session, definition=definition, windows=windows)
     raise ValueError(f"Neznama verze modelu: {definition.model_version}")
 
 
@@ -451,6 +462,48 @@ def _rebuild_model_2_candidate(
         profile_count=profile_count,
         selected_device_count=len(selected_by_ident),
         validation_candidate_count=len(candidates),
+    )
+
+
+def _rebuild_model_3_candidate(
+    session,
+    *,
+    definition: CandidateModelDefinition,
+    windows: RebuildWindows,
+) -> ModelPerformanceSummary:
+    evaluation_version = _build_evaluation_model_version(definition.model_version)
+    _build_model_3_profiles(
+        session,
+        model_version=evaluation_version,
+        data_start=windows.train_start,
+        data_end=windows.train_end,
+        reference_end=windows.validation_start,
+    )
+    validation = _evaluate_profiles_on_validation(
+        session,
+        model_version=evaluation_version,
+        windows=windows,
+    )
+    _delete_profiles(session, evaluation_version)
+
+    _build_model_3_profiles(
+        session,
+        model_version=definition.model_version,
+        data_start=windows.deploy_start,
+        data_end=windows.deploy_end,
+        reference_end=windows.deploy_end,
+    )
+    profile_count = _count_profiles(session, definition.model_version)
+    return ModelPerformanceSummary(
+        model_version=definition.model_version,
+        model_name=definition.model_name,
+        validation_total_count=validation.validation_total_count,
+        matched_validation_count=validation.matched_validation_count,
+        coverage=validation.coverage,
+        mae=validation.mae,
+        rmse=validation.rmse,
+        bias=validation.bias,
+        profile_count=profile_count,
     )
 
 
@@ -653,6 +706,306 @@ def _build_v1_profiles(
             "model_version": model_version,
             "data_start": data_start,
             "data_end": data_end,
+        },
+    )
+
+
+def _build_model_3_profiles(
+    session,
+    *,
+    model_version: int,
+    data_start: datetime,
+    data_end: datetime,
+    reference_end: datetime,
+) -> None:
+    # Blend specific and broader profiles based on recent effective sample size
+    # so sparse slots keep coverage without hard-switching the whole device.
+    _delete_profiles(session, model_version)
+    session.execute(
+        text(
+            """
+            WITH base AS (
+                SELECT
+                    identifikace,
+                    interval_minutes,
+                    day_of_week,
+                    slot,
+                    CASE WHEN day_of_week BETWEEN 0 AND 4 THEN TRUE ELSE FALSE END AS is_workday,
+                    delta,
+                    GREATEST(
+                        EXTRACT(EPOCH FROM (:reference_end - date)) / 86400.0,
+                        0.0
+                    ) AS age_days
+                FROM monitoring."Mereni_vodomery_vse"
+                WHERE
+                    synthetic = FALSE
+                    AND platne = TRUE
+                    AND reset_detected = FALSE
+                    AND delta IS NOT NULL
+                    AND date >= :data_start
+                    AND date < :data_end
+            ),
+            weighted_base AS (
+                SELECT
+                    identifikace,
+                    interval_minutes,
+                    day_of_week,
+                    slot,
+                    is_workday,
+                    delta,
+                    EXP(-LN(2.0) * age_days / :half_life_days) AS recency_weight
+                FROM base
+            ),
+            interval_stats AS (
+                SELECT
+                    identifikace,
+                    interval_minutes,
+                    percentile_cont(0.5) WITHIN GROUP (ORDER BY delta) AS median,
+                    SUM(recency_weight * delta) / NULLIF(SUM(recency_weight), 0.0) AS mean,
+                    percentile_cont(0.1) WITHIN GROUP (ORDER BY delta) AS p10,
+                    percentile_cont(0.9) WITHIN GROUP (ORDER BY delta) AS p90,
+                    GREATEST(COALESCE(stddev_samp(delta), 0.0), 0.0001) AS std,
+                    COUNT(*) AS sample_size,
+                    COALESCE(SUM(recency_weight), 0.0) AS weighted_sample_size
+                FROM weighted_base
+                GROUP BY identifikace, interval_minutes
+            ),
+            slot_stats AS (
+                SELECT
+                    identifikace,
+                    interval_minutes,
+                    slot,
+                    percentile_cont(0.5) WITHIN GROUP (ORDER BY delta) AS median,
+                    SUM(recency_weight * delta) / NULLIF(SUM(recency_weight), 0.0) AS mean,
+                    percentile_cont(0.1) WITHIN GROUP (ORDER BY delta) AS p10,
+                    percentile_cont(0.9) WITHIN GROUP (ORDER BY delta) AS p90,
+                    GREATEST(COALESCE(stddev_samp(delta), 0.0), 0.0001) AS std,
+                    COUNT(*) AS sample_size,
+                    COALESCE(SUM(recency_weight), 0.0) AS weighted_sample_size
+                FROM weighted_base
+                GROUP BY identifikace, interval_minutes, slot
+            ),
+            workday_slot_stats AS (
+                SELECT
+                    identifikace,
+                    interval_minutes,
+                    is_workday,
+                    slot,
+                    percentile_cont(0.5) WITHIN GROUP (ORDER BY delta) AS median,
+                    SUM(recency_weight * delta) / NULLIF(SUM(recency_weight), 0.0) AS mean,
+                    percentile_cont(0.1) WITHIN GROUP (ORDER BY delta) AS p10,
+                    percentile_cont(0.9) WITHIN GROUP (ORDER BY delta) AS p90,
+                    GREATEST(COALESCE(stddev_samp(delta), 0.0), 0.0001) AS std,
+                    COUNT(*) AS sample_size,
+                    COALESCE(SUM(recency_weight), 0.0) AS weighted_sample_size
+                FROM weighted_base
+                GROUP BY identifikace, interval_minutes, is_workday, slot
+            ),
+            dow_slot_stats AS (
+                SELECT
+                    identifikace,
+                    interval_minutes,
+                    day_of_week,
+                    slot,
+                    percentile_cont(0.5) WITHIN GROUP (ORDER BY delta) AS median,
+                    SUM(recency_weight * delta) / NULLIF(SUM(recency_weight), 0.0) AS mean,
+                    percentile_cont(0.1) WITHIN GROUP (ORDER BY delta) AS p10,
+                    percentile_cont(0.9) WITHIN GROUP (ORDER BY delta) AS p90,
+                    GREATEST(COALESCE(stddev_samp(delta), 0.0), 0.0001) AS std,
+                    COUNT(*) AS sample_size,
+                    COALESCE(SUM(recency_weight), 0.0) AS weighted_sample_size
+                FROM weighted_base
+                GROUP BY identifikace, interval_minutes, day_of_week, slot
+            ),
+            slots AS (
+                SELECT
+                    interval_stats.identifikace,
+                    interval_stats.interval_minutes,
+                    generated_slots.slot
+                FROM interval_stats
+                CROSS JOIN LATERAL generate_series(
+                    0,
+                    GREATEST(
+                        COALESCE(
+                            CAST(FLOOR(1440.0 / NULLIF(interval_stats.interval_minutes, 0)) AS integer),
+                            1
+                        ) - 1,
+                        0
+                    )
+                ) AS generated_slots(slot)
+            ),
+            days(day_of_week, is_workday) AS (
+                VALUES
+                    (0, TRUE),
+                    (1, TRUE),
+                    (2, TRUE),
+                    (3, TRUE),
+                    (4, TRUE),
+                    (5, FALSE),
+                    (6, FALSE)
+            ),
+            grid AS (
+                SELECT
+                    slots.identifikace,
+                    slots.interval_minutes,
+                    days.day_of_week,
+                    days.is_workday,
+                    slots.slot
+                FROM slots
+                CROSS JOIN days
+            ),
+            blended AS (
+                SELECT
+                    grid.identifikace,
+                    grid.interval_minutes,
+                    grid.day_of_week,
+                    grid.slot,
+                    interval_stats.median AS interval_median,
+                    interval_stats.mean AS interval_mean,
+                    interval_stats.p10 AS interval_p10,
+                    interval_stats.p90 AS interval_p90,
+                    interval_stats.std AS interval_std,
+                    interval_stats.sample_size AS interval_sample_size,
+                    slot_stats.median AS slot_median,
+                    slot_stats.mean AS slot_mean,
+                    slot_stats.p10 AS slot_p10,
+                    slot_stats.p90 AS slot_p90,
+                    slot_stats.std AS slot_std,
+                    slot_stats.sample_size AS slot_sample_size,
+                    workday_slot_stats.median AS workday_median,
+                    workday_slot_stats.mean AS workday_mean,
+                    workday_slot_stats.p10 AS workday_p10,
+                    workday_slot_stats.p90 AS workday_p90,
+                    workday_slot_stats.std AS workday_std,
+                    workday_slot_stats.sample_size AS workday_sample_size,
+                    dow_slot_stats.median AS dow_median,
+                    dow_slot_stats.mean AS dow_mean,
+                    dow_slot_stats.p10 AS dow_p10,
+                    dow_slot_stats.p90 AS dow_p90,
+                    dow_slot_stats.std AS dow_std,
+                    dow_slot_stats.sample_size AS dow_sample_size,
+                    LEAST(
+                        COALESCE(slot_stats.weighted_sample_size, 0.0) / :slot_weight_target,
+                        1.0
+                    ) AS slot_trust,
+                    LEAST(
+                        COALESCE(workday_slot_stats.weighted_sample_size, 0.0) / :workday_weight_target,
+                        1.0
+                    ) AS workday_trust,
+                    LEAST(
+                        COALESCE(dow_slot_stats.weighted_sample_size, 0.0) / :dow_weight_target,
+                        1.0
+                    ) AS dow_trust
+                FROM grid
+                JOIN interval_stats
+                    ON interval_stats.identifikace = grid.identifikace
+                    AND interval_stats.interval_minutes = grid.interval_minutes
+                LEFT JOIN slot_stats
+                    ON slot_stats.identifikace = grid.identifikace
+                    AND slot_stats.interval_minutes = grid.interval_minutes
+                    AND slot_stats.slot = grid.slot
+                LEFT JOIN workday_slot_stats
+                    ON workday_slot_stats.identifikace = grid.identifikace
+                    AND workday_slot_stats.interval_minutes = grid.interval_minutes
+                    AND workday_slot_stats.is_workday = grid.is_workday
+                    AND workday_slot_stats.slot = grid.slot
+                LEFT JOIN dow_slot_stats
+                    ON dow_slot_stats.identifikace = grid.identifikace
+                    AND dow_slot_stats.interval_minutes = grid.interval_minutes
+                    AND dow_slot_stats.day_of_week = grid.day_of_week
+                    AND dow_slot_stats.slot = grid.slot
+            ),
+            profiles AS (
+                SELECT
+                    identifikace,
+                    interval_minutes,
+                    day_of_week,
+                    slot,
+                    dow_trust * COALESCE(dow_median, workday_median, slot_median, interval_median)
+                        + (1.0 - dow_trust) * (
+                            workday_trust * COALESCE(workday_median, slot_median, interval_median)
+                            + (1.0 - workday_trust) * (
+                                slot_trust * COALESCE(slot_median, interval_median)
+                                + (1.0 - slot_trust) * interval_median
+                            )
+                        ) AS median,
+                    dow_trust * COALESCE(dow_mean, workday_mean, slot_mean, interval_mean)
+                        + (1.0 - dow_trust) * (
+                            workday_trust * COALESCE(workday_mean, slot_mean, interval_mean)
+                            + (1.0 - workday_trust) * (
+                                slot_trust * COALESCE(slot_mean, interval_mean)
+                                + (1.0 - slot_trust) * interval_mean
+                            )
+                        ) AS mean,
+                    dow_trust * COALESCE(dow_p10, workday_p10, slot_p10, interval_p10)
+                        + (1.0 - dow_trust) * (
+                            workday_trust * COALESCE(workday_p10, slot_p10, interval_p10)
+                            + (1.0 - workday_trust) * (
+                                slot_trust * COALESCE(slot_p10, interval_p10)
+                                + (1.0 - slot_trust) * interval_p10
+                            )
+                        ) AS p10,
+                    dow_trust * COALESCE(dow_p90, workday_p90, slot_p90, interval_p90)
+                        + (1.0 - dow_trust) * (
+                            workday_trust * COALESCE(workday_p90, slot_p90, interval_p90)
+                            + (1.0 - workday_trust) * (
+                                slot_trust * COALESCE(slot_p90, interval_p90)
+                                + (1.0 - slot_trust) * interval_p90
+                            )
+                        ) AS p90,
+                    dow_trust * COALESCE(dow_std, workday_std, slot_std, interval_std)
+                        + (1.0 - dow_trust) * (
+                            workday_trust * COALESCE(workday_std, slot_std, interval_std)
+                            + (1.0 - workday_trust) * (
+                                slot_trust * COALESCE(slot_std, interval_std)
+                                + (1.0 - slot_trust) * interval_std
+                            )
+                        ) AS std,
+                    GREATEST(
+                        COALESCE(dow_sample_size, 0),
+                        COALESCE(workday_sample_size, 0),
+                        COALESCE(slot_sample_size, 0),
+                        interval_sample_size
+                    ) AS sample_size
+                FROM blended
+            )
+            INSERT INTO monitoring.vodomery_anomaly_profiles (
+                identifikace,
+                interval_minutes,
+                day_of_week,
+                slot,
+                median,
+                mean,
+                p10,
+                p90,
+                std,
+                model_version,
+                sample_size
+            )
+            SELECT
+                identifikace,
+                interval_minutes,
+                day_of_week,
+                slot,
+                median,
+                mean,
+                LEAST(p10, p90) AS p10,
+                GREATEST(p10, p90) AS p90,
+                GREATEST(std, 0.0001) AS std,
+                :model_version,
+                GREATEST(sample_size, 1) AS sample_size
+            FROM profiles
+            """
+        ),
+        {
+            "model_version": model_version,
+            "data_start": data_start,
+            "data_end": data_end,
+            "reference_end": reference_end,
+            "half_life_days": MODEL_V3_RECENCY_HALF_LIFE_DAYS,
+            "dow_weight_target": MODEL_V3_DOW_WEIGHT_TARGET,
+            "workday_weight_target": MODEL_V3_WORKDAY_WEIGHT_TARGET,
+            "slot_weight_target": MODEL_V3_SLOT_WEIGHT_TARGET,
         },
     )
 

@@ -7,6 +7,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from moduly.mereni.vodomery.vodomery_prediction import (
     ModelPerformanceSummary,
     build_rebuild_windows,
+    get_candidate_model_versions,
     select_best_model_summary,
 )
 
@@ -21,6 +22,10 @@ def test_build_rebuild_windows_reserves_last_week_for_validation():
     assert windows.validation_start == reference_time - datetime.timedelta(days=7)
     assert windows.train_start == reference_time - datetime.timedelta(days=120)
     assert windows.train_end == windows.validation_start
+
+
+def test_get_candidate_model_versions_includes_new_hierarchical_candidate():
+    assert get_candidate_model_versions() == (1, 2, 3)
 
 
 def test_select_best_model_summary_prefers_coverage_before_lower_error():

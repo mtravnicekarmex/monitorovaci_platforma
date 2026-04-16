@@ -109,7 +109,7 @@ def _build_email_body(selection_result: dict[str, object]) -> str:
         "<th style='padding:8px 10px;border:1px solid #d0d7de;background:#f6f8fa;text-align:right;'>RMSE</th>"
         "<th style='padding:8px 10px;border:1px solid #d0d7de;background:#f6f8fa;text-align:right;'>Bias</th>"
         "<th style='padding:8px 10px;border:1px solid #d0d7de;background:#f6f8fa;text-align:right;'>Profily</th>"
-        "<th style='padding:8px 10px;border:1px solid #d0d7de;background:#f6f8fa;text-align:right;'>Zarizeni v2</th>"
+        "<th style='padding:8px 10px;border:1px solid #d0d7de;background:#f6f8fa;text-align:right;'>Selected devices</th>"
         "</tr>"
         f"{candidate_table_rows}"
         "</table>"

@@ -44,6 +44,7 @@ from moduly.mereni.vodomery.vodomery_anomaly import score_new_measurements
 from moduly.mereni.vodomery.alerting import process_vodomery_alerts
 from moduly.mereni.vodomery.reporting import (
     send_daily_vodomery_branch_report,
+    send_weekly_vodomery_branch_report,
     send_monthly_vodomery_branch_report,
     send_monthly_b1_consumption_report,
     send_vodomery_model_rebuild_report,
@@ -609,6 +610,7 @@ def daily_vodomery_branch_report_job():
 def weekly_job():
     rebuild_result = safe_call(rebuild_profiles)
     safe_call(send_vodomery_model_rebuild_report, rebuild_result)
+    safe_call(send_weekly_vodomery_branch_report)
 
 
 # každé úterý v 6:55:05

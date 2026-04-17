@@ -372,15 +372,20 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
         assert result is rebuild_result
         return None
 
+    def fake_send_weekly_vodomery_branch_report():
+        return {"recipient_count": 1}
+
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "rebuild_profiles", fake_rebuild_profiles)
     monkeypatch.setattr(scheduler, "send_vodomery_model_rebuild_report", fake_send_vodomery_model_rebuild_report)
+    monkeypatch.setattr(scheduler, "send_weekly_vodomery_branch_report", fake_send_weekly_vodomery_branch_report)
 
     scheduler.weekly_job()
 
     assert [name for name, _, _ in calls] == [
         "fake_rebuild_profiles",
         "fake_send_vodomery_model_rebuild_report",
+        "fake_send_weekly_vodomery_branch_report",
     ]
 
 

@@ -66,7 +66,7 @@ SCHEDULER_JOB_SPECS: tuple[SchedulerJobSpec, ...] = (
     SchedulerJobSpec(
         id="weekly_job",
         label="Weekly",
-        description="Rebuild prediction profilu.",
+        description="Rebuild prediction profilu a tydenni branch report vodomeru.",
         trigger_kwargs={"day_of_week": "mon", "hour": 6, "minute": 10, "second": 5},
     ),
     SchedulerJobSpec(

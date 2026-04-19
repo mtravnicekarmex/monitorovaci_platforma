@@ -6,10 +6,28 @@ from datetime import datetime
 from decouple import config
 
 from app.channels.email import send_email_outlook
+from moduly.mereni.vodomery.reporting._email_config import (
+    filter_placeholder_recipients,
+    load_report_recipients,
+    sanitize_sender_alias,
+)
 
 
 def send_vodomery_model_rebuild_report(selection_result: dict[str, object]) -> dict[str, object]:
-    recipients = _load_recipients()
+    recipients = filter_placeholder_recipients(
+        _load_recipients(),
+        context_label="send_vodomery_model_rebuild_report",
+    )
+    if not recipients:
+        return {
+            "selection_run_id": selection_result["selection_run_id"],
+            "active_model_version": selection_result["active_model_version"],
+            "active_model_name": selection_result["active_model_name"],
+            "recipient_count": 0,
+            "candidate_count": len(selection_result.get("candidates", [])),
+            "skipped": True,
+            "skip_reason": "no_sendable_recipients",
+        }
     subject = (
         "Vodomer model rebuild | "
         f"aktivni model {selection_result['active_model_name']} (v{selection_result['active_model_version']})"
@@ -21,7 +39,10 @@ def send_vodomery_model_rebuild_report(selection_result: dict[str, object]) -> d
             email_receiver=recipient,
             subject=subject,
             body=body,
-            sender_alias=config("O_EMAIL_UPOZORNENI", default=None),
+            sender_alias=sanitize_sender_alias(
+                config("O_EMAIL_UPOZORNENI", default=None),
+                context_label="VODOMERY_MODEL_REBUILD_REPORT_SENDER_ALIAS",
+            ),
             is_html=True,
         )
 
@@ -35,14 +56,11 @@ def send_vodomery_model_rebuild_report(selection_result: dict[str, object]) -> d
 
 
 def _load_recipients() -> list[str]:
-    raw_recipients = config(
-        "VODOMERY_MODEL_REBUILD_REPORT_RECIPIENTS",
-        default=config("VODOMERY_MONTHLY_REPORT_RECIPIENTS", default=""),
+    return list(
+        load_report_recipients(
+            "VODOMERY_MODEL_REBUILD_REPORT_RECIPIENTS",
+        )
     )
-    recipients = [item.strip() for item in raw_recipients.split(",") if item.strip()]
-    if not recipients:
-        raise ValueError("Neni nastavena promenna VODOMERY_MODEL_REBUILD_REPORT_RECIPIENTS.")
-    return recipients
 
 
 def _build_email_body(selection_result: dict[str, object]) -> str:

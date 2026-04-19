@@ -15,6 +15,11 @@ from decouple import config
 
 from app.channels.email import send_email_outlook
 from app.time_utils import prague_now_naive, prague_today
+from moduly.mereni.vodomery.reporting._email_config import (
+    filter_placeholder_recipients,
+    load_report_recipients,
+    sanitize_sender_alias,
+)
 from services.api.services.dashboard_auth import DashboardUserContext
 from services.api.services.vodomery import load_branch_day_overview
 
@@ -99,24 +104,21 @@ def _resolve_target_date(target_date: date | None = None) -> date:
 
 
 def _load_recipients() -> tuple[str, ...]:
-    raw_recipients = config(
+    return load_report_recipients(
         "VODOMERY_DAILY_BRANCH_REPORT_RECIPIENTS",
         default=DEFAULT_DAILY_BRANCH_REPORT_RECIPIENTS,
+        error_cls=VodomeryDailyBranchReportError,
     )
-    recipients = tuple(item.strip() for item in raw_recipients.split(",") if item.strip())
-    if not recipients:
-        raise VodomeryDailyBranchReportError(
-            "Neni nastavena promenna VODOMERY_DAILY_BRANCH_REPORT_RECIPIENTS."
-        )
-    return recipients
 
 
 def _resolve_sender_alias() -> str | None:
-    sender_alias = config(
-        "VODOMERY_DAILY_BRANCH_REPORT_SENDER_ALIAS",
-        default=config("O_EMAIL_UPOZORNENI", default=DEFAULT_DAILY_BRANCH_REPORT_SENDER_ALIAS),
-    ).strip()
-    return sender_alias or None
+    return sanitize_sender_alias(
+        config(
+            "VODOMERY_DAILY_BRANCH_REPORT_SENDER_ALIAS",
+            default=config("O_EMAIL_UPOZORNENI", default=DEFAULT_DAILY_BRANCH_REPORT_SENDER_ALIAS),
+        ),
+        context_label="VODOMERY_DAILY_BRANCH_REPORT_SENDER_ALIAS",
+    )
 
 
 def _load_playwright_api():
@@ -966,8 +968,24 @@ def send_daily_vodomery_branch_report(
     target_date: date | None = None,
     recipients: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
-    resolved_recipients = recipients or _load_recipients()
-    report = build_daily_branch_report(target_date=target_date)
+    resolved_target_date = _resolve_target_date(target_date)
+    resolved_recipients = filter_placeholder_recipients(
+        recipients if recipients is not None else _load_recipients(),
+        context_label="send_daily_vodomery_branch_report",
+    )
+    if not resolved_recipients:
+        return {
+            "title": f"Vodomery | denni report fakturacnich vodomeru | {resolved_target_date:%d.%m.%Y}",
+            "recipient_count": 0,
+            "recipients": (),
+            "target_date": resolved_target_date.isoformat(),
+            "branch_count": 0,
+            "pdf_filename": f"vodomery_vetve_{resolved_target_date:%Y%m%d}.pdf",
+            "pdf_size_bytes": 0,
+            "skipped": True,
+            "skip_reason": "no_sendable_recipients",
+        }
+    report = build_daily_branch_report(target_date=resolved_target_date)
     pdf_bytes = render_daily_branch_report_pdf(report)
     pdf_filename = _build_report_pdf_filename(report)
     subject = _build_report_subject(report)

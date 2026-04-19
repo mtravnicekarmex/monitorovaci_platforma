@@ -10,6 +10,11 @@ from sqlalchemy import text
 from app.channels.email import send_email_outlook
 from app.time_utils import prague_today
 from core.db.connect import ENGINE_MS, ENGINE_PG
+from moduly.mereni.vodomery.reporting._email_config import (
+    filter_placeholder_recipients,
+    load_report_recipients,
+    sanitize_sender_alias,
+)
 
 ELEKTROMER_IDENTIFIERS: tuple[str, ...] = ("B1", "B1-EPS")
 
@@ -50,8 +55,20 @@ class MeterConsumptionSummary:
 
 
 def send_monthly_b1_consumption_report(reference_date: date | None = None) -> dict[str, object]:
-    recipients = _load_recipients()
     period = _get_previous_month_period(reference_date)
+    recipients = filter_placeholder_recipients(
+        _load_recipients(),
+        context_label="send_monthly_b1_consumption_report",
+    )
+    if not recipients:
+        return {
+            "title": _build_subject(period),
+            "recipient_count": 0,
+            "meter_count": 0,
+            "period": period.month_label,
+            "skipped": True,
+            "skip_reason": "no_sendable_recipients",
+        }
     summaries = _build_meter_summaries(period)
     subject = _build_subject(period)
     body = _build_html_body(period, summaries)
@@ -61,7 +78,10 @@ def send_monthly_b1_consumption_report(reference_date: date | None = None) -> di
             email_receiver=recipient,
             subject=subject,
             body=body,
-            sender_alias=config("O_EMAIL_UPOZORNENI", default=None),
+            sender_alias=sanitize_sender_alias(
+                config("O_EMAIL_UPOZORNENI", default=None),
+                context_label="VODOMERY_MONTHLY_REPORT_SENDER_ALIAS",
+            ),
             is_html=True,
         )
 
@@ -74,11 +94,9 @@ def send_monthly_b1_consumption_report(reference_date: date | None = None) -> di
 
 
 def _load_recipients() -> list[str]:
-    raw_recipients = config("VODOMERY_MONTHLY_REPORT_RECIPIENTS", default="")
-    recipients = [item.strip() for item in raw_recipients.split(",") if item.strip()]
-    if not recipients:
-        raise ValueError("Neni nastavena promenna VODOMERY_MONTHLY_REPORT_RECIPIENTS.")
-    return recipients
+    return list(
+        load_report_recipients("VODOMERY_MONTHLY_B1_CONSUMPTION_REPORT_RECIPIENTS")
+    )
 
 
 def _get_previous_month_period(reference_date: date | None = None) -> ReportPeriod:

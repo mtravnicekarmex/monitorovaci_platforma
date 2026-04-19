@@ -11,6 +11,11 @@ from decouple import config
 
 from app.channels.email import send_email_outlook
 from app.time_utils import prague_now_naive, prague_today
+from moduly.mereni.vodomery.reporting._email_config import (
+    filter_placeholder_recipients,
+    load_report_recipients,
+    sanitize_sender_alias,
+)
 from moduly.mereni.vodomery.reporting.daily_branch_report import (
     BILLING_CURVE_COLOR,
     BranchDeviceReportRow,
@@ -93,30 +98,24 @@ class MonthlyBranchReport:
 
 
 def _load_recipients() -> tuple[str, ...]:
-    raw_recipients = config(
+    return load_report_recipients(
         "VODOMERY_MONTHLY_BRANCH_REPORT_RECIPIENTS",
-        default=config(
-            "VODOMERY_DAILY_BRANCH_REPORT_RECIPIENTS",
-            default=DEFAULT_MONTHLY_BRANCH_REPORT_RECIPIENTS,
-        ),
+        default=DEFAULT_MONTHLY_BRANCH_REPORT_RECIPIENTS,
+        error_cls=VodomeryMonthlyBranchReportError,
     )
-    recipients = tuple(item.strip() for item in raw_recipients.split(",") if item.strip())
-    if not recipients:
-        raise VodomeryMonthlyBranchReportError(
-            "Neni nastavena promenna VODOMERY_MONTHLY_BRANCH_REPORT_RECIPIENTS."
-        )
-    return recipients
 
 
 def _resolve_sender_alias() -> str | None:
-    sender_alias = config(
-        "VODOMERY_MONTHLY_BRANCH_REPORT_SENDER_ALIAS",
-        default=config(
-            "VODOMERY_DAILY_BRANCH_REPORT_SENDER_ALIAS",
-            default=config("O_EMAIL_UPOZORNENI", default=DEFAULT_MONTHLY_BRANCH_REPORT_SENDER_ALIAS),
+    return sanitize_sender_alias(
+        config(
+            "VODOMERY_MONTHLY_BRANCH_REPORT_SENDER_ALIAS",
+            default=config(
+                "VODOMERY_DAILY_BRANCH_REPORT_SENDER_ALIAS",
+                default=config("O_EMAIL_UPOZORNENI", default=DEFAULT_MONTHLY_BRANCH_REPORT_SENDER_ALIAS),
+            ),
         ),
-    ).strip()
-    return sender_alias or None
+        context_label="VODOMERY_MONTHLY_BRANCH_REPORT_SENDER_ALIAS",
+    )
 
 
 def _get_previous_month_period(reference_date: date | None = None) -> MonthlyBranchReportPeriod:
@@ -947,7 +946,23 @@ def send_monthly_vodomery_branch_report(
     reference_date: date | None = None,
     recipients: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
-    resolved_recipients = recipients or _load_recipients()
+    period = _get_previous_month_period(reference_date)
+    resolved_recipients = filter_placeholder_recipients(
+        recipients if recipients is not None else _load_recipients(),
+        context_label="send_monthly_vodomery_branch_report",
+    )
+    if not resolved_recipients:
+        return {
+            "title": f"Vodomery | mesicni report fakturacnich vodomeru | {period.month:02d}.{period.year}",
+            "recipient_count": 0,
+            "recipients": (),
+            "period": period.month_label,
+            "branch_count": 0,
+            "pdf_filename": f"vodomery_vetve_mesic_{period.year}{period.month:02d}.pdf",
+            "pdf_size_bytes": 0,
+            "skipped": True,
+            "skip_reason": "no_sendable_recipients",
+        }
     report = build_monthly_vodomery_branch_report(reference_date=reference_date)
     pdf_bytes = render_monthly_vodomery_branch_report_pdf(report)
     pdf_filename = _build_report_pdf_filename(report)

@@ -133,7 +133,7 @@ def test_send_daily_vodomery_branch_report_sends_pdf_attachment(monkeypatch):
     monkeypatch.setattr(report_module, "build_daily_branch_report", lambda **kwargs: report)
     monkeypatch.setattr(report_module, "render_daily_branch_report_pdf", lambda current_report: b"%PDF-1.4")
     monkeypatch.setattr(report_module, "send_email_outlook", lambda **kwargs: sent_messages.append(kwargs))
-    monkeypatch.setattr(report_module, "_load_recipients", lambda: ("branch@example.com",))
+    monkeypatch.setattr(report_module, "_load_recipients", lambda: ("branch@armex.cz",))
     monkeypatch.setattr(report_module, "_resolve_sender_alias", lambda: "Monitoring")
 
     result = report_module.send_daily_vodomery_branch_report()
@@ -141,14 +141,14 @@ def test_send_daily_vodomery_branch_report_sends_pdf_attachment(monkeypatch):
     assert result == {
         "title": "Vodomery | denni report fakturacnich vodomeru | 15.04.2026",
         "recipient_count": 1,
-        "recipients": ("branch@example.com",),
+        "recipients": ("branch@armex.cz",),
         "target_date": "2026-04-15",
         "branch_count": 1,
         "pdf_filename": "vodomery_vetve_20260415.pdf",
         "pdf_size_bytes": 8,
     }
     assert len(sent_messages) == 1
-    assert sent_messages[0]["email_receiver"] == "branch@example.com"
+    assert sent_messages[0]["email_receiver"] == "branch@armex.cz"
     assert sent_messages[0]["subject"] == "Vodomery | denni report fakturacnich vodomeru | 15.04.2026"
     assert sent_messages[0]["sender_alias"] == "Monitoring"
     assert sent_messages[0]["is_html"] is True
@@ -156,3 +156,34 @@ def test_send_daily_vodomery_branch_report_sends_pdf_attachment(monkeypatch):
     assert sent_messages[0]["attachments"] == [
         ("vodomery_vetve_20260415.pdf", b"%PDF-1.4", "application", "pdf")
     ]
+
+
+def test_send_daily_vodomery_branch_report_skips_when_no_sendable_recipients(monkeypatch):
+    build_calls = []
+    sent_messages = []
+
+    monkeypatch.setattr(report_module, "_load_recipients", lambda: ())
+    monkeypatch.setattr(
+        report_module,
+        "build_daily_branch_report",
+        lambda **kwargs: build_calls.append(kwargs),
+    )
+    monkeypatch.setattr(report_module, "send_email_outlook", lambda **kwargs: sent_messages.append(kwargs))
+
+    result = report_module.send_daily_vodomery_branch_report(
+        target_date=datetime.date(2026, 4, 15),
+    )
+
+    assert result == {
+        "title": "Vodomery | denni report fakturacnich vodomeru | 15.04.2026",
+        "recipient_count": 0,
+        "recipients": (),
+        "target_date": "2026-04-15",
+        "branch_count": 0,
+        "pdf_filename": "vodomery_vetve_20260415.pdf",
+        "pdf_size_bytes": 0,
+        "skipped": True,
+        "skip_reason": "no_sendable_recipients",
+    }
+    assert build_calls == []
+    assert sent_messages == []

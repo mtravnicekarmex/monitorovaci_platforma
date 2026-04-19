@@ -155,7 +155,7 @@ def test_send_weekly_vodomery_branch_report_sends_pdf_attachment(monkeypatch):
     monkeypatch.setattr(report_module, "build_weekly_vodomery_branch_report", lambda **kwargs: report)
     monkeypatch.setattr(report_module, "render_weekly_vodomery_branch_report_pdf", lambda current_report: b"%PDF-1.4")
     monkeypatch.setattr(report_module, "send_email_outlook", lambda **kwargs: sent_messages.append(kwargs))
-    monkeypatch.setattr(report_module, "_load_recipients", lambda: ("weekly@example.com",))
+    monkeypatch.setattr(report_module, "_load_recipients", lambda: ("weekly@armex.cz",))
     monkeypatch.setattr(report_module, "_resolve_sender_alias", lambda: "Monitoring")
 
     result = report_module.send_weekly_vodomery_branch_report()
@@ -163,7 +163,7 @@ def test_send_weekly_vodomery_branch_report_sends_pdf_attachment(monkeypatch):
     assert result == {
         "title": "Vodomery | tydenni report fakturacnich vodomeru | 30.03.2026 - 05.04.2026",
         "recipient_count": 1,
-        "recipients": ("weekly@example.com",),
+        "recipients": ("weekly@armex.cz",),
         "period": "2026-W14",
         "date_range": "30.03.2026 - 05.04.2026",
         "branch_count": 1,
@@ -171,7 +171,7 @@ def test_send_weekly_vodomery_branch_report_sends_pdf_attachment(monkeypatch):
         "pdf_size_bytes": 8,
     }
     assert len(sent_messages) == 1
-    assert sent_messages[0]["email_receiver"] == "weekly@example.com"
+    assert sent_messages[0]["email_receiver"] == "weekly@armex.cz"
     assert sent_messages[0]["subject"] == "Vodomery | tydenni report fakturacnich vodomeru | 30.03.2026 - 05.04.2026"
     assert sent_messages[0]["sender_alias"] == "Monitoring"
     assert sent_messages[0]["is_html"] is True

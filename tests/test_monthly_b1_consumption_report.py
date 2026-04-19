@@ -39,7 +39,7 @@ def test_send_monthly_b1_consumption_report_builds_html_email(monkeypatch):
         ),
     )
 
-    monkeypatch.setattr(report_module, "_load_recipients", lambda: ["monthly@example.com"])
+    monkeypatch.setattr(report_module, "_load_recipients", lambda: ["monthly@armex.cz"])
     monkeypatch.setattr(report_module, "_get_previous_month_period", lambda reference_date=None: period)
     monkeypatch.setattr(report_module, "_build_meter_summaries", lambda current_period: summaries)
     monkeypatch.setattr(report_module, "send_email_outlook", lambda **kwargs: sent_messages.append(kwargs))
@@ -60,7 +60,7 @@ def test_send_monthly_b1_consumption_report_builds_html_email(monkeypatch):
         "period": "03/2026",
     }
     assert len(sent_messages) == 1
-    assert sent_messages[0]["email_receiver"] == "monthly@example.com"
+    assert sent_messages[0]["email_receiver"] == "monthly@armex.cz"
     assert sent_messages[0]["subject"] == "Spotřeba B1 - 03/2026"
     assert sent_messages[0]["sender_alias"] == "Monitoring"
     assert sent_messages[0]["is_html"] is True

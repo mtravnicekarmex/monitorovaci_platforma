@@ -35,6 +35,7 @@ from moduly.mereni.vodomery.reporting.daily_branch_report import (
     _prediction_delta_percent,
     _prepare_branch_device_rows,
     _safe_ratio_percent,
+    _sum_email_volume_column,
 )
 from services.api.services.vodomery import BRANCH_DASHBOARD_CONFIGS, load_branch_day_overview
 
@@ -358,6 +359,8 @@ def build_monthly_vodomery_branch_report(
                     identifier,
                     {
                         "identifikace": identifier,
+                        "start_value": None,
+                        "end_value": None,
                         "spotreba": 0.0,
                         "ocekavana_spotreba": 0.0,
                     },
@@ -375,10 +378,28 @@ def build_monthly_vodomery_branch_report(
                     identifier,
                     {
                         "identifikace": identifier,
+                        "start_value": None,
+                        "end_value": None,
                         "spotreba": 0.0,
                         "ocekavana_spotreba": 0.0,
                     },
                 )
+                start_value_raw = row.get("start_value")
+                end_value_raw = row.get("end_value")
+                if start_value_raw is not None:
+                    try:
+                        start_value = round(float(start_value_raw), 3)
+                    except (TypeError, ValueError):
+                        start_value = None
+                    if start_value is not None and device_stats["start_value"] is None:
+                        device_stats["start_value"] = start_value
+                if end_value_raw is not None:
+                    try:
+                        end_value = round(float(end_value_raw), 3)
+                    except (TypeError, ValueError):
+                        end_value = None
+                    if end_value is not None:
+                        device_stats["end_value"] = end_value
                 device_stats["spotreba"] = round(float(device_stats["spotreba"]) + actual_value, 3)
                 device_stats["ocekavana_spotreba"] = round(float(device_stats["ocekavana_spotreba"]) + expected_value, 3)
                 device_values[identifier] = actual_value
@@ -903,10 +924,13 @@ def _build_report_subject(report: MonthlyBranchReport) -> str:
 
 
 def _build_report_pdf_filename(report: MonthlyBranchReport) -> str:
-    return f"vodomery_vetve_mesic_{report.period.year}{report.period.month:02d}.pdf"
+    return f"Mesicni report vodomeru - {report.period.month:02d}.{report.period.year}.pdf"
 
 
 def _build_report_email_body(report: MonthlyBranchReport, pdf_filename: str) -> str:
+    total_actual = _sum_email_volume_column(tuple(branch.actual_total for branch in report.branches))
+    total_billing = _sum_email_volume_column(tuple(branch.billing_total for branch in report.branches))
+    total_difference = _sum_email_volume_column(tuple(branch.difference_vs_billing for branch in report.branches))
     summary_rows = "".join(
         (
             "<tr>"
@@ -917,6 +941,14 @@ def _build_report_email_body(report: MonthlyBranchReport, pdf_filename: str) -> 
             "</tr>"
         )
         for branch in report.branches
+    )
+    total_row = (
+        "<tr>"
+        "<td style='padding:8px 10px;border:1px solid #d0d7de;background:#e8edf3;'><strong>Celkem</strong></td>"
+        f"<td style='padding:8px 10px;border:1px solid #d0d7de;background:#e8edf3;text-align:right;'><strong>{escape(_format_volume(total_actual))}</strong></td>"
+        f"<td style='padding:8px 10px;border:1px solid #d0d7de;background:#e8edf3;text-align:right;'><strong>{escape(_format_volume(total_billing))}</strong></td>"
+        f"<td style='padding:8px 10px;border:1px solid #d0d7de;background:#e8edf3;text-align:right;'><strong>{escape(_format_volume(total_difference, signed=True))}</strong></td>"
+        "</tr>"
     )
     return (
         "<html><body style='font-family:Segoe UI,Arial,sans-serif;color:#1f2328;'>"
@@ -936,6 +968,7 @@ def _build_report_email_body(report: MonthlyBranchReport, pdf_filename: str) -> 
         "<th style='padding:8px 10px;border:1px solid #d0d7de;background:#f6f8fa;text-align:right;'>Rozdíl</th>"
         "</tr>"
         f"{summary_rows}"
+        f"{total_row}"
         "</table>"
         "</body></html>"
     )
@@ -958,7 +991,7 @@ def send_monthly_vodomery_branch_report(
             "recipients": (),
             "period": period.month_label,
             "branch_count": 0,
-            "pdf_filename": f"vodomery_vetve_mesic_{period.year}{period.month:02d}.pdf",
+            "pdf_filename": f"Mesicni report vodomeru - {period.month:02d}.{period.year}.pdf",
             "pdf_size_bytes": 0,
             "skipped": True,
             "skip_reason": "no_sendable_recipients",

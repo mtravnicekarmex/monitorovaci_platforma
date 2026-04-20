@@ -1112,6 +1112,40 @@ def load_branch_day_overview(
                 None if billing_measurements_df.empty else pd.to_datetime(billing_measurements_df["date"]).max()
             )
 
+            device_state_lookup: dict[str, tuple[float | None, float | None]] = {}
+            if not measurements_df.empty:
+                state_measurements_df = measurements_df.loc[
+                    measurements_df["identifikace"].isin(active_devices)
+                ].copy()
+                if not state_measurements_df.empty:
+                    state_measurements_df["objem"] = pd.to_numeric(
+                        state_measurements_df["objem"],
+                        errors="coerce",
+                    )
+                    if "platne" in state_measurements_df.columns:
+                        state_measurements_df = state_measurements_df.loc[
+                            state_measurements_df["platne"].fillna(True)
+                        ].copy()
+                    if "reset_detected" in state_measurements_df.columns:
+                        state_measurements_df = state_measurements_df.loc[
+                            ~state_measurements_df["reset_detected"].fillna(False)
+                        ].copy()
+                    state_measurements_df = state_measurements_df.dropna(
+                        subset=["date", "identifikace", "objem"]
+                    )
+                    if not state_measurements_df.empty:
+                        state_measurements_df = state_measurements_df.sort_values(
+                            ["identifikace", "date"],
+                            ascending=[True, True],
+                        )
+                        for identifier, state_group in state_measurements_df.groupby(
+                            "identifikace",
+                            sort=False,
+                        ):
+                            start_value = round(float(state_group["objem"].iloc[0]), 3)
+                            end_value = round(float(state_group["objem"].iloc[-1]), 3)
+                            device_state_lookup[str(identifier)] = (start_value, end_value)
+
             hourly_actual_lookup: dict[tuple[str, pd.Timestamp], float] = {}
             if not measurements_df.empty:
                 measurements_df["hour_bucket"] = measurements_df["date"].dt.floor("h")
@@ -1265,6 +1299,8 @@ def load_branch_day_overview(
                 (
                     {
                         "identifikace": identifier,
+                        "start_value": device_state_lookup.get(identifier, (None, None))[0],
+                        "end_value": device_state_lookup.get(identifier, (None, None))[1],
                         "spotreba": round(float(device_actual_totals.get(identifier, 0.0)), 3),
                         "ocekavana_spotreba": round(float(device_expected_totals.get(identifier, 0.0)), 3),
                         "odchylka_od_ocekavani_procent": calculate_percentage_deviation(

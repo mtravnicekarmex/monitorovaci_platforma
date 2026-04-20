@@ -38,12 +38,16 @@ def test_build_daily_branch_report_computes_branch_metrics(monkeypatch):
             "device_consumption_rows": [
                 {
                     "identifikace": "A_V1",
+                    "start_value": 100.0,
+                    "end_value": 109.0,
                     "spotreba": 9.0,
                     "podil_procent": 75.0,
                     "ocekavana_spotreba": 8.0,
                 },
                 {
                     "identifikace": "B_V1",
+                    "start_value": 50.0,
+                    "end_value": 53.0,
                     "spotreba": 3.0,
                     "podil_procent": 25.0,
                     "ocekavana_spotreba": 6.0,
@@ -76,6 +80,8 @@ def test_build_daily_branch_report_computes_branch_metrics(monkeypatch):
     assert branch.difference_vs_billing == 1.0
     assert branch.actual_vs_billing_percent == 109.1
     assert branch.device_rows[0].identifikace == "A_V1"
+    assert branch.device_rows[0].start_value == 100.0
+    assert branch.device_rows[0].end_value == 109.0
     assert branch.device_rows[0].spotreba_ku_ocekavani_procent == 112.5
     assert "<svg" in branch.chart_svg
 
@@ -90,6 +96,10 @@ def test_build_daily_branch_report_computes_branch_metrics(monkeypatch):
     assert "Odchylky" in html
     assert "Na 1 vodoměr / den" in html
     assert "Na 1 vodoměr / hodinu" in html
+    assert "Počáteční stav" in html
+    assert "Konečný stav" in html
+    assert "100.000 m³" in html
+    assert "109.000 m³" in html
     assert "+0.500 m³" in html
     assert "+0.021 m³" in html
     assert "stroke='#f97316'" in html
@@ -104,6 +114,52 @@ def test_build_daily_branch_report_computes_branch_metrics(monkeypatch):
     assert "Skutečná data do:" not in html
     assert "data:image/png;base64" in html
     assert ".branch-table thead th.numeric" in html
+
+
+def test_build_daily_branch_report_email_body_contains_total_row():
+    report = report_module.DailyBranchReport(
+        generated_at=datetime.datetime(2026, 4, 16, 6, 0, 0),
+        target_date=datetime.date(2026, 4, 15),
+        branches=(
+            report_module.BranchDailyReportSection(
+                key="SCVK_HE",
+                title="HECHT",
+                billing_ident="SCVK_HE",
+                actual_total=12.0,
+                expected_total=14.0,
+                daily_limit=20.0,
+                remaining_to_limit=8.0,
+                billing_total=11.0,
+                difference_vs_billing=1.0,
+                actual_vs_billing_percent=109.1,
+                last_actual_timestamp=datetime.datetime(2026, 4, 15, 23, 0, 0),
+                device_rows=(),
+                chart_svg="<svg></svg>",
+            ),
+            report_module.BranchDailyReportSection(
+                key="SCVK_DV",
+                title="DOKTOR voda",
+                billing_ident="SCVK_DV",
+                actual_total=8.5,
+                expected_total=9.0,
+                daily_limit=10.0,
+                remaining_to_limit=1.5,
+                billing_total=7.25,
+                difference_vs_billing=1.25,
+                actual_vs_billing_percent=117.2,
+                last_actual_timestamp=datetime.datetime(2026, 4, 15, 23, 0, 0),
+                device_rows=(),
+                chart_svg="<svg></svg>",
+            ),
+        ),
+    )
+
+    body = report_module._build_report_email_body(report, "Denni report vodomeru - 15.04.2026.pdf")
+
+    assert "<strong>Celkem</strong>" in body
+    assert "20.500 m³" in body
+    assert "18.250 m³" in body
+    assert "+2.250 m³" in body
 
 
 def test_send_daily_vodomery_branch_report_sends_pdf_attachment(monkeypatch):
@@ -144,7 +200,7 @@ def test_send_daily_vodomery_branch_report_sends_pdf_attachment(monkeypatch):
         "recipients": ("branch@armex.cz",),
         "target_date": "2026-04-15",
         "branch_count": 1,
-        "pdf_filename": "vodomery_vetve_20260415.pdf",
+        "pdf_filename": "Denni report vodomeru - 15.04.2026.pdf",
         "pdf_size_bytes": 8,
     }
     assert len(sent_messages) == 1
@@ -154,7 +210,7 @@ def test_send_daily_vodomery_branch_report_sends_pdf_attachment(monkeypatch):
     assert sent_messages[0]["is_html"] is True
     assert "HECHT" in sent_messages[0]["body"]
     assert sent_messages[0]["attachments"] == [
-        ("vodomery_vetve_20260415.pdf", b"%PDF-1.4", "application", "pdf")
+        ("Denni report vodomeru - 15.04.2026.pdf", b"%PDF-1.4", "application", "pdf")
     ]
 
 
@@ -180,7 +236,7 @@ def test_send_daily_vodomery_branch_report_skips_when_no_sendable_recipients(mon
         "recipients": (),
         "target_date": "2026-04-15",
         "branch_count": 0,
-        "pdf_filename": "vodomery_vetve_20260415.pdf",
+        "pdf_filename": "Denni report vodomeru - 15.04.2026.pdf",
         "pdf_size_bytes": 0,
         "skipped": True,
         "skip_reason": "no_sendable_recipients",

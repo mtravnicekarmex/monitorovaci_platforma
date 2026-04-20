@@ -182,6 +182,8 @@ def build_weekly_vodomery_branch_report(
                     identifier,
                     {
                         "identifikace": identifier,
+                        "start_value": None,
+                        "end_value": None,
                         "spotreba": 0.0,
                         "ocekavana_spotreba": 0.0,
                     },
@@ -199,10 +201,28 @@ def build_weekly_vodomery_branch_report(
                     identifier,
                     {
                         "identifikace": identifier,
+                        "start_value": None,
+                        "end_value": None,
                         "spotreba": 0.0,
                         "ocekavana_spotreba": 0.0,
                     },
                 )
+                start_value_raw = row.get("start_value")
+                end_value_raw = row.get("end_value")
+                if start_value_raw is not None:
+                    try:
+                        start_value = round(float(start_value_raw), 3)
+                    except (TypeError, ValueError):
+                        start_value = None
+                    if start_value is not None and device_stats["start_value"] is None:
+                        device_stats["start_value"] = start_value
+                if end_value_raw is not None:
+                    try:
+                        end_value = round(float(end_value_raw), 3)
+                    except (TypeError, ValueError):
+                        end_value = None
+                    if end_value is not None:
+                        device_stats["end_value"] = end_value
                 device_stats["spotreba"] = round(float(device_stats["spotreba"]) + actual_value, 3)
                 device_stats["ocekavana_spotreba"] = round(float(device_stats["ocekavana_spotreba"]) + expected_value, 3)
                 device_values[identifier] = actual_value
@@ -345,7 +365,7 @@ def _build_report_subject(report: WeeklyBranchReport) -> str:
 def _build_report_pdf_filename(report: WeeklyBranchReport) -> str:
     end_date_inclusive = report.period.period_end - timedelta(days=1)
     return (
-        f"vodomery_vetve_tyden_{report.period.period_start:%Y%m%d}_{end_date_inclusive:%Y%m%d}.pdf"
+        f"Tydenni report vodomeru - {report.period.period_start:%d} - {end_date_inclusive:%d.%m.%Y}.pdf"
     )
 
 
@@ -379,7 +399,7 @@ def send_weekly_vodomery_branch_report(
             "date_range": period.date_range_label,
             "branch_count": 0,
             "pdf_filename": (
-                f"vodomery_vetve_tyden_{period.period_start:%Y%m%d}_{end_date_inclusive:%Y%m%d}.pdf"
+                f"Tydenni report vodomeru - {period.period_start:%d} - {end_date_inclusive:%d.%m.%Y}.pdf"
             ),
             "pdf_size_bytes": 0,
             "skipped": True,

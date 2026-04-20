@@ -48,6 +48,8 @@ class VodomeryDailyBranchReportError(RuntimeError):
 @dataclass(frozen=True)
 class BranchDeviceReportRow:
     identifikace: str
+    start_value: float | None
+    end_value: float | None
     spotreba: float
     podil_procent: float
     ocekavana_spotreba: float | None
@@ -193,12 +195,25 @@ def _format_datetime(value: datetime | None) -> str:
     return "-" if value is None else value.strftime("%d.%m.%Y %H:%M")
 
 
+def _sum_email_volume_column(values: tuple[object, ...]) -> float:
+    total = 0.0
+    for value in values:
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            continue
+        if pd.isna(numeric_value) or not isfinite(numeric_value):
+            continue
+        total += numeric_value
+    return round(total, 3)
+
+
 def _build_report_subject(report: DailyBranchReport) -> str:
     return f"Vodomery | denni report fakturacnich vodomeru | {report.target_date:%d.%m.%Y}"
 
 
 def _build_report_pdf_filename(report: DailyBranchReport) -> str:
-    return f"vodomery_vetve_{report.target_date:%Y%m%d}.pdf"
+    return f"Denni report vodomeru - {report.target_date:%d.%m.%Y}.pdf"
 
 
 def _load_image_data_uri(image_path: Path) -> str:
@@ -244,6 +259,10 @@ def _prepare_branch_device_rows(device_consumption_df: pd.DataFrame) -> tuple[Br
         return ()
 
     rows = device_consumption_df.copy()
+    if "start_value" in rows.columns:
+        rows["start_value"] = pd.to_numeric(rows["start_value"], errors="coerce")
+    if "end_value" in rows.columns:
+        rows["end_value"] = pd.to_numeric(rows["end_value"], errors="coerce")
     if "spotreba" in rows.columns:
         rows["spotreba"] = pd.to_numeric(rows["spotreba"], errors="coerce").fillna(0.0)
     if "podil_procent" in rows.columns:
@@ -254,10 +273,14 @@ def _prepare_branch_device_rows(device_consumption_df: pd.DataFrame) -> tuple[Br
 
     prepared_rows: list[BranchDeviceReportRow] = []
     for index, row in enumerate(rows.itertuples(index=False)):
+        start_value = None if not hasattr(row, "start_value") or pd.isna(row.start_value) else round(float(row.start_value), 3)
+        end_value = None if not hasattr(row, "end_value") or pd.isna(row.end_value) else round(float(row.end_value), 3)
         expected_value = None if pd.isna(row.ocekavana_spotreba) else round(float(row.ocekavana_spotreba), 3)
         prepared_rows.append(
             BranchDeviceReportRow(
                 identifikace=str(row.identifikace),
+                start_value=start_value,
+                end_value=end_value,
                 spotreba=round(float(row.spotreba), 3),
                 podil_procent=round(float(row.podil_procent), 1),
                 ocekavana_spotreba=expected_value,
@@ -544,6 +567,8 @@ def _build_device_table_html(device_rows: tuple[BranchDeviceReportRow, ...]) -> 
         rows_html.append(
             "<tr>"
             f"<td><span class='row-ident'><span class='row-swatch' style='background:{escape(row.color_hex)};'></span>{escape(row.identifikace)}</span></td>"
+            f"<td class='numeric'>{escape(_format_volume(row.start_value))}</td>"
+            f"<td class='numeric'>{escape(_format_volume(row.end_value))}</td>"
             f"<td class='numeric'>{escape(_format_volume(row.spotreba))}</td>"
             f"<td class='numeric'>{escape(_format_percent(row.podil_procent))}</td>"
             f"<td class='numeric'>{escape(_format_volume(row.ocekavana_spotreba))}</td>"
@@ -555,6 +580,8 @@ def _build_device_table_html(device_rows: tuple[BranchDeviceReportRow, ...]) -> 
         "<table class='branch-table'>"
         "<thead><tr>"
         "<th>Odběrné místo</th>"
+        "<th class='numeric'>Počáteční stav</th>"
+        "<th class='numeric'>Konečný stav</th>"
         "<th class='numeric'>Spotřeba</th>"
         "<th class='numeric'>Podíl na větvi</th>"
         "<th class='numeric'>Očekávaná spotřeba</th>"
@@ -929,6 +956,9 @@ def render_daily_branch_report_pdf(report: DailyBranchReport) -> bytes:
 
 
 def _build_report_email_body(report: DailyBranchReport, pdf_filename: str) -> str:
+    total_actual = _sum_email_volume_column(tuple(branch.actual_total for branch in report.branches))
+    total_billing = _sum_email_volume_column(tuple(branch.billing_total for branch in report.branches))
+    total_difference = _sum_email_volume_column(tuple(branch.difference_vs_billing for branch in report.branches))
     summary_rows = "".join(
         (
             "<tr>"
@@ -939,6 +969,14 @@ def _build_report_email_body(report: DailyBranchReport, pdf_filename: str) -> st
             "</tr>"
         )
         for branch in report.branches
+    )
+    total_row = (
+        "<tr>"
+        "<td style='padding:8px 10px;border:1px solid #d0d7de;background:#e8edf3;'><strong>Celkem</strong></td>"
+        f"<td style='padding:8px 10px;border:1px solid #d0d7de;background:#e8edf3;text-align:right;'><strong>{escape(_format_volume(total_actual))}</strong></td>"
+        f"<td style='padding:8px 10px;border:1px solid #d0d7de;background:#e8edf3;text-align:right;'><strong>{escape(_format_volume(total_billing))}</strong></td>"
+        f"<td style='padding:8px 10px;border:1px solid #d0d7de;background:#e8edf3;text-align:right;'><strong>{escape(_format_volume(total_difference, signed=True))}</strong></td>"
+        "</tr>"
     )
     return (
         "<html><body style='font-family:Segoe UI,Arial,sans-serif;color:#1f2328;'>"
@@ -958,6 +996,7 @@ def _build_report_email_body(report: DailyBranchReport, pdf_filename: str) -> st
         "<th style='padding:8px 10px;border:1px solid #d0d7de;background:#f6f8fa;text-align:right;'>Rozdíl</th>"
         "</tr>"
         f"{summary_rows}"
+        f"{total_row}"
         "</table>"
         "</body></html>"
     )
@@ -980,7 +1019,7 @@ def send_daily_vodomery_branch_report(
             "recipients": (),
             "target_date": resolved_target_date.isoformat(),
             "branch_count": 0,
-            "pdf_filename": f"vodomery_vetve_{resolved_target_date:%Y%m%d}.pdf",
+            "pdf_filename": f"Denni report vodomeru - {resolved_target_date:%d.%m.%Y}.pdf",
             "pdf_size_bytes": 0,
             "skipped": True,
             "skip_reason": "no_sendable_recipients",

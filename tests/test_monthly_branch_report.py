@@ -30,8 +30,8 @@ def test_build_monthly_vodomery_branch_report_aggregates_daily_payloads(monkeypa
                     {"date": datetime.datetime(2026, 3, 1, 1, 0, 0), "fakturacni_spotreba": 8.0},
                 ],
                 "device_consumption_rows": [
-                    {"identifikace": "A_V1", "spotreba": 9.0, "ocekavana_spotreba": 8.0},
-                    {"identifikace": "B_V1", "spotreba": 3.0, "ocekavana_spotreba": 6.0},
+                    {"identifikace": "A_V1", "start_value": 100.0, "end_value": 109.0, "spotreba": 9.0, "ocekavana_spotreba": 8.0},
+                    {"identifikace": "B_V1", "start_value": 200.0, "end_value": 203.0, "spotreba": 3.0, "ocekavana_spotreba": 6.0},
                 ],
             }
         ],
@@ -49,8 +49,8 @@ def test_build_monthly_vodomery_branch_report_aggregates_daily_payloads(monkeypa
                     {"date": datetime.datetime(2026, 3, 2, 1, 0, 0), "fakturacni_spotreba": 5.0},
                 ],
                 "device_consumption_rows": [
-                    {"identifikace": "A_V1", "spotreba": 4.0, "ocekavana_spotreba": 3.0},
-                    {"identifikace": "C_V1", "spotreba": 6.0, "ocekavana_spotreba": 5.0},
+                    {"identifikace": "A_V1", "start_value": 109.0, "end_value": 113.0, "spotreba": 4.0, "ocekavana_spotreba": 3.0},
+                    {"identifikace": "C_V1", "start_value": 300.0, "end_value": 306.0, "spotreba": 6.0, "ocekavana_spotreba": 5.0},
                 ],
             }
         ],
@@ -82,8 +82,12 @@ def test_build_monthly_vodomery_branch_report_aggregates_daily_payloads(monkeypa
     assert hecht.deviation_per_meter_day == 0.333
     assert hecht.deviation_per_meter_hour == 0.014
     assert hecht.device_rows[0].identifikace == "A_V1"
+    assert hecht.device_rows[0].start_value == 100.0
+    assert hecht.device_rows[0].end_value == 113.0
     assert hecht.device_rows[0].spotreba == 13.0
     assert hecht.device_rows[1].identifikace == "C_V1"
+    assert hecht.device_rows[1].start_value == 300.0
+    assert hecht.device_rows[1].end_value == 306.0
     assert "<svg" in hecht.chart_svg
 
     html = report_module.build_monthly_vodomery_branch_report_html(report)
@@ -97,6 +101,10 @@ def test_build_monthly_vodomery_branch_report_aggregates_daily_payloads(monkeypa
     assert "Odchylky" in html
     assert "Na 1 vodoměr / den" in html
     assert "Na 1 vodoměr / hodinu" in html
+    assert "Počáteční stav" in html
+    assert "Konečný stav" in html
+    assert "100.000 m³" in html
+    assert "113.000 m³" in html
     assert "+0.333 m³" in html
     assert "+0.014 m³" in html
     assert "stroke='#f97316'" in html
@@ -109,6 +117,60 @@ def test_build_monthly_vodomery_branch_report_aggregates_daily_payloads(monkeypa
     assert "Měsíční report" in header_template
     assert "pdf-header-table" in header_template
     assert "pdf-header-rule" in header_template
+
+
+def test_build_monthly_branch_report_email_body_contains_total_row():
+    report = report_module.MonthlyBranchReport(
+        generated_at=datetime.datetime(2026, 4, 1, 6, 0, 0),
+        period=report_module.MonthlyBranchReportPeriod(
+            year=2026,
+            month=3,
+            period_start=datetime.datetime(2026, 3, 1, 0, 0, 0),
+            period_end=datetime.datetime(2026, 4, 1, 0, 0, 0),
+        ),
+        branches=(
+            report_module.BranchMonthlyReportSection(
+                key="SCVK_HE",
+                title="HECHT",
+                billing_ident="SCVK_HE",
+                actual_total=22.0,
+                expected_total=22.0,
+                period_limit=620.0,
+                remaining_to_limit=598.0,
+                billing_total=20.0,
+                difference_vs_billing=2.0,
+                actual_vs_billing_percent=110.0,
+                device_rows=(),
+                chart_svg="<svg></svg>",
+                deviation_per_meter_day=0.067,
+                deviation_per_meter_hour=0.003,
+            ),
+            report_module.BranchMonthlyReportSection(
+                key="SCVK_DV",
+                title="DOKTOR voda",
+                billing_ident="SCVK_DV",
+                actual_total=8.0,
+                expected_total=9.0,
+                period_limit=310.0,
+                remaining_to_limit=302.0,
+                billing_total=7.0,
+                difference_vs_billing=1.0,
+                actual_vs_billing_percent=114.3,
+                device_rows=(),
+                chart_svg="<svg></svg>",
+                deviation_per_meter_day=0.033,
+                deviation_per_meter_hour=0.001,
+            ),
+        ),
+    )
+
+    body = report_module._build_report_email_body(report, "Mesicni report vodomeru - 03.2026.pdf")
+
+    assert "Měsíční report fakturačních vodoměrů" in body
+    assert "<strong>Celkem</strong>" in body
+    assert "30.000 m³" in body
+    assert "27.000 m³" in body
+    assert "+3.000 m³" in body
 
 
 def test_send_monthly_vodomery_branch_report_sends_pdf_attachment(monkeypatch):
@@ -155,7 +217,7 @@ def test_send_monthly_vodomery_branch_report_sends_pdf_attachment(monkeypatch):
         "recipients": ("monthly@armex.cz",),
         "period": "03/2026",
         "branch_count": 1,
-        "pdf_filename": "vodomery_vetve_mesic_202603.pdf",
+        "pdf_filename": "Mesicni report vodomeru - 03.2026.pdf",
         "pdf_size_bytes": 8,
     }
     assert len(sent_messages) == 1
@@ -165,5 +227,5 @@ def test_send_monthly_vodomery_branch_report_sends_pdf_attachment(monkeypatch):
     assert sent_messages[0]["is_html"] is True
     assert "HECHT" in sent_messages[0]["body"]
     assert sent_messages[0]["attachments"] == [
-        ("vodomery_vetve_mesic_202603.pdf", b"%PDF-1.4", "application", "pdf")
+        ("Mesicni report vodomeru - 03.2026.pdf", b"%PDF-1.4", "application", "pdf")
     ]

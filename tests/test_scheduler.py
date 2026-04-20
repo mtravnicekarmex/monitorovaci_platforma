@@ -9,6 +9,7 @@ import pytest
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from core.scheduler import scheduler
+from core.scheduler.job_schedule import get_scheduler_job_specs
 
 
 class FakeLogger:
@@ -407,6 +408,12 @@ def test_smartfuelpass_weekly_report_job_sends_email_report(monkeypatch):
     assert [name for name, _, _ in calls] == ["fake_send_charge_sessions_report_email"]
 
 
+def test_scheduler_job_registry_matches_schedule_specs():
+    assert set(scheduler._get_job_functions()) == {
+        job_spec.id for job_spec in get_scheduler_job_specs()
+    }
+
+
 def test_main_scheduler_registers_monthly_and_daily_report_jobs(monkeypatch, fake_metrics_store):
     fake_logger = FakeLogger()
 
@@ -440,10 +447,15 @@ def test_main_scheduler_registers_monthly_and_daily_report_jobs(monkeypatch, fak
     scheduler.main_scheduler()
 
     monthly_job = next(job for job in fake_scheduler.jobs if job["id"] == "monthly_job")
+    daily_job = next(job for job in fake_scheduler.jobs if job["id"] == "daily_job")
     smartfuelpass_job = next(job for job in fake_scheduler.jobs if job["id"] == "smartfuelpass_weekly_report_job")
     daily_branch_job = next(job for job in fake_scheduler.jobs if job["id"] == "daily_vodomery_branch_report_job")
 
     assert monthly_job["fn"] is scheduler.monthly_job
+    assert daily_job["fn"] is scheduler.daily_job
+    assert "hour='0'" in str(daily_job["trigger"])
+    assert "minute='15'" in str(daily_job["trigger"])
+    assert "second='5'" in str(daily_job["trigger"])
     assert "day='1'" in str(monthly_job["trigger"])
     assert "hour='6'" in str(monthly_job["trigger"])
     assert "minute='20'" in str(monthly_job["trigger"])

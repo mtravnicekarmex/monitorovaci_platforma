@@ -1,10 +1,15 @@
 import datetime
+import sys
 import warnings
+from pathlib import Path
 
 import pandas as pd
 
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
 from services.api.services.vodomery import (
     BranchDashboardConfig,
+    _aggregate_hourly_branch_values,
     _build_branch_billing_payload,
     _prepare_branch_measurements,
     _serialize_dataframe_rows,
@@ -51,6 +56,39 @@ def test_prepare_branch_measurements_zeroes_invalid_rows():
     prepared = _prepare_branch_measurements(frame)
 
     assert prepared["spotreba"].tolist() == [0.0, 0.0, 0.6]
+
+
+def test_aggregate_hourly_branch_values_rounds_numeric_column_without_datetime_warning():
+    frame = pd.DataFrame(
+        {
+            "identifikace": ["A", "A", "B"],
+            "hour_bucket": pd.to_datetime(
+                [
+                    "2026-04-10 10:00:00",
+                    "2026-04-10 10:00:00",
+                    "2026-04-10 11:00:00",
+                ]
+            ),
+            "spotreba": [0.3333, 0.3333, 1.6666],
+        }
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        hourly = _aggregate_hourly_branch_values(frame, value_column="spotreba")
+
+    assert hourly.to_dict(orient="records") == [
+        {
+            "identifikace": "A",
+            "hour_bucket": pd.Timestamp("2026-04-10 10:00:00"),
+            "spotreba": 0.667,
+        },
+        {
+            "identifikace": "B",
+            "hour_bucket": pd.Timestamp("2026-04-10 11:00:00"),
+            "spotreba": 1.667,
+        },
+    ]
 
 
 def test_build_branch_billing_payload_allocates_consumption_and_merges_assignments():

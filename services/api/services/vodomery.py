@@ -240,6 +240,18 @@ def _prepare_branch_measurements(df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(grouped_frames, ignore_index=True)
 
 
+def _aggregate_hourly_branch_values(df: pd.DataFrame, *, value_column: str) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=["identifikace", "hour_bucket", value_column])
+
+    hourly_df = (
+        df.groupby(["identifikace", "hour_bucket"], as_index=False)
+        .agg(**{value_column: (value_column, "sum")})
+    )
+    hourly_df[value_column] = pd.to_numeric(hourly_df[value_column], errors="coerce").fillna(0.0).round(3)
+    return hourly_df
+
+
 def _serialize_dataframe_rows(df: pd.DataFrame) -> list[dict[str, object]]:
     if df.empty:
         return []
@@ -1103,10 +1115,9 @@ def load_branch_day_overview(
             hourly_actual_lookup: dict[tuple[str, pd.Timestamp], float] = {}
             if not measurements_df.empty:
                 measurements_df["hour_bucket"] = measurements_df["date"].dt.floor("h")
-                actual_hourly = (
-                    measurements_df.groupby(["identifikace", "hour_bucket"], as_index=False)["spotreba"]
-                    .sum()
-                    .round(3)
+                actual_hourly = _aggregate_hourly_branch_values(
+                    measurements_df,
+                    value_column="spotreba",
                 )
                 hourly_actual_lookup = {
                     (str(row.identifikace), pd.Timestamp(row.hour_bucket)): round(float(row.spotreba), 3)
@@ -1150,10 +1161,9 @@ def load_branch_day_overview(
                             unit="m",
                         )
                         prediction_df["hour_bucket"] = prediction_df["date"].dt.floor("h")
-                        prediction_hourly = (
-                            prediction_df.groupby(["identifikace", "hour_bucket"], as_index=False)["expected_mean"]
-                            .sum()
-                            .round(3)
+                        prediction_hourly = _aggregate_hourly_branch_values(
+                            prediction_df,
+                            value_column="expected_mean",
                         )
                         hourly_prediction_lookup = {
                             (str(row.identifikace), pd.Timestamp(row.hour_bucket)): round(float(row.expected_mean), 3)

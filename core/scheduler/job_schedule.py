@@ -31,12 +31,13 @@ class ScheduledRun:
     scheduled_at: datetime
 
 
+# Jediny zdroj pravdy pro casy scheduler jobu.
 SCHEDULER_JOB_SPECS: tuple[SchedulerJobSpec, ...] = (
     SchedulerJobSpec(
         id="quarter_hour_job",
         label="Quarter hour",
         description="Import vodomeru, scoring, eventy a alerting.",
-        trigger_kwargs={"minute": "5,16,35,50", "second": 5},
+        trigger_kwargs={"minute": "5,16,35,47", "second": 5},
     ),
     SchedulerJobSpec(
         id="hourly_job",
@@ -48,7 +49,7 @@ SCHEDULER_JOB_SPECS: tuple[SchedulerJobSpec, ...] = (
     SchedulerJobSpec(
         id="daily_seven_and_two_job",
         label="Daily 7 and 14",
-        description="Web search monitoring.",
+        description="Web monitoring v 7:00 a 14:00.",
         trigger_kwargs={"hour": "7,14", "minute": 0, "second": 5},
     ),
     SchedulerJobSpec(

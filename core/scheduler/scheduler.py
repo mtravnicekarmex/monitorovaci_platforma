@@ -1,13 +1,8 @@
 """
 Scheduler pro automatizované úlohy monitorovací platformy.
 
-Spravuje plánování a spouštění periodických úloh:
-- Čtvrtletní job (každých 15 minut)
-- Hodinový job (každou hodinu)
-- Denní job (7:00 a 14:00)
-- Noční job (0:15)
-- Týdenní job (každé pondělí)
-- Měsíční job (první den v měsíci)
+Tento modul obsahuje implementace jednotlivých jobů a registraci do APScheduleru.
+Časování jobů je centralizované v ``core.scheduler.job_schedule``.
 """
 
 import html
@@ -105,55 +100,6 @@ def setup_logging():
 
 
 logger = setup_logging()
-
-
-# -------------------------
-# Logger
-# -------------------------
-
-SCHEDULER_DIR = Path(__file__).resolve().parent
-SCHEDULER_LOGS_DIR = SCHEDULER_DIR / "logs"
-SCHEDULER_LOG_PATH = SCHEDULER_LOGS_DIR / "scheduler.log"
-
-
-def setup_logging():
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    SCHEDULER_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-
-    formatter = logging.Formatter(
-        "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
-    )
-
-    has_console_handler = any(
-        isinstance(handler, logging.StreamHandler) and getattr(handler, "stream", None) is sys.stdout
-        for handler in logger.handlers
-    )
-    if not has_console_handler:
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
-
-    has_file_handler = any(
-        isinstance(handler, TimedRotatingFileHandler)
-        and Path(getattr(handler, "baseFilename", "")).resolve() == SCHEDULER_LOG_PATH.resolve()
-        for handler in logger.handlers
-    )
-    if not has_file_handler:
-        file_handler = TimedRotatingFileHandler(
-            SCHEDULER_LOG_PATH,
-            when="midnight",
-            interval=1,
-            backupCount=14,
-            encoding="utf-8"
-        )
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-
-    # potlačí SQLAlchemy spam
-    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
-
-    return logging.getLogger(__name__)
 
 
 
@@ -548,8 +494,10 @@ def locked_job(*decorator_args):
 # -------------------------
 # Definice jednotlivých jobů
 # -------------------------
+#
+# Přesné časy běhu jsou definované v `core.scheduler.job_schedule`.
 
-# každých 15 minut v X:05,20,35,50
+# Import vodomeru, scoring, eventy a alerting.
 @locked_job
 def quarter_hour_job():
     safe_call(vodomery_db_import)
@@ -580,32 +528,32 @@ def quarter_hour_job():
     )
 
 
-# každou hodinu v X:02:05
+# Hodinový import SCVK vodoměrů.
 @locked_job
 def hourly_job():
     safe_call(SCVK_save_to_database_all)
 
 
-# každý den v 7:00 a 14:00
+# Denní web monitoring.
 @locked_job
 def daily_seven_and_two_job():
     safe_call(daily_web_monitor_job)
 
 
-# každý den v 0:15:05
+# Noční SOFTLINK import a synchronizace meteo dat.
 @locked_job
-def daily_pulnoc_job():
+def daily_job():
     safe_call(SOFTLINK_save_to_database_all)
     safe_call(meteo_sync)
 
 
-# každý den v 6:00:05
+# Denní email report větví vodoměrů.
 @locked_job
 def daily_vodomery_branch_report_job():
     safe_call(send_daily_vodomery_branch_report)
 
 
-# každý týden v pondělí v 6:10:05
+# Týdenní rebuild profilů a report větví vodoměrů.
 @locked_job
 def weekly_job():
     rebuild_result = safe_call(rebuild_profiles)
@@ -613,18 +561,31 @@ def weekly_job():
     safe_call(send_weekly_vodomery_branch_report)
 
 
-# každé úterý v 6:55:05
+# Týdenní email report SmartFuelPass.
 @locked_job
 def smartfuelpass_weekly_report_job():
     safe_call(send_charge_sessions_report_email)
 
 
-# každý první den v měsíci v 6:20:05
+# Měsíční reporty spotřeb.
 @locked_job
 def monthly_job():
     safe_call(send_monthly_vodomery_consumption_report)
     safe_call(send_monthly_vodomery_branch_report)
     safe_call(send_monthly_b1_consumption_report)
+
+
+def _get_job_functions():
+    return {
+        "quarter_hour_job": quarter_hour_job,
+        "hourly_job": hourly_job,
+        "daily_seven_and_two_job": daily_seven_and_two_job,
+        "daily_job": daily_job,
+        "daily_vodomery_branch_report_job": daily_vodomery_branch_report_job,
+        "weekly_job": weekly_job,
+        "smartfuelpass_weekly_report_job": smartfuelpass_weekly_report_job,
+        "monthly_job": monthly_job,
+    }
 
 
 
@@ -654,18 +615,9 @@ def main_scheduler():
 
 
     # -------------------------
-    # Naplánování jobů
+    # Naplánování jobů podle centrální specifikace v core.scheduler.job_schedule
     # -------------------------
-    job_functions = {
-        "quarter_hour_job": quarter_hour_job,
-        "hourly_job": hourly_job,
-        "daily_seven_and_two_job": daily_seven_and_two_job,
-        "daily_job": daily_pulnoc_job,
-        "daily_vodomery_branch_report_job": daily_vodomery_branch_report_job,
-        "weekly_job": weekly_job,
-        "smartfuelpass_weekly_report_job": smartfuelpass_weekly_report_job,
-        "monthly_job": monthly_job,
-    }
+    job_functions = _get_job_functions()
     for job_spec in get_scheduler_job_specs():
         scheduler.add_job(
             job_functions[job_spec.id],

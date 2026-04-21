@@ -1,3 +1,8 @@
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
 from moduly.apps.dashboard.navigation_config import (
     get_configurable_page_keys,
     get_configurable_section_keys,
@@ -17,6 +22,7 @@ def test_scheduler_health_footer_page_is_after_vodomery_alerting():
     footer_page_keys = [page.key for page in get_dashboard_pages("footer")]
 
     assert "vodomery_alerting" in footer_page_keys
+    assert "plynomery_alerting" in footer_page_keys
     assert "scheduler_health" in footer_page_keys
     assert "muj_ucet" in footer_page_keys
     assert footer_page_keys.index("vodomery_alerting") < footer_page_keys.index("scheduler_health")
@@ -29,6 +35,14 @@ def test_manometry_section_and_page_are_configurable():
 
     assert "manometry" in section_keys
     assert "manometry_overview" in page_keys
+
+
+def test_dashboard_overview_is_first_main_page():
+    main_page_keys = [page.key for page in get_dashboard_pages("main")]
+
+    assert main_page_keys[0] == "dashboard_overview"
+    assert "vodomery_overview" in main_page_keys
+    assert main_page_keys.index("dashboard_overview") < main_page_keys.index("vodomery_overview")
 
 
 def test_vodomery_billing_page_is_in_main_navigation_after_branch_overview():

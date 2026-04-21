@@ -3,36 +3,38 @@ from __future__ import annotations
 from sqlalchemy import inspect, text
 
 from core.db.connect import ENGINE_PG, get_session_pg
-from moduly.mereni.vodomery.database.models import Mereni_vodomery, VodomeryAlertDelivery, VodomeryAlertRule
-from moduly.mereni.vodomery.database.runtime_schema import drop_legacy_identifikace_fk
+from moduly.mereni.plynomery.database.models import (
+    Mereni_plynomery,
+    PlynomeryAlertDelivery,
+    PlynomeryAlertRule,
+)
 
 
-EVENT_TYPE_OPTIONS = ("", "NIGHT_USAGE", "SPIKE", "LONG_LEAK", "ZERO_FLOW", "EXPECTED_ZERO_USAGE", "OUTLIER_REVIEW")
+EVENT_TYPE_OPTIONS = ("", "NIGHT_USAGE", "SPIKE", "LONG_HIGH_USAGE")
 NON_EMPTY_EVENT_TYPE_OPTIONS = tuple(option for option in EVENT_TYPE_OPTIONS if option)
 SEVERITY_OPTIONS = ("LOW", "MEDIUM", "HIGH", "CRITICAL")
 SEND_ON_OPTIONS = ("ACTIVE", "RESOLVED", "BOTH")
 
 
-def ensure_vodomery_alerting_tables() -> None:
+def ensure_plynomery_alerting_tables() -> None:
     with ENGINE_PG.begin() as conn:
         conn.execute(text("CREATE SCHEMA IF NOT EXISTS monitoring"))
-        VodomeryAlertRule.__table__.create(bind=conn, checkfirst=True)
-        VodomeryAlertDelivery.__table__.create(bind=conn, checkfirst=True)
+        PlynomeryAlertRule.__table__.create(bind=conn, checkfirst=True)
+        PlynomeryAlertDelivery.__table__.create(bind=conn, checkfirst=True)
         _ensure_alert_rule_event_type_constraint(conn)
-    drop_legacy_identifikace_fk(VodomeryAlertRule.__tablename__)
 
 
 def _ensure_alert_rule_event_type_constraint(conn) -> None:
     inspector = inspect(conn)
-    if "vodomery_alert_rules" not in inspector.get_table_names(schema="monitoring"):
+    if "plynomery_alert_rules" not in inspector.get_table_names(schema="monitoring"):
         return
 
     allowed_values = ", ".join(f"'{value}'" for value in NON_EMPTY_EVENT_TYPE_OPTIONS)
-    conn.execute(text("ALTER TABLE monitoring.vodomery_alert_rules DROP CONSTRAINT IF EXISTS ck_alert_rule_event_type_valid"))
+    conn.execute(text("ALTER TABLE monitoring.plynomery_alert_rules DROP CONSTRAINT IF EXISTS ck_plynomery_alert_rule_event_type_valid"))
     conn.execute(
         text(
-            "ALTER TABLE monitoring.vodomery_alert_rules "
-            f"ADD CONSTRAINT ck_alert_rule_event_type_valid CHECK (event_type IS NULL OR event_type IN ({allowed_values}))"
+            "ALTER TABLE monitoring.plynomery_alert_rules "
+            f"ADD CONSTRAINT ck_plynomery_alert_rule_event_type_valid CHECK (event_type IS NULL OR event_type IN ({allowed_values}))"
         )
     )
 
@@ -41,11 +43,11 @@ def list_alert_rules() -> list[dict[str, object]]:
     session = get_session_pg()
     try:
         rows = (
-            session.query(VodomeryAlertRule)
+            session.query(PlynomeryAlertRule)
             .order_by(
-                VodomeryAlertRule.enabled.desc(),
-                VodomeryAlertRule.rule_name.asc(),
-                VodomeryAlertRule.id.asc(),
+                PlynomeryAlertRule.enabled.desc(),
+                PlynomeryAlertRule.rule_name.asc(),
+                PlynomeryAlertRule.id.asc(),
             )
             .all()
         )
@@ -76,9 +78,9 @@ def load_device_options() -> list[str]:
     session = get_session_pg()
     try:
         rows = (
-            session.query(Mereni_vodomery.identifikace)
+            session.query(Mereni_plynomery.identifikace)
             .distinct()
-            .order_by(Mereni_vodomery.identifikace)
+            .order_by(Mereni_plynomery.identifikace)
             .all()
         )
         return [row[0] for row in rows]
@@ -103,7 +105,7 @@ def upsert_alert_rule(
     session = get_session_pg()
     try:
         if rule_id is None:
-            row = VodomeryAlertRule(
+            row = PlynomeryAlertRule(
                 rule_name=rule_name,
                 identifikace=identifikace or None,
                 event_type=event_type or None,
@@ -121,7 +123,7 @@ def upsert_alert_rule(
             session.refresh(row)
             return int(row.id)
 
-        row = session.get(VodomeryAlertRule, rule_id)
+        row = session.get(PlynomeryAlertRule, rule_id)
         if row is None:
             raise ValueError("Alert pravidlo neexistuje.")
 
@@ -144,7 +146,7 @@ def upsert_alert_rule(
 def delete_alert_rule(rule_id: int) -> None:
     session = get_session_pg()
     try:
-        row = session.get(VodomeryAlertRule, rule_id)
+        row = session.get(PlynomeryAlertRule, rule_id)
         if row is None:
             return
         session.delete(row)

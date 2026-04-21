@@ -75,6 +75,20 @@ def get_current_manometry_user(
     return current_user
 
 
+def get_current_plynomery_user(
+    current_user: DashboardUserContext = Depends(get_current_user),
+) -> DashboardUserContext:
+    try:
+        require_section_access(current_user, "plynomery")
+    except AuthorizationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+
+    return current_user
+
+
 def get_current_admin_user(
     current_user: DashboardUserContext = Depends(get_current_user),
 ) -> DashboardUserContext:

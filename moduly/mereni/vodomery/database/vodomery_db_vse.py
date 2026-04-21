@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 from moduly.mereni.vodomery.database.models import (
     Mereni_vodomery,
     Vodomer_areal_Mereni,
+    Vodomer_areal_Zarizeni,
     Vodomer_SCVK_Mereni,
-    Vodomer_areal_Zarizeni_QGIS,
 )
 from moduly.mereni.vodomery.alerting.outlier_notifications import process_new_outlier_review_notifications
 from moduly.mereni.vodomery.database.outlier_reviews import (
@@ -16,6 +16,7 @@ from moduly.mereni.vodomery.database.outlier_reviews import (
     load_outlier_review_ids_by_keys,
     upsert_outlier_review_candidates,
 )
+from moduly.mereni.vodomery.database.runtime_schema import drop_legacy_identifikace_fk
 from core.db.connect import ENGINE_MS, ENGINE_PG
 from app.time_utils import utc_now_naive
 
@@ -62,6 +63,8 @@ def ensure_destination_table():
     if expected_table not in monitoring_tables:
         Mereni_vodomery.__table__.create(bind=engine, checkfirst=True)
         logger.info('Created missing table monitoring."%s"', expected_table)
+
+    drop_legacy_identifikace_fk(expected_table)
 
 
 
@@ -793,15 +796,16 @@ def filter_valid_rows(session, rows, source_name):
     valid_idents = set()
     ident_list = list(set(r["identifikace"] for r in sanitized))
 
-    for ident_chunk in chunked(ident_list):
-        valid_idents.update(
-            session.execute(
-                select(Vodomer_areal_Zarizeni_QGIS.identifikace)
-                .where(Vodomer_areal_Zarizeni_QGIS.identifikace.in_(ident_chunk))
+    with Session(engine_ms) as ms_session:
+        for ident_chunk in chunked(ident_list):
+            valid_idents.update(
+                ms_session.execute(
+                    select(Vodomer_areal_Zarizeni.identifikace)
+                    .where(Vodomer_areal_Zarizeni.identifikace.in_(ident_chunk))
+                )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
-        )
 
     filtered = [r for r in sanitized if r["identifikace"] in valid_idents]
 
@@ -843,7 +847,7 @@ def filter_valid_rows(session, rows, source_name):
     # -------------------------------------------------
     if dropped_invalid or dropped_future or dropped_fk:
         logger.warning(
-            "%s dropped rows - invalid: %s, future_ts: %s, missing_evidence_identifikace: %s",
+            "%s dropped rows - invalid: %s, future_ts: %s, missing_ms_zarizeni_identifikace: %s",
             source_name,
             dropped_invalid,
             dropped_future,

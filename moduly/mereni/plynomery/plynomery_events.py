@@ -1,11 +1,16 @@
-from sqlalchemy import func, select, update
-from moduly.mereni.vodomery.database.models import *
-from moduly.mereni.vodomery.database.expected_zero import ensure_expected_zero_table
-from moduly.mereni.vodomery.database.runtime_schema import drop_legacy_identifikace_fk
-from core.db.connect import ENGINE_PG
+from __future__ import annotations
+
+from sqlalchemy import func, inspect, select, text, update
 from sqlalchemy.orm import Session
+
 from app.time_utils import utc_now_naive
-from moduly.mereni.vodomery.database.vodomery_db_vse import is_night_time
+from core.db.connect import ENGINE_PG
+from moduly.mereni.plynomery.database.models import (
+    PlynomeryAnomalyEvent,
+    PlynomeryAnomalyScore,
+    PlynomeryEventEngineState,
+    PlynomeryEventState,
+)
 
 
 EVENT_CONFIG = {
@@ -17,19 +22,41 @@ EVENT_CONFIG = {
         "threshold": 5.0,
         "min_consecutive": 1,
     },
-    "LONG_LEAK": {
+    "LONG_HIGH_USAGE": {
         "threshold": 2.0,
         "min_consecutive": 8,
     },
-    "ZERO_FLOW": {
-        "threshold": None,
-        "min_consecutive": 12,
-    },
-    "EXPECTED_ZERO_USAGE": {
-        "threshold": None,
-        "min_consecutive": 1,
-    },
 }
+
+
+def ensure_event_tables() -> None:
+    PlynomeryAnomalyEvent.__table__.create(bind=ENGINE_PG, checkfirst=True)
+    PlynomeryEventState.__table__.create(bind=ENGINE_PG, checkfirst=True)
+    PlynomeryEventEngineState.__table__.create(bind=ENGINE_PG, checkfirst=True)
+    _drop_legacy_identifikace_fk(PlynomeryAnomalyEvent.__tablename__)
+
+
+def _drop_legacy_identifikace_fk(table_name: str) -> None:
+    inspector = inspect(ENGINE_PG)
+    for foreign_key in inspector.get_foreign_keys(table_name, schema="monitoring"):
+        name = foreign_key.get("name")
+        constrained_columns = tuple(foreign_key.get("constrained_columns") or ())
+        referred_schema = foreign_key.get("referred_schema")
+        referred_table = foreign_key.get("referred_table")
+        if (
+            name
+            and constrained_columns == ("identifikace",)
+            and referred_schema == "evidence"
+            and referred_table == "plynoměry"
+        ):
+            escaped_name = str(name).replace('"', '""')
+            with ENGINE_PG.begin() as conn:
+                conn.execute(
+                    text(
+                        f'ALTER TABLE monitoring."{table_name}" '
+                        f'DROP CONSTRAINT IF EXISTS "{escaped_name}"'
+                    )
+                )
 
 
 def detect_events_from_scores(
@@ -38,17 +65,12 @@ def detect_events_from_scores(
     *,
     bootstrap_to_latest_if_missing: bool = False,
 ):
-    ensure_expected_zero_table()
-    drop_legacy_identifikace_fk(VodomeryAnomalyEvent.__tablename__)
+    ensure_event_tables()
 
     with Session(ENGINE_PG, autoflush=False, expire_on_commit=False) as session:
-
-        # =====================================================
-        # 1️⃣ Engine state
-        # =====================================================
         engine_state = session.execute(
-            select(VodomeryEventEngineState)
-            .where(VodomeryEventEngineState.model_version == model_version)
+            select(PlynomeryEventEngineState)
+            .where(PlynomeryEventEngineState.model_version == model_version)
             .with_for_update()
         ).scalar_one_or_none()
 
@@ -56,12 +78,12 @@ def detect_events_from_scores(
             initial_checkpoint = 0
             if bootstrap_to_latest_if_missing:
                 initial_checkpoint = int(
-                    session.query(func.max(VodomeryAnomalyScore.id))
-                    .filter(VodomeryAnomalyScore.model_version == model_version)
+                    session.query(func.max(PlynomeryAnomalyScore.id))
+                    .filter(PlynomeryAnomalyScore.model_version == model_version)
                     .scalar()
                     or 0
                 )
-            engine_state = VodomeryEventEngineState(
+            engine_state = PlynomeryEventEngineState(
                 model_version=model_version,
                 last_score_id=initial_checkpoint,
             )
@@ -69,33 +91,29 @@ def detect_events_from_scores(
             session.commit()
             last_id = initial_checkpoint
         else:
-            last_id = engine_state.last_score_id
+            last_id = int(engine_state.last_score_id or 0)
 
         if last_id > 0:
             session.execute(
-                update(VodomeryAnomalyScore)
+                update(PlynomeryAnomalyScore)
                 .where(
-                    VodomeryAnomalyScore.model_version == model_version,
-                    VodomeryAnomalyScore.id <= last_id,
-                    VodomeryAnomalyScore.processed.is_(False),
+                    PlynomeryAnomalyScore.model_version == model_version,
+                    PlynomeryAnomalyScore.id <= last_id,
+                    PlynomeryAnomalyScore.processed.is_(False),
                 )
                 .values(processed=True)
             )
 
-        # =====================================================
-        # 2️⃣ Načti nové scores
-        # =====================================================
         new_scores = (
-            session.query(VodomeryAnomalyScore)
+            session.query(PlynomeryAnomalyScore)
             .filter(
-                VodomeryAnomalyScore.model_version == model_version,
-                VodomeryAnomalyScore.processed.is_(False),
+                PlynomeryAnomalyScore.model_version == model_version,
+                PlynomeryAnomalyScore.processed.is_(False),
             )
-            .order_by(VodomeryAnomalyScore.id)
+            .order_by(PlynomeryAnomalyScore.id)
             .limit(batch_size)
             .all()
         )
-
         if not new_scores:
             return {
                 "processed": 0,
@@ -107,45 +125,25 @@ def detect_events_from_scores(
                 "resolved_event_ids": [],
             }
 
-        max_processed_id = new_scores[-1].id
-        idents = {s.identifikace for s in new_scores}
-        expected_zero_idents = {
-            row[0]
-            for row in session.execute(
-                select(VodomeryExpectedZero.identifikace).where(
-                    VodomeryExpectedZero.identifikace.in_(idents)
-                )
-            ).all()
-        }
+        max_processed_id = int(new_scores[-1].id)
+        idents = {score.identifikace for score in new_scores}
 
-        # =====================================================
-        # 3️⃣ Načti states
-        # =====================================================
         states = session.execute(
-            select(VodomeryEventState).where(
-                VodomeryEventState.model_version == model_version,
-                VodomeryEventState.identifikace.in_(idents),
+            select(PlynomeryEventState).where(
+                PlynomeryEventState.model_version == model_version,
+                PlynomeryEventState.identifikace.in_(idents),
             )
         ).scalars().all()
+        state_lookup = {(state.identifikace, state.event_type): state for state in states}
 
-        state_lookup = {
-            (s.identifikace, s.event_type): s for s in states
-        }
-
-        # =====================================================
-        # 4️⃣ Načti aktivní eventy
-        # =====================================================
         active_events = session.execute(
-            select(VodomeryAnomalyEvent).where(
-                VodomeryAnomalyEvent.model_version == model_version,
-                VodomeryAnomalyEvent.identifikace.in_(idents),
-                VodomeryAnomalyEvent.is_active.is_(True),
+            select(PlynomeryAnomalyEvent).where(
+                PlynomeryAnomalyEvent.model_version == model_version,
+                PlynomeryAnomalyEvent.identifikace.in_(idents),
+                PlynomeryAnomalyEvent.is_active.is_(True),
             )
         ).scalars().all()
-
-        active_lookup = {
-            (e.identifikace, e.event_type): e for e in active_events
-        }
+        active_lookup = {(event.identifikace, event.event_type): event for event in active_events}
 
         created_events = 0
         resolved_events = 0
@@ -153,22 +151,15 @@ def detect_events_from_scores(
         active_event_candidates = {}
         resolved_event_candidates = {}
 
-        # =====================================================
-        # 5️⃣ Hlavní smyčka
-        # =====================================================
         for score in new_scores:
-
             ident = score.identifikace
             ts = score.date
 
             for event_type, cfg in EVENT_CONFIG.items():
-
                 key = (ident, event_type)
                 state = state_lookup.get(key)
-
-                # vytvoř state pokud neexistuje
-                if not state:
-                    state = VodomeryEventState(
+                if state is None:
+                    state = PlynomeryEventState(
                         identifikace=ident,
                         event_type=event_type,
                         model_version=model_version,
@@ -181,39 +172,20 @@ def detect_events_from_scores(
                     session.add(state)
                     state_lookup[key] = state
 
-                # -------------------------------------------------
-                # TRIGGER LOGIKA
-                # -------------------------------------------------
-                if event_type == "ZERO_FLOW":
-                    triggered = score.actual_value == 0 and ident not in expected_zero_idents
-                elif event_type == "EXPECTED_ZERO_USAGE":
-                    triggered = ident in expected_zero_idents and score.actual_value > 0
-                elif event_type == "NIGHT_USAGE":
-                    triggered = (
-                        is_night_time(ts)
-                        and score.z_score > cfg["threshold"]
-                    )
+                if event_type == "NIGHT_USAGE":
+                    triggered = (ts.hour >= 23 or ts.hour < 5) and score.z_score > cfg["threshold"]
                 else:
                     triggered = score.z_score > cfg["threshold"]
 
-                # =================================================
-                # EVENT AKTIVNÍ
-                # =================================================
                 if triggered:
-
                     state.consecutive_count += 1
                     state.accumulator += abs(score.z_score)
 
-                    if (
-                        not state.is_event_active
-                        and state.consecutive_count >= cfg["min_consecutive"]
-                    ):
-
-                        # otevři nový event
+                    if not state.is_event_active and state.consecutive_count >= cfg["min_consecutive"]:
                         state.is_event_active = True
                         state.event_start_time = ts
 
-                        new_event = VodomeryAnomalyEvent(
+                        new_event = PlynomeryAnomalyEvent(
                             identifikace=ident,
                             event_type=event_type,
                             start_time=ts,
@@ -228,61 +200,32 @@ def detect_events_from_scores(
                             model_version=model_version,
                             last_score_time=ts,
                         )
-
                         session.add(new_event)
                         active_lookup[key] = new_event
                         created_event_objects.append(new_event)
                         active_event_candidates[key] = new_event
                         created_events += 1
-
                     elif state.is_event_active:
-
-                        # update existujícího eventu
                         event = active_lookup.get(key)
-                        if event:
-
-                            event.max_z_score = max(
-                                event.max_z_score,
-                                score.z_score,
-                            )
-
+                        if event is not None:
+                            event.max_z_score = max(event.max_z_score, score.z_score)
                             event.total_deviation += abs(score.z_score)
-
-                            duration = int(
-                                (ts - event.start_time).total_seconds() / 60
-                            )
-
+                            duration = int((ts - event.start_time).total_seconds() / 60)
                             event.duration_minutes = duration
-
-                            event.avg_z_score = (
-                                event.total_deviation
-                                / max(state.consecutive_count, 1)
-                            )
-
-                            event.severity = _compute_severity(
-                                event.max_z_score,
-                                duration,
-                            )
-
+                            event.avg_z_score = event.total_deviation / max(state.consecutive_count, 1)
+                            event.severity = _compute_severity(event.max_z_score, duration)
                             event.last_score_time = ts
                             active_event_candidates[key] = event
-
-                # =================================================
-                # EVENT KONČÍ
-                # =================================================
                 else:
-
                     if state.is_event_active:
-
                         event = active_lookup.get(key)
-                        if event:
+                        if event is not None:
                             event.is_active = False
                             event.resolved = True
                             event.resolved_at = ts
                             event.end_time = ts
                             resolved_event_candidates[key] = event
                             resolved_events += 1
-
                         state.is_event_active = False
 
                     state.consecutive_count = 0
@@ -294,17 +237,13 @@ def detect_events_from_scores(
         processed_score_ids = [score.id for score in new_scores if score.id is not None]
         if processed_score_ids:
             session.execute(
-                update(VodomeryAnomalyScore)
-                .where(VodomeryAnomalyScore.id.in_(processed_score_ids))
+                update(PlynomeryAnomalyScore)
+                .where(PlynomeryAnomalyScore.id.in_(processed_score_ids))
                 .values(processed=True)
             )
 
-        # =====================================================
-        # 6️⃣ Ulož engine state
-        # =====================================================
         engine_state.last_score_id = max_processed_id
         engine_state.updated_at = utc_now_naive()
-
         session.commit()
 
         created_event_ids = [event.id for event in created_event_objects if event.id is not None]
@@ -322,20 +261,11 @@ def detect_events_from_scores(
         }
 
 
-
 def _compute_severity(max_z: float, duration_min: int) -> str:
-
     if max_z > 8 or duration_min > 720:
         return "CRITICAL"
-
     if max_z > 5 or duration_min > 240:
         return "HIGH"
-
     if max_z > 3:
         return "MEDIUM"
-
     return "LOW"
-
-
-
-

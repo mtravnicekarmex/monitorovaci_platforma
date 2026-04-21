@@ -14,11 +14,13 @@ from moduly.mereni.vodomery.database.model_validation import (
     get_active_vodomery_model_version,
 )
 from moduly.mereni.vodomery.database.models import (
+    VodomeryProfilesAnomaly,
     VodomeryModelSelectionCandidate,
     VodomeryModelSelectionRun,
     VodomeryModelValidationMetric,
     VodomeryModelValidationRun,
 )
+from moduly.mereni.vodomery.database.runtime_schema import drop_legacy_identifikace_fk
 
 
 MODEL_VERSION_BASELINE = 1
@@ -250,9 +252,11 @@ def rebuild_profiles(
 ) -> dict[str, object]:
     if model_version is not None:
         windows = build_rebuild_windows(reference_time=reference_time)
+        drop_legacy_identifikace_fk(VodomeryProfilesAnomaly.__tablename__)
         return _rebuild_single_candidate_model(model_version=model_version, windows=windows)
 
     ensure_vodomery_model_validation_tables()
+    drop_legacy_identifikace_fk(VodomeryProfilesAnomaly.__tablename__)
     windows = build_rebuild_windows(reference_time=reference_time)
     session = get_session_pg()
 

@@ -46,6 +46,16 @@ from moduly.mereni.vodomery.reporting import (
     send_monthly_vodomery_consumption_report,
 )
 from moduly.mereni.vodomery.vodomery_events import detect_events_from_scores
+from moduly.mereni.plynomery.database.plynomery_db_vse import plynomery_db_import
+from moduly.mereni.plynomery.plynomery_anomaly import score_new_measurements as score_new_plynomery_measurements
+from moduly.mereni.plynomery.plynomery_prediction import (
+    get_candidate_model_versions as get_plynomery_candidate_model_versions,
+    get_runtime_model_version as get_plynomery_runtime_model_version,
+    rebuild_profiles as rebuild_plynomery_profiles,
+)
+from moduly.mereni.plynomery.plynomery_events import detect_events_from_scores as detect_plynomery_events_from_scores
+from moduly.mereni.plynomery.alerting import process_plynomery_alerts
+from moduly.mereni.plynomery.reporting import send_plynomery_model_rebuild_report
 from moduly.apps.meteo.meteo_sync import meteo_sync
 from moduly.apps.smartfuelpass import send_charge_sessions_report_email
 
@@ -526,6 +536,30 @@ def quarter_hour_job():
         active_event_ids=active_event_result.get("active_event_ids", []),
         resolved_event_ids=active_event_result.get("resolved_event_ids", []),
     )
+    safe_call(plynomery_db_import)
+    active_plynomery_model_version = safe_call(get_plynomery_runtime_model_version)
+    active_plynomery_event_result = {
+        "active_event_ids": [],
+        "resolved_event_ids": [],
+    }
+    for model_version in get_plynomery_candidate_model_versions():
+        safe_call(
+            score_new_plynomery_measurements,
+            model_version=model_version,
+            bootstrap_to_latest_if_missing=True,
+        )
+        plynomery_event_result = safe_call(
+            detect_plynomery_events_from_scores,
+            model_version=model_version,
+            bootstrap_to_latest_if_missing=True,
+        )
+        if model_version == active_plynomery_model_version:
+            active_plynomery_event_result = plynomery_event_result
+    safe_call(
+        process_plynomery_alerts,
+        active_event_ids=active_plynomery_event_result.get("active_event_ids", []),
+        resolved_event_ids=active_plynomery_event_result.get("resolved_event_ids", []),
+    )
 
 
 # Hodinový import SCVK vodoměrů.
@@ -553,11 +587,13 @@ def daily_vodomery_branch_report_job():
     safe_call(send_daily_vodomery_branch_report)
 
 
-# Týdenní rebuild profilů a report větví vodoměrů.
+# Týdenní rebuild profilů vodoměrů i plynoměrů a report větví vodoměrů.
 @locked_job
 def weekly_job():
     rebuild_result = safe_call(rebuild_profiles)
+    plynomery_rebuild_result = safe_call(rebuild_plynomery_profiles)
     safe_call(send_vodomery_model_rebuild_report, rebuild_result)
+    safe_call(send_plynomery_model_rebuild_report, plynomery_rebuild_result)
     safe_call(send_weekly_vodomery_branch_report)
 
 

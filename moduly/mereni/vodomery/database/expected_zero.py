@@ -7,12 +7,14 @@ from sqlalchemy.orm import Session
 
 from core.db.connect import ENGINE_PG
 from moduly.mereni.vodomery.database.models import VodomeryExpectedZero
+from moduly.mereni.vodomery.database.runtime_schema import drop_legacy_identifikace_fk
 
 
 def ensure_expected_zero_table() -> None:
     with ENGINE_PG.begin() as conn:
         conn.execute(text("CREATE SCHEMA IF NOT EXISTS monitoring"))
         VodomeryExpectedZero.__table__.create(bind=conn, checkfirst=True)
+    drop_legacy_identifikace_fk(VodomeryExpectedZero.__tablename__)
 
 
 def list_expected_zero_devices() -> list[dict[str, object]]:

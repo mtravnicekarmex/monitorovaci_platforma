@@ -630,3 +630,52 @@ def delete_vodomery_alert_rule(access_token: str, rule_id: int) -> None:
         f"/api/v1/vodomery/alert-rules/{rule_id}",
         access_token=access_token,
     )
+
+
+def get_plynomery_devices(access_token: str, limit: int = 500) -> list[str]:
+    response = _request(
+        "GET",
+        "/api/v1/plynomery/devices",
+        access_token=access_token,
+        params={"limit": limit},
+    )
+    payload = response.json()
+    return [str(item) for item in payload.get("devices", [])]
+
+
+def list_plynomery_alert_rules(access_token: str) -> list[dict[str, object]]:
+    response = _request(
+        "GET",
+        "/api/v1/plynomery/alert-rules",
+        access_token=access_token,
+    )
+    payload = response.json()
+    return [dict(item) for item in payload.get("rows", [])]
+
+
+def create_plynomery_alert_rule(access_token: str, payload: dict[str, object]) -> dict[str, object]:
+    response = _request(
+        "POST",
+        "/api/v1/plynomery/alert-rules",
+        access_token=access_token,
+        json_payload=payload,
+    )
+    return dict(response.json())
+
+
+def update_plynomery_alert_rule(access_token: str, rule_id: int, payload: dict[str, object]) -> dict[str, object]:
+    response = _request(
+        "PATCH",
+        f"/api/v1/plynomery/alert-rules/{rule_id}",
+        access_token=access_token,
+        json_payload=payload,
+    )
+    return dict(response.json())
+
+
+def delete_plynomery_alert_rule(access_token: str, rule_id: int) -> None:
+    _request(
+        "DELETE",
+        f"/api/v1/plynomery/alert-rules/{rule_id}",
+        access_token=access_token,
+    )

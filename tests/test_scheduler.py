@@ -302,6 +302,7 @@ def test_daily_vodomery_branch_report_job_sends_email_report(monkeypatch):
 def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(monkeypatch):
     calls = []
     alert_payloads = []
+    plynomery_alert_payloads = []
 
     def fake_safe_call(fn, *args, **kwargs):
         calls.append((fn.__name__, args, kwargs))
@@ -328,6 +329,29 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
         alert_payloads.append((active_event_ids, resolved_event_ids))
         return None
 
+    def fake_plynomery_import():
+        return None
+
+    def fake_get_plynomery_runtime_model_version():
+        return 1
+
+    def fake_score_new_plynomery_measurements(*, model_version, bootstrap_to_latest_if_missing=False):
+        assert model_version == 1
+        assert bootstrap_to_latest_if_missing is True
+        return 3
+
+    def fake_detect_plynomery_events_from_scores(*, model_version, bootstrap_to_latest_if_missing=False):
+        assert model_version == 1
+        assert bootstrap_to_latest_if_missing is True
+        return {
+            "active_event_ids": [101],
+            "resolved_event_ids": [202],
+        }
+
+    def fake_process_plynomery_alerts(*, active_event_ids, resolved_event_ids):
+        plynomery_alert_payloads.append((active_event_ids, resolved_event_ids))
+        return None
+
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "vodomery_db_import", fake_import)
     monkeypatch.setattr(scheduler, "get_runtime_model_version", fake_get_runtime_model_version)
@@ -335,6 +359,12 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
     monkeypatch.setattr(scheduler, "score_new_measurements", fake_score_new_measurements)
     monkeypatch.setattr(scheduler, "detect_events_from_scores", fake_detect_events_from_scores)
     monkeypatch.setattr(scheduler, "process_vodomery_alerts", fake_process_vodomery_alerts)
+    monkeypatch.setattr(scheduler, "plynomery_db_import", fake_plynomery_import)
+    monkeypatch.setattr(scheduler, "get_plynomery_runtime_model_version", fake_get_plynomery_runtime_model_version)
+    monkeypatch.setattr(scheduler, "get_plynomery_candidate_model_versions", lambda: (1,))
+    monkeypatch.setattr(scheduler, "score_new_plynomery_measurements", fake_score_new_plynomery_measurements)
+    monkeypatch.setattr(scheduler, "detect_plynomery_events_from_scores", fake_detect_plynomery_events_from_scores)
+    monkeypatch.setattr(scheduler, "process_plynomery_alerts", fake_process_plynomery_alerts)
 
     scheduler.quarter_hour_job()
 
@@ -346,8 +376,14 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
         "fake_score_new_measurements",
         "fake_detect_events_from_scores",
         "fake_process_vodomery_alerts",
+        "fake_plynomery_import",
+        "fake_get_plynomery_runtime_model_version",
+        "fake_score_new_plynomery_measurements",
+        "fake_detect_plynomery_events_from_scores",
+        "fake_process_plynomery_alerts",
     ]
     assert alert_payloads == [([2], [20])]
+    assert plynomery_alert_payloads == [([101], [202])]
 
 
 def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
@@ -369,8 +405,23 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
     def fake_rebuild_profiles():
         return rebuild_result
 
+    def fake_rebuild_plynomery_profiles():
+        return {
+            "active_model_version": 1,
+            "active_model_name": "Model 1 - exact/fallback baseline",
+            "candidates": [],
+        }
+
     def fake_send_vodomery_model_rebuild_report(result):
         assert result is rebuild_result
+        return None
+
+    def fake_send_plynomery_model_rebuild_report(result):
+        assert result == {
+            "active_model_version": 1,
+            "active_model_name": "Model 1 - exact/fallback baseline",
+            "candidates": [],
+        }
         return None
 
     def fake_send_weekly_vodomery_branch_report():
@@ -378,14 +429,18 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
 
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "rebuild_profiles", fake_rebuild_profiles)
+    monkeypatch.setattr(scheduler, "rebuild_plynomery_profiles", fake_rebuild_plynomery_profiles)
     monkeypatch.setattr(scheduler, "send_vodomery_model_rebuild_report", fake_send_vodomery_model_rebuild_report)
+    monkeypatch.setattr(scheduler, "send_plynomery_model_rebuild_report", fake_send_plynomery_model_rebuild_report)
     monkeypatch.setattr(scheduler, "send_weekly_vodomery_branch_report", fake_send_weekly_vodomery_branch_report)
 
     scheduler.weekly_job()
 
     assert [name for name, _, _ in calls] == [
         "fake_rebuild_profiles",
+        "fake_rebuild_plynomery_profiles",
         "fake_send_vodomery_model_rebuild_report",
+        "fake_send_plynomery_model_rebuild_report",
         "fake_send_weekly_vodomery_branch_report",
     ]
 

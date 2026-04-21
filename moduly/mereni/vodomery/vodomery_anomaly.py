@@ -1,4 +1,5 @@
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from moduly.mereni.vodomery.database.models import *
 from core.db.connect import ENGINE_PG
@@ -158,7 +159,9 @@ def score_new_measurements(
         # -------------------------------------------------
         if rows_to_insert:
             session.execute(
-                insert(VodomeryAnomalyScore),
+                insert(VodomeryAnomalyScore).on_conflict_do_nothing(
+                    index_elements=["measurement_id", "model_version"]
+                ),
                 rows_to_insert,
             )
 

@@ -37,6 +37,12 @@ SECTIONS: tuple[DashboardSection, ...] = (
 
 PAGES: tuple[DashboardPage, ...] = (
     DashboardPage(
+        key="dashboard_overview",
+        path="pages/0_overview.py",
+        title="Overview",
+        icon="🏠",
+    ),
+    DashboardPage(
         key="vodomery_overview",
         path="pages/2_vodomery.py",
         title="Přehled",
@@ -160,6 +166,14 @@ PAGES: tuple[DashboardPage, ...] = (
         key="vodomery_alerting",
         path="pages/7_vodomery_alerting.py",
         title="Alerting vodomeru",
+        icon="📣",
+        sidebar_location="footer",
+        admin_only=True,
+    ),
+    DashboardPage(
+        key="plynomery_alerting",
+        path="pages/20_plynomery_alerting.py",
+        title="Alerting plynomeru",
         icon="📣",
         sidebar_location="footer",
         admin_only=True,

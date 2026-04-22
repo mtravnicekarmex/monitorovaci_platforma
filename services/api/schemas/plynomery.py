@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -19,6 +19,62 @@ from services.api.core.plynomery_alert_rule_validation import (
 class PlynomeryDeviceListResponse(BaseModel):
     total: int
     devices: list[str]
+
+
+class PlynomeryAnomalyRow(BaseModel):
+    date: datetime
+    identifikace: str
+    actual_value: float
+    expected_mean: float
+    z_score: float
+    severity: str | None = None
+    is_anomaly: bool
+
+
+class PlynomeryRecentAnomaliesResponse(BaseModel):
+    identifikace: str | None = None
+    start_date: date
+    end_date: date
+    total: int
+    rows: list[PlynomeryAnomalyRow]
+
+
+class PlynomeryEventRow(BaseModel):
+    identifikace: str
+    event_type: str
+    start_time: datetime
+    end_time: datetime | None = None
+    duration_minutes: int
+    max_z_score: float
+    avg_z_score: float
+    severity: str
+
+
+class PlynomeryOpenEventsResponse(BaseModel):
+    total: int
+    rows: list[PlynomeryEventRow]
+
+
+class PlynomeryResolvedEventsResponse(BaseModel):
+    days: int
+    total: int
+    rows: list[PlynomeryEventRow]
+
+
+class PlynomeryExpectedZeroRow(BaseModel):
+    identifikace: str
+    updated_by: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PlynomeryExpectedZeroListResponse(BaseModel):
+    total: int
+    rows: list[PlynomeryExpectedZeroRow]
+
+
+class PlynomeryExpectedZeroUpdateRequest(BaseModel):
+    identifikace_list: list[str]
 
 
 class PlynomeryAlertRuleRow(BaseModel):

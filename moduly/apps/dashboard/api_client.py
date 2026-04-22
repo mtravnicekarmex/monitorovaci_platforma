@@ -61,14 +61,23 @@ def _request(
     access_token: str | None = None,
     json_payload: dict[str, object] | None = None,
     query_params: dict[str, object] | None = None,
+    params: dict[str, object] | None = None,
 ) -> requests.Response:
+    resolved_query_params: dict[str, object] | None
+    if query_params is None:
+        resolved_query_params = params
+    elif params is None:
+        resolved_query_params = query_params
+    else:
+        resolved_query_params = {**params, **query_params}
+
     try:
         response = requests.request(
             method=method,
             url=_build_url(path),
             headers=_headers(access_token),
             json=json_payload,
-            params=query_params,
+            params=resolved_query_params,
             timeout=DEFAULT_TIMEOUT_SECONDS,
         )
     except requests.RequestException as exc:
@@ -637,10 +646,90 @@ def get_plynomery_devices(access_token: str, limit: int = 500) -> list[str]:
         "GET",
         "/api/v1/plynomery/devices",
         access_token=access_token,
-        params={"limit": limit},
+        query_params={"limit": limit},
     )
     payload = response.json()
     return [str(item) for item in payload.get("devices", [])]
+
+
+def get_plynomery_recent_anomalies(
+    access_token: str,
+    *,
+    start_date: str,
+    end_date: str,
+    identifikace: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, object]]:
+    query_params: dict[str, object] = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "limit": limit,
+    }
+    if identifikace:
+        query_params["identifikace"] = identifikace
+    response = _request(
+        "GET",
+        "/api/v1/plynomery/recent-anomalies",
+        access_token=access_token,
+        query_params=query_params,
+    )
+    payload = response.json()
+    return [dict(item) for item in payload.get("rows", [])]
+
+
+def get_plynomery_open_events(
+    access_token: str,
+    *,
+    limit: int = 500,
+) -> list[dict[str, object]]:
+    response = _request(
+        "GET",
+        "/api/v1/plynomery/open-events",
+        access_token=access_token,
+        query_params={"limit": limit},
+    )
+    payload = response.json()
+    return [dict(item) for item in payload.get("rows", [])]
+
+
+def get_plynomery_resolved_events(
+    access_token: str,
+    *,
+    days: int = 7,
+    limit: int = 500,
+) -> list[dict[str, object]]:
+    response = _request(
+        "GET",
+        "/api/v1/plynomery/resolved-events",
+        access_token=access_token,
+        query_params={
+            "days": days,
+            "limit": limit,
+        },
+    )
+    payload = response.json()
+    return [dict(item) for item in payload.get("rows", [])]
+
+
+def get_plynomery_expected_zero(access_token: str) -> list[dict[str, object]]:
+    response = _request(
+        "GET",
+        "/api/v1/plynomery/expected-zero",
+        access_token=access_token,
+    )
+    payload = response.json()
+    return [dict(item) for item in payload.get("rows", [])]
+
+
+def update_plynomery_expected_zero(access_token: str, identifikace_list: list[str]) -> list[dict[str, object]]:
+    response = _request(
+        "PUT",
+        "/api/v1/plynomery/expected-zero",
+        access_token=access_token,
+        json_payload={"identifikace_list": identifikace_list},
+    )
+    payload = response.json()
+    return [dict(item) for item in payload.get("rows", [])]
 
 
 def list_plynomery_alert_rules(access_token: str) -> list[dict[str, object]]:

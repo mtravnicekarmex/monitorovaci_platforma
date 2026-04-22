@@ -15,11 +15,15 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.db.connect import get_session_ms
 from moduly.apps.dashboard.auth import get_allowed_devices, is_admin
 from moduly.apps.dashboard.vodomery_shared import (
+    filter_min_duration_events,
     format_consumption_dataframe,
     format_consumption_with_unit,
     format_value,
     normalize_date_range,
+    prepare_event_display_dataframe,
+    render_filter_summary,
     render_page_styles,
+    require_dashboard_api_token,
     round_consumption_columns,
 )
 from moduly.mereni.plynomery.database.models import (

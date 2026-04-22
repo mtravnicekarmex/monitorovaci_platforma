@@ -209,11 +209,30 @@ class PlynomeryScoringState(Base):
     )
 
 
+class PlynomeryExpectedZero(Base):
+    __tablename__ = "plynomery_expected_zero"
+    __table_args__ = {"schema": "monitoring"}
+
+    identifikace: Mapped[str] = mapped_column(String(250), primary_key=True)
+    updated_by: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        onupdate=text("now()"),
+        nullable=False,
+    )
+
+
 class PlynomeryAnomalyEvent(Base):
     __tablename__ = "plynomery_anomaly_events"
     __table_args__ = (
         CheckConstraint(
-            "event_type IN ('NIGHT_USAGE','SPIKE','LONG_HIGH_USAGE')",
+            "event_type IN ('NIGHT_USAGE','SPIKE','LONG_HIGH_USAGE','EXPECTED_ZERO_USAGE')",
             name="ck_plynomery_event_type_valid",
         ),
         Index(
@@ -279,7 +298,7 @@ class PlynomeryAlertRule(Base):
     __tablename__ = "plynomery_alert_rules"
     __table_args__ = (
         CheckConstraint(
-            "event_type IS NULL OR event_type IN ('NIGHT_USAGE','SPIKE','LONG_HIGH_USAGE')",
+            "event_type IS NULL OR event_type IN ('NIGHT_USAGE','SPIKE','LONG_HIGH_USAGE','EXPECTED_ZERO_USAGE')",
             name="ck_plynomery_alert_rule_event_type_valid",
         ),
         CheckConstraint(

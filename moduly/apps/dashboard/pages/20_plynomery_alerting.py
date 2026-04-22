@@ -17,7 +17,9 @@ from moduly.apps.dashboard.api_client import (
     create_plynomery_alert_rule,
     delete_plynomery_alert_rule,
     get_plynomery_devices,
+    get_plynomery_expected_zero,
     list_plynomery_alert_rules,
+    update_plynomery_expected_zero,
     update_plynomery_alert_rule,
 )
 from moduly.apps.dashboard.auth import get_auth_token, require_page_access
@@ -39,6 +41,7 @@ EVENT_TYPE_LABELS = {
     "NIGHT_USAGE": "NIGHT_USAGE",
     "SPIKE": "SPIKE",
     "LONG_HIGH_USAGE": "LONG_HIGH_USAGE",
+    "EXPECTED_ZERO_USAGE": "EXPECTED_ZERO",
 }
 SEND_ON_LABELS = {
     "ACTIVE": "Pri prekroceni limitu u aktivniho eventu",
@@ -61,6 +64,14 @@ def load_devices_cached() -> list[str]:
     if not access_token:
         raise DashboardApiError("Chybi bearer token pro dashboard API.")
     return get_plynomery_devices(access_token, limit=5000)
+
+
+@st.cache_data(ttl=60)
+def load_expected_zero_rows_cached() -> list[dict[str, object]]:
+    access_token = get_auth_token()
+    if not access_token:
+        raise DashboardApiError("Chybi bearer token pro dashboard API.")
+    return get_plynomery_expected_zero(access_token)
 
 
 def format_timestamp(value: object) -> str:
@@ -87,8 +98,46 @@ def render_page() -> None:
     )
 
     device_options = load_devices_cached()
+    expected_zero_rows = load_expected_zero_rows_cached()
     rules = load_rules_cached()
 
+    st.subheader("Expected zero")
+    st.caption("Zarizeni, u kterych se ocekava nulova spotreba. Jakykoliv odber pak vytvari event EXPECTED_ZERO.")
+
+    selected_expected_zero = [str(row["identifikace"]) for row in expected_zero_rows]
+    expected_zero_options = sorted({*device_options, *selected_expected_zero})
+    with st.form("plynomery_expected_zero_form"):
+        selected_devices = st.multiselect(
+            "Plynomery s ocekavanym nulovym odberem",
+            options=expected_zero_options,
+            default=selected_expected_zero,
+            help="Pro vybrana zarizeni se jakakoliv kladna spotreba vyhodnoti jako EXPECTED_ZERO.",
+        )
+        expected_zero_submitted = st.form_submit_button("Ulozit expected zero")
+
+    if expected_zero_submitted:
+        update_plynomery_expected_zero(get_auth_token(), selected_devices)
+        st.cache_data.clear()
+        st.success("Seznam expected zero pro plynomery byl ulozen.")
+        st.rerun()
+
+    if expected_zero_rows:
+        expected_zero_df = pd.DataFrame(
+            [
+                {
+                    "identifikace": row["identifikace"],
+                    "upravil": row["updated_by"] or "-",
+                    "vytvoreno": format_timestamp(row["created_at"]),
+                    "aktualizovano": format_timestamp(row["updated_at"]),
+                }
+                for row in expected_zero_rows
+            ]
+        )
+        st.dataframe(expected_zero_df, width="stretch", hide_index=True)
+    else:
+        st.info("Zatim neni nastavene zadne zarizeni s expected zero.")
+
+    st.markdown("---")
     create_col, overview_col = st.columns([2, 3])
 
     with create_col:

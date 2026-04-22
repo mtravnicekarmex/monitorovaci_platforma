@@ -10,6 +10,7 @@ from moduly.mereni.vodomery.database.alerting import ensure_vodomery_alerting_ta
 from moduly.mereni.vodomery.database.outlier_reviews import ensure_vodomery_outlier_review_table
 from moduly.mereni.vodomery.alerting.outlier_notifications import ensure_vodomery_outlier_email_delivery_table
 from moduly.mereni.plynomery.database.alerting import ensure_plynomery_alerting_tables
+from moduly.mereni.plynomery.database.expected_zero import ensure_expected_zero_table as ensure_plynomery_expected_zero_table
 
 
 def ensure_streamlit_user_columns() -> None:
@@ -45,6 +46,7 @@ def ensure_dashboard_tables() -> None:
     ensure_streamlit_user_columns()
     ensure_web_search_tables()
     ensure_expected_zero_table()
+    ensure_plynomery_expected_zero_table()
     ensure_vodomery_alerting_tables()
     ensure_vodomery_outlier_review_table()
     ensure_vodomery_outlier_email_delivery_table()

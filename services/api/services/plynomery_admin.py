@@ -5,6 +5,10 @@ from moduly.mereni.plynomery.database.alerting import (
     list_alert_rules,
     upsert_alert_rule,
 )
+from moduly.mereni.plynomery.database.expected_zero import (
+    list_expected_zero_devices,
+    replace_expected_zero_devices,
+)
 from services.api.core.plynomery_alert_rule_validation import normalize_alert_rule_payload
 from services.api.services.dashboard_admin import require_admin_access
 from services.api.services.dashboard_auth import DashboardUserContext
@@ -45,6 +49,21 @@ def _prepare_alert_rule_payload(
 def list_alert_rules_admin(user_context: DashboardUserContext) -> list[dict[str, object]]:
     require_admin_access(user_context)
     return list_alert_rules()
+
+
+def list_expected_zero_devices_admin(user_context: DashboardUserContext) -> list[dict[str, object]]:
+    require_admin_access(user_context)
+    return list_expected_zero_devices()
+
+
+def replace_expected_zero_devices_admin(
+    user_context: DashboardUserContext,
+    *,
+    identifikace_list: list[str],
+) -> list[dict[str, object]]:
+    require_admin_access(user_context)
+    replace_expected_zero_devices(identifikace_list, updated_by=user_context.username)
+    return list_expected_zero_devices()
 
 
 def create_alert_rule_admin(

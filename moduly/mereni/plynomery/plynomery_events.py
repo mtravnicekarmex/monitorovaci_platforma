@@ -5,6 +5,10 @@ from sqlalchemy.orm import Session
 
 from app.time_utils import utc_now_naive
 from core.db.connect import ENGINE_PG
+from moduly.mereni.plynomery.database.expected_zero import (
+    ensure_expected_zero_table,
+    get_expected_zero_device_set,
+)
 from moduly.mereni.plynomery.database.models import (
     PlynomeryAnomalyEvent,
     PlynomeryAnomalyScore,
@@ -26,14 +30,47 @@ EVENT_CONFIG = {
         "threshold": 2.0,
         "min_consecutive": 8,
     },
+    "EXPECTED_ZERO_USAGE": {
+        "threshold": None,
+        "min_consecutive": 1,
+    },
 }
+EVENT_TYPE_CONSTRAINT_OPTIONS = (
+    "NIGHT_USAGE",
+    "SPIKE",
+    "LONG_HIGH_USAGE",
+    "EXPECTED_ZERO_USAGE",
+)
 
 
 def ensure_event_tables() -> None:
-    PlynomeryAnomalyEvent.__table__.create(bind=ENGINE_PG, checkfirst=True)
-    PlynomeryEventState.__table__.create(bind=ENGINE_PG, checkfirst=True)
-    PlynomeryEventEngineState.__table__.create(bind=ENGINE_PG, checkfirst=True)
+    ensure_expected_zero_table()
+    with ENGINE_PG.begin() as conn:
+        PlynomeryAnomalyEvent.__table__.create(bind=conn, checkfirst=True)
+        PlynomeryEventState.__table__.create(bind=conn, checkfirst=True)
+        PlynomeryEventEngineState.__table__.create(bind=conn, checkfirst=True)
+        _ensure_event_type_constraint(conn)
     _drop_legacy_identifikace_fk(PlynomeryAnomalyEvent.__tablename__)
+
+
+def _ensure_event_type_constraint(conn) -> None:
+    inspector = inspect(conn)
+    if "plynomery_anomaly_events" not in inspector.get_table_names(schema="monitoring"):
+        return
+
+    allowed_values = ", ".join(f"'{value}'" for value in EVENT_TYPE_CONSTRAINT_OPTIONS)
+    conn.execute(
+        text(
+            "ALTER TABLE monitoring.plynomery_anomaly_events "
+            "DROP CONSTRAINT IF EXISTS ck_plynomery_event_type_valid"
+        )
+    )
+    conn.execute(
+        text(
+            "ALTER TABLE monitoring.plynomery_anomaly_events "
+            f"ADD CONSTRAINT ck_plynomery_event_type_valid CHECK (event_type IN ({allowed_values}))"
+        )
+    )
 
 
 def _drop_legacy_identifikace_fk(table_name: str) -> None:
@@ -127,6 +164,7 @@ def detect_events_from_scores(
 
         max_processed_id = int(new_scores[-1].id)
         idents = {score.identifikace for score in new_scores}
+        expected_zero_idents = get_expected_zero_device_set(session=session) & idents
 
         states = session.execute(
             select(PlynomeryEventState).where(
@@ -172,7 +210,9 @@ def detect_events_from_scores(
                     session.add(state)
                     state_lookup[key] = state
 
-                if event_type == "NIGHT_USAGE":
+                if event_type == "EXPECTED_ZERO_USAGE":
+                    triggered = ident in expected_zero_idents and score.actual_value > 0
+                elif event_type == "NIGHT_USAGE":
                     triggered = (ts.hour >= 23 or ts.hour < 5) and score.z_score > cfg["threshold"]
                 else:
                     triggered = score.z_score > cfg["threshold"]

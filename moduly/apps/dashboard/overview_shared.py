@@ -32,6 +32,7 @@ from moduly.apps.dashboard.plynomery_shared import (
     load_ident_options as load_plynomery_ident_options,
 )
 from moduly.apps.dashboard.vodomery_shared import (
+    load_all_open_events as load_vodomery_open_events,
     load_branch_day_overview as load_vodomery_branch_day_overview,
     load_ident_options as load_vodomery_ident_options,
     load_overview_metrics as load_vodomery_overview_metrics,
@@ -59,6 +60,27 @@ MODULE_ACCENT_COLORS = {
     "plynomery": "#d97706",
     "elektromery": "#dc2626",
     "kalorimetry": "#ea580c",
+}
+VODOMERY_ALARM_EVENT_LIMIT = 6
+VODOMERY_ALARM_EVENT_TYPE_LABELS = {
+    "NIGHT_USAGE": "Noční odběr",
+    "SPIKE": "Špička",
+    "LONG_LEAK": "Dlouhý únik",
+    "ZERO_FLOW": "Bez průtoku",
+    "EXPECTED_ZERO_USAGE": "Odběr v expected zero",
+    "OUTLIER_REVIEW": "Outlier review",
+}
+VODOMERY_ALARM_SEVERITY_LABELS = {
+    "CRITICAL": "Critical",
+    "HIGH": "High",
+    "MEDIUM": "Medium",
+    "LOW": "Low",
+}
+VODOMERY_ALARM_SEVERITY_ORDER = {
+    "CRITICAL": 0,
+    "HIGH": 1,
+    "MEDIUM": 2,
+    "LOW": 3,
 }
 
 
@@ -93,14 +115,24 @@ def summarize_dashboard_overview(cards: list[dict[str, object]]) -> dict[str, in
     }
 
 
-def _build_empty_card(section_key: str, *, accessible: bool, description: str, error: str | None = None) -> dict[str, object]:
+def _build_empty_card(
+    section_key: str,
+    *,
+    accessible: bool,
+    description: str,
+    error: str | None = None,
+    title: str | None = None,
+    icon: str | None = None,
+    accent_color: str | None = None,
+    page_key: str | None = None,
+) -> dict[str, object]:
     section = get_section_definition(section_key)
     return {
         "section_key": section_key,
-        "page_key": MODULE_OVERVIEW_PAGE_KEYS.get(section_key),
-        "title": section.label if section is not None else section_key,
-        "icon": section.icon if section is not None else "",
-        "accent_color": MODULE_ACCENT_COLORS.get(section_key, "#64748b"),
+        "page_key": page_key if page_key is not None else MODULE_OVERVIEW_PAGE_KEYS.get(section_key),
+        "title": title if title is not None else (section.label if section is not None else section_key),
+        "icon": icon if icon is not None else (section.icon if section is not None else ""),
+        "accent_color": accent_color if accent_color is not None else MODULE_ACCENT_COLORS.get(section_key, "#64748b"),
         "accessible": accessible,
         "total_devices": 0,
         "recent_devices": 0,
@@ -223,6 +255,90 @@ def _load_vodomery_card(allowed_devices: tuple[str, ...], user_is_admin: bool) -
             ],
         }
     )
+    return card
+
+
+def _coerce_alarm_duration_minutes(value: object) -> int:
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def build_vodomery_alarm_payload(open_events_df, *, limit: int = VODOMERY_ALARM_EVENT_LIMIT) -> dict[str, object]:
+    if open_events_df is None or open_events_df.empty:
+        return {
+            "total_open_events": 0,
+            "affected_devices": 0,
+            "critical_count": 0,
+            "high_count": 0,
+            "medium_count": 0,
+            "hidden_event_count": 0,
+            "open_event_rows": [],
+        }
+
+    normalized_rows: list[dict[str, object]] = []
+    for index, row in enumerate(open_events_df.to_dict("records")):
+        event_type = str(row.get("event_type") or "")
+        severity = str(row.get("severity") or "").upper() or "UNKNOWN"
+        normalized_rows.append(
+            {
+                "identifikace": str(row.get("identifikace") or "Neznámý vodoměr"),
+                "event_type": event_type,
+                "event_type_label": VODOMERY_ALARM_EVENT_TYPE_LABELS.get(event_type, event_type or "Neznámý event"),
+                "start_time": row.get("start_time"),
+                "end_time": row.get("end_time"),
+                "duration_minutes": _coerce_alarm_duration_minutes(row.get("duration_minutes")),
+                "max_z_score": row.get("max_z_score"),
+                "avg_z_score": row.get("avg_z_score"),
+                "severity": severity,
+                "severity_label": VODOMERY_ALARM_SEVERITY_LABELS.get(severity, severity or "Unknown"),
+                "_source_order": index,
+            }
+        )
+
+    normalized_rows.sort(
+        key=lambda item: (
+            VODOMERY_ALARM_SEVERITY_ORDER.get(str(item.get("severity") or "").upper(), 99),
+            -int(item.get("duration_minutes") or 0),
+            int(item.get("_source_order") or 0),
+        )
+    )
+
+    visible_rows = []
+    for row in normalized_rows[:max(limit, 0)]:
+        visible_rows.append({key: value for key, value in row.items() if key != "_source_order"})
+
+    return {
+        "total_open_events": len(normalized_rows),
+        "affected_devices": len({str(row["identifikace"]) for row in normalized_rows if row.get("identifikace")}),
+        "critical_count": sum(1 for row in normalized_rows if row.get("severity") == "CRITICAL"),
+        "high_count": sum(1 for row in normalized_rows if row.get("severity") == "HIGH"),
+        "medium_count": sum(1 for row in normalized_rows if row.get("severity") == "MEDIUM"),
+        "hidden_event_count": max(len(normalized_rows) - len(visible_rows), 0),
+        "open_event_rows": visible_rows,
+    }
+
+
+def _load_vodomery_alarm_card(allowed_devices: tuple[str, ...], user_is_admin: bool) -> dict[str, object]:
+    open_events_df = load_vodomery_open_events(allowed_devices, user_is_admin, limit=500)
+    payload = build_vodomery_alarm_payload(open_events_df)
+
+    card = _build_empty_card(
+        "vodomery_alarm",
+        accessible=True,
+        description="Otevřené Anomaly eventy na vodoměrech.",
+        title="Vodoměry alarm",
+        icon="🚨",
+        accent_color="#dc2626",
+        page_key="vodomery_anomalie_eventy",
+    )
+    card.update(payload)
+    card["badges"] = [
+        {"label": "Otevřené eventy", "value": f"{int(payload.get('total_open_events', 0)):,}".replace(",", " ")},
+        {"label": "Critical", "value": f"{int(payload.get('critical_count', 0)):,}".replace(",", " ")},
+        {"label": "Vodoměry", "value": f"{int(payload.get('affected_devices', 0)):,}".replace(",", " ")},
+    ]
     return card
 
 
@@ -440,5 +556,36 @@ def load_dashboard_overview_cards(
                     error=str(exc),
                 )
             )
+
+    vodomery_accessible = "vodomery" in accessible_set
+    if not vodomery_accessible:
+        cards.append(
+            _build_empty_card(
+                "vodomery_alarm",
+                accessible=False,
+                description="Sekce není pro aktuální účet dostupná nebo nemá přiřazené zařízení.",
+                title="Vodoměry alarm",
+                icon="🚨",
+                accent_color="#dc2626",
+                page_key="vodomery_anomalie_eventy",
+            )
+        )
+        return cards
+
+    try:
+        cards.append(_load_vodomery_alarm_card(allowed_devices, user_is_admin))
+    except (DashboardApiError, SQLAlchemyError, ValueError) as exc:
+        cards.append(
+            _build_empty_card(
+                "vodomery_alarm",
+                accessible=True,
+                description="Data se zatím nepodařilo načíst. Stránku s anomaly eventy lze otevřít přímo.",
+                error=str(exc),
+                title="Vodoměry alarm",
+                icon="🚨",
+                accent_color="#dc2626",
+                page_key="vodomery_anomalie_eventy",
+            )
+        )
 
     return cards

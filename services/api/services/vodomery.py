@@ -1113,9 +1113,11 @@ def load_branch_day_overview(
             )
 
             device_state_lookup: dict[str, tuple[float | None, float | None]] = {}
+            billing_start_value: float | None = None
+            billing_end_value: float | None = None
             if not measurements_df.empty:
                 state_measurements_df = measurements_df.loc[
-                    measurements_df["identifikace"].isin(active_devices)
+                    measurements_df["identifikace"].isin(tuple(dict.fromkeys(active_devices + (config_item.billing_ident,))))
                 ].copy()
                 if not state_measurements_df.empty:
                     state_measurements_df["objem"] = pd.to_numeric(
@@ -1144,7 +1146,12 @@ def load_branch_day_overview(
                         ):
                             start_value = round(float(state_group["objem"].iloc[0]), 3)
                             end_value = round(float(state_group["objem"].iloc[-1]), 3)
-                            device_state_lookup[str(identifier)] = (start_value, end_value)
+                            identifier_key = str(identifier)
+                            if identifier_key == config_item.billing_ident:
+                                billing_start_value = start_value
+                                billing_end_value = end_value
+                            else:
+                                device_state_lookup[identifier_key] = (start_value, end_value)
 
             hourly_actual_lookup: dict[tuple[str, pd.Timestamp], float] = {}
             if not measurements_df.empty:
@@ -1339,6 +1346,8 @@ def load_branch_day_overview(
                     "daily_limit": config_item.daily_limit,
                     "active_devices": list(active_devices),
                     "hourly_rows": _serialize_dataframe_rows(hourly_df),
+                    "billing_start_value": billing_start_value,
+                    "billing_end_value": billing_end_value,
                     "last_actual_timestamp": last_actual_timestamp.to_pydatetime() if last_actual_timestamp is not None else None,
                     "actual_total": actual_total,
                     "device_consumption_rows": _serialize_dataframe_rows(device_consumption_df),

@@ -51,10 +51,12 @@ class BranchDeviceReportRow:
     start_value: float | None
     end_value: float | None
     spotreba: float
-    podil_procent: float
+    podil_procent: float | None
+    night_consumption: float | None
     ocekavana_spotreba: float | None
     spotreba_ku_ocekavani_procent: float | None
     color_hex: str
+    is_billing_meter: bool = False
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,7 @@ class BranchDailyReportSection:
     last_actual_timestamp: datetime | None
     device_rows: tuple[BranchDeviceReportRow, ...]
     chart_svg: str
+    billing_row: BranchDeviceReportRow | None = None
 
 
 @dataclass(frozen=True)
@@ -162,7 +165,7 @@ def _format_number(value: object, *, digits: int = 3) -> str:
     return f"{numeric_value:.{digits}f}"
 
 
-def _format_percent(value: object, *, digits: int = 1) -> str:
+def _format_percent(value: object, *, digits: int = 1, signed: bool = False) -> str:
     if value is None:
         return "-"
     try:
@@ -173,6 +176,8 @@ def _format_percent(value: object, *, digits: int = 1) -> str:
         return "-"
     if abs(numeric_value) < 0.05:
         numeric_value = 0.0
+    if signed and numeric_value != 0:
+        return f"{numeric_value:+.{digits}f} %"
     return f"{numeric_value:.{digits}f} %"
 
 
@@ -267,6 +272,10 @@ def _prepare_branch_device_rows(device_consumption_df: pd.DataFrame) -> tuple[Br
         rows["spotreba"] = pd.to_numeric(rows["spotreba"], errors="coerce").fillna(0.0)
     if "podil_procent" in rows.columns:
         rows["podil_procent"] = pd.to_numeric(rows["podil_procent"], errors="coerce").fillna(0.0)
+    if "nocni_spotreba" in rows.columns:
+        rows["nocni_spotreba"] = pd.to_numeric(rows["nocni_spotreba"], errors="coerce").fillna(0.0)
+    else:
+        rows["nocni_spotreba"] = 0.0
     if "ocekavana_spotreba" in rows.columns:
         rows["ocekavana_spotreba"] = pd.to_numeric(rows["ocekavana_spotreba"], errors="coerce")
     rows = rows.sort_values(["spotreba", "identifikace"], ascending=[False, True]).reset_index(drop=True)
@@ -276,6 +285,7 @@ def _prepare_branch_device_rows(device_consumption_df: pd.DataFrame) -> tuple[Br
         start_value = None if not hasattr(row, "start_value") or pd.isna(row.start_value) else round(float(row.start_value), 3)
         end_value = None if not hasattr(row, "end_value") or pd.isna(row.end_value) else round(float(row.end_value), 3)
         expected_value = None if pd.isna(row.ocekavana_spotreba) else round(float(row.ocekavana_spotreba), 3)
+        night_consumption = None if pd.isna(row.nocni_spotreba) else round(float(row.nocni_spotreba), 3)
         prepared_rows.append(
             BranchDeviceReportRow(
                 identifikace=str(row.identifikace),
@@ -283,6 +293,7 @@ def _prepare_branch_device_rows(device_consumption_df: pd.DataFrame) -> tuple[Br
                 end_value=end_value,
                 spotreba=round(float(row.spotreba), 3),
                 podil_procent=round(float(row.podil_procent), 1),
+                night_consumption=night_consumption,
                 ocekavana_spotreba=expected_value,
                 spotreba_ku_ocekavani_procent=_safe_ratio_percent(row.spotreba, expected_value),
                 color_hex=PALETTE[index % len(PALETTE)],
@@ -296,6 +307,170 @@ def _prediction_delta_percent(actual_total: object, expected_total: object) -> f
     if ratio_percent is None:
         return None
     return ratio_percent - 100.0
+
+
+def _is_report_night_hour(value: object) -> bool:
+    timestamp = pd.to_datetime(value, errors="coerce")
+    if pd.isna(timestamp):
+        return False
+    return bool(timestamp.hour >= 22 or timestamp.hour < 5)
+
+
+def _build_night_consumption_lookup(device_hourly_df: pd.DataFrame) -> dict[str, float]:
+    if device_hourly_df.empty:
+        return {}
+
+    working_df = device_hourly_df.copy()
+    working_df["date"] = pd.to_datetime(working_df["date"], errors="coerce")
+    working_df["spotreba"] = pd.to_numeric(working_df["spotreba"], errors="coerce").fillna(0.0)
+    working_df = working_df.loc[
+        working_df["date"].notna() & working_df["identifikace"].notna() & working_df["date"].map(_is_report_night_hour)
+    ].copy()
+    if working_df.empty:
+        return {}
+
+    nightly_totals = (
+        working_df.groupby("identifikace", as_index=False)["spotreba"].sum()
+        .assign(spotreba=lambda frame: pd.to_numeric(frame["spotreba"], errors="coerce").fillna(0.0).round(3))
+    )
+    return {
+        str(row.identifikace): round(float(row.spotreba), 3)
+        for row in nightly_totals.itertuples(index=False)
+    }
+
+
+def _sum_night_consumption(hourly_df: pd.DataFrame, *, value_column: str) -> float | None:
+    if hourly_df.empty or value_column not in hourly_df.columns:
+        return None
+
+    working_df = hourly_df.copy()
+    working_df["date"] = pd.to_datetime(working_df["date"], errors="coerce")
+    working_df[value_column] = pd.to_numeric(working_df[value_column], errors="coerce").fillna(0.0)
+    working_df = working_df.loc[working_df["date"].notna() & working_df["date"].map(_is_report_night_hour)].copy()
+    if working_df.empty:
+        return 0.0
+    return round(float(working_df[value_column].sum()), 3)
+
+
+def _build_billing_meter_row(
+    billing_ident: str,
+    billing_total: float | None,
+    billing_start_value: float | None,
+    billing_end_value: float | None,
+    night_consumption: float | None,
+    expected_total: float | None,
+) -> BranchDeviceReportRow | None:
+    if (
+        billing_total is None
+        and billing_start_value is None
+        and billing_end_value is None
+        and night_consumption is None
+        and expected_total is None
+    ):
+        return None
+    return BranchDeviceReportRow(
+        identifikace=f"SČVK vodoměr ({billing_ident})",
+        start_value=billing_start_value,
+        end_value=billing_end_value,
+        spotreba=round(float(billing_total or 0.0), 3),
+        podil_procent=None,
+        night_consumption=round(float(night_consumption or 0.0), 3),
+        ocekavana_spotreba=None if expected_total is None else round(float(expected_total), 3),
+        spotreba_ku_ocekavani_procent=_safe_ratio_percent(billing_total, expected_total),
+        color_hex=BILLING_CURVE_COLOR,
+        is_billing_meter=True,
+    )
+
+
+def _billing_delta_percent(actual_total: object, billing_total: object) -> float | None:
+    ratio_percent = _safe_ratio_percent(actual_total, billing_total)
+    if ratio_percent is None:
+        return None
+    return round(ratio_percent - 100.0, 1)
+
+
+def _build_report_balance_section_html(
+    branches: tuple[Any, ...],
+    *,
+    title: str,
+    meta_label: str,
+    meta_value: str,
+) -> str:
+    total_actual = _sum_email_volume_column(tuple(getattr(branch, "actual_total", None) for branch in branches))
+    total_billing = _sum_email_volume_column(tuple(getattr(branch, "billing_total", None) for branch in branches))
+    total_difference = round(total_actual - total_billing, 3)
+    total_coverage_percent = _safe_ratio_percent(total_actual, total_billing)
+    total_difference_percent = _billing_delta_percent(total_actual, total_billing)
+
+    rows_html = []
+    for branch in branches:
+        actual_total = round(float(getattr(branch, "actual_total", 0.0) or 0.0), 3)
+        billing_total_raw = getattr(branch, "billing_total", None)
+        billing_total = None if billing_total_raw is None else round(float(billing_total_raw), 3)
+        difference_raw = getattr(branch, "difference_vs_billing", None)
+        difference_vs_billing = difference_raw
+        if difference_vs_billing is None and billing_total is not None:
+            difference_vs_billing = round(actual_total - billing_total, 3)
+        coverage_percent = getattr(branch, "actual_vs_billing_percent", None)
+        if coverage_percent is None and billing_total is not None:
+            coverage_percent = _safe_ratio_percent(actual_total, billing_total)
+
+        rows_html.append(
+            "<tr>"
+            f"<td><strong>{escape(str(getattr(branch, 'title', '-')))}</strong></td>"
+            f"<td class='numeric'>{escape(_format_volume(actual_total))}</td>"
+            f"<td class='numeric'>{escape(_format_volume(billing_total))}</td>"
+            f"<td class='numeric'>{escape(_format_volume(difference_vs_billing, signed=True))}</td>"
+            f"<td class='numeric'>{escape(_format_percent(coverage_percent))}</td>"
+            "</tr>"
+        )
+
+    total_row_html = (
+        "<tr class='balance-total-row'>"
+        "<td><strong>Celkem</strong></td>"
+        f"<td class='numeric'><strong>{escape(_format_volume(total_actual))}</strong></td>"
+        f"<td class='numeric'><strong>{escape(_format_volume(total_billing))}</strong></td>"
+        f"<td class='numeric'><strong>{escape(_format_volume(total_difference, signed=True))}</strong></td>"
+        f"<td class='numeric'><strong>{escape(_format_percent(total_coverage_percent))}</strong></td>"
+        "</tr>"
+    )
+
+    return (
+        "<section class='balance-section'>"
+        "<div class='balance-hero'>"
+        "<div class='balance-title-block'>"
+        "<div class='title-eyebrow'>Souhrn reportu</div>"
+        f"<h2>{escape(title)}</h2>"
+        f"<div class='branch-meta'><strong>{escape(meta_label)}:</strong> {escape(meta_value)}</div>"
+        "<div class='balance-description'>"
+        "Součet spotřeby všech odběrných míst je porovnán se spotřebou fakturačních vodoměrů SČVK "
+        "za všechny větve i pro každou větev zvlášť."
+        "</div>"
+        "</div>"
+        "<div class='balance-summary-card'>"
+        f"{_build_metric_card_html('Celková bilance součtu větví vs. SČVK', _format_volume(total_difference, signed=True), f'Součet větví {_format_volume(total_actual)} vs. SČVK {_format_volume(total_billing)} | Odchylka {_format_percent(total_difference_percent, signed=True)}', primary=True)}"
+        "</div>"
+        "</div>"
+        "<div class='metric-grid balance-metric-grid'>"
+        f"{_build_metric_card_html('Součet spotřeby všech odběrných míst', _format_volume(total_actual))}"
+        f"{_build_metric_card_html('Součet spotřeby SČVK vodoměrů', _format_volume(total_billing))}"
+        f"{_build_metric_card_html('Pokrytí vůči SČVK', _format_percent(total_coverage_percent))}"
+        "</div>"
+        "<div class='branch-table-wrap balance-table-wrap'>"
+        "<div class='branch-subtitle'>Bilance po větvích</div>"
+        "<table class='branch-table balance-table'>"
+        "<thead><tr>"
+        "<th>Větev</th>"
+        "<th class='numeric'>Součet odběrných míst</th>"
+        "<th class='numeric'>SPOTŘEBA SČVK</th>"
+        "<th class='numeric'>Rozdíl</th>"
+        "<th class='numeric'>Pokrytí</th>"
+        "</tr></thead>"
+        f"<tbody>{''.join(rows_html)}{total_row_html}</tbody>"
+        "</table>"
+        "</div>"
+        "</section>"
+    )
 
 
 def _build_branch_chart_svg(
@@ -490,6 +665,12 @@ def build_daily_branch_report(
         hourly_df = _serialize_branch_dataframe_rows(branch.get("hourly_rows", []))
         device_consumption_df = pd.DataFrame(branch.get("device_consumption_rows", []))
         device_hourly_df = _serialize_branch_dataframe_rows(branch.get("device_hourly_rows", []))
+        night_consumption_by_device = _build_night_consumption_lookup(device_hourly_df)
+        if not device_consumption_df.empty:
+            device_consumption_df["nocni_spotreba"] = [
+                round(float(night_consumption_by_device.get(str(identifier), 0.0)), 3)
+                for identifier in device_consumption_df["identifikace"]
+            ]
         device_rows = _prepare_branch_device_rows(device_consumption_df)
 
         billing_total = None
@@ -498,6 +679,11 @@ def build_daily_branch_report(
                 float(pd.to_numeric(hourly_df["fakturacni_spotreba"], errors="coerce").fillna(0.0).sum()),
                 3,
             )
+        billing_night_consumption = _sum_night_consumption(hourly_df, value_column="fakturacni_spotreba")
+        billing_start_value_raw = branch.get("billing_start_value")
+        billing_start_value = None if billing_start_value_raw is None else round(float(billing_start_value_raw), 3)
+        billing_end_value_raw = branch.get("billing_end_value")
+        billing_end_value = None if billing_end_value_raw is None else round(float(billing_end_value_raw), 3)
         actual_total = round(float(branch.get("actual_total", 0.0) or 0.0), 3)
         expected_total = round(float(branch.get("expected_total", 0.0) or 0.0), 3)
         daily_limit = branch.get("daily_limit")
@@ -524,6 +710,14 @@ def build_daily_branch_report(
                 last_actual_timestamp=last_actual_timestamp,
                 device_rows=device_rows,
                 chart_svg=_build_branch_chart_svg(device_hourly_df, hourly_df, device_rows, last_actual_timestamp),
+                billing_row=_build_billing_meter_row(
+                    str(branch["billing_ident"]),
+                    billing_total,
+                    billing_start_value,
+                    billing_end_value,
+                    billing_night_consumption,
+                    expected_total,
+                ),
             )
         )
 
@@ -558,23 +752,41 @@ def _build_metric_card_html(
     )
 
 
-def _build_device_table_html(device_rows: tuple[BranchDeviceReportRow, ...]) -> str:
-    if not device_rows:
+def _build_device_table_row_html(row: BranchDeviceReportRow, *, extra_class: str = "") -> str:
+    row_classes = []
+    if row.is_billing_meter:
+        row_classes.append("branch-table-billing-row")
+    if extra_class:
+        row_classes.append(extra_class)
+    row_class_attr = f" class='{' '.join(row_classes)}'" if row_classes else ""
+    return (
+        f"<tr{row_class_attr}>"
+        f"<td><span class='row-ident'><span class='row-swatch' style='background:{escape(row.color_hex)};'></span>{escape(row.identifikace)}</span></td>"
+        f"<td class='numeric'>{escape(_format_volume(row.start_value))}</td>"
+        f"<td class='numeric'>{escape(_format_volume(row.end_value))}</td>"
+        f"<td class='numeric'>{escape(_format_volume(row.spotreba))}</td>"
+        f"<td class='numeric'>{escape(_format_percent(row.podil_procent))}</td>"
+        f"<td class='numeric'>{escape(_format_volume(row.night_consumption))}</td>"
+        f"<td class='numeric'>{escape(_format_volume(row.ocekavana_spotreba))}</td>"
+        f"<td class='numeric'>{escape(_format_percent(row.spotreba_ku_ocekavani_procent))}</td>"
+        "</tr>"
+    )
+
+
+def _build_device_table_html(
+    device_rows: tuple[BranchDeviceReportRow, ...],
+    *,
+    billing_row: BranchDeviceReportRow | None = None,
+) -> str:
+    if not device_rows and billing_row is None:
         return "<p class='empty-state'>Pro tuto větev nejsou k dispozici žádná odběrná místa.</p>"
 
     rows_html = []
-    for row in device_rows:
-        rows_html.append(
-            "<tr>"
-            f"<td><span class='row-ident'><span class='row-swatch' style='background:{escape(row.color_hex)};'></span>{escape(row.identifikace)}</span></td>"
-            f"<td class='numeric'>{escape(_format_volume(row.start_value))}</td>"
-            f"<td class='numeric'>{escape(_format_volume(row.end_value))}</td>"
-            f"<td class='numeric'>{escape(_format_volume(row.spotreba))}</td>"
-            f"<td class='numeric'>{escape(_format_percent(row.podil_procent))}</td>"
-            f"<td class='numeric'>{escape(_format_volume(row.ocekavana_spotreba))}</td>"
-            f"<td class='numeric'>{escape(_format_percent(row.spotreba_ku_ocekavani_procent))}</td>"
-            "</tr>"
-        )
+    if billing_row is not None:
+        rows_html.append(_build_device_table_row_html(billing_row))
+        if device_rows:
+            rows_html.append("<tr class='branch-table-separator'><td colspan='8'></td></tr>")
+    rows_html.extend(_build_device_table_row_html(row) for row in device_rows)
 
     return (
         "<table class='branch-table'>"
@@ -584,6 +796,7 @@ def _build_device_table_html(device_rows: tuple[BranchDeviceReportRow, ...]) -> 
         "<th class='numeric'>Konečný stav</th>"
         "<th class='numeric'>Spotřeba</th>"
         "<th class='numeric'>Podíl na větvi</th>"
+        "<th class='numeric'>Noční odběr</th>"
         "<th class='numeric'>Očekávaná spotřeba</th>"
         "<th class='numeric'>Spotřeba / očekávání</th>"
         "</tr></thead>"
@@ -629,7 +842,7 @@ def _build_branch_section_html(section: BranchDailyReportSection, *, is_first: b
         f"{section.chart_svg}"
         "</div>"
         "<div class='branch-table-wrap'>"
-        f"{_build_device_table_html(section.device_rows)}"
+        f"{_build_device_table_html(section.device_rows, billing_row=section.billing_row)}"
         "</div>"
         "<div class='branch-deviation-wrap'>"
         "<div class='branch-subtitle'>Odchylky</div>"
@@ -644,6 +857,12 @@ def _build_branch_section_html(section: BranchDailyReportSection, *, is_first: b
 
 def build_daily_branch_report_html(report: DailyBranchReport) -> str:
     armex_logo_data_uri = _load_image_data_uri(_armex_logo_path())
+    balance_section_html = _build_report_balance_section_html(
+        report.branches,
+        title="Celková bilance větví",
+        meta_label="Datum reportu",
+        meta_value=report.target_date.strftime("%d.%m.%Y"),
+    )
     branch_sections_html = "".join(
         _build_branch_section_html(section, is_first=index == 0)
         for index, section in enumerate(report.branches)
@@ -706,6 +925,39 @@ def build_daily_branch_report_html(report: DailyBranchReport) -> str:
       text-align: right;
       color: #52606d;
       font-size: 11px;
+    }}
+    .balance-section {{
+      break-after: page;
+      page-break-after: always;
+      padding-top: 2px;
+    }}
+    .balance-hero {{
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+      gap: 8px;
+      align-items: stretch;
+      margin-bottom: 8px;
+    }}
+    .balance-title-block {{
+      padding: 4px 0;
+    }}
+    .balance-title-block h2 {{
+      margin: 0;
+      font-size: 20px;
+      color: #0f4c81;
+    }}
+    .balance-description {{
+      margin-top: 6px;
+      color: #52606d;
+      max-width: 620px;
+    }}
+    .balance-summary-card .metric-card {{
+      height: 100%;
+      box-sizing: border-box;
+    }}
+    .balance-metric-grid {{
+      grid-template-columns: repeat(3, 1fr);
+      margin-bottom: 8px;
     }}
     .branch-section {{
       break-before: page;
@@ -899,6 +1151,19 @@ def build_daily_branch_report_html(report: DailyBranchReport) -> str:
     .branch-table tbody tr:last-child td {{
       border-bottom: none;
     }}
+    .branch-table-billing-row td {{
+      background: #fff7ed !important;
+      font-weight: 600;
+    }}
+    .branch-table-separator td {{
+      padding: 0;
+      height: 7px;
+      border-bottom: 2px solid #cbd5e1;
+      background: #ffffff !important;
+    }}
+    .balance-total-row td {{
+      background: #e8edf3 !important;
+    }}
     .numeric {{
       text-align: right;
       white-space: nowrap;
@@ -931,6 +1196,7 @@ def build_daily_branch_report_html(report: DailyBranchReport) -> str:
     </div>
   </header>
 
+  {balance_section_html}
   {branch_sections_html}
 </body>
 </html>"""

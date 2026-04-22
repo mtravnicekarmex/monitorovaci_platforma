@@ -22,6 +22,8 @@ def test_build_monthly_vodomery_branch_report_aggregates_daily_payloads(monkeypa
                 "title": "HECHT",
                 "billing_ident": "SCVK_HE",
                 "daily_limit": 20.0,
+                "billing_start_value": 500.0,
+                "billing_end_value": 511.0,
                 "active_devices": ["A_V1", "B_V1"],
                 "actual_total": 12.0,
                 "expected_total": 14.0,
@@ -33,6 +35,11 @@ def test_build_monthly_vodomery_branch_report_aggregates_daily_payloads(monkeypa
                     {"identifikace": "A_V1", "start_value": 100.0, "end_value": 109.0, "spotreba": 9.0, "ocekavana_spotreba": 8.0},
                     {"identifikace": "B_V1", "start_value": 200.0, "end_value": 203.0, "spotreba": 3.0, "ocekavana_spotreba": 6.0},
                 ],
+                "device_hourly_rows": [
+                    {"date": datetime.datetime(2026, 3, 1, 0, 0, 0), "identifikace": "A_V1", "spotreba": 5.0},
+                    {"date": datetime.datetime(2026, 3, 1, 23, 0, 0), "identifikace": "A_V1", "spotreba": 4.0},
+                    {"date": datetime.datetime(2026, 3, 1, 1, 0, 0), "identifikace": "B_V1", "spotreba": 3.0},
+                ],
             }
         ],
         datetime.date(2026, 3, 2): [
@@ -41,6 +48,8 @@ def test_build_monthly_vodomery_branch_report_aggregates_daily_payloads(monkeypa
                 "title": "HECHT",
                 "billing_ident": "SCVK_HE",
                 "daily_limit": 20.0,
+                "billing_start_value": 511.0,
+                "billing_end_value": 520.0,
                 "active_devices": ["A_V1", "C_V1"],
                 "actual_total": 10.0,
                 "expected_total": 8.0,
@@ -51,6 +60,10 @@ def test_build_monthly_vodomery_branch_report_aggregates_daily_payloads(monkeypa
                 "device_consumption_rows": [
                     {"identifikace": "A_V1", "start_value": 109.0, "end_value": 113.0, "spotreba": 4.0, "ocekavana_spotreba": 3.0},
                     {"identifikace": "C_V1", "start_value": 300.0, "end_value": 306.0, "spotreba": 6.0, "ocekavana_spotreba": 5.0},
+                ],
+                "device_hourly_rows": [
+                    {"date": datetime.datetime(2026, 3, 2, 22, 0, 0), "identifikace": "A_V1", "spotreba": 4.0},
+                    {"date": datetime.datetime(2026, 3, 2, 2, 0, 0), "identifikace": "C_V1", "spotreba": 6.0},
                 ],
             }
         ],
@@ -81,22 +94,40 @@ def test_build_monthly_vodomery_branch_report_aggregates_daily_payloads(monkeypa
     assert hecht.actual_vs_billing_percent == 110.0
     assert hecht.deviation_per_meter_day == 0.333
     assert hecht.deviation_per_meter_hour == 0.014
+    assert hecht.billing_row is not None
+    assert hecht.billing_row.identifikace == "SČVK vodoměr (SCVK_HE)"
+    assert hecht.billing_row.start_value == 500.0
+    assert hecht.billing_row.end_value == 520.0
+    assert hecht.billing_row.spotreba == 20.0
+    assert hecht.billing_row.night_consumption == 20.0
+    assert hecht.billing_row.ocekavana_spotreba == 22.0
+    assert hecht.billing_row.spotreba_ku_ocekavani_procent == 90.9
     assert hecht.device_rows[0].identifikace == "A_V1"
     assert hecht.device_rows[0].start_value == 100.0
     assert hecht.device_rows[0].end_value == 113.0
     assert hecht.device_rows[0].spotreba == 13.0
+    assert hecht.device_rows[0].night_consumption == 13.0
     assert hecht.device_rows[1].identifikace == "C_V1"
     assert hecht.device_rows[1].start_value == 300.0
     assert hecht.device_rows[1].end_value == 306.0
+    assert hecht.device_rows[1].night_consumption == 6.0
     assert "<svg" in hecht.chart_svg
 
     html = report_module.build_monthly_vodomery_branch_report_html(report)
     header_template = report_module._build_pdf_header_template(report)
     assert "Měsíční report fakturačních vodoměrů" in html
+    assert "Celková bilance větví" in html
+    assert "Součet spotřeby SČVK vodoměrů" in html
+    assert "Součet spotřeby všech odběrných míst" in html
+    assert "Bilance po větvích" in html
+    assert "Pokrytí vůči SČVK" in html
     assert "Období reportu:</strong> 01.03.2026 - 02.03.2026" in html
     assert "HECHT" in html
+    assert "SČVK vodoměr (SCVK_HE)" in html
+    assert "Noční odběr" in html
     assert "Do limitu SČVK" not in html
     assert "Predikce období" in html
+    assert "Odchylka +10.0 %" in html
     assert "Pokrytí 110.0 %" in html
     assert "Odchylky" in html
     assert "Na 1 vodoměr / den" in html
@@ -105,12 +136,18 @@ def test_build_monthly_vodomery_branch_report_aggregates_daily_payloads(monkeypa
     assert "Konečný stav" in html
     assert "100.000 m³" in html
     assert "113.000 m³" in html
+    assert "500.000 m³" in html
+    assert "520.000 m³" in html
+    assert "22.000 m³" in html
+    assert "90.9 %" in html
+    assert "20.000 m³" in html
     assert "+0.333 m³" in html
     assert "+0.014 m³" in html
     assert "stroke='#f97316'" in html
     assert "chart-line-legend" in html
     assert ">SČVK<" in html
     assert ">Predikce<" in html
+    assert "branch-table-separator" in html
     assert "display: none;" in html
     assert "margin: 10mm 8mm 10mm;" in html
     assert "data:image/png;base64" in header_template

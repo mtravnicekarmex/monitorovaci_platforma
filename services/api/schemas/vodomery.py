@@ -394,6 +394,8 @@ class VodomeryBranchOverviewRow(BaseModel):
     daily_limit: float | None = None
     active_devices: list[str]
     hourly_rows: list[VodomeryBranchHourlyRow]
+    billing_start_value: float | None = None
+    billing_end_value: float | None = None
     last_actual_timestamp: datetime | None = None
     actual_total: float
     device_consumption_rows: list[VodomeryBranchDeviceConsumptionRow]

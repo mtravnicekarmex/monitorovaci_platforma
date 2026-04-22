@@ -22,6 +22,9 @@ from moduly.mereni.vodomery.reporting.daily_branch_report import (
     DEFAULT_DAILY_BRANCH_REPORT_RECIPIENTS,
     DEFAULT_DAILY_BRANCH_REPORT_SENDER_ALIAS,
     _armex_logo_path,
+    _build_billing_meter_row,
+    _build_report_balance_section_html,
+    _build_night_consumption_lookup,
     _build_device_table_html,
     _build_metric_card_html,
     _build_scheduler_admin_context,
@@ -35,6 +38,7 @@ from moduly.mereni.vodomery.reporting.daily_branch_report import (
     _prediction_delta_percent,
     _prepare_branch_device_rows,
     _safe_ratio_percent,
+    _sum_night_consumption,
     _sum_email_volume_column,
 )
 from services.api.services.vodomery import BRANCH_DASHBOARD_CONFIGS, load_branch_day_overview
@@ -85,6 +89,7 @@ class BranchMonthlyReportSection:
     chart_svg: str
     deviation_per_meter_day: float | None
     deviation_per_meter_hour: float | None
+    billing_row: BranchDeviceReportRow | None = None
 
 
 @dataclass(frozen=True)
@@ -306,6 +311,9 @@ def build_monthly_vodomery_branch_report(
             "actual_total": 0.0,
             "expected_total": 0.0,
             "billing_total": 0.0,
+            "billing_start_value": None,
+            "billing_end_value": None,
+            "billing_night_consumption": 0.0,
             "period_limit": 0.0 if config_item.daily_limit is not None else None,
             "device_map": {},
             "unique_devices": set(),
@@ -326,6 +334,17 @@ def build_monthly_vodomery_branch_report(
             actual_total = round(float((branch_payload or {}).get("actual_total", 0.0) or 0.0), 3)
             expected_total = round(float((branch_payload or {}).get("expected_total", 0.0) or 0.0), 3)
             billing_total = _sum_billing_total((branch_payload or {}).get("hourly_rows") or ())
+            branch_hourly_df = pd.DataFrame((branch_payload or {}).get("hourly_rows") or ())
+            device_hourly_df = pd.DataFrame((branch_payload or {}).get("device_hourly_rows") or ())
+            billing_night_consumption = _sum_night_consumption(
+                branch_hourly_df,
+                value_column="fakturacni_spotreba",
+            )
+            billing_start_value_raw = (branch_payload or {}).get("billing_start_value")
+            billing_end_value_raw = (branch_payload or {}).get("billing_end_value")
+            billing_start_value = None if billing_start_value_raw is None else round(float(billing_start_value_raw), 3)
+            billing_end_value = None if billing_end_value_raw is None else round(float(billing_end_value_raw), 3)
+            night_consumption_by_device = _build_night_consumption_lookup(device_hourly_df)
             daily_limit_value = (branch_payload or {}).get("daily_limit")
             if daily_limit_value is None:
                 daily_limit_value = config_item.daily_limit
@@ -336,6 +355,14 @@ def build_monthly_vodomery_branch_report(
             accumulator["actual_total"] = round(float(accumulator["actual_total"]) + actual_total, 3)
             accumulator["expected_total"] = round(float(accumulator["expected_total"]) + expected_total, 3)
             accumulator["billing_total"] = round(float(accumulator["billing_total"]) + billing_total, 3)
+            accumulator["billing_night_consumption"] = round(
+                float(accumulator["billing_night_consumption"]) + float(billing_night_consumption or 0.0),
+                3,
+            )
+            if accumulator["billing_start_value"] is None and billing_start_value is not None:
+                accumulator["billing_start_value"] = billing_start_value
+            if billing_end_value is not None:
+                accumulator["billing_end_value"] = billing_end_value
 
             active_devices = tuple(
                 dict.fromkeys(
@@ -362,6 +389,7 @@ def build_monthly_vodomery_branch_report(
                         "start_value": None,
                         "end_value": None,
                         "spotreba": 0.0,
+                        "nocni_spotreba": 0.0,
                         "ocekavana_spotreba": 0.0,
                     },
                 )
@@ -381,6 +409,7 @@ def build_monthly_vodomery_branch_report(
                         "start_value": None,
                         "end_value": None,
                         "spotreba": 0.0,
+                        "nocni_spotreba": 0.0,
                         "ocekavana_spotreba": 0.0,
                     },
                 )
@@ -401,6 +430,10 @@ def build_monthly_vodomery_branch_report(
                     if end_value is not None:
                         device_stats["end_value"] = end_value
                 device_stats["spotreba"] = round(float(device_stats["spotreba"]) + actual_value, 3)
+                device_stats["nocni_spotreba"] = round(
+                    float(device_stats["nocni_spotreba"]) + float(night_consumption_by_device.get(identifier, 0.0)),
+                    3,
+                )
                 device_stats["ocekavana_spotreba"] = round(float(device_stats["ocekavana_spotreba"]) + expected_value, 3)
                 device_values[identifier] = actual_value
 
@@ -466,6 +499,14 @@ def build_monthly_vodomery_branch_report(
                     len(accumulator["unique_devices"]),
                     max(period.day_count * 24, 1),
                 ),
+                billing_row=_build_billing_meter_row(
+                    str(accumulator["billing_ident"]),
+                    billing_total,
+                    accumulator["billing_start_value"],
+                    accumulator["billing_end_value"],
+                    accumulator["billing_night_consumption"],
+                    expected_total,
+                ),
             )
         )
 
@@ -501,7 +542,7 @@ def _build_branch_section_html(section: BranchMonthlyReportSection, *, is_first:
         f"{section.chart_svg}"
         "</div>"
         "<div class='branch-table-wrap'>"
-        f"{_build_device_table_html(section.device_rows)}"
+        f"{_build_device_table_html(section.device_rows, billing_row=section.billing_row)}"
         "</div>"
         "<div class='branch-deviation-wrap'>"
         "<div class='branch-subtitle'>Odchylky</div>"
@@ -515,6 +556,12 @@ def _build_branch_section_html(section: BranchMonthlyReportSection, *, is_first:
 
 
 def build_monthly_vodomery_branch_report_html(report: MonthlyBranchReport) -> str:
+    balance_section_html = _build_report_balance_section_html(
+        report.branches,
+        title="Celková bilance větví",
+        meta_label="Období reportu",
+        meta_value=report.period.date_range_label,
+    )
     branch_sections_html = "".join(
         _build_branch_section_html(section, is_first=index == 0)
         for index, section in enumerate(report.branches)
@@ -543,6 +590,39 @@ def build_monthly_vodomery_branch_report_html(report: MonthlyBranchReport) -> st
     }}
     .report-content {{
       margin-top: 0;
+    }}
+    .balance-section {{
+      break-after: page;
+      page-break-after: always;
+      padding-top: 11mm;
+    }}
+    .balance-hero {{
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+      gap: 8px;
+      align-items: stretch;
+      margin-bottom: 8px;
+    }}
+    .balance-title-block {{
+      padding: 4px 0;
+    }}
+    .balance-title-block h2 {{
+      margin: 0;
+      font-size: 20px;
+      color: #0f4c81;
+    }}
+    .balance-description {{
+      margin-top: 6px;
+      color: #52606d;
+      max-width: 620px;
+    }}
+    .balance-summary-card .metric-card {{
+      height: 100%;
+      box-sizing: border-box;
+    }}
+    .balance-metric-grid {{
+      grid-template-columns: repeat(3, 1fr);
+      margin-bottom: 8px;
     }}
     .title-eyebrow {{
       text-transform: uppercase;
@@ -772,6 +852,19 @@ def build_monthly_vodomery_branch_report_html(report: MonthlyBranchReport) -> st
     .branch-table tbody tr:last-child td {{
       border-bottom: none;
     }}
+    .branch-table-billing-row td {{
+      background: #fff7ed !important;
+      font-weight: 600;
+    }}
+    .branch-table-separator td {{
+      padding: 0;
+      height: 7px;
+      border-bottom: 2px solid #cbd5e1;
+      background: #ffffff !important;
+    }}
+    .balance-total-row td {{
+      background: #e8edf3 !important;
+    }}
     .numeric {{
       text-align: right;
       white-space: nowrap;
@@ -805,6 +898,7 @@ def build_monthly_vodomery_branch_report_html(report: MonthlyBranchReport) -> st
   </header>
 
   <main class="report-content">
+    {balance_section_html}
     {branch_sections_html}
   </main>
 </body>

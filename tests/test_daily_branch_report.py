@@ -15,6 +15,8 @@ def test_build_daily_branch_report_computes_branch_metrics(monkeypatch):
             "title": "HECHT",
             "billing_ident": "SCVK_HE",
             "daily_limit": 20.0,
+            "billing_start_value": 500.0,
+            "billing_end_value": 511.0,
             "actual_total": 12.0,
             "expected_total": 14.0,
             "last_actual_timestamp": datetime.datetime(2026, 4, 15, 23, 0, 0),
@@ -79,19 +81,37 @@ def test_build_daily_branch_report_computes_branch_metrics(monkeypatch):
     assert branch.remaining_to_limit == 8.0
     assert branch.difference_vs_billing == 1.0
     assert branch.actual_vs_billing_percent == 109.1
+    assert branch.billing_row is not None
+    assert branch.billing_row.identifikace == "SČVK vodoměr (SCVK_HE)"
+    assert branch.billing_row.start_value == 500.0
+    assert branch.billing_row.end_value == 511.0
+    assert branch.billing_row.spotreba == 11.0
+    assert branch.billing_row.night_consumption == 11.0
+    assert branch.billing_row.ocekavana_spotreba == 14.0
+    assert branch.billing_row.spotreba_ku_ocekavani_procent == 78.6
     assert branch.device_rows[0].identifikace == "A_V1"
     assert branch.device_rows[0].start_value == 100.0
     assert branch.device_rows[0].end_value == 109.0
+    assert branch.device_rows[0].night_consumption == 9.0
     assert branch.device_rows[0].spotreba_ku_ocekavani_procent == 112.5
+    assert branch.device_rows[1].night_consumption == 3.0
     assert "<svg" in branch.chart_svg
 
     html = report_module.build_daily_branch_report_html(report)
     assert "Denní report fakturačních vodoměrů" in html
+    assert "Celková bilance větví" in html
+    assert "Součet spotřeby SČVK vodoměrů" in html
+    assert "Součet spotřeby všech odběrných míst" in html
+    assert "Bilance po větvích" in html
+    assert "Pokrytí vůči SČVK" in html
     assert "HECHT" in html
     assert "Součet spotřeby vs. fakturační vodoměr" in html
+    assert "SČVK vodoměr (SCVK_HE)" in html
+    assert "Noční odběr" in html
     assert "Do limitu SČVK" in html
     assert "SPOTŘEBA SČVK" in html
     assert "-14%" in html
+    assert "Odchylka +9.1 %" in html
     assert "Pokrytí 109.1 %" in html
     assert "Odchylky" in html
     assert "Na 1 vodoměr / den" in html
@@ -100,12 +120,18 @@ def test_build_daily_branch_report_computes_branch_metrics(monkeypatch):
     assert "Konečný stav" in html
     assert "100.000 m³" in html
     assert "109.000 m³" in html
+    assert "500.000 m³" in html
+    assert "511.000 m³" in html
+    assert "14.000 m³" in html
+    assert "78.6 %" in html
+    assert "11.000 m³" in html
     assert "+0.500 m³" in html
     assert "+0.021 m³" in html
     assert "stroke='#f97316'" in html
     assert "chart-line-legend" in html
     assert ">SČVK<" in html
     assert ">Predikce<" in html
+    assert "branch-table-separator" in html
     assert "Graf spotřeby větve" not in html
     assert "Odběrná místa" not in html
     assert "chart-legend" not in html

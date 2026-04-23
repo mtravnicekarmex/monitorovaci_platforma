@@ -9,6 +9,10 @@ from moduly.mereni.plynomery.database.expected_zero import (
     list_expected_zero_devices,
     replace_expected_zero_devices,
 )
+from moduly.mereni.plynomery.database.outlier_reviews import (
+    list_outlier_reviews,
+)
+from moduly.mereni.plynomery.database.outlier_review_apply import apply_outlier_review_update
 from services.api.core.plynomery_alert_rule_validation import normalize_alert_rule_payload
 from services.api.services.dashboard_admin import require_admin_access
 from services.api.services.dashboard_auth import DashboardUserContext
@@ -64,6 +68,45 @@ def replace_expected_zero_devices_admin(
     require_admin_access(user_context)
     replace_expected_zero_devices(identifikace_list, updated_by=user_context.username)
     return list_expected_zero_devices()
+
+
+def list_outlier_reviews_admin(
+    user_context: DashboardUserContext,
+    *,
+    review_status: str | None = None,
+    identifikace: str | None = None,
+    source_filter: str = "VSE",
+    limit: int = 200,
+) -> list[dict[str, object]]:
+    require_admin_access(user_context)
+    try:
+        return list_outlier_reviews(
+            review_status=review_status,
+            identifikace=identifikace,
+            source_filter=source_filter,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise PlynomeryAdminOperationError(str(exc)) from exc
+
+
+def update_outlier_review_admin(
+    user_context: DashboardUserContext,
+    *,
+    review_id: int,
+    review_status: str,
+    review_note: str | None = None,
+) -> dict[str, object]:
+    require_admin_access(user_context)
+    try:
+        return apply_outlier_review_update(
+            review_id,
+            review_status=review_status,
+            review_note=review_note,
+            actor=user_context.username,
+        )
+    except ValueError as exc:
+        raise PlynomeryAdminOperationError(str(exc)) from exc
 
 
 def create_alert_rule_admin(

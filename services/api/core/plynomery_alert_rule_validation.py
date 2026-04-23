@@ -107,14 +107,19 @@ def normalize_alert_rule_payload(
     enabled: object = True,
     note: object | None = None,
 ) -> dict[str, object]:
+    normalized_event_type = normalize_alert_rule_event_type(event_type)
+    normalized_min_duration = normalize_alert_rule_min_duration(min_duration_minutes)
+    if normalized_event_type == "OUTLIER_REVIEW":
+        normalized_min_duration = 0
+
     return {
         "rule_name": normalize_alert_rule_name(rule_name),
         "recipient_email": normalize_alert_rule_email(recipient_email),
         "severity_min": normalize_alert_rule_severity(severity_min),
-        "min_duration_minutes": normalize_alert_rule_min_duration(min_duration_minutes),
+        "min_duration_minutes": normalized_min_duration,
         "send_on": normalize_alert_rule_send_on(send_on),
         "identifikace": normalize_alert_rule_identifikace(identifikace),
-        "event_type": normalize_alert_rule_event_type(event_type),
+        "event_type": normalized_event_type,
         "enabled": bool(enabled),
         "note": normalize_alert_rule_note(note),
     }

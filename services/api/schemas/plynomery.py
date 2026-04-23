@@ -4,6 +4,10 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from moduly.mereni.plynomery.database.outlier_reviews import (
+    normalize_review_note,
+    normalize_review_status,
+)
 from services.api.core.plynomery_alert_rule_validation import (
     normalize_alert_rule_email,
     normalize_alert_rule_event_type,
@@ -149,3 +153,49 @@ class PlynomeryAlertRuleUpsertRequest(BaseModel):
     @classmethod
     def validate_note(cls, value: str | None) -> str | None:
         return normalize_alert_rule_note(value)
+
+
+class PlynomeryOutlierReviewRow(BaseModel):
+    id: int
+    identifikace: str
+    date: datetime
+    zdroj: str
+    source_recid: int | None = None
+    seriove_cislo: str
+    interval_minutes: int
+    detection_kind: str
+    current_objem: float
+    baseline_objem: float | None = None
+    baseline_date: datetime | None = None
+    candidate_delta: float
+    threshold_delta: float | None = None
+    sample_size: int | None = None
+    median_delta: float | None = None
+    p90_delta: float | None = None
+    p99_delta: float | None = None
+    std_delta: float | None = None
+    review_status: str
+    review_note: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime
+
+
+class PlynomeryOutlierReviewListResponse(BaseModel):
+    total: int
+    rows: list[PlynomeryOutlierReviewRow]
+
+
+class PlynomeryOutlierReviewUpdateRequest(BaseModel):
+    review_status: str
+    review_note: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("review_status")
+    @classmethod
+    def validate_review_status(cls, value: str) -> str:
+        return normalize_review_status(value)
+
+    @field_validator("review_note")
+    @classmethod
+    def validate_review_note(cls, value: str | None) -> str | None:
+        return normalize_review_note(value)

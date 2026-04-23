@@ -42,6 +42,7 @@ EVENT_TYPE_LABELS = {
     "SPIKE": "SPIKE",
     "LONG_HIGH_USAGE": "LONG_HIGH_USAGE",
     "EXPECTED_ZERO_USAGE": "EXPECTED_ZERO",
+    "OUTLIER_REVIEW": "OUTLIER_REVIEW",
 }
 SEND_ON_LABELS = {
     "ACTIVE": "Pri prekroceni limitu u aktivniho eventu",
@@ -96,6 +97,7 @@ def render_page() -> None:
     st.info(
         "Vsechna pravidla pro stejny email budou pri odesilani seskupena do jednoho souhrnneho emailu."
     )
+    st.caption("Pro event type OUTLIER_REVIEW se minimalni trvani uklada automaticky jako 0 minut.")
 
     device_options = load_devices_cached()
     expected_zero_rows = load_expected_zero_rows_cached()

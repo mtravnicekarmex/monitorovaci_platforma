@@ -12,6 +12,10 @@ def test_expected_zero_usage_is_available_for_plynomery_alerting():
     assert "EXPECTED_ZERO_USAGE" in EVENT_TYPE_OPTIONS
 
 
+def test_outlier_review_is_available_for_plynomery_alerting():
+    assert "OUTLIER_REVIEW" in EVENT_TYPE_OPTIONS
+
+
 def test_normalize_alert_rule_payload_accepts_expected_zero_usage():
     payload = normalize_alert_rule_payload(
         rule_name="Expected zero",
@@ -27,3 +31,20 @@ def test_normalize_alert_rule_payload_accepts_expected_zero_usage():
 
     assert payload["event_type"] == "EXPECTED_ZERO_USAGE"
     assert payload["min_duration_minutes"] == 120
+
+
+def test_normalize_alert_rule_payload_forces_zero_duration_for_outlier_review():
+    payload = normalize_alert_rule_payload(
+        rule_name="Outlier email",
+        recipient_email="alerts@example.com",
+        severity_min="HIGH",
+        min_duration_minutes=120,
+        send_on="ACTIVE",
+        identifikace=None,
+        event_type="OUTLIER_REVIEW",
+        enabled=True,
+        note=None,
+    )
+
+    assert payload["event_type"] == "OUTLIER_REVIEW"
+    assert payload["min_duration_minutes"] == 0

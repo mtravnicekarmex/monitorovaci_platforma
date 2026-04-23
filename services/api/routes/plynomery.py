@@ -13,6 +13,9 @@ from services.api.schemas.plynomery import (
     PlynomeryExpectedZeroListResponse,
     PlynomeryExpectedZeroUpdateRequest,
     PlynomeryOpenEventsResponse,
+    PlynomeryOutlierReviewListResponse,
+    PlynomeryOutlierReviewRow,
+    PlynomeryOutlierReviewUpdateRequest,
     PlynomeryRecentAnomaliesResponse,
     PlynomeryResolvedEventsResponse,
 )
@@ -30,8 +33,10 @@ from services.api.services.plynomery_admin import (
     delete_alert_rule_admin,
     list_alert_rules_admin,
     list_expected_zero_devices_admin,
+    list_outlier_reviews_admin,
     replace_expected_zero_devices_admin,
     update_alert_rule_admin,
+    update_outlier_review_admin,
 )
 
 
@@ -133,6 +138,66 @@ def get_plynomery_resolved_events(
         total=len(rows),
         rows=rows,
     )
+
+
+@router.get(
+    "/outlier-reviews",
+    response_model=PlynomeryOutlierReviewListResponse,
+    summary="Get outlier reviews",
+    description="Vrací seznam plynoměrových outlierů k manuálnímu přezkoumání. "
+    "Umožňuje adminovi označit outlier jako datový glitch nebo legitimní odběr. "
+    "Vyžaduje admin oprávnění.",
+)
+def get_plynomery_outlier_reviews(
+    review_status: str | None = Query(default="PENDING"),
+    identifikace: str | None = Query(default=None),
+    source: str = Query(default="VSE"),
+    limit: int = Query(default=200, ge=1, le=1000),
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> PlynomeryOutlierReviewListResponse:
+    try:
+        rows = list_outlier_reviews_admin(
+            current_user,
+            review_status=review_status,
+            identifikace=identifikace,
+            source_filter=source,
+            limit=limit,
+        )
+    except PlynomeryAdminOperationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return PlynomeryOutlierReviewListResponse(total=len(rows), rows=rows)
+
+
+@router.patch(
+    "/outlier-reviews/{review_id}",
+    response_model=PlynomeryOutlierReviewRow,
+    summary="Update outlier review",
+    description="Aktualizuje status plynoměrového outlier review a poznámku. "
+    "Vyžaduje admin oprávnění.",
+)
+def patch_plynomery_outlier_review(
+    review_id: int,
+    payload: PlynomeryOutlierReviewUpdateRequest,
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> PlynomeryOutlierReviewRow:
+    try:
+        row = update_outlier_review_admin(
+            current_user,
+            review_id=review_id,
+            review_status=payload.review_status,
+            review_note=payload.review_note,
+        )
+    except PlynomeryAdminOperationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return PlynomeryOutlierReviewRow(**row)
 
 
 @router.get(

@@ -142,6 +142,7 @@ def render_overview_styles() -> None:
         .dashboard-overview-weather-days {
             display: grid;
             grid-template-columns: repeat(5, minmax(92px, 1fr));
+            justify-content: end;
             gap: 0.45rem;
             width: min(100%, 500px);
         }
@@ -633,12 +634,12 @@ def render_overview_styles() -> None:
             }
 
             .dashboard-overview-weather-days-wrap {
-                justify-content: stretch;
+                justify-content: flex-end;
             }
 
             .dashboard-overview-weather-days {
                 grid-template-columns: repeat(5, minmax(88px, 1fr));
-                width: 100%;
+                width: min(100%, 500px);
             }
 
         }

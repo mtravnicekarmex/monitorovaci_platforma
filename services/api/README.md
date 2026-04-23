@@ -124,6 +124,22 @@ Automaticky generovaná dokumentace je dostupná na:
 | GET | `/api/v1/manometry/measurement-series` | Časová řada měření |
 | GET | `/api/v1/manometry/device-detail` | Detail zařízení a lifetime statistiky |
 
+#### Plynoměry
+| Metoda | Cesta | Popis |
+|--------|-------|-------|
+| GET | `/api/v1/plynomery/devices` | Seznam plynoměrů |
+| GET | `/api/v1/plynomery/recent-anomalies` | Nedávné anomálie |
+| GET | `/api/v1/plynomery/open-events` | Otevřené eventy |
+| GET | `/api/v1/plynomery/resolved-events` | Vyřešené eventy |
+| GET | `/api/v1/plynomery/outlier-reviews` | Outlier recenze (admin) |
+| PATCH | `/api/v1/plynomery/outlier-reviews/{id}` | Aktualizace outlier (admin) |
+| GET | `/api/v1/plynomery/expected-zero` | Seznam nulové spotřeby (admin) |
+| PUT | `/api/v1/plynomery/expected-zero` | Nastavení nulové spotřeby (admin) |
+| GET | `/api/v1/plynomery/alert-rules` | Alert pravidla (admin) |
+| POST | `/api/v1/plynomery/alert-rules` | Vytvoření alert pravidla (admin) |
+| PATCH | `/api/v1/plynomery/alert-rules/{id}` | Úprava alert pravidla (admin) |
+| DELETE | `/api/v1/plynomery/alert-rules/{id}` | Smazání alert pravidla (admin) |
+
 ## Konfigurace
 
 Konfigurace se načítá z proměnných prostředí (viz `.env.example`):

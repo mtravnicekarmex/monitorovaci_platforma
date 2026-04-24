@@ -10,32 +10,35 @@ from moduly.apps.dashboard.navigation_config import (
 )
 
 
-def test_expected_zero_footer_page_was_merged_into_vodomery_alerting():
+def test_expected_zero_footer_page_was_merged_into_alerting():
     footer_page_keys = [page.key for page in get_dashboard_pages("footer")]
 
     assert "web_search_monitor" in footer_page_keys
     assert "expected_zero" not in footer_page_keys
-    assert "vodomery_alerting" in footer_page_keys
-    assert footer_page_keys.index("web_search_monitor") < footer_page_keys.index("vodomery_alerting")
+    assert "alerting" in footer_page_keys
+    assert "vodomery_alerting" not in footer_page_keys
+    assert "plynomery_alerting" not in footer_page_keys
+    assert footer_page_keys.index("web_search_monitor") < footer_page_keys.index("alerting")
 
 
-def test_scheduler_health_footer_page_is_after_vodomery_alerting():
+def test_scheduler_health_footer_page_is_after_alerting():
     footer_page_keys = [page.key for page in get_dashboard_pages("footer")]
 
-    assert "vodomery_alerting" in footer_page_keys
-    assert "plynomery_alerting" in footer_page_keys
+    assert "alerting" in footer_page_keys
     assert "scheduler_health" in footer_page_keys
     assert "muj_ucet" in footer_page_keys
-    assert footer_page_keys.index("vodomery_alerting") < footer_page_keys.index("scheduler_health")
+    assert footer_page_keys.index("alerting") < footer_page_keys.index("scheduler_health")
     assert footer_page_keys.index("scheduler_health") < footer_page_keys.index("muj_ucet")
 
 
-def test_plynomery_outlier_review_footer_page_is_after_vodomery_outlier_review():
+def test_shared_outlier_review_footer_page_is_after_scheduler_health():
     footer_page_keys = [page.key for page in get_dashboard_pages("footer")]
 
-    assert "vodomery_outlier_review" in footer_page_keys
-    assert "plynomery_outlier_review" in footer_page_keys
-    assert footer_page_keys.index("vodomery_outlier_review") < footer_page_keys.index("plynomery_outlier_review")
+    assert "scheduler_health" in footer_page_keys
+    assert "outlier_review" in footer_page_keys
+    assert "vodomery_outlier_review" not in footer_page_keys
+    assert "plynomery_outlier_review" not in footer_page_keys
+    assert footer_page_keys.index("scheduler_health") < footer_page_keys.index("outlier_review")
 
 
 def test_manometry_section_and_page_are_configurable():

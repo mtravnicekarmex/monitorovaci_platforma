@@ -62,6 +62,7 @@ MODULE_ACCENT_COLORS = {
     "kalorimetry": "#ea580c",
 }
 VODOMERY_ALARM_EVENT_LIMIT = 6
+VODOMERY_ALARM_ZERO_FLOW_MIN_DURATION_MINUTES = 60 * 60
 VODOMERY_ALARM_EVENT_TYPE_LABELS = {
     "NIGHT_USAGE": "Noční odběr",
     "SPIKE": "Špička",
@@ -265,6 +266,12 @@ def _coerce_alarm_duration_minutes(value: object) -> int:
         return 0
 
 
+def _is_visible_vodomery_alarm_event(event_type: str, duration_minutes: int) -> bool:
+    if event_type == "ZERO_FLOW" and duration_minutes <= VODOMERY_ALARM_ZERO_FLOW_MIN_DURATION_MINUTES:
+        return False
+    return True
+
+
 def build_vodomery_alarm_payload(open_events_df, *, limit: int = VODOMERY_ALARM_EVENT_LIMIT) -> dict[str, object]:
     if open_events_df is None or open_events_df.empty:
         return {
@@ -280,6 +287,9 @@ def build_vodomery_alarm_payload(open_events_df, *, limit: int = VODOMERY_ALARM_
     normalized_rows: list[dict[str, object]] = []
     for index, row in enumerate(open_events_df.to_dict("records")):
         event_type = str(row.get("event_type") or "")
+        duration_minutes = _coerce_alarm_duration_minutes(row.get("duration_minutes"))
+        if not _is_visible_vodomery_alarm_event(event_type, duration_minutes):
+            continue
         severity = str(row.get("severity") or "").upper() or "UNKNOWN"
         normalized_rows.append(
             {
@@ -288,7 +298,7 @@ def build_vodomery_alarm_payload(open_events_df, *, limit: int = VODOMERY_ALARM_
                 "event_type_label": VODOMERY_ALARM_EVENT_TYPE_LABELS.get(event_type, event_type or "Neznámý event"),
                 "start_time": row.get("start_time"),
                 "end_time": row.get("end_time"),
-                "duration_minutes": _coerce_alarm_duration_minutes(row.get("duration_minutes")),
+                "duration_minutes": duration_minutes,
                 "max_z_score": row.get("max_z_score"),
                 "avg_z_score": row.get("avg_z_score"),
                 "severity": severity,

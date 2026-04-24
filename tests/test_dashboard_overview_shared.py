@@ -23,7 +23,7 @@ def test_build_vodomery_alarm_payload_sorts_and_limits_visible_rows():
                 "identifikace": "VDM-01",
                 "event_type": "ZERO_FLOW",
                 "start_time": "2026-04-22T06:00:00",
-                "duration_minutes": 180,
+                "duration_minutes": 3660,
                 "max_z_score": 9.3,
                 "severity": "CRITICAL",
             },
@@ -63,3 +63,32 @@ def test_build_vodomery_alarm_payload_returns_empty_state_for_empty_dataframe():
         "hidden_event_count": 0,
         "open_event_rows": [],
     }
+
+
+def test_build_vodomery_alarm_payload_hides_zero_flow_until_over_60_hours():
+    events_df = pd.DataFrame(
+        [
+            {
+                "identifikace": "VDM-01",
+                "event_type": "ZERO_FLOW",
+                "start_time": "2026-04-22T06:00:00",
+                "duration_minutes": 3600,
+                "severity": "CRITICAL",
+            },
+            {
+                "identifikace": "VDM-02",
+                "event_type": "SPIKE",
+                "start_time": "2026-04-22T07:00:00",
+                "duration_minutes": 120,
+                "severity": "HIGH",
+            },
+        ]
+    )
+
+    payload = build_vodomery_alarm_payload(events_df)
+
+    assert payload["total_open_events"] == 1
+    assert payload["affected_devices"] == 1
+    assert payload["critical_count"] == 0
+    assert payload["high_count"] == 1
+    assert [row["identifikace"] for row in payload["open_event_rows"]] == ["VDM-02"]

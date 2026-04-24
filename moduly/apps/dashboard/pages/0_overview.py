@@ -548,13 +548,6 @@ def render_overview_styles() -> None:
             padding: 0.72rem 0.78rem;
         }
 
-        .dashboard-overview-alarm-row-head {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 0.55rem;
-        }
-
         .dashboard-overview-alarm-main {
             display: flex;
             align-items: baseline;
@@ -574,18 +567,7 @@ def render_overview_styles() -> None:
             color: #9a3412;
             font-size: 0.76rem;
             font-weight: 600;
-        }
-
-        .dashboard-overview-alarm-severity {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0.24rem 0.5rem;
-            border-radius: 999px;
-            border: 1px solid transparent;
-            font-size: 0.72rem;
-            font-weight: 700;
-            white-space: nowrap;
+            letter-spacing: 0.02em;
         }
 
         .dashboard-overview-alarm-meta {
@@ -1045,27 +1027,6 @@ def _format_alarm_duration_minutes(value: object) -> str:
     return f"{hours} h {minutes} min"
 
 
-def _format_alarm_z_score(value: object) -> str:
-    try:
-        numeric_value = float(value)
-    except (TypeError, ValueError):
-        return "N/A"
-    if pd.isna(numeric_value):
-        return "N/A"
-    return f"{numeric_value:.1f}"
-
-
-def _alarm_severity_style(severity: object) -> str:
-    normalized = str(severity or "").upper()
-    if normalized == "CRITICAL":
-        return "background:#fee2e2;border-color:#fca5a5;color:#991b1b;"
-    if normalized == "HIGH":
-        return "background:#ffedd5;border-color:#fdba74;color:#9a3412;"
-    if normalized == "MEDIUM":
-        return "background:#fef3c7;border-color:#fcd34d;color:#92400e;"
-    return "background:#e5e7eb;border-color:#cbd5e1;color:#475569;"
-
-
 def render_vodomery_alarm_card(card: dict[str, object]) -> None:
     summary_items = [
         ("Eventy", int(card.get("total_open_events") or 0)),
@@ -1095,17 +1056,13 @@ def render_vodomery_alarm_card(card: dict[str, object]) -> None:
     for row in event_rows:
         row_markup.append(
             "<div class='dashboard-overview-alarm-row'>"
-            "<div class='dashboard-overview-alarm-row-head'>"
             "<div class='dashboard-overview-alarm-main'>"
             f"<div class='dashboard-overview-alarm-ident'>{escape(str(row.get('identifikace') or '-'))}</div>"
-            f"<div class='dashboard-overview-alarm-type'>• {escape(str(row.get('event_type_label') or row.get('event_type') or '-'))}</div>"
-            "</div>"
-            f"<span class='dashboard-overview-alarm-severity' style='{_alarm_severity_style(row.get('severity'))}'>{escape(str(row.get('severity_label') or row.get('severity') or '-'))}</span>"
+            f"<div class='dashboard-overview-alarm-type'>{escape(str(row.get('event_type_label') or row.get('event_type') or '-'))}</div>"
             "</div>"
             "<div class='dashboard-overview-alarm-meta'>"
             f"<span>Od {escape(format_overview_timestamp(row.get('start_time')))}</span>"
             f"<span>Trvá {escape(_format_alarm_duration_minutes(row.get('duration_minutes')))}</span>"
-            f"<span>Max Z {escape(_format_alarm_z_score(row.get('max_z_score')))}</span>"
             "</div>"
             "</div>"
         )

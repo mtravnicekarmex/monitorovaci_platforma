@@ -20,7 +20,7 @@ from moduly.apps.dashboard.auth import (
     is_admin,
     require_page_access,
 )
-from moduly.apps.dashboard.auto_refresh import enable_scheduled_page_refresh
+from moduly.apps.dashboard.auto_refresh import QUARTER_HOUR_PAGE_REFRESH_MINUTES, enable_scheduled_page_refresh
 from moduly.apps.dashboard.navigation_config import SECTIONS, get_page_definition
 from moduly.apps.dashboard.overview_shared import (
     MANOMETRY_CHART_DEVICE_LIMIT,
@@ -1213,6 +1213,7 @@ render_overview_styles()
 enable_scheduled_page_refresh(
     "dashboard_overview",
     cache_clearers=(load_dashboard_overview_cards.clear, load_overview_weather.clear),
+    refresh_minutes=QUARTER_HOUR_PAGE_REFRESH_MINUTES,
 )
 accessible_section_keys = build_accessible_section_keys()
 cards = load_dashboard_overview_cards(accessible_section_keys, get_allowed_devices(), is_admin())

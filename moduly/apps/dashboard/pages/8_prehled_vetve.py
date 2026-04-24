@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from moduly.apps.dashboard.auto_refresh import enable_scheduled_page_refresh
+from moduly.apps.dashboard.auto_refresh import QUARTER_HOUR_PAGE_REFRESH_MINUTES, enable_scheduled_page_refresh
 from moduly.apps.dashboard.api_client import DashboardApiError
 from moduly.apps.dashboard.auth import require_page_access
 from moduly.apps.dashboard.vodomery_shared import (
@@ -394,6 +394,7 @@ def render_dashboard() -> None:
         enable_scheduled_page_refresh(
             "vodomery_branch_overview",
             cache_clearers=(load_branch_day_overview.clear,),
+            refresh_minutes=QUARTER_HOUR_PAGE_REFRESH_MINUTES,
         )
 
     st.caption(

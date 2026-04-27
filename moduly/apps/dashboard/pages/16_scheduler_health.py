@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from moduly.apps.dashboard.api_client import (
     DashboardApiError,
     get_scheduler_health as api_get_scheduler_health,
+    run_scheduler_job_once as api_run_scheduler_job_once,
 )
 from moduly.apps.dashboard.auth import get_auth_token, require_page_access
 
@@ -88,6 +89,22 @@ def _format_failure_rate(value: object) -> str:
         return "-"
 
 
+def _has_runtime_activity(row: dict[str, object]) -> bool:
+    if _parse_datetime(row.get("last_run")) is not None:
+        return True
+    if _parse_datetime(row.get("next_run")) is not None:
+        return True
+    if row.get("avg_duration_24h") not in (None, ""):
+        return True
+    if str(row.get("last_status") or "unknown").lower() != "unknown":
+        return True
+
+    try:
+        return float(row.get("failure_rate_24h") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _build_jobs_dataframe(rows: list[dict[str, object]]) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
@@ -131,6 +148,119 @@ def _build_schedule_dataframe(rows: list[dict[str, object]]) -> pd.DataFrame:
     return dataframe.drop(columns=["_sort_ts"])
 
 
+def _job_display_name(row: dict[str, object]) -> str:
+    label = str(row.get("label") or "").strip()
+    job_id = str(row.get("id") or "").strip()
+    if label and label != job_id:
+        return f"{label} ({job_id})"
+    return job_id or label or "-"
+
+
+def _build_manual_jobs_dataframe(rows: list[dict[str, object]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame()
+
+    dataframe = pd.DataFrame(
+        [
+            {
+                "typ": "job" if row.get("is_scheduled") else "vnitrni krok",
+                "job": _job_display_name(row),
+                "popis": str(row.get("description") or "-"),
+                "stav": str(row.get("last_status") or "unknown"),
+                "posledni_beh": _format_timestamp(row.get("last_run")),
+                "dalsi_beh": _format_timestamp(row.get("next_run")),
+            }
+            for row in rows
+        ]
+    )
+    return dataframe.sort_values(by=["typ", "job"], kind="stable")
+
+
+def _show_manual_run_feedback() -> None:
+    feedback = st.session_state.pop("scheduler_manual_run_feedback", None)
+    if not isinstance(feedback, dict):
+        return
+
+    status = str(feedback.get("status") or "").lower()
+    job_name = str(feedback.get("job_name") or feedback.get("job_id") or "job")
+    detail = str(feedback.get("detail") or "")
+    requested_at = _format_timestamp(feedback.get("requested_at"))
+    message = f"{job_name}: {detail}"
+    if requested_at != "-":
+        message = f"{message} Cas pozadavku: {requested_at}."
+
+    if status == "started":
+        st.success(message)
+    elif status == "busy":
+        st.warning(message)
+    else:
+        st.info(message)
+
+
+def _trigger_manual_job_run(access_token: str, row: dict[str, object]) -> None:
+    job_id = str(row.get("id") or "").strip()
+    if not job_id:
+        raise DashboardApiError("Scheduler job nema validni identifikator.")
+
+    result = api_run_scheduler_job_once(access_token, job_id)
+    st.session_state["scheduler_manual_run_feedback"] = {
+        "job_id": job_id,
+        "job_name": _job_display_name(row),
+        "status": result.get("status"),
+        "detail": result.get("detail"),
+        "requested_at": result.get("requested_at"),
+    }
+    load_scheduler_health.clear()
+    st.rerun()
+
+
+def _render_manual_run_section(access_token: str, rows: list[dict[str, object]]) -> None:
+    st.subheader("Rucni spusteni jobu a kroku")
+    st.caption(
+        "Jednorazovy trigger scheduler jobu nebo vnitrniho kroku. Beh se spousti na pozadi a respektuje stejne locky jako scheduler."
+    )
+    _show_manual_run_feedback()
+
+    if not rows:
+        st.info("Nejsou k dispozici zadne scheduler joby ani vnitrni kroky pro rucni spusteni.")
+        return
+
+    runnable_rows = sorted(rows, key=lambda item: str(item.get("id") or ""))
+    st.dataframe(
+        _build_manual_jobs_dataframe(runnable_rows),
+        width="stretch",
+        hide_index=True,
+    )
+
+    jobs_by_id = {
+        str(row.get("id") or "").strip(): row
+        for row in runnable_rows
+        if str(row.get("id") or "").strip()
+    }
+    job_ids = list(jobs_by_id)
+
+    with st.form("scheduler_manual_run_form"):
+        select_col, action_col = st.columns([4, 1.2])
+        with select_col:
+            selected_job_id = st.selectbox(
+                "Vyber job nebo vnitrni krok pro jednorazove spusteni",
+                options=job_ids,
+                format_func=lambda job_id: _job_display_name(jobs_by_id[job_id]),
+            )
+        with action_col:
+            st.write("")
+            st.write("")
+            submit_run = st.form_submit_button("Spustit jednou", width="stretch")
+
+        if submit_run:
+            selected_row = jobs_by_id[selected_job_id]
+            try:
+                _trigger_manual_job_run(access_token, selected_row)
+            except DashboardApiError as exc:
+                st.error(f"Nepodarilo se spustit job `{selected_job_id}`.")
+                st.exception(exc)
+
+
 def render_page() -> None:
     access_token = _require_access_token()
 
@@ -158,13 +288,15 @@ def render_page() -> None:
     skipped_jobs = [
         row for row in jobs if str(row.get("last_status") or "").lower().startswith("skipped")
     ]
+    visible_rows = [row for row in jobs if bool(row.get("is_scheduled")) or _has_runtime_activity(row)]
+    manual_runnable_jobs = [row for row in jobs if bool(row.get("is_manual_runnable"))]
     scheduled_jobs = [row for row in jobs if row.get("next_run")]
-    internal_steps = [row for row in jobs if not row.get("next_run")]
+    internal_steps = [row for row in visible_rows if not row.get("next_run")]
 
     status_col, running_col, jobs_col, errors_col = st.columns(4)
     status_col.metric("Celkovy stav", STATUS_LABELS.get(status, status.upper()))
     running_col.metric("Scheduler bezi", "ANO" if scheduler_running else "NE")
-    jobs_col.metric("Evidovane zaznamy", str(len(jobs)))
+    jobs_col.metric("Evidovane zaznamy", str(len(visible_rows)))
     errors_col.metric("Chybove zaznamy", str(len(error_jobs)))
 
     st.caption(f"Posledni kontrola API: {_format_timestamp(checked_at)}")
@@ -208,6 +340,8 @@ def render_page() -> None:
         )
     else:
         st.info("Pro nasledujicich 24 hodin nebyly vypocteny zadne behy.")
+
+    _render_manual_run_section(access_token, manual_runnable_jobs)
 
 
 try:

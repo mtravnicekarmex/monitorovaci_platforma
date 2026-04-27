@@ -6,6 +6,7 @@ Tento modul obsahuje implementace jednotlivých jobů a registraci do APSchedule
 """
 
 import html
+import os
 import sys
 from datetime import datetime
 from dataclasses import dataclass
@@ -59,6 +60,11 @@ from moduly.mereni.plynomery.reporting import send_plynomery_model_rebuild_repor
 from moduly.apps.meteo.meteo_sync import meteo_sync
 from moduly.apps.smartfuelpass import send_charge_sessions_report_email
 
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
+
 
 # -------------------------
 # Logger
@@ -66,6 +72,7 @@ from moduly.apps.smartfuelpass import send_charge_sessions_report_email
 
 SCHEDULER_DIR = Path(__file__).resolve().parent
 SCHEDULER_LOGS_DIR = SCHEDULER_DIR / "logs"
+SCHEDULER_LOCKS_DIR = SCHEDULER_DIR / "locks"
 SCHEDULER_LOG_PATH = SCHEDULER_LOGS_DIR / "scheduler.log"
 
 
@@ -123,6 +130,39 @@ logger = setup_logging()
 class SkippedJobResult:
     reason: str
     lock_names: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ManualJobTriggerResult:
+    job_id: str
+    status: str
+    detail: str
+    requested_at: datetime
+
+
+@dataclass(frozen=True)
+class ManualRunnableSpec:
+    id: str
+    label: str
+    description: str
+    run_fn: object
+    lock_names: tuple[str, ...]
+    is_scheduled: bool
+    kind: str
+
+
+@dataclass(frozen=True)
+class _ProcessLockHandle:
+    lock_name: str
+    lock_path: Path
+    file_handle: object
+
+
+@dataclass(frozen=True)
+class _AcquiredJobLocks:
+    lock_names: tuple[str, ...]
+    thread_locks: tuple[object, ...]
+    process_locks: tuple[_ProcessLockHandle, ...]
 
 
 class SchedulerContextError(RuntimeError):
@@ -469,24 +509,33 @@ def safe_call(fn, *args, **kwargs):
 # -------------------------
 # Wrapper pro zamezení paralelního běhu
 # -------------------------
+def _resolve_job_lock_names(fn, decorator_lock_names=()) -> tuple[str, ...]:
+    configured_lock_names = tuple(decorator_lock_names or ())
+    if configured_lock_names:
+        return tuple(dict.fromkeys(configured_lock_names))
+
+    existing_lock_names = tuple(getattr(fn, "__scheduler_lock_names__", ()) or ())
+    if existing_lock_names:
+        return tuple(dict.fromkeys(existing_lock_names))
+
+    return (fn.__name__,)
+
+
 def _build_locked_job(fn, decorator_lock_names):
-    resolved_lock_names = tuple(dict.fromkeys(decorator_lock_names or (fn.__name__,)))
+    resolved_lock_names = _resolve_job_lock_names(fn, decorator_lock_names)
 
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        resolved_locks = tuple(_get_lock(lock_name) for lock_name in sorted(resolved_lock_names))
-        acquired_locks = []
-        for job_lock in resolved_locks:
-            if not job_lock.acquire(blocking=False):
-                for acquired_lock in reversed(acquired_locks):
-                    acquired_lock.release()
-                return SkippedJobResult(reason="lock_busy", lock_names=resolved_lock_names)
-            acquired_locks.append(job_lock)
+        acquired_locks = _try_acquire_job_locks(resolved_lock_names)
+        if acquired_locks is None:
+            return SkippedJobResult(reason="lock_busy", lock_names=resolved_lock_names)
         try:
             return fn(*args, **kwargs)
         finally:
-            for acquired_lock in reversed(acquired_locks):
-                acquired_lock.release()
+            _release_job_locks(acquired_locks)
+
+    wrapper.__scheduler_lock_names__ = resolved_lock_names
+    wrapper.__scheduler_unlocked_fn__ = fn
     return wrapper
 
 
@@ -611,6 +660,80 @@ def monthly_job():
     safe_call(send_monthly_b1_consumption_report)
 
 
+def _run_vodomery_scoring_step() -> None:
+    for model_version in get_candidate_model_versions():
+        score_new_measurements(
+            model_version=model_version,
+            bootstrap_to_latest_if_missing=True,
+        )
+
+
+def _run_vodomery_event_detection_step() -> None:
+    for model_version in get_candidate_model_versions():
+        detect_events_from_scores(
+            model_version=model_version,
+            bootstrap_to_latest_if_missing=True,
+        )
+
+
+def _run_vodomery_alerting_step() -> None:
+    active_model_version = get_runtime_model_version()
+    score_new_measurements(
+        model_version=active_model_version,
+        bootstrap_to_latest_if_missing=True,
+    )
+    event_result = detect_events_from_scores(
+        model_version=active_model_version,
+        bootstrap_to_latest_if_missing=True,
+    )
+    process_vodomery_alerts(
+        active_event_ids=event_result.get("active_event_ids", []),
+        resolved_event_ids=event_result.get("resolved_event_ids", []),
+    )
+
+
+def _run_plynomery_scoring_step() -> None:
+    for model_version in get_plynomery_candidate_model_versions():
+        score_new_plynomery_measurements(
+            model_version=model_version,
+            bootstrap_to_latest_if_missing=True,
+        )
+
+
+def _run_plynomery_event_detection_step() -> None:
+    for model_version in get_plynomery_candidate_model_versions():
+        detect_plynomery_events_from_scores(
+            model_version=model_version,
+            bootstrap_to_latest_if_missing=True,
+        )
+
+
+def _run_plynomery_alerting_step() -> None:
+    active_model_version = get_plynomery_runtime_model_version()
+    score_new_plynomery_measurements(
+        model_version=active_model_version,
+        bootstrap_to_latest_if_missing=True,
+    )
+    event_result = detect_plynomery_events_from_scores(
+        model_version=active_model_version,
+        bootstrap_to_latest_if_missing=True,
+    )
+    process_plynomery_alerts(
+        active_event_ids=event_result.get("active_event_ids", []),
+        resolved_event_ids=event_result.get("resolved_event_ids", []),
+    )
+
+
+def _run_vodomery_model_rebuild_report_step() -> None:
+    rebuild_result = rebuild_profiles()
+    send_vodomery_model_rebuild_report(rebuild_result)
+
+
+def _run_plynomery_model_rebuild_report_step() -> None:
+    rebuild_result = rebuild_plynomery_profiles()
+    send_plynomery_model_rebuild_report(rebuild_result)
+
+
 def _get_job_functions():
     return {
         "quarter_hour_job": quarter_hour_job,
@@ -622,6 +745,354 @@ def _get_job_functions():
         "smartfuelpass_weekly_report_job": smartfuelpass_weekly_report_job,
         "monthly_job": monthly_job,
     }
+
+
+def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
+    manual_specs: dict[str, ManualRunnableSpec] = {}
+
+    job_functions = _get_job_functions()
+    for job_spec in get_scheduler_job_specs():
+        job_fn = job_functions[job_spec.id]
+        manual_specs[job_spec.id] = ManualRunnableSpec(
+            id=job_spec.id,
+            label=job_spec.label,
+            description=job_spec.description,
+            run_fn=getattr(job_fn, "__scheduler_unlocked_fn__", job_fn),
+            lock_names=_resolve_job_lock_names(job_fn),
+            is_scheduled=True,
+            kind="job",
+        )
+
+    internal_step_specs = (
+        ManualRunnableSpec(
+            id="vodomery_db_import",
+            label="Import vodomeru",
+            description="Import aktualnich vodomernych mereni do databaze.",
+            run_fn=vodomery_db_import,
+            lock_names=("quarter_hour_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="get_runtime_model_version",
+            label="Aktivni model vodomeru",
+            description="Nacteni aktivni runtime verze modelu vodomeru.",
+            run_fn=get_runtime_model_version,
+            lock_names=("quarter_hour_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="score_new_measurements",
+            label="Scoring vodomeru",
+            description="Scoring novych vodomernych mereni pro vsechny kandidacni modely.",
+            run_fn=_run_vodomery_scoring_step,
+            lock_names=("quarter_hour_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="detect_events_from_scores",
+            label="Detekce eventu vodomeru",
+            description="Detekce eventu z naskorovanych vodomernych mereni pro vsechny kandidacni modely.",
+            run_fn=_run_vodomery_event_detection_step,
+            lock_names=("quarter_hour_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="process_vodomery_alerts",
+            label="Zpracovani alertu vodomeru",
+            description="Zpracovani vodomernych alertu pro aktivni model vcetne potrebneho score a event detection.",
+            run_fn=_run_vodomery_alerting_step,
+            lock_names=("quarter_hour_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="plynomery_db_import",
+            label="Import plynomeru",
+            description="Import aktualnich plynomernych mereni do databaze.",
+            run_fn=plynomery_db_import,
+            lock_names=("quarter_hour_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="get_plynomery_runtime_model_version",
+            label="Aktivni model plynomeru",
+            description="Nacteni aktivni runtime verze modelu plynomeru.",
+            run_fn=get_plynomery_runtime_model_version,
+            lock_names=("quarter_hour_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="score_new_plynomery_measurements",
+            label="Scoring plynomeru",
+            description="Scoring novych plynomernych mereni pro vsechny kandidacni modely.",
+            run_fn=_run_plynomery_scoring_step,
+            lock_names=("quarter_hour_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="detect_plynomery_events_from_scores",
+            label="Detekce eventu plynomeru",
+            description="Detekce eventu z naskorovanych plynomernych mereni pro vsechny kandidacni modely.",
+            run_fn=_run_plynomery_event_detection_step,
+            lock_names=("quarter_hour_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="process_plynomery_alerts",
+            label="Zpracovani alertu plynomeru",
+            description="Zpracovani plynomernych alertu pro aktivni model vcetne potrebneho score a event detection.",
+            run_fn=_run_plynomery_alerting_step,
+            lock_names=("quarter_hour_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="SCVK_save_to_database_all",
+            label="Import SCVK vodomeru",
+            description="Hodinovy import SCVK vodomernych dat do databaze.",
+            run_fn=SCVK_save_to_database_all,
+            lock_names=("hourly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="daily_web_monitor_job",
+            label="Web monitoring",
+            description="Denni kontrola monitorovanych webu a notifikace novych vyskytu.",
+            run_fn=daily_web_monitor_job,
+            lock_names=("daily_seven_and_two_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="SOFTLINK_save_to_database_all",
+            label="Import SOFTLINK elektromeru",
+            description="Nocni import elektromernych dat ze SOFTLINKu do databaze.",
+            run_fn=SOFTLINK_save_to_database_all,
+            lock_names=("daily_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="meteo_sync",
+            label="Synchronizace meteo dat",
+            description="Synchronizace meteorologickych dat pro dalsi vyhodnoceni.",
+            run_fn=meteo_sync,
+            lock_names=("daily_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="send_daily_vodomery_branch_report",
+            label="Denni report vetvi vodomeru",
+            description="Odeslani denniho email reportu vetvi vodomeru.",
+            run_fn=send_daily_vodomery_branch_report,
+            lock_names=("daily_vodomery_branch_report_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="rebuild_profiles",
+            label="Rebuild modelu vodomeru",
+            description="Tydenni rebuild profilu a modelovych podkladu pro vodomery.",
+            run_fn=rebuild_profiles,
+            lock_names=("weekly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="rebuild_plynomery_profiles",
+            label="Rebuild modelu plynomeru",
+            description="Tydenni rebuild profilu a modelovych podkladu pro plynomery.",
+            run_fn=rebuild_plynomery_profiles,
+            lock_names=("weekly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="send_vodomery_model_rebuild_report",
+            label="Report rebuildu vodomeru",
+            description="Odeslani reportu z rebuildu vodomeru vcetne pripravy potrebnych vystupu.",
+            run_fn=_run_vodomery_model_rebuild_report_step,
+            lock_names=("weekly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="send_plynomery_model_rebuild_report",
+            label="Report rebuildu plynomeru",
+            description="Odeslani reportu z rebuildu plynomeru vcetne pripravy potrebnych vystupu.",
+            run_fn=_run_plynomery_model_rebuild_report_step,
+            lock_names=("weekly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="send_weekly_vodomery_branch_report",
+            label="Tydenni report vetvi vodomeru",
+            description="Odeslani tydenniho email reportu vetvi vodomeru.",
+            run_fn=send_weekly_vodomery_branch_report,
+            lock_names=("weekly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="send_charge_sessions_report_email",
+            label="Tydenni report SmartFuelPass",
+            description="Odeslani tydenniho email reportu SmartFuelPass.",
+            run_fn=send_charge_sessions_report_email,
+            lock_names=("smartfuelpass_weekly_report_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="send_monthly_vodomery_consumption_report",
+            label="Mesicni report spotreby vodomeru",
+            description="Odeslani mesicniho reportu spotreby vodomeru.",
+            run_fn=send_monthly_vodomery_consumption_report,
+            lock_names=("monthly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="send_monthly_vodomery_branch_report",
+            label="Mesicni report vetvi vodomeru",
+            description="Odeslani mesicniho reportu vetvi vodomeru.",
+            run_fn=send_monthly_vodomery_branch_report,
+            lock_names=("monthly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="send_monthly_b1_consumption_report",
+            label="Mesicni report spotreby B1",
+            description="Odeslani mesicniho reportu spotreby objektu B1.",
+            run_fn=send_monthly_b1_consumption_report,
+            lock_names=("monthly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+    )
+
+    manual_specs.update({spec.id: spec for spec in internal_step_specs})
+    return manual_specs
+
+
+def get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
+    return _get_manual_run_specs()
+
+
+def _run_manual_job(manual_spec: ManualRunnableSpec, *, requested_at: datetime) -> None:
+    metrics = get_metrics_store()
+    started_at = datetime.now().astimezone()
+    start = time.time()
+    logger.info(
+        "JOB MANUAL START | id=%s | requested=%s | started=%s",
+        manual_spec.id,
+        requested_at,
+        started_at,
+    )
+
+    try:
+        result = manual_spec.run_fn()
+        duration = round(time.time() - start, 2)
+        if isinstance(result, SkippedJobResult):
+            metrics.record_job_skipped(manual_spec.id, result.reason)
+            _sync_job_next_run(manual_spec.id)
+            logger.warning(
+                "JOB MANUAL SKIPPED | id=%s | reason=%s | locks=%s",
+                manual_spec.id,
+                result.reason,
+                ",".join(result.lock_names),
+            )
+            return
+
+        metrics.record_job_success(manual_spec.id, duration)
+        _sync_job_next_run(manual_spec.id)
+        logger.info(
+            "JOB MANUAL SUCCESS | id=%s | duration=%ss",
+            manual_spec.id,
+            duration,
+        )
+    except Exception as exc:
+        duration = round(time.time() - start, 2)
+        metrics.record_job_error(manual_spec.id, duration)
+        _sync_job_next_run(manual_spec.id)
+        reason = _format_scheduler_reason(exc)
+        targets = _extract_scheduler_targets(exc)
+        logger.error(
+            "JOB MANUAL ERROR | id=%s | requested=%s | duration=%ss | reason=%s",
+            manual_spec.id,
+            requested_at,
+            duration,
+            reason or "-",
+            exc_info=True,
+        )
+        _deliver_scheduler_alert(
+            job_id=manual_spec.id,
+            status_text="manual run error",
+            description="Rucne spusteny job scheduleru skoncil chybou.",
+            scheduled_time=requested_at,
+            reason=reason,
+            targets=targets,
+        )
+
+
+def _run_manual_job_worker(
+    manual_spec: ManualRunnableSpec,
+    acquired_locks: _AcquiredJobLocks,
+    *,
+    requested_at: datetime,
+) -> None:
+    try:
+        _run_manual_job(manual_spec, requested_at=requested_at)
+    finally:
+        _release_job_locks(acquired_locks)
+
+
+def trigger_manual_job(job_id: str) -> ManualJobTriggerResult:
+    manual_spec = get_manual_run_specs().get(job_id)
+    if manual_spec is None:
+        raise KeyError(job_id)
+
+    requested_at = datetime.now().astimezone()
+    acquired_locks = _try_acquire_job_locks(manual_spec.lock_names)
+    if acquired_locks is None:
+        return ManualJobTriggerResult(
+            job_id=job_id,
+            status="busy",
+            detail="Job uz prave bezi nebo ceka na uvolneni sdileneho locku.",
+            requested_at=requested_at,
+        )
+
+    worker = threading.Thread(
+        target=_run_manual_job_worker,
+        name=f"scheduler-manual-{job_id}",
+        args=(manual_spec, acquired_locks),
+        kwargs={"requested_at": requested_at},
+        daemon=True,
+    )
+
+    try:
+        worker.start()
+    except Exception:
+        _release_job_locks(acquired_locks)
+        raise
+
+    return ManualJobTriggerResult(
+        job_id=job_id,
+        status="started",
+        detail="Jednorazovy manualni beh byl prijat a spusten na pozadi.",
+        requested_at=requested_at,
+    )
 
 
 
@@ -698,6 +1169,103 @@ def main_scheduler():
 _LOCK_REGISTRY_GUARD = threading.Lock()
 _JOB_LOCKS = {}
 _SCHEDULER_INSTANCE = None
+
+
+def _sanitize_lock_name(lock_name: str) -> str:
+    return "".join(
+        character if character.isalnum() or character in ("-", "_") else "_"
+        for character in str(lock_name)
+    )
+
+
+def _lock_file_path(lock_name: str) -> Path:
+    return SCHEDULER_LOCKS_DIR / f"{_sanitize_lock_name(lock_name)}.lock"
+
+
+def _try_acquire_process_lock(lock_name: str) -> _ProcessLockHandle | None:
+    SCHEDULER_LOCKS_DIR.mkdir(parents=True, exist_ok=True)
+    lock_path = _lock_file_path(lock_name)
+    file_handle = lock_path.open("a+b")
+
+    try:
+        file_handle.seek(0, 2)
+        if file_handle.tell() == 0:
+            file_handle.write(b"0")
+            file_handle.flush()
+        file_handle.seek(0)
+
+        if os.name == "nt":
+            msvcrt.locking(file_handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(file_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        file_handle.close()
+        return None
+
+    return _ProcessLockHandle(
+        lock_name=lock_name,
+        lock_path=lock_path,
+        file_handle=file_handle,
+    )
+
+
+def _release_process_lock(lock_handle: _ProcessLockHandle) -> None:
+    try:
+        lock_handle.file_handle.seek(0)
+        if os.name == "nt":
+            msvcrt.locking(lock_handle.file_handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(lock_handle.file_handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        lock_handle.file_handle.close()
+
+
+def _try_acquire_job_locks(lock_names) -> _AcquiredJobLocks | None:
+    resolved_lock_names = tuple(dict.fromkeys(sorted(lock_names or ())))
+    acquired_thread_locks = []
+    acquired_process_locks = []
+
+    for lock_name in resolved_lock_names:
+        thread_lock = _get_lock(lock_name)
+        if not thread_lock.acquire(blocking=False):
+            if acquired_thread_locks or acquired_process_locks:
+                _release_job_locks(
+                    _AcquiredJobLocks(
+                        lock_names=resolved_lock_names,
+                        thread_locks=tuple(acquired_thread_locks),
+                        process_locks=tuple(acquired_process_locks),
+                    )
+                )
+            return None
+        acquired_thread_locks.append(thread_lock)
+
+        process_lock = _try_acquire_process_lock(lock_name)
+        if process_lock is None:
+            _release_job_locks(
+                _AcquiredJobLocks(
+                    lock_names=resolved_lock_names,
+                    thread_locks=tuple(acquired_thread_locks),
+                    process_locks=tuple(acquired_process_locks),
+                )
+            )
+            return None
+        acquired_process_locks.append(process_lock)
+
+    return _AcquiredJobLocks(
+        lock_names=resolved_lock_names,
+        thread_locks=tuple(acquired_thread_locks),
+        process_locks=tuple(acquired_process_locks),
+    )
+
+
+def _release_job_locks(acquired_locks: _AcquiredJobLocks | None) -> None:
+    if acquired_locks is None:
+        return
+
+    for process_lock in reversed(acquired_locks.process_locks):
+        _release_process_lock(process_lock)
+    for thread_lock in reversed(acquired_locks.thread_locks):
+        thread_lock.release()
 
 
 def _get_lock(lock_name):

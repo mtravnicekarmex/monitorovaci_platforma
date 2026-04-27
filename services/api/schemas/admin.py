@@ -51,6 +51,10 @@ class AdminUserUpdateRequest(BaseModel):
 
 class SchedulerJobHealth(BaseModel):
     id: str
+    label: str | None = None
+    description: str | None = None
+    is_scheduled: bool = False
+    is_manual_runnable: bool = False
     last_run: datetime | None = None
     last_status: str
     last_duration_seconds: float | None = None
@@ -72,3 +76,11 @@ class SchedulerHealthResponse(BaseModel):
     jobs: list[SchedulerJobHealth]
     schedule: list[SchedulerScheduledRun] = Field(default_factory=list)
     checked_at: datetime
+
+
+class SchedulerJobRunResponse(BaseModel):
+    job_id: str
+    job_label: str
+    status: str = Field(..., pattern="^(started|busy)$")
+    detail: str
+    requested_at: datetime

@@ -211,6 +211,15 @@ def get_scheduler_health(access_token: str) -> dict[str, object]:
     return dict(response.json())
 
 
+def run_scheduler_job_once(access_token: str, job_id: str) -> dict[str, object]:
+    response = _request(
+        "POST",
+        f"/health/scheduler/jobs/{job_id}/run",
+        access_token=access_token,
+    )
+    return dict(response.json())
+
+
 def preview_web_search_hits(access_token: str, payload: dict[str, object]) -> dict[str, object]:
     response = _request(
         "POST",

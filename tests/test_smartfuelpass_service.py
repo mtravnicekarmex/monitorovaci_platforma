@@ -593,6 +593,52 @@ def test_build_charge_sessions_report_html_contains_summary_sections():
     assert "ARMEX logo" in html
 
 
+def test_build_charge_sessions_report_from_portal_retries_missing_table(monkeypatch):
+    dataframe = pd.DataFrame(
+        [
+            {
+                "Hodnoty měřidel": "13.04.2026 09:15",
+                "Čas spuštění": "11.04.2026 13:56 Vzdálené zahájení přes backend systém",
+                "Čas ukončení": "11.04.2026 14:29 Ukončeno nabíječkou",
+                "Název EV lokace": "Armex - Budova E null",
+                "Konektor EVSE ID": "A1",
+                "Veřejné ID": "Domácí nabíjení Dokončeno 0 kW 33,489 kWh 79 % null AdHoc nabíjení - OPT (pax16**128150) ARMEX HOLDING 15Kč + 20,00 % (ARMEX HOLDING 15Kč) 0,00 Kč (120,50 Kč)",
+                "Suma": "120,50 Kč",
+            }
+        ]
+    )
+    fetch_calls = []
+    sleep_calls = []
+
+    def fake_fetch_charge_sessions_dataframe(**kwargs):
+        fetch_calls.append(kwargs)
+        if len(fetch_calls) == 1:
+            raise service.SmartFuelPassError(service.TABLE_NOT_FOUND_MESSAGE)
+        return dataframe
+
+    def fake_config(key, default="", cast=None):
+        mapping = {
+            "SMARTFUELPASS_FETCH_ATTEMPTS": "2",
+            "SMARTFUELPASS_FETCH_RETRY_DELAY_SECONDS": "0",
+        }
+        value = mapping.get(key, default)
+        return cast(value) if cast is not None else value
+
+    monkeypatch.setattr(service, "fetch_charge_sessions_dataframe", fake_fetch_charge_sessions_dataframe)
+    monkeypatch.setattr(service, "config", fake_config)
+    monkeypatch.setattr(service.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    report = service.build_charge_sessions_report_from_portal(
+        reference_datetime=datetime.datetime(2026, 4, 14, 8, 30),
+        subject_name="ARMEX HOLDING, a.s.",
+    )
+
+    assert len(fetch_calls) == 2
+    assert sleep_calls == []
+    assert report.total.session_count == 1
+    assert report.total.total_amount == 120.5
+
+
 def test_send_charge_sessions_report_email_generates_pdf_and_sends_attachment(monkeypatch, tmp_path):
     dataframe = pd.DataFrame(
         [

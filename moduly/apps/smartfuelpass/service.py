@@ -6,6 +6,7 @@ from html import escape
 from io import StringIO
 import json
 import base64
+import logging
 import mimetypes
 import re
 import time
@@ -33,6 +34,8 @@ DEFAULT_REPORT_EXPORT_PATH = Path("data") / "smartfuelpass" / "reporting_snapsho
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_LOGIN_TIMEOUT_SECONDS = 300
 DEFAULT_TABLE_WAIT_TIMEOUT_SECONDS = 45
+DEFAULT_FETCH_ATTEMPTS = 2
+DEFAULT_FETCH_RETRY_DELAY_SECONDS = 5
 DEFAULT_NAVIGATION_TIMEOUT_MS = 15000
 DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/135.0 Safari/537.36"
 DEFAULT_DASHBOARD_PATH = "/Fuel/Merchant/Dashboard?contractId=12147&accountId=0"
@@ -43,6 +46,10 @@ DEFAULT_WEEKLY_REPORT_RECIPIENTS = "m.travnicek@armex.cz"
 DEFAULT_LOGO_PATH = Path("data") / "smartfuelpass" / "smfp_logo_white.svg"
 DEFAULT_ARMEX_LOGO_PATH = Path("data") / "ARMEX" / "logo_ARMEX.png"
 LOGIN_PATH_FRAGMENT = "/User/Login"
+TABLE_NOT_FOUND_MESSAGE = "Nepodarilo se nacist zadnou viditelnou HTML tabulku."
+
+
+logger = logging.getLogger(__name__)
 
 
 class SmartFuelPassError(RuntimeError):
@@ -195,6 +202,28 @@ def _smartfuel_weekly_report_sender_alias() -> str | None:
         default=config("O_EMAIL_UPOZORNENI", default=""),
     ).strip()
     return sender_alias or None
+
+
+def _smartfuel_fetch_attempts() -> int:
+    return max(
+        config(
+            "SMARTFUELPASS_FETCH_ATTEMPTS",
+            default=DEFAULT_FETCH_ATTEMPTS,
+            cast=int,
+        ),
+        1,
+    )
+
+
+def _smartfuel_fetch_retry_delay_seconds() -> float:
+    return max(
+        config(
+            "SMARTFUELPASS_FETCH_RETRY_DELAY_SECONDS",
+            default=DEFAULT_FETCH_RETRY_DELAY_SECONDS,
+            cast=float,
+        ),
+        0.0,
+    )
 
 
 def _smartfuel_email() -> str:
@@ -1083,7 +1112,46 @@ def load_main_table(page: Any, *, timeout_seconds: int | None = None) -> pd.Data
     if best_dataframe is not None:
         return best_dataframe
 
-    raise SmartFuelPassError("Nepodarilo se nacist zadnou viditelnou HTML tabulku.") from last_error
+    raise SmartFuelPassError(TABLE_NOT_FOUND_MESSAGE) from last_error
+
+
+def _is_retryable_charge_sessions_fetch_error(error: Exception) -> bool:
+    return isinstance(error, SmartFuelPassError) and TABLE_NOT_FOUND_MESSAGE in str(error)
+
+
+def _fetch_charge_sessions_dataframe_with_retries(
+    *,
+    cookie_path: str | Path | None = None,
+    headless: bool = True,
+    attempts: int | None = None,
+    retry_delay_seconds: float | None = None,
+) -> pd.DataFrame:
+    resolved_attempts = attempts or _smartfuel_fetch_attempts()
+    resolved_retry_delay = (
+        _smartfuel_fetch_retry_delay_seconds()
+        if retry_delay_seconds is None
+        else max(retry_delay_seconds, 0.0)
+    )
+
+    for attempt in range(1, resolved_attempts + 1):
+        try:
+            return fetch_charge_sessions_dataframe(
+                cookie_path=cookie_path,
+                headless=headless,
+            )
+        except SmartFuelPassError as exc:
+            if attempt >= resolved_attempts or not _is_retryable_charge_sessions_fetch_error(exc):
+                raise
+            logger.warning(
+                "SmartFuelPass charge sessions table was not available on attempt %s/%s; retrying in %ss.",
+                attempt,
+                resolved_attempts,
+                resolved_retry_delay,
+            )
+            if resolved_retry_delay:
+                time.sleep(resolved_retry_delay)
+
+    raise SmartFuelPassError(TABLE_NOT_FOUND_MESSAGE)
 
 
 def fetch_charge_sessions_dataframe(
@@ -1861,7 +1929,7 @@ def build_charge_sessions_report_from_portal(
     subject_name: str | None = None,
     headless: bool = True,
 ) -> SmartFuelPassChargeSessionsReport:
-    dataframe = fetch_charge_sessions_dataframe(
+    dataframe = _fetch_charge_sessions_dataframe_with_retries(
         cookie_path=cookie_path,
         headless=headless,
     )

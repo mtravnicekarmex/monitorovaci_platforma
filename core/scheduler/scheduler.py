@@ -76,10 +76,9 @@ SCHEDULER_LOCKS_DIR = SCHEDULER_DIR / "locks"
 SCHEDULER_LOG_PATH = SCHEDULER_LOGS_DIR / "scheduler.log"
 
 
-def setup_logging():
+def setup_logging(*, enable_file: bool = False):
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
-    SCHEDULER_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
     formatter = logging.Formatter(
         "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
@@ -94,21 +93,23 @@ def setup_logging():
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
 
-    has_file_handler = any(
-        isinstance(handler, TimedRotatingFileHandler)
-        and Path(getattr(handler, "baseFilename", "")).resolve() == SCHEDULER_LOG_PATH.resolve()
-        for handler in logger.handlers
-    )
-    if not has_file_handler:
-        file_handler = TimedRotatingFileHandler(
-            SCHEDULER_LOG_PATH,
-            when="midnight",
-            interval=1,
-            backupCount=14,
-            encoding="utf-8"
+    if enable_file:
+        SCHEDULER_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        has_file_handler = any(
+            isinstance(handler, TimedRotatingFileHandler)
+            and Path(getattr(handler, "baseFilename", "")).resolve() == SCHEDULER_LOG_PATH.resolve()
+            for handler in logger.handlers
         )
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        if not has_file_handler:
+            file_handler = TimedRotatingFileHandler(
+                SCHEDULER_LOG_PATH,
+                when="midnight",
+                interval=1,
+                backupCount=14,
+                encoding="utf-8"
+            )
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
 
     # potlačí SQLAlchemy spam
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
@@ -1111,6 +1112,22 @@ def trigger_manual_job(job_id: str) -> ManualJobTriggerResult:
 # Hlavní funkce scheduleru
 # -------------------------
 def main_scheduler():
+    global logger
+
+    scheduler_process_lock = _try_acquire_process_lock("scheduler_process")
+    if scheduler_process_lock is None:
+        logger.warning("Scheduler uz bezi v jinem procesu; dalsi instance nebude spustena.")
+        return
+
+    try:
+        logger = setup_logging(enable_file=True)
+        _run_main_scheduler_loop()
+    finally:
+        _set_scheduler_instance(None)
+        _release_process_lock(scheduler_process_lock)
+
+
+def _run_main_scheduler_loop():
     scheduler = BackgroundScheduler(
         timezone=SCHEDULER_TIMEZONE_NAME,
         job_defaults={

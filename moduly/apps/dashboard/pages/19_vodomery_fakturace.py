@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 from pathlib import Path
 import sys
 
@@ -20,14 +21,23 @@ from moduly.apps.dashboard.vodomery_shared import (
     format_consumption_with_unit,
     load_billing_options,
     load_billing_period,
-    normalize_date_range,
     render_vodomery_header,
+)
+from moduly.mereni.vodomery.SCVK.fakturace_pdf import (
+    ParsedScvkInvoice,
+    apply_invoice_consumption_to_payload,
+    parse_scvk_invoice_pdf,
 )
 
 
 FILTER_BILLING_IDENT_KEY = "vodomery_billing_ident"
-FILTER_DATE_RANGE_KEY = "vodomery_billing_date_range"
+FILTER_PERIOD_START_KEY = "vodomery_billing_period_start"
+FILTER_PERIOD_END_KEY = "vodomery_billing_period_end"
+FILTER_INVOICE_CONSUMPTION_KEY = "vodomery_billing_invoice_consumption"
 FILTER_INVOICE_AMOUNT_KEY = "vodomery_billing_invoice_amount"
+FILTER_INVOICE_PDF_KEY = "vodomery_billing_invoice_pdf"
+FILTER_INVOICE_PDF_HASH_KEY = "vodomery_billing_invoice_pdf_hash"
+FILTER_INVOICE_PDF_NAME_KEY = "vodomery_billing_invoice_pdf_name"
 PRICE_INTERVAL_IDS_KEY = "vodomery_billing_price_interval_ids"
 PRICE_INTERVAL_SEQ_KEY = "vodomery_billing_price_interval_seq"
 PRICE_INTERVAL_START_PREFIX = "vodomery_billing_price_interval_start"
@@ -56,10 +66,47 @@ def get_default_date_range() -> tuple[datetime.date, datetime.date]:
 def init_page_state(default_billing_ident: str) -> None:
     default_start, default_end = get_default_date_range()
     st.session_state.setdefault(FILTER_BILLING_IDENT_KEY, default_billing_ident)
-    st.session_state.setdefault(FILTER_DATE_RANGE_KEY, (default_start, default_end))
+    st.session_state.setdefault(FILTER_PERIOD_START_KEY, default_start)
+    st.session_state.setdefault(FILTER_PERIOD_END_KEY, default_end)
+    st.session_state.setdefault(FILTER_INVOICE_CONSUMPTION_KEY, 0.0)
     st.session_state.setdefault(FILTER_INVOICE_AMOUNT_KEY, 0.0)
+    st.session_state.setdefault(FILTER_INVOICE_PDF_HASH_KEY, "")
+    st.session_state.setdefault(FILTER_INVOICE_PDF_NAME_KEY, "")
     st.session_state.setdefault(PRICE_INTERVAL_IDS_KEY, [])
     st.session_state.setdefault(PRICE_INTERVAL_SEQ_KEY, 0)
+
+
+def normalize_period_range(
+    start_date: object,
+    end_date: object,
+) -> tuple[datetime.date, datetime.date]:
+    default_start, default_end = get_default_date_range()
+    resolved_start = start_date if isinstance(start_date, datetime.date) else default_start
+    resolved_end = end_date if isinstance(end_date, datetime.date) else default_end
+    if resolved_start > resolved_end:
+        resolved_start, resolved_end = resolved_end, resolved_start
+    return resolved_start, resolved_end
+
+
+def initialize_invoice_state_from_upload(
+    uploaded_pdf,
+    option_ids: list[str],
+) -> ParsedScvkInvoice:
+    pdf_bytes = uploaded_pdf.getvalue()
+    parsed_invoice = parse_scvk_invoice_pdf(pdf_bytes)
+    file_hash = hashlib.sha256(pdf_bytes).hexdigest()
+    if st.session_state.get(FILTER_INVOICE_PDF_HASH_KEY) != file_hash:
+        st.session_state[FILTER_INVOICE_PDF_HASH_KEY] = file_hash
+        st.session_state[FILTER_INVOICE_PDF_NAME_KEY] = uploaded_pdf.name
+        if parsed_invoice.billing_ident in option_ids:
+            st.session_state[FILTER_BILLING_IDENT_KEY] = parsed_invoice.billing_ident
+        if parsed_invoice.period_start is not None:
+            st.session_state[FILTER_PERIOD_START_KEY] = parsed_invoice.period_start
+        if parsed_invoice.period_end is not None:
+            st.session_state[FILTER_PERIOD_END_KEY] = parsed_invoice.period_end
+        if parsed_invoice.total_consumption_m3 is not None:
+            st.session_state[FILTER_INVOICE_CONSUMPTION_KEY] = parsed_invoice.total_consumption_m3
+    return parsed_invoice
 
 
 def format_currency(value: object) -> str:
@@ -239,6 +286,11 @@ def prepare_price_interval_summary(
     summary_rows: list[dict[str, object]] = []
     covered_consumption = 0.0
     total_cost = 0.0
+    consumption_label = (
+        "Odhad spotřeby z faktury [m³]"
+        if payload.get("billing_consumption_source") == "invoice_pdf"
+        else "Odhad spotřeby fakturačního [m³]"
+    )
 
     for interval in sorted_intervals:
         estimated_consumption = 0.0
@@ -274,7 +326,7 @@ def prepare_price_interval_summary(
                     f"{interval['end_date'].strftime('%d.%m.%Y')}"
                 ),
                 "Cena vody [Kč/m³]": format_currency(interval["price_per_m3"]).replace(" Kč", ""),
-                "Odhad spotřeby fakturačního [m³]": format_consumption_with_unit(estimated_consumption),
+                consumption_label: format_consumption_with_unit(estimated_consumption),
                 "Odhad ceny [Kč]": format_currency(estimated_cost),
             }
         )
@@ -290,7 +342,7 @@ def prepare_price_interval_summary(
         if uncovered_consumption > 0:
             warnings.append(
                 "Intervaly ceny vody nepokrývají celé zvolené období. "
-                "Část spotřeby fakturačního vodoměru zůstává bez ceny."
+                "Část rozpočtené spotřeby zůstává bez ceny."
             )
 
     return (
@@ -306,14 +358,47 @@ def prepare_price_interval_summary(
     )
 
 
-def render_sidebar_filters(options: list[dict[str, object]]) -> tuple[str, datetime.date, datetime.date, float]:
+def render_invoice_filters(
+    options: list[dict[str, object]],
+) -> tuple[str, datetime.date, datetime.date, float, float, ParsedScvkInvoice | None, str | None]:
     option_ids = [str(option["billing_ident"]) for option in options]
     if st.session_state.get(FILTER_BILLING_IDENT_KEY) not in option_ids:
         st.session_state[FILTER_BILLING_IDENT_KEY] = option_ids[0]
 
-    with st.sidebar:
-        st.markdown("---")
-        st.subheader("Filtry")
+    with st.container(border=True):
+        st.subheader("Faktura SČVK")
+        st.caption(
+            "Nahraj PDF faktury. Parser z ní předvyplní větev, fakturační období a celkovou spotřebu. "
+            "Před načtením rozpočítání je můžeš ručně upravit."
+        )
+        uploaded_pdf = st.file_uploader(
+            "PDF faktury",
+            type=["pdf"],
+            key=FILTER_INVOICE_PDF_KEY,
+            help="Používá se pro určení fakturačního období a celkové spotřeby.",
+        )
+
+        parsed_invoice: ParsedScvkInvoice | None = None
+        pdf_name = None
+        if uploaded_pdf is not None:
+            parsed_invoice = initialize_invoice_state_from_upload(uploaded_pdf, option_ids)
+            pdf_name = uploaded_pdf.name
+            if parsed_invoice.billing_ident:
+                st.info(f"Detekovaná větev z PDF: `{parsed_invoice.billing_ident}`")
+            for note in parsed_invoice.notes:
+                st.warning(note)
+        else:
+            st.info("Bez nahraného PDF nelze připravit rozpočítání faktury.")
+            return (
+                st.session_state[FILTER_BILLING_IDENT_KEY],
+                st.session_state[FILTER_PERIOD_START_KEY],
+                st.session_state[FILTER_PERIOD_END_KEY],
+                float(st.session_state.get(FILTER_INVOICE_CONSUMPTION_KEY, 0.0) or 0.0),
+                float(st.session_state.get(FILTER_INVOICE_AMOUNT_KEY, 0.0) or 0.0),
+                None,
+                None,
+            )
+
         with st.form("vodomery_billing_filters"):
             billing_ident = st.selectbox(
                 "Fakturační vodoměr",
@@ -328,22 +413,48 @@ def render_sidebar_filters(options: list[dict[str, object]]) -> tuple[str, datet
                     value,
                 ),
             )
-            date_range = st.date_input(
-                "Období",
-                key=FILTER_DATE_RANGE_KEY,
-                value=st.session_state[FILTER_DATE_RANGE_KEY],
-            )
-            invoice_amount = st.number_input(
-                "Částka faktury [Kč]",
-                key=FILTER_INVOICE_AMOUNT_KEY,
-                min_value=0.0,
-                step=100.0,
-                help="Volitelné. Pokud vyplníš částku, tabulka dopočítá i rozdělení v Kč.",
-            )
+            period_cols = st.columns(2)
+            with period_cols[0]:
+                start_date = st.date_input(
+                    "Fakturační období od",
+                    key=FILTER_PERIOD_START_KEY,
+                )
+            with period_cols[1]:
+                end_date = st.date_input(
+                    "Fakturační období do",
+                    key=FILTER_PERIOD_END_KEY,
+                )
+            amount_cols = st.columns(2)
+            with amount_cols[0]:
+                invoice_consumption = st.number_input(
+                    "Celková spotřeba z faktury [m³]",
+                    key=FILTER_INVOICE_CONSUMPTION_KEY,
+                    min_value=0.0,
+                    step=0.1,
+                )
+            with amount_cols[1]:
+                invoice_amount = st.number_input(
+                    "Částka faktury [Kč]",
+                    key=FILTER_INVOICE_AMOUNT_KEY,
+                    min_value=0.0,
+                    step=100.0,
+                    help="Volitelné. Pokud vyplníš částku, tabulka dopočítá i rozdělení v Kč.",
+                )
             st.form_submit_button("Načíst rozpočítání", use_container_width=True)
 
-    start_date, end_date = normalize_date_range(date_range)
-    return billing_ident, start_date, end_date, float(invoice_amount)
+    start_date, end_date = normalize_period_range(
+        st.session_state.get(FILTER_PERIOD_START_KEY),
+        st.session_state.get(FILTER_PERIOD_END_KEY),
+    )
+    return (
+        billing_ident,
+        start_date,
+        end_date,
+        float(invoice_consumption),
+        float(invoice_amount),
+        parsed_invoice,
+        pdf_name,
+    )
 
 
 def render_filter_summary(
@@ -351,15 +462,20 @@ def render_filter_summary(
     billing_ident: str,
     start_date: datetime.date,
     end_date: datetime.date,
+    invoice_consumption: float,
     invoice_amount: float,
+    pdf_name: str | None,
 ) -> None:
     pills = [
         f"Větev: {branch_title}",
         f"Fakturační vodoměr: {billing_ident}",
         f"Období: {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}",
+        f"Spotřeba z faktury: {format_consumption_with_unit(invoice_consumption)}",
     ]
     if invoice_amount > 0:
         pills.append(f"Částka faktury: {format_currency(invoice_amount)}")
+    if pdf_name:
+        pills.append(f"PDF: {pdf_name}")
 
     st.markdown(
         "".join(
@@ -380,12 +496,18 @@ def prepare_device_table(payload: dict[str, object], invoice_amount: float) -> p
     if rows.empty:
         return rows
 
+    allocated_consumption_label = (
+        "Rozpočtená spotřeba z faktury [m³]"
+        if payload.get("billing_consumption_source") == "invoice_pdf"
+        else "Rozpočtená spotřeba z fakturačního [m³]"
+    )
+
     rows["Aktivní od"] = rows["active_from"].apply(format_timestamp)
     rows["Aktivní do"] = rows["active_to"].apply(format_timestamp)
     rows["Spotřeba [m³]"] = rows["spotreba"].apply(format_consumption_with_unit)
     rows["Podíl na podružných"] = rows["podil_na_podruznych_procent"].apply(format_percent)
     rows["Podíl na fakturačním"] = rows["podil_na_fakturacnim_procent"].apply(format_percent)
-    rows["Rozpočtená spotřeba z fakturačního [m³]"] = rows["rozpoctena_fakturacni_spotreba"].apply(
+    rows[allocated_consumption_label] = rows["rozpoctena_fakturacni_spotreba"].apply(
         format_consumption_with_unit
     )
     if invoice_amount > 0:
@@ -398,7 +520,7 @@ def prepare_device_table(payload: dict[str, object], invoice_amount: float) -> p
         "Spotřeba [m³]",
         "Podíl na podružných",
         "Podíl na fakturačním",
-        "Rozpočtená spotřeba z fakturačního [m³]",
+        allocated_consumption_label,
         "active_segment_count",
         "segments_with_data_count",
         "segments_without_data_count",
@@ -435,11 +557,16 @@ def prepare_segment_table(payload: dict[str, object]) -> pd.DataFrame:
     if rows.empty:
         return rows
 
+    billing_label = (
+        "Rozpočtená spotřeba z faktury [m³]"
+        if payload.get("billing_consumption_source") == "invoice_pdf"
+        else "Spotřeba fakturačního [m³]"
+    )
     rows["Od"] = rows["start_time"].apply(format_timestamp)
     rows["Do"] = rows["end_time"].apply(format_timestamp)
     rows["Aktivní podružné vodoměry"] = rows["active_devices"].apply(lambda values: ", ".join(values) if values else "-")
     rows["Spotřeba podružných [m³]"] = rows["submeter_consumption"].apply(format_consumption_with_unit)
-    rows["Spotřeba fakturačního [m³]"] = rows["billing_consumption"].apply(format_consumption_with_unit)
+    rows[billing_label] = rows["billing_consumption"].apply(format_consumption_with_unit)
     rows["Rozdíl [m³]"] = rows["difference"].apply(lambda value: format_consumption_with_unit(value, signed=True))
     return rows.loc[
         :,
@@ -450,7 +577,7 @@ def prepare_segment_table(payload: dict[str, object]) -> pd.DataFrame:
             "devices_with_data_count",
             "devices_without_data_count",
             "Spotřeba podružných [m³]",
-            "Spotřeba fakturačního [m³]",
+            billing_label,
             "Rozdíl [m³]",
             "Aktivní podružné vodoměry",
         ],
@@ -464,20 +591,31 @@ def prepare_segment_table(payload: dict[str, object]) -> pd.DataFrame:
 
 
 def render_metrics(payload: dict[str, object], invoice_amount: float) -> None:
+    billing_metric_label = (
+        "Spotřeba z faktury"
+        if payload.get("billing_consumption_source") == "invoice_pdf"
+        else "Spotřeba fakturačního"
+    )
     metric_cols = st.columns(6)
-    metric_cols[0].metric("Spotřeba fakturačního", format_consumption_with_unit(payload.get("billing_consumption")))
+    metric_cols[0].metric(billing_metric_label, format_consumption_with_unit(payload.get("billing_consumption")))
     metric_cols[1].metric("Součet podružných", format_consumption_with_unit(payload.get("submeter_consumption_total")))
     metric_cols[2].metric("Rozdíl", format_consumption_with_unit(payload.get("difference"), signed=True))
     metric_cols[3].metric("Pokrytí podružnými", format_percent(payload.get("coverage_percent")))
     metric_cols[4].metric("Podružné vodoměry", str(int(payload.get("active_device_count", 0))))
     metric_cols[5].metric("Aktivní segmenty", str(int(payload.get("active_segment_count", 0))))
 
-    st.caption(
+    captions = [
         "Počáteční stav fakturačního: "
         f"{format_consumption_with_unit(payload.get('billing_start_value'))} | "
         "Konečný stav fakturačního: "
         f"{format_consumption_with_unit(payload.get('billing_end_value'))}"
-    )
+    ]
+    if payload.get("billing_consumption_source") == "invoice_pdf":
+        captions.append(
+            "Referenční spotřeba fakturačního vodoměru z odečtů: "
+            f"{format_consumption_with_unit(payload.get('reference_billing_consumption'))}"
+        )
+    st.caption(" | ".join(captions))
     if invoice_amount > 0:
         st.caption(f"Částka faktury pro rozdělení: {format_currency(invoice_amount)}")
 
@@ -575,8 +713,8 @@ def render_price_section(
         )
 
         st.caption(
-            "Odhad ceny vychází z poměrného rozdělení spotřeby fakturačního vodoměru "
-            "do zadaných intervalů podle jejich časového překryvu s aktivními segmenty."
+            "Odhad ceny vychází z poměrného rozdělení spotřeby do zadaných intervalů "
+            "podle jejich časového překryvu s aktivními segmenty."
         )
         st.dataframe(summary_df, hide_index=True, use_container_width=True)
 
@@ -584,7 +722,7 @@ def render_price_section(
 def render_dashboard() -> None:
     render_vodomery_header(
         "Fakturace",
-        "Rozpočítání spotřeby fakturačního vodoměru na podružné vodoměry podle historie větví.",
+        "Rozpočítání spotřeby z PDF faktury SČVK na podružné vodoměry podle historie větví.",
     )
 
     billing_options = load_billing_options()
@@ -593,17 +731,30 @@ def render_dashboard() -> None:
         return
 
     init_page_state(str(billing_options[0]["billing_ident"]))
-    billing_ident, start_date, end_date, invoice_amount = render_sidebar_filters(billing_options)
-    st.caption("Filtr se aplikuje po kliknutí na `Načíst rozpočítání` v sidebaru.")
+    (
+        billing_ident,
+        start_date,
+        end_date,
+        invoice_consumption,
+        invoice_amount,
+        parsed_invoice,
+        pdf_name,
+    ) = render_invoice_filters(billing_options)
+
+    if parsed_invoice is None:
+        return
 
     payload = load_billing_period(billing_ident, start_date, end_date)
+    payload = apply_invoice_consumption_to_payload(payload, invoice_consumption)
 
     render_filter_summary(
         str(payload["branch_title"]),
         str(payload["billing_ident"]),
         start_date,
         end_date,
+        invoice_consumption,
         invoice_amount,
+        pdf_name,
     )
     render_metrics(payload, invoice_amount)
     render_price_section(payload, start_date, end_date)
@@ -611,7 +762,7 @@ def render_dashboard() -> None:
     billing_consumption = payload.get("billing_consumption")
     submeter_total = float(payload.get("submeter_consumption_total", 0.0) or 0.0)
     if billing_consumption is None:
-        st.warning("Spotřebu fakturačního vodoměru se nepodařilo spolehlivě určit z dostupných odečtů.")
+        st.warning("Spotřebu z faktury se nepodařilo spolehlivě určit. Zkontroluj nebo doplň hodnotu z PDF.")
     elif float(payload.get("difference", 0.0) or 0.0) > 0:
         st.warning(
             "Součet podružných vodoměrů je nižší než spotřeba fakturačního vodoměru. "
@@ -644,7 +795,9 @@ def render_dashboard() -> None:
 
     with st.container(border=True):
         st.subheader("Kontrola po intervalech")
-        st.caption("Porovnání součtu podružných vodoměrů a fakturačního vodoměru v jednotlivých aktivních intervalech.")
+        st.caption(
+            "Porovnání součtu podružných vodoměrů a rozpočtené spotřeby faktury v jednotlivých aktivních intervalech."
+        )
         if segment_table.empty:
             st.info("Pro zvolené období není k dispozici žádný aktivní interval větve.")
         else:

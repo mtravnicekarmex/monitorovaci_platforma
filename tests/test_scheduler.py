@@ -471,6 +471,8 @@ def test_scheduler_job_registry_matches_schedule_specs():
 
 def test_main_scheduler_registers_monthly_and_daily_report_jobs(monkeypatch, fake_metrics_store):
     fake_logger = FakeLogger()
+    fake_process_lock = object()
+    released_process_locks = []
 
     class FakeScheduler:
         def __init__(self, *args, **kwargs):
@@ -492,6 +494,13 @@ def test_main_scheduler_registers_monthly_and_daily_report_jobs(monkeypatch, fak
     fake_scheduler = FakeScheduler()
 
     monkeypatch.setattr(scheduler, "logger", fake_logger)
+    monkeypatch.setattr(scheduler, "setup_logging", lambda **kwargs: fake_logger)
+    monkeypatch.setattr(scheduler, "_try_acquire_process_lock", lambda lock_name: fake_process_lock)
+    monkeypatch.setattr(
+        scheduler,
+        "_release_process_lock",
+        lambda lock_handle: released_process_locks.append(lock_handle),
+    )
     monkeypatch.setattr(scheduler, "BackgroundScheduler", lambda *args, **kwargs: fake_scheduler)
     monkeypatch.setattr(
         scheduler.time,
@@ -527,3 +536,23 @@ def test_main_scheduler_registers_monthly_and_daily_report_jobs(monkeypatch, fak
     assert fake_metrics_store.started == 1
     assert fake_metrics_store.heartbeat_calls == 1
     assert fake_metrics_store.stopped == 1
+    assert released_process_locks == [fake_process_lock]
+
+
+def test_main_scheduler_skips_start_when_process_lock_is_busy(monkeypatch, fake_metrics_store):
+    fake_logger = FakeLogger()
+
+    monkeypatch.setattr(scheduler, "logger", fake_logger)
+    monkeypatch.setattr(scheduler, "_try_acquire_process_lock", lambda lock_name: None)
+    monkeypatch.setattr(
+        scheduler,
+        "BackgroundScheduler",
+        lambda *args, **kwargs: pytest.fail("scheduler should not start without process lock"),
+    )
+
+    scheduler.main_scheduler()
+
+    assert fake_metrics_store.started == 0
+    assert fake_logger.records == [
+        ("warning", "Scheduler uz bezi v jinem procesu; dalsi instance nebude spustena.")
+    ]

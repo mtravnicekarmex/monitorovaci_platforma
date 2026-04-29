@@ -127,6 +127,14 @@ def test_build_branch_billing_payload_allocates_consumption_and_merges_assignmen
     assert payload["submeter_consumption_total"] == 34.0
     assert payload["difference"] == 16.0
     assert payload["coverage_percent"] == 68.0
+    assert payload["segment_rows"][0]["device_consumptions"] == [
+        {"identifikace": "A", "spotreba": 5.0},
+        {"identifikace": "B", "spotreba": 4.0},
+    ]
+    assert payload["segment_rows"][1]["device_consumptions"] == [
+        {"identifikace": "A", "spotreba": 10.0},
+        {"identifikace": "C", "spotreba": 15.0},
+    ]
 
     assignment_rows = payload["assignment_rows"]
     assert len(assignment_rows) == 3

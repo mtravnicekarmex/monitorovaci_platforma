@@ -48,6 +48,7 @@ def test_build_schedule_runs_returns_expected_next_24h_runs():
     assert runs[0].scheduled_at == datetime(2026, 4, 10, 10, 2, 5, tzinfo=ZoneInfo("Europe/Prague"))
     assert any(run.job_id == "daily_job" for run in runs)
     assert any(run.job_id == "daily_vodomery_branch_report_job" for run in runs)
+    assert not any(run.job_id == "daily_elektromery_branch_report_job" for run in runs)
     assert any(run.job_id == "daily_seven_and_two_job" for run in runs)
     assert not any(run.job_id == "weekly_job" for run in runs)
 
@@ -107,5 +108,8 @@ def test_scheduler_health_route_returns_degraded_status(monkeypatch):
 
     assert response.status == "degraded"
     assert response.scheduler_running is True
-    assert [job.id for job in response.jobs] == ["daily_job", "quarter_hour_job"]
+    job_by_id = {job.id: job for job in response.jobs}
+    assert {"daily_job", "quarter_hour_job"}.issubset(job_by_id)
+    assert job_by_id["daily_job"].last_status == "error"
+    assert job_by_id["quarter_hour_job"].last_status == "success"
     assert [item.job_id for item in response.schedule] == ["hourly_job"]

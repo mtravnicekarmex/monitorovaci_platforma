@@ -267,9 +267,13 @@ def test_monthly_job_calls_both_monthly_reports(monkeypatch):
     def fake_b1_report():
         return None
 
+    def fake_monthly_elektromery_report():
+        return None
+
     monkeypatch.setattr(scheduler, "send_monthly_vodomery_consumption_report", fake_vodomery_report)
     monkeypatch.setattr(scheduler, "send_monthly_vodomery_branch_report", fake_monthly_branch_report)
     monkeypatch.setattr(scheduler, "send_monthly_b1_consumption_report", fake_b1_report)
+    monkeypatch.setattr(scheduler, "send_monthly_elektromery_branch_report", fake_monthly_elektromery_report)
     monkeypatch.setattr(
         scheduler,
         "safe_call",
@@ -278,7 +282,12 @@ def test_monthly_job_calls_both_monthly_reports(monkeypatch):
 
     scheduler.monthly_job()
 
-    assert [fn for fn, _, _ in calls] == [fake_vodomery_report, fake_monthly_branch_report, fake_b1_report]
+    assert [fn for fn, _, _ in calls] == [
+        fake_vodomery_report,
+        fake_monthly_branch_report,
+        fake_b1_report,
+        fake_monthly_elektromery_report,
+    ]
 
 
 def test_daily_vodomery_branch_report_job_sends_email_report(monkeypatch):
@@ -427,12 +436,16 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
     def fake_send_weekly_vodomery_branch_report():
         return {"recipient_count": 1}
 
+    def fake_send_weekly_elektromery_branch_report():
+        return {"recipient_count": 1}
+
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "rebuild_profiles", fake_rebuild_profiles)
     monkeypatch.setattr(scheduler, "rebuild_plynomery_profiles", fake_rebuild_plynomery_profiles)
     monkeypatch.setattr(scheduler, "send_vodomery_model_rebuild_report", fake_send_vodomery_model_rebuild_report)
     monkeypatch.setattr(scheduler, "send_plynomery_model_rebuild_report", fake_send_plynomery_model_rebuild_report)
     monkeypatch.setattr(scheduler, "send_weekly_vodomery_branch_report", fake_send_weekly_vodomery_branch_report)
+    monkeypatch.setattr(scheduler, "send_weekly_elektromery_branch_report", fake_send_weekly_elektromery_branch_report)
 
     scheduler.weekly_job()
 
@@ -442,6 +455,7 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
         "fake_send_vodomery_model_rebuild_report",
         "fake_send_plynomery_model_rebuild_report",
         "fake_send_weekly_vodomery_branch_report",
+        "fake_send_weekly_elektromery_branch_report",
     ]
 
 

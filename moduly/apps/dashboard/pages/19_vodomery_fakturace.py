@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import html
 from pathlib import Path
 import sys
 
@@ -25,6 +26,7 @@ from moduly.apps.dashboard.vodomery_shared import (
 )
 from moduly.mereni.vodomery.SCVK.fakturace_pdf import (
     ParsedScvkInvoice,
+    apply_price_intervals_to_payload,
     apply_invoice_consumption_to_payload,
     parse_scvk_invoice_pdf,
 )
@@ -106,6 +108,7 @@ def initialize_invoice_state_from_upload(
             st.session_state[FILTER_PERIOD_END_KEY] = parsed_invoice.period_end
         if parsed_invoice.total_consumption_m3 is not None:
             st.session_state[FILTER_INVOICE_CONSUMPTION_KEY] = parsed_invoice.total_consumption_m3
+        replace_price_intervals(parsed_invoice.price_intervals)
     return parsed_invoice
 
 
@@ -157,14 +160,18 @@ def get_price_interval_widget_keys(interval_id: int) -> tuple[str, str, str]:
     )
 
 
-def add_price_interval(start_date: datetime.date, end_date: datetime.date) -> None:
+def add_price_interval(
+    start_date: datetime.date,
+    end_date: datetime.date,
+    price_per_m3: float = 0.0,
+) -> None:
     interval_id = int(st.session_state.get(PRICE_INTERVAL_SEQ_KEY, 0))
     st.session_state[PRICE_INTERVAL_SEQ_KEY] = interval_id + 1
     st.session_state[PRICE_INTERVAL_IDS_KEY] = [*st.session_state.get(PRICE_INTERVAL_IDS_KEY, []), interval_id]
     start_key, end_key, price_key = get_price_interval_widget_keys(interval_id)
     st.session_state[start_key] = start_date
     st.session_state[end_key] = end_date
-    st.session_state[price_key] = 0.0
+    st.session_state[price_key] = price_per_m3
 
 
 def remove_price_interval(interval_id: int) -> None:
@@ -180,6 +187,12 @@ def clear_price_intervals() -> None:
         for key in get_price_interval_widget_keys(interval_id):
             st.session_state.pop(key, None)
     st.session_state[PRICE_INTERVAL_IDS_KEY] = []
+
+
+def replace_price_intervals(intervals: object) -> None:
+    clear_price_intervals()
+    for interval in intervals or ():
+        add_price_interval(interval.start_date, interval.end_date, float(interval.price_per_m3))
 
 
 def collect_price_intervals() -> list[dict[str, object]]:
@@ -385,6 +398,8 @@ def render_invoice_filters(
             pdf_name = uploaded_pdf.name
             if parsed_invoice.billing_ident:
                 st.info(f"Detekovaná větev z PDF: `{parsed_invoice.billing_ident}`")
+            if parsed_invoice.price_intervals:
+                st.success(f"Z PDF načteno {len(parsed_invoice.price_intervals)} cenových intervalů vody.")
             for note in parsed_invoice.notes:
                 st.warning(note)
         else:
@@ -440,7 +455,7 @@ def render_invoice_filters(
                     step=100.0,
                     help="Volitelné. Pokud vyplníš částku, tabulka dopočítá i rozdělení v Kč.",
                 )
-            st.form_submit_button("Načíst rozpočítání", use_container_width=True)
+            st.form_submit_button("Načíst rozpočítání", width="stretch")
 
     start_date, end_date = normalize_period_range(
         st.session_state.get(FILTER_PERIOD_START_KEY),
@@ -483,7 +498,7 @@ def render_filter_summary(
                 '<span style="display:inline-flex;align-items:center;margin:0 0.4rem 0.4rem 0;'
                 'padding:0.35rem 0.7rem;border-radius:999px;background:#f1f5f9;'
                 'border:1px solid #dbe4ee;color:#0f172a;font-size:0.85rem;">'
-                f"{pill}</span>"
+                f"{html.escape(pill)}</span>"
             )
             for pill in pills
         ),
@@ -514,6 +529,13 @@ def prepare_device_table(payload: dict[str, object], invoice_amount: float) -> p
         rows["Rozpočtená částka [Kč]"] = (
             pd.to_numeric(rows["podil_na_podruznych_procent"], errors="coerce").fillna(0.0) / 100 * invoice_amount
         ).round(2).apply(format_currency)
+    has_price_payment = "payment_amount" in rows.columns and pd.to_numeric(
+        rows["payment_amount"],
+        errors="coerce",
+    ).notna().any()
+    if has_price_payment:
+        rows["Oceněná spotřeba dle ceny [m³]"] = rows["priced_consumption"].apply(format_consumption_with_unit)
+        rows["Částka k zaplacení [Kč]"] = rows["payment_amount"].apply(format_currency)
 
     display_columns = [
         "identifikace",
@@ -535,6 +557,10 @@ def prepare_device_table(payload: dict[str, object], invoice_amount: float) -> p
     }
     if invoice_amount > 0:
         display_columns.insert(5, "Rozpočtená částka [Kč]")
+    if has_price_payment:
+        insert_index = 6 if invoice_amount > 0 else 5
+        display_columns.insert(insert_index, "Oceněná spotřeba dle ceny [m³]")
+        display_columns.insert(insert_index + 1, "Částka k zaplacení [Kč]")
 
     return rows.loc[:, display_columns].rename(columns=rename_map)
 
@@ -636,11 +662,11 @@ def render_price_section(
         with actions_col:
             add_col, clear_col = st.columns(2)
             with add_col:
-                if st.button("Přidat interval", key="vodomery_billing_add_price_interval", use_container_width=True):
+                if st.button("Přidat interval", key="vodomery_billing_add_price_interval", width="stretch"):
                     add_price_interval(start_date, end_date)
                     st.rerun()
             with clear_col:
-                if st.button("Smazat vše", key="vodomery_billing_clear_price_intervals", use_container_width=True):
+                if st.button("Smazat vše", key="vodomery_billing_clear_price_intervals", width="stretch"):
                     clear_price_intervals()
                     st.rerun()
 
@@ -678,7 +704,7 @@ def render_price_section(
             with row_cols[3]:
                 st.write("")
                 st.write("")
-                if st.button("Smazat", key=f"vodomery_billing_remove_interval_{interval_id}", use_container_width=True):
+                if st.button("Smazat", key=f"vodomery_billing_remove_interval_{interval_id}", width="stretch"):
                     remove_price_interval(interval_id)
                     st.rerun()
 
@@ -716,7 +742,7 @@ def render_price_section(
             "Odhad ceny vychází z poměrného rozdělení spotřeby do zadaných intervalů "
             "podle jejich časového překryvu s aktivními segmenty."
         )
-        st.dataframe(summary_df, hide_index=True, use_container_width=True)
+        st.dataframe(summary_df, hide_index=True, width="stretch")
 
 
 def render_dashboard() -> None:
@@ -743,6 +769,12 @@ def render_dashboard() -> None:
 
     if parsed_invoice is None:
         return
+    if parsed_invoice.total_consumption_m3 is None and invoice_consumption <= 0:
+        st.warning(
+            "Spotřebu z faktury se nepodařilo spolehlivě určit. "
+            "Doplň celkovou spotřebu z PDF a znovu načti rozpočítání."
+        )
+        return
 
     payload = load_billing_period(billing_ident, start_date, end_date)
     payload = apply_invoice_consumption_to_payload(payload, invoice_consumption)
@@ -758,6 +790,15 @@ def render_dashboard() -> None:
     )
     render_metrics(payload, invoice_amount)
     render_price_section(payload, start_date, end_date)
+    price_intervals = collect_price_intervals()
+    _, _, price_errors, _ = prepare_price_interval_summary(
+        payload,
+        start_date,
+        end_date,
+        price_intervals,
+    )
+    if not price_errors:
+        payload = apply_price_intervals_to_payload(payload, price_intervals)
 
     billing_consumption = payload.get("billing_consumption")
     submeter_total = float(payload.get("submeter_consumption_total", 0.0) or 0.0)
@@ -782,7 +823,7 @@ def render_dashboard() -> None:
             if device_table.empty:
                 st.info("Ve zvoleném období nejsou pro tuto větev k dispozici žádné podružné vodoměry.")
             else:
-                st.dataframe(device_table, hide_index=True, use_container_width=True)
+                st.dataframe(device_table, hide_index=True, width="stretch")
 
     with top_right:
         with st.container(border=True):
@@ -791,7 +832,7 @@ def render_dashboard() -> None:
             if assignment_table.empty:
                 st.info("Ve zvoleném období není pro tuto větev definované žádné přiřazení podružných vodoměrů.")
             else:
-                st.dataframe(assignment_table, hide_index=True, use_container_width=True)
+                st.dataframe(assignment_table, hide_index=True, width="stretch")
 
     with st.container(border=True):
         st.subheader("Kontrola po intervalech")
@@ -801,7 +842,7 @@ def render_dashboard() -> None:
         if segment_table.empty:
             st.info("Pro zvolené období není k dispozici žádný aktivní interval větve.")
         else:
-            st.dataframe(segment_table, hide_index=True, use_container_width=True)
+            st.dataframe(segment_table, hide_index=True, width="stretch")
 
 
 try:

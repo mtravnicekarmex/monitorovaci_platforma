@@ -46,6 +46,10 @@ from moduly.mereni.vodomery.reporting import (
     send_vodomery_model_rebuild_report,
     send_monthly_vodomery_consumption_report,
 )
+from moduly.mereni.elektromery.reporting import (
+    send_monthly_elektromery_branch_report,
+    send_weekly_elektromery_branch_report,
+)
 from moduly.mereni.vodomery.vodomery_events import detect_events_from_scores
 from moduly.mereni.plynomery.database.plynomery_db_vse import plynomery_db_import
 from moduly.mereni.plynomery.plynomery_anomaly import score_new_measurements as score_new_plynomery_measurements
@@ -645,6 +649,7 @@ def weekly_job():
     safe_call(send_vodomery_model_rebuild_report, rebuild_result)
     safe_call(send_plynomery_model_rebuild_report, plynomery_rebuild_result)
     safe_call(send_weekly_vodomery_branch_report)
+    safe_call(send_weekly_elektromery_branch_report)
 
 
 # Týdenní email report SmartFuelPass.
@@ -659,6 +664,7 @@ def monthly_job():
     safe_call(send_monthly_vodomery_consumption_report)
     safe_call(send_monthly_vodomery_branch_report)
     safe_call(send_monthly_b1_consumption_report)
+    safe_call(send_monthly_elektromery_branch_report)
 
 
 def _run_vodomery_scoring_step() -> None:
@@ -946,6 +952,15 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             kind="internal_step",
         ),
         ManualRunnableSpec(
+            id="send_weekly_elektromery_branch_report",
+            label="Tydenni report elektromeru",
+            description="Odeslani tydenniho email reportu spotreby elektromeru po trafostanicich.",
+            run_fn=send_weekly_elektromery_branch_report,
+            lock_names=("weekly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
             id="send_charge_sessions_report_email",
             label="Tydenni report SmartFuelPass",
             description="Odeslani tydenniho email reportu SmartFuelPass.",
@@ -977,6 +992,15 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             label="Mesicni report spotreby B1",
             description="Odeslani mesicniho reportu spotreby objektu B1.",
             run_fn=send_monthly_b1_consumption_report,
+            lock_names=("monthly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="send_monthly_elektromery_branch_report",
+            label="Mesicni report elektromeru",
+            description="Odeslani mesicniho email reportu spotreby elektromeru po trafostanicich.",
+            run_fn=send_monthly_elektromery_branch_report,
             lock_names=("monthly_job",),
             is_scheduled=False,
             kind="internal_step",

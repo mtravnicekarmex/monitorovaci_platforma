@@ -365,6 +365,7 @@ def _build_branch_billing_payload(
     segment_rows: list[dict[str, object]] = []
     for segment_start, segment_end, active_devices in effective_segments:
         segment_consumptions: list[float] = []
+        segment_device_consumptions: list[dict[str, object]] = []
         devices_with_data_count = 0
         for identifier in active_devices:
             device_active_segment_counts[identifier] = device_active_segment_counts.get(identifier, 0) + 1
@@ -378,6 +379,12 @@ def _build_branch_billing_payload(
             device_segments_with_data_counts[identifier] = device_segments_with_data_counts.get(identifier, 0) + 1
             devices_with_data_count += 1
             segment_consumptions.append(consumption)
+            segment_device_consumptions.append(
+                {
+                    "identifikace": identifier,
+                    "spotreba": consumption,
+                }
+            )
 
         billing_consumption = _compute_consumption_between_values(
             snapshot_cache.get(segment_start, {}).get(config_item.billing_ident),
@@ -399,6 +406,7 @@ def _build_branch_billing_payload(
                 "submeter_consumption": submeter_consumption,
                 "billing_consumption": billing_consumption,
                 "difference": difference,
+                "device_consumptions": segment_device_consumptions,
             }
         )
 

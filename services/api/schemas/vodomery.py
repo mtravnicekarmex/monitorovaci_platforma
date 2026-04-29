@@ -342,6 +342,12 @@ class VodomeryBillingAssignmentRow(BaseModel):
     duration_hours: float
 
 
+class VodomeryBillingSegmentDeviceConsumptionRow(BaseModel):
+    identifikace: str
+    spotreba: float
+    billing_consumption: float | None = None
+
+
 class VodomeryBillingSegmentRow(BaseModel):
     start_time: datetime
     end_time: datetime
@@ -352,6 +358,7 @@ class VodomeryBillingSegmentRow(BaseModel):
     submeter_consumption: float
     billing_consumption: float | None = None
     difference: float | None = None
+    device_consumptions: list[VodomeryBillingSegmentDeviceConsumptionRow] = Field(default_factory=list)
 
 
 class VodomeryBillingPeriodResponse(BaseModel):

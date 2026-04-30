@@ -75,9 +75,20 @@ def test_build_weekly_elektromery_branch_report_computes_period_metrics(monkeypa
     assert branch.device_rows[0].active_days == 7
     assert "<svg" in branch.chart_svg
 
+    summary_rows = report_module._build_ts_consumption_summary_rows(report)
+    assert len(summary_rows) == 1
+    assert summary_rows[0].title == "TS1"
+    assert summary_rows[0].device_count == 2
+    assert summary_rows[0].spotreba_total == 12.0
+    assert summary_rows[0].vt_total == 7.0
+    assert summary_rows[0].nt_total == 5.0
+
     html = report_module.build_elektromery_branch_report_html(report)
     assert "Týdenní report spotřeby elektroměrů" in html
     assert "Celková spotřeba trafostanic" in html
+    assert "Součet spotřeb odběrných míst TS1-TS3" in html
+    assert "Součet podle TS seznamů" in html
+    assert "Součty vycházejí ze spotřeb jednotlivých odběrných míst" in html
     assert "Bilance po větvích" in html
     assert "Noční odběr" not in html
     assert "12.000 kWh" in html

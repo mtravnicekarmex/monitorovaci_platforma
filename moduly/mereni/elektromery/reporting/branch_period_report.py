@@ -91,6 +91,15 @@ class BranchPeriodReportSection:
 
 
 @dataclass(frozen=True)
+class TsConsumptionSummaryRow:
+    title: str
+    device_count: int
+    spotreba_total: float
+    vt_total: float
+    nt_total: float
+
+
+@dataclass(frozen=True)
 class BranchPeriodReport:
     generated_at: datetime
     period: BranchReportPeriod
@@ -528,6 +537,94 @@ def _build_report_balance_section_html(report: BranchPeriodReport) -> str:
     )
 
 
+def _build_ts_consumption_summary_rows(report: BranchPeriodReport) -> tuple[TsConsumptionSummaryRow, ...]:
+    summary_rows: list[TsConsumptionSummaryRow] = []
+    for branch in report.branches:
+        summary_rows.append(
+            TsConsumptionSummaryRow(
+                title=branch.title,
+                device_count=len(branch.device_rows),
+                spotreba_total=_sum_energy_column(tuple(row.spotreba for row in branch.device_rows)),
+                vt_total=_sum_energy_column(tuple(row.spotreba_vt for row in branch.device_rows)),
+                nt_total=_sum_energy_column(tuple(row.spotreba_nt for row in branch.device_rows)),
+            )
+        )
+    return tuple(summary_rows)
+
+
+def _build_ts_consumption_summary_section_html(report: BranchPeriodReport) -> str:
+    summary_rows = _build_ts_consumption_summary_rows(report)
+    total_actual = _sum_energy_column(tuple(row.spotreba_total for row in summary_rows))
+    total_vt = _sum_energy_column(tuple(row.vt_total for row in summary_rows))
+    total_nt = _sum_energy_column(tuple(row.nt_total for row in summary_rows))
+    total_devices = sum(row.device_count for row in summary_rows)
+
+    rows_html = []
+    for row in summary_rows:
+        rows_html.append(
+            "<tr>"
+            f"<td><strong>{escape(row.title)}</strong></td>"
+            f"<td class='numeric'>{row.device_count}</td>"
+            f"<td class='numeric'>{escape(_format_energy(row.spotreba_total))}</td>"
+            f"<td class='numeric'>{escape(_format_energy(row.vt_total))}</td>"
+            f"<td class='numeric'>{escape(_format_energy(row.nt_total))}</td>"
+            "</tr>"
+        )
+
+    total_row_html = (
+        "<tr class='balance-total-row'>"
+        "<td><strong>TS1-TS3 celkem</strong></td>"
+        f"<td class='numeric'><strong>{total_devices}</strong></td>"
+        f"<td class='numeric'><strong>{escape(_format_energy(total_actual))}</strong></td>"
+        f"<td class='numeric'><strong>{escape(_format_energy(total_vt))}</strong></td>"
+        f"<td class='numeric'><strong>{escape(_format_energy(total_nt))}</strong></td>"
+        "</tr>"
+    )
+
+    table_html = (
+        "<div class='branch-table-wrap balance-table-wrap'>"
+        "<div class='branch-subtitle'>Součet podle TS seznamů</div>"
+        "<table class='branch-table balance-table'>"
+        "<thead><tr>"
+        "<th>Seznam TS</th>"
+        "<th class='numeric'>Odběrná místa</th>"
+        "<th class='numeric'>Součet spotřeb</th>"
+        "<th class='numeric'>VT</th>"
+        "<th class='numeric'>NT</th>"
+        "</tr></thead>"
+        f"<tbody>{''.join(rows_html)}{total_row_html}</tbody>"
+        "</table>"
+        "</div>"
+    )
+    if not summary_rows:
+        table_html = "<p class='empty-state'>Pro zvolené období nejsou k dispozici žádná odběrná místa TS.</p>"
+
+    return (
+        "<section class='ts-summary-section'>"
+        "<div class='balance-hero'>"
+        "<div class='balance-title-block'>"
+        "<div class='title-eyebrow'>Součet podle seznamů TS</div>"
+        "<h2>Součet spotřeb odběrných míst TS1-TS3</h2>"
+        f"<div class='branch-meta'><strong>Období reportu:</strong> {escape(report.period.date_range_label)}</div>"
+        "<div class='balance-description'>"
+        "Součty vycházejí ze spotřeb jednotlivých odběrných míst zařazených do TS1, TS2 a TS3 v historie_TS.py."
+        "</div>"
+        "</div>"
+        "<div class='balance-summary-card'>"
+        f"{_build_metric_card_html('Součet TS1-TS3', _format_energy(total_actual), f'VT {_format_energy(total_vt)} | NT {_format_energy(total_nt)}', primary=True)}"
+        "</div>"
+        "</div>"
+        "<div class='metric-grid'>"
+        f"{_build_metric_card_html('Spotřeba VT', _format_energy(total_vt))}"
+        f"{_build_metric_card_html('Spotřeba NT', _format_energy(total_nt))}"
+        f"{_build_metric_card_html('Odběrná místa v TS', str(total_devices))}"
+        f"{_build_metric_card_html('Počet TS seznamů', str(len(summary_rows)))}"
+        "</div>"
+        f"{table_html}"
+        "</section>"
+    )
+
+
 def _build_device_table_row_html(row: BranchDeviceReportRow) -> str:
     return (
         "<tr>"
@@ -594,6 +691,7 @@ def _build_branch_section_html(section: BranchPeriodReportSection, *, is_first: 
 def build_elektromery_branch_report_html(report: BranchPeriodReport) -> str:
     armex_logo_data_uri = _load_image_data_uri(_armex_logo_path())
     balance_section_html = _build_report_balance_section_html(report)
+    ts_summary_section_html = _build_ts_consumption_summary_section_html(report)
     branch_sections_html = "".join(
         _build_branch_section_html(section, is_first=index == 0)
         for index, section in enumerate(report.branches)
@@ -658,6 +756,11 @@ def build_elektromery_branch_report_html(report: BranchPeriodReport) -> str:
       font-size: 11px;
     }}
     .balance-section {{
+      break-after: page;
+      page-break-after: always;
+      padding-top: 2px;
+    }}
+    .ts-summary-section {{
       break-after: page;
       page-break-after: always;
       padding-top: 2px;
@@ -843,6 +946,7 @@ def build_elektromery_branch_report_html(report: BranchPeriodReport) -> str:
   </header>
 
   {balance_section_html}
+  {ts_summary_section_html}
   {branch_sections_html}
 </body>
 </html>"""

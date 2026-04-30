@@ -73,3 +73,11 @@ def test_plynomery_anomalie_eventy_page_is_between_overview_and_detail():
     assert "plynomery_detail" in main_page_keys
     assert main_page_keys.index("plynomery_overview") < main_page_keys.index("plynomery_anomalie_eventy")
     assert main_page_keys.index("plynomery_anomalie_eventy") < main_page_keys.index("plynomery_detail")
+
+
+def test_elektromery_reports_page_is_after_xlsx_import():
+    main_page_keys = [page.key for page in get_dashboard_pages("main")]
+
+    assert "elektromery_import" in main_page_keys
+    assert "elektromery_reports" in main_page_keys
+    assert main_page_keys.index("elektromery_import") < main_page_keys.index("elektromery_reports")

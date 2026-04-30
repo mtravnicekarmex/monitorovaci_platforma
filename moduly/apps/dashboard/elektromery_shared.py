@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.db.connect import get_session_ms
+from core.db.connect import get_session_ms, get_session_pg
 from moduly.apps.dashboard.auth import get_allowed_devices, is_admin
 from moduly.apps.dashboard.vodomery_shared import (
     format_consumption_dataframe,
@@ -23,8 +23,8 @@ from moduly.apps.dashboard.vodomery_shared import (
     round_consumption_columns,
 )
 from moduly.mereni.elektromery.database.models import (
-    Elektromer_areal_Mereni,
     Elektromer_areal_Zarizeni,
+    Mereni_elektromery,
 )
 
 
@@ -42,12 +42,15 @@ def get_elektromery_access_context() -> tuple[bool, tuple[str, ...]]:
 
 @st.cache_data(ttl=60)
 def load_ident_options(allowed_devices: tuple[str, ...], user_is_admin: bool) -> list[str]:
-    session = get_session_ms()
+    session = get_session_pg()
     try:
-        query = session.query(Elektromer_areal_Mereni.identifikace).distinct()
+        query = session.query(Mereni_elektromery.identifikace).filter(
+            Mereni_elektromery.identifikace.is_not(None),
+            Mereni_elektromery.platne.is_(True),
+        ).distinct()
         if not user_is_admin:
-            query = query.filter(Elektromer_areal_Mereni.identifikace.in_(allowed_devices))
-        rows = query.order_by(Elektromer_areal_Mereni.identifikace).limit(MAX_IDENT_OPTIONS).all()
+            query = query.filter(Mereni_elektromery.identifikace.in_(allowed_devices))
+        rows = query.order_by(Mereni_elektromery.identifikace).limit(MAX_IDENT_OPTIONS).all()
         return [row[0] for row in rows if row[0]]
     finally:
         session.close()
@@ -70,29 +73,49 @@ def load_measurement_series(
     if not user_is_admin and identifikace not in allowed_devices:
         return pd.DataFrame()
 
-    session = get_session_ms()
+    session = get_session_pg()
     try:
         start_dt, end_dt = build_datetime_range(start_date, end_date)
         rows = (
             session.query(
-                Elektromer_areal_Mereni.date,
-                Elektromer_areal_Mereni.identifikace,
-                Elektromer_areal_Mereni.seriove_cislo,
-                Elektromer_areal_Mereni.vt,
-                Elektromer_areal_Mereni.nt,
-                Elektromer_areal_Mereni.total,
+                Mereni_elektromery.date,
+                Mereni_elektromery.identifikace,
+                Mereni_elektromery.seriove_cislo,
+                Mereni_elektromery.objem,
+                Mereni_elektromery.delta,
+                Mereni_elektromery.zdroj,
+                Mereni_elektromery.platne,
+                Mereni_elektromery.synthetic,
+                Mereni_elektromery.gap_detected,
+                Mereni_elektromery.reset_detected,
             )
             .filter(
-                Elektromer_areal_Mereni.identifikace == identifikace,
-                Elektromer_areal_Mereni.date >= start_dt,
-                Elektromer_areal_Mereni.date <= end_dt,
+                Mereni_elektromery.identifikace == identifikace,
+                Mereni_elektromery.date >= start_dt,
+                Mereni_elektromery.date <= end_dt,
+                Mereni_elektromery.platne.is_(True),
             )
-            .order_by(Elektromer_areal_Mereni.date.asc())
+            .order_by(Mereni_elektromery.date.asc(), Mereni_elektromery.zdroj.asc())
             .all()
         )
         return pd.DataFrame(
-            rows,
-            columns=["date", "identifikace", "seriove_cislo", "vt", "nt", "total"],
+            [
+                {
+                    "date": row.date,
+                    "identifikace": row.identifikace,
+                    "seriove_cislo": row.seriove_cislo,
+                    "vt": None,
+                    "nt": None,
+                    "total": row.objem,
+                    "delta": row.delta,
+                    "zdroj": row.zdroj,
+                    "platne": row.platne,
+                    "synthetic": row.synthetic,
+                    "gap_detected": row.gap_detected,
+                    "reset_detected": row.reset_detected,
+                }
+                for row in rows
+            ],
         )
     finally:
         session.close()
@@ -146,12 +169,65 @@ def format_energy_metric(value: object, unit: str = "kWh", signed: bool = False)
     return format_consumption_with_unit(value, unit=unit, signed=signed)
 
 
+def uses_ote_delta_source(df: pd.DataFrame) -> bool:
+    if df.empty or "zdroj" not in df.columns:
+        return False
+
+    sources = {
+        str(value).strip().upper()
+        for value in df["zdroj"]
+        if pd.notna(value) and str(value).strip()
+    }
+    return sources == {"OTE"}
+
+
+def build_delta_consumption_summary(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+
+    prepared = df.copy()
+    date_values = prepared["date"] if "date" in prepared.columns else pd.Series(dtype="datetime64[ns]")
+    date_series = pd.to_datetime(date_values, errors="coerce")
+    consumption_source = "spotreba" if "spotreba" in prepared.columns else "delta"
+    consumption_values = prepared[consumption_source] if consumption_source in prepared.columns else pd.Series(dtype=float)
+    consumption = pd.to_numeric(consumption_values, errors="coerce").fillna(0.0)
+
+    return pd.DataFrame(
+        [
+            {
+                "Zdroj": "OTE" if uses_ote_delta_source(prepared) else "Delta",
+                "První měření": date_series.min(),
+                "Poslední měření": date_series.max(),
+                "Počet měření": int(date_series.notna().sum()),
+                "Spotřeba z delta": round(float(consumption.sum()), 3),
+            }
+        ]
+    )
+
+
 def prepare_measurements(df: pd.DataFrame) -> pd.DataFrame:
     prepared = df.copy()
+    for column in (
+        "date",
+        "identifikace",
+        "seriove_cislo",
+        "vt",
+        "nt",
+        "total",
+        "delta",
+        "zdroj",
+        "platne",
+        "synthetic",
+        "gap_detected",
+        "reset_detected",
+    ):
+        if column not in prepared.columns:
+            prepared[column] = pd.NA
+
     prepared["date"] = pd.to_datetime(prepared["date"], errors="coerce")
-    for column in ("vt", "nt", "total"):
+    for column in ("vt", "nt", "total", "delta"):
         prepared[column] = pd.to_numeric(prepared[column], errors="coerce")
-    prepared["seriove_cislo"] = prepared["seriove_cislo"].astype(str)
+    prepared["seriove_cislo"] = prepared["seriove_cislo"].astype("string")
     prepared = prepared.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
 
     if prepared.empty:
@@ -163,17 +239,23 @@ def prepare_measurements(df: pd.DataFrame) -> pd.DataFrame:
         prepared["vt"] + prepared["nt"]
     )
     prepared.loc[prepared["stav_celkem"].isna(), "stav_celkem"] = prepared["vt"]
-    prepared = prepared.dropna(subset=["stav_celkem"]).reset_index(drop=True)
-
-    if prepared.empty:
-        return prepared
 
     diff_from_total = prepared["stav_celkem"].diff()
     serial_changed = prepared["seriove_cislo"].ne(prepared["seriove_cislo"].shift())
-    reset_detected = diff_from_total.lt(0).fillna(False) | serial_changed.fillna(False)
+    if not serial_changed.empty:
+        serial_changed.iloc[0] = False
+    state_reset = (
+        diff_from_total.lt(0).fillna(False)
+        & prepared["stav_celkem"].notna()
+        & prepared["stav_celkem"].shift().notna()
+    )
+    stored_reset = prepared["reset_detected"].map(lambda value: bool(value) if pd.notna(value) else False)
+    reset_detected = state_reset | serial_changed.fillna(False) | stored_reset
     prepared["reset_detected"] = reset_detected
 
+    source_delta_available = prepared["delta"].notna()
     prepared["spotreba"] = diff_from_total.fillna(0.0)
+    prepared.loc[source_delta_available, "spotreba"] = prepared.loc[source_delta_available, "delta"]
     prepared.loc[prepared["spotreba"] < 0, "spotreba"] = 0.0
 
     for state_column, consumption_column in (("vt", "spotreba_vt"), ("nt", "spotreba_nt")):
@@ -181,8 +263,9 @@ def prepare_measurements(df: pd.DataFrame) -> pd.DataFrame:
         prepared.loc[prepared[consumption_column] < 0, consumption_column] = 0.0
         prepared.loc[prepared[state_column].isna(), consumption_column] = 0.0
 
+    reset_without_source_delta = prepared["reset_detected"] & ~source_delta_available
     for column in ("spotreba", "spotreba_vt", "spotreba_nt"):
-        prepared.loc[prepared["reset_detected"], column] = 0.0
+        prepared.loc[reset_without_source_delta, column] = 0.0
         prepared[column] = prepared[column].round(3)
 
     prepared["kumulovana_spotreba"] = prepared["spotreba"].cumsum().round(3)
@@ -196,8 +279,20 @@ def build_change_table(df: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     previous_row = df.iloc[0]
     for _, row in df.iloc[1:].iterrows():
-        serial_changed = row["seriove_cislo"] != previous_row["seriove_cislo"]
-        total_reset = row["stav_celkem"] < previous_row["stav_celkem"]
+        current_serial = row["seriove_cislo"]
+        previous_serial = previous_row["seriove_cislo"]
+        serial_changed = (
+            pd.notna(current_serial)
+            and pd.notna(previous_serial)
+            and current_serial != previous_serial
+        )
+        current_state = row["stav_celkem"]
+        previous_state = previous_row["stav_celkem"]
+        total_reset = (
+            pd.notna(current_state)
+            and pd.notna(previous_state)
+            and current_state < previous_state
+        )
         if serial_changed or total_reset:
             rows.append(
                 {

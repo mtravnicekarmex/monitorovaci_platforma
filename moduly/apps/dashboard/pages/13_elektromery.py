@@ -20,6 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from moduly.apps.dashboard.auth import require_page_access
 from moduly.apps.dashboard.elektromery_shared import (
     build_change_table,
+    build_delta_consumption_summary,
     format_consumption_dataframe,
     format_energy_metric,
     format_value,
@@ -30,6 +31,7 @@ from moduly.apps.dashboard.elektromery_shared import (
     prepare_measurements,
     render_page_styles,
     round_consumption_columns,
+    uses_ote_delta_source,
 )
 
 
@@ -132,16 +134,19 @@ def build_detail_table(df: pd.DataFrame, detail_level: str) -> pd.DataFrame:
             stav_celkem=("stav_celkem", "last"),
             identifikace=("identifikace", "first"),
             seriove_cislo=("seriove_cislo", "last"),
+            zdroj=("zdroj", "first"),
+            delta=("delta", "sum"),
             spotreba=("spotreba", "sum"),
             spotreba_vt=("spotreba_vt", "sum"),
             spotreba_nt=("spotreba_nt", "sum"),
             kumulovana_spotreba=("kumulovana_spotreba", "last"),
             reset_detected=("reset_detected", "sum"),
+            pocet_zaznamu=("spotreba", "count"),
         )
         .reset_index()
     )
     resampled = resampled.rename(columns={"reset_detected": "pocet_resetu"})
-    resampled = resampled[resampled["stav_celkem"].notna()].copy()
+    resampled = resampled[resampled["pocet_zaznamu"] > 0].drop(columns=["pocet_zaznamu"]).copy()
     if resampled.empty:
         return resampled
     for column in ("spotreba", "spotreba_vt", "spotreba_nt", "kumulovana_spotreba"):
@@ -178,6 +183,8 @@ def build_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         "stav_celkem",
         "identifikace",
         "seriove_cislo",
+        "zdroj",
+        "delta",
         "spotreba",
         "spotreba_vt",
         "spotreba_nt",
@@ -195,6 +202,8 @@ def build_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             "stav_celkem",
             "identifikace",
             "seriove_cislo",
+            "zdroj",
+            "delta",
             "spotreba",
             "spotreba_vt",
             "spotreba_nt",
@@ -205,7 +214,8 @@ def build_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 def render_summary_metrics(df: pd.DataFrame) -> None:
     total_consumption = round(float(df["kumulovana_spotreba"].iloc[-1]), 3)
-    st.metric("Spotřeba za období", format_energy_metric(total_consumption))
+    label = "Spotřeba za období (delta)" if uses_ote_delta_source(df) else "Spotřeba za období"
+    st.metric(label, format_energy_metric(total_consumption))
 
 
 def build_line_chart(
@@ -257,6 +267,28 @@ def build_bar_chart(
 def render_graphs(df: pd.DataFrame, detail_df: pd.DataFrame, detail_level: str) -> None:
     if detail_level == "Ne" or detail_df.empty:
         chart_source_df = round_consumption_columns(df, columns=("stav_celkem", "spotreba"))
+        if uses_ote_delta_source(df):
+            chart_source_df = round_consumption_columns(df, columns=("spotreba", "kumulovana_spotreba"))
+            chart_cols = st.columns(2)
+            with chart_cols[0]:
+                st.subheader("Spotřeba podle delta")
+                st.altair_chart(
+                    build_bar_chart(chart_source_df, "spotreba", "Spotřeba [kWh]", ELECTRICITY_CONSUMPTION_COLOR),
+                    width="stretch",
+                )
+            with chart_cols[1]:
+                st.subheader("Kumulovaná spotřeba")
+                st.altair_chart(
+                    build_line_chart(
+                        chart_source_df,
+                        "kumulovana_spotreba",
+                        "Kumulovaná spotřeba [kWh]",
+                        ELECTRICITY_CONSUMPTION_COLOR,
+                    ),
+                    width="stretch",
+                )
+            return
+
         chart_cols = st.columns(2)
         with chart_cols[0]:
             st.subheader("Stav celkem")
@@ -305,6 +337,43 @@ def render_graphs(df: pd.DataFrame, detail_df: pd.DataFrame, detail_level: str) 
 
 
 def render_data_table(df: pd.DataFrame, detail_df: pd.DataFrame, detail_level: str) -> None:
+    if uses_ote_delta_source(df):
+        source_df = df if detail_level == "Ne" or detail_df.empty else detail_df
+        table_df = source_df.rename(
+            columns={
+                "date": "Datum",
+                "identifikace": "Elektroměr",
+                "seriove_cislo": "Sériové číslo",
+                "zdroj": "Zdroj",
+                "delta": "Delta",
+                "spotreba": "Spotřeba",
+                "kumulovana_spotreba": "Kumulovaná spotřeba",
+                "reset_detected": "Reset detekován",
+                "pocet_resetu": "Počet resetů",
+            }
+        ).sort_values("Datum", ascending=detail_level != "Ne")
+        table_df = format_consumption_dataframe(
+            table_df,
+            columns=("Delta", "Spotřeba", "Kumulovaná spotřeba"),
+        )
+        visible_columns = [
+            column
+            for column in (
+                "Datum",
+                "Elektroměr",
+                "Sériové číslo",
+                "Zdroj",
+                "Delta",
+                "Spotřeba",
+                "Kumulovaná spotřeba",
+                "Reset detekován",
+                "Počet resetů",
+            )
+            if column in table_df.columns
+        ]
+        st.dataframe(table_df[visible_columns], width="stretch", hide_index=True)
+        return
+
     if detail_level == "Ne" or detail_df.empty:
         table_df = (
             df.rename(
@@ -413,12 +482,18 @@ def render_dashboard() -> None:
     render_summary_metrics(measurements_df)
 
     with st.container(border=True):
-        st.subheader("Počáteční a konečný stav")
-        boundary_display_df = format_consumption_dataframe(
-            boundary_table,
-            columns=("Stav VT", "Stav NT", "Stav celkem"),
-        ).set_index("Datum")
-        st.table(boundary_display_df)
+        if uses_ote_delta_source(measurements_df):
+            st.subheader("Spotřeba podle delta")
+            delta_summary_df = build_delta_consumption_summary(measurements_df)
+            delta_summary_df = format_consumption_dataframe(delta_summary_df, columns=("Spotřeba z delta",))
+            st.table(delta_summary_df.set_index("Zdroj"))
+        else:
+            st.subheader("Počáteční a konečný stav")
+            boundary_display_df = format_consumption_dataframe(
+                boundary_table,
+                columns=("Stav VT", "Stav NT", "Stav celkem"),
+            ).set_index("Datum")
+            st.table(boundary_display_df)
         export_source = measurements_df if detail_level == "Ne" or detail_df.empty else detail_df
         render_export_button(export_source, selected_ident, start_date, end_date, detail_level)
 

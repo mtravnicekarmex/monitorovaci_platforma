@@ -37,7 +37,7 @@ from moduly.apps.dashboard.vodomery_shared import (
     load_ident_options as load_vodomery_ident_options,
     load_overview_metrics as load_vodomery_overview_metrics,
 )
-from moduly.mereni.elektromery.database.models import Elektromer_areal_Mereni
+from moduly.mereni.elektromery.database.models import Mereni_elektromery
 from moduly.mereni.kalorimetry.database.models import Kalorimetr_areal_Mereni
 from moduly.mereni.manometry.database.models import Mereni_manometry
 from moduly.mereni.plynomery.database.models import Plynomer_areal_Mereni
@@ -479,13 +479,70 @@ def _load_plynomery_card(allowed_devices: tuple[str, ...], user_is_admin: bool) 
 
 
 def _load_elektromery_card(allowed_devices: tuple[str, ...], user_is_admin: bool) -> dict[str, object]:
-    metrics = _load_ms_measurement_metrics(
-        measurement_model=Elektromer_areal_Mereni,
-        ident_column=Elektromer_areal_Mereni.identifikace,
-        date_column=Elektromer_areal_Mereni.date,
-        allowed_devices=allowed_devices,
-        user_is_admin=user_is_admin,
-    )
+    now = prague_now_naive()
+    recent_cutoff = now - datetime.timedelta(days=RECENT_WINDOW_DAYS)
+
+    session = get_session_pg()
+    try:
+        total_devices_query = session.query(func.count(func.distinct(Mereni_elektromery.identifikace))).filter(
+            Mereni_elektromery.identifikace.is_not(None),
+            Mereni_elektromery.platne.is_(True),
+        )
+        recent_devices_query = session.query(func.count(func.distinct(Mereni_elektromery.identifikace))).filter(
+            Mereni_elektromery.identifikace.is_not(None),
+            Mereni_elektromery.date.is_not(None),
+            Mereni_elektromery.date >= recent_cutoff,
+            Mereni_elektromery.date <= now,
+            Mereni_elektromery.platne.is_(True),
+        )
+        last_measurement_query = session.query(func.max(Mereni_elektromery.date)).filter(
+            Mereni_elektromery.identifikace.is_not(None),
+            Mereni_elektromery.date.is_not(None),
+            Mereni_elektromery.platne.is_(True),
+        )
+        recent_measurements_query = session.query(Mereni_elektromery).filter(
+            Mereni_elektromery.identifikace.is_not(None),
+            Mereni_elektromery.date.is_not(None),
+            Mereni_elektromery.date >= recent_cutoff,
+            Mereni_elektromery.date <= now,
+            Mereni_elektromery.platne.is_(True),
+        )
+
+        total_devices_query = _apply_device_scope(
+            total_devices_query,
+            Mereni_elektromery.identifikace,
+            allowed_devices,
+            user_is_admin,
+        )
+        recent_devices_query = _apply_device_scope(
+            recent_devices_query,
+            Mereni_elektromery.identifikace,
+            allowed_devices,
+            user_is_admin,
+        )
+        last_measurement_query = _apply_device_scope(
+            last_measurement_query,
+            Mereni_elektromery.identifikace,
+            allowed_devices,
+            user_is_admin,
+        )
+        recent_measurements_query = _apply_device_scope(
+            recent_measurements_query,
+            Mereni_elektromery.identifikace,
+            allowed_devices,
+            user_is_admin,
+        )
+
+        recent_measurements = int(recent_measurements_query.count())
+        metrics = {
+            "total_devices": int(total_devices_query.scalar() or 0),
+            "recent_devices": int(recent_devices_query.scalar() or 0),
+            "recent_measurements": recent_measurements,
+            "last_measurement_at": last_measurement_query.scalar(),
+            "badges": [],
+        }
+    finally:
+        session.close()
 
     card = _build_empty_card(
         "elektromery",

@@ -51,6 +51,7 @@ from moduly.mereni.elektromery.reporting import (
     send_monthly_elektromery_branch_report,
     send_weekly_elektromery_branch_report,
 )
+from moduly.mereni.elektromery.softlink_devices import send_weekly_new_elektromery_report
 from moduly.mereni.vodomery.vodomery_events import detect_events_from_scores
 from moduly.mereni.plynomery.database.plynomery_db_vse import plynomery_db_import
 from moduly.mereni.plynomery.plynomery_anomaly import score_new_measurements as score_new_plynomery_measurements
@@ -652,6 +653,7 @@ def weekly_job():
     safe_call(send_plynomery_model_rebuild_report, plynomery_rebuild_result)
     safe_call(send_weekly_vodomery_branch_report)
     safe_call(send_weekly_elektromery_branch_report)
+    safe_call(send_weekly_new_elektromery_report)
 
 
 # Týdenní email report SmartFuelPass.
@@ -967,6 +969,15 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             label="Tydenni report elektromeru",
             description="Odeslani tydenniho email reportu spotreby elektromeru po trafostanicich.",
             run_fn=send_weekly_elektromery_branch_report,
+            lock_names=("weekly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="send_weekly_new_elektromery_report",
+            label="Tydenni kontrola novych elektromeru",
+            description="Kontrola novych SOFTLINK zarizeni a odeslani email reportu.",
+            run_fn=send_weekly_new_elektromery_report,
             lock_names=("weekly_job",),
             is_scheduled=False,
             kind="internal_step",

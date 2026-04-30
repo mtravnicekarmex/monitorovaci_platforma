@@ -81,3 +81,11 @@ def test_elektromery_reports_page_is_after_xlsx_import():
     assert "elektromery_import" in main_page_keys
     assert "elektromery_reports" in main_page_keys
     assert main_page_keys.index("elektromery_import") < main_page_keys.index("elektromery_reports")
+
+
+def test_elektromery_new_devices_page_is_after_reports():
+    main_page_keys = [page.key for page in get_dashboard_pages("main")]
+
+    assert "elektromery_reports" in main_page_keys
+    assert "elektromery_new_devices" in main_page_keys
+    assert main_page_keys.index("elektromery_reports") < main_page_keys.index("elektromery_new_devices")

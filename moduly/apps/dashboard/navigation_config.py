@@ -147,6 +147,14 @@ PAGES: tuple[DashboardPage, ...] = (
         admin_only=True,
     ),
     DashboardPage(
+        key="elektromery_new_devices",
+        path="pages/25_elektromery_nove.py",
+        title="Nové elektroměry",
+        icon="🆕",
+        section_key="elektromery",
+        admin_only=True,
+    ),
+    DashboardPage(
         key="kalorimetry_overview",
         path="pages/11_kalorimetry.py",
         title="Přehled",

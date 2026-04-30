@@ -469,6 +469,9 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
     def fake_send_weekly_elektromery_branch_report():
         return {"recipient_count": 1}
 
+    def fake_send_weekly_new_elektromery_report():
+        return {"recipient_count": 1, "new_device_count": 2}
+
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "rebuild_profiles", fake_rebuild_profiles)
     monkeypatch.setattr(scheduler, "rebuild_plynomery_profiles", fake_rebuild_plynomery_profiles)
@@ -476,6 +479,7 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
     monkeypatch.setattr(scheduler, "send_plynomery_model_rebuild_report", fake_send_plynomery_model_rebuild_report)
     monkeypatch.setattr(scheduler, "send_weekly_vodomery_branch_report", fake_send_weekly_vodomery_branch_report)
     monkeypatch.setattr(scheduler, "send_weekly_elektromery_branch_report", fake_send_weekly_elektromery_branch_report)
+    monkeypatch.setattr(scheduler, "send_weekly_new_elektromery_report", fake_send_weekly_new_elektromery_report)
 
     scheduler.weekly_job()
 
@@ -486,6 +490,7 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
         "fake_send_plynomery_model_rebuild_report",
         "fake_send_weekly_vodomery_branch_report",
         "fake_send_weekly_elektromery_branch_report",
+        "fake_send_weekly_new_elektromery_report",
     ]
 
 

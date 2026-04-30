@@ -13,6 +13,8 @@ from moduly.mereni.plynomery.database.alerting import ensure_plynomery_alerting_
 from moduly.mereni.plynomery.database.expected_zero import ensure_expected_zero_table as ensure_plynomery_expected_zero_table
 from moduly.mereni.plynomery.database.outlier_reviews import ensure_plynomery_outlier_review_table
 from moduly.mereni.plynomery.alerting.outlier_notifications import ensure_plynomery_outlier_email_delivery_table
+from moduly.mereni.elektromery.database.hlavni_xlsx_import import ensure_elektromery_ote_table
+from moduly.mereni.elektromery.database.elektromery_db_vse import ensure_elektromery_vse_table
 
 
 def ensure_streamlit_user_columns() -> None:
@@ -55,6 +57,8 @@ def ensure_dashboard_tables() -> None:
     ensure_plynomery_alerting_tables()
     ensure_plynomery_outlier_review_table()
     ensure_plynomery_outlier_email_delivery_table()
+    ensure_elektromery_ote_table()
+    ensure_elektromery_vse_table()
 
 
 if __name__ == "__main__":

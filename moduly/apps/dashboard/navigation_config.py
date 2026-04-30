@@ -131,6 +131,14 @@ PAGES: tuple[DashboardPage, ...] = (
         configurable=True,
     ),
     DashboardPage(
+        key="elektromery_import",
+        path="pages/23_elektromery_import.py",
+        title="Import XLSX",
+        icon="📤",
+        section_key="elektromery",
+        admin_only=True,
+    ),
+    DashboardPage(
         key="kalorimetry_overview",
         path="pages/11_kalorimetry.py",
         title="Přehled",

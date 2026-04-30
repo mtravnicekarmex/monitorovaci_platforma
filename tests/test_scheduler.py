@@ -395,6 +395,36 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
     assert plynomery_alert_payloads == [([101], [202])]
 
 
+def test_daily_job_runs_elektromery_vse_import_after_softlink(monkeypatch):
+    calls = []
+
+    def fake_safe_call(fn, *args, **kwargs):
+        calls.append(fn.__name__)
+        return fn(*args, **kwargs)
+
+    def fake_softlink_import():
+        return None
+
+    def fake_elektromery_import():
+        return {"inserted_softlink": 1, "inserted_ote": 2}
+
+    def fake_meteo_sync():
+        return None
+
+    monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
+    monkeypatch.setattr(scheduler, "SOFTLINK_save_to_database_all", fake_softlink_import)
+    monkeypatch.setattr(scheduler, "elektromery_db_import", fake_elektromery_import)
+    monkeypatch.setattr(scheduler, "meteo_sync", fake_meteo_sync)
+
+    scheduler.daily_job.__scheduler_unlocked_fn__()
+
+    assert calls == [
+        "fake_softlink_import",
+        "fake_elektromery_import",
+        "fake_meteo_sync",
+    ]
+
+
 def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
     calls = []
     rebuild_result = {

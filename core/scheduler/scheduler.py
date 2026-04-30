@@ -31,6 +31,7 @@ from core.scheduler.job_schedule import SCHEDULER_TIMEZONE_NAME, get_scheduler_j
 from core.scheduler.metrics import get_metrics_store
 from decouple import config
 from moduly.mereni.vodomery.database.vodomery_db_vse import vodomery_db_import
+from moduly.mereni.elektromery.database.elektromery_db_vse import elektromery_db_import
 from moduly.mereni.vodomery.vodomery_prediction import (
     get_candidate_model_versions,
     get_runtime_model_version,
@@ -632,6 +633,7 @@ def daily_seven_and_two_job():
 @locked_job
 def daily_job():
     safe_call(SOFTLINK_save_to_database_all)
+    safe_call(elektromery_db_import)
     safe_call(meteo_sync)
 
 
@@ -884,6 +886,15 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             label="Import SOFTLINK elektromeru",
             description="Nocni import elektromernych dat ze SOFTLINKu do databaze.",
             run_fn=SOFTLINK_save_to_database_all,
+            lock_names=("daily_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="elektromery_db_import",
+            label="Import elektromeru vse",
+            description="Denní import SOFTLINK a OTE elektromernych dat do monitoring.Mereni_elektromery_vse.",
+            run_fn=elektromery_db_import,
             lock_names=("daily_job",),
             is_scheduled=False,
             kind="internal_step",

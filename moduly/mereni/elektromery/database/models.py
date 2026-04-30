@@ -63,7 +63,7 @@ class Elektromer_areal_Mereni(Base):
     nt: Mapped[float] = mapped_column(nullable=True)
     total: Mapped[float] = mapped_column(nullable=True)
     date: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=True)
-    softlink_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    softlink_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
     vt_var_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
     nt_var_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
     total_var_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
@@ -77,6 +77,58 @@ class Elektromer_areal_Mereni(Base):
         return f"{self.date} - {self.identifikace} - {self.total}"
 
 
+class Elektromer_OTE_Mereni(Base):
+    __tablename__ = "Mereni_elektromery_OTE"
+    __table_args__ = (
+        UniqueConstraint("identifikace", "date", name="uq_ele_ote_ident_date"),
+        Index("ix_ele_ote_ident_date", "identifikace", "date"),
+        Index("ix_ele_ote_date", "date"),
+        {"schema": "dbo"},
+    )
+
+    recid: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, nullable=False)
+    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
+    seriove_cislo: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    objem: Mapped[float] = mapped_column(Float, nullable=False)
+    date: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    source_file: Mapped[str] = mapped_column(String(255), nullable=True)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=func.now(), nullable=False)
+
+    def __repr__(self) -> str:
+        return f"{self.date} - {self.identifikace} - {self.objem}"
+
+
+class Mereni_elektromery(Base):
+    __tablename__ = "Mereni_elektromery_vse"
+    __table_args__ = (
+        UniqueConstraint("identifikace", "date", "zdroj", name="uq_ele_vse_ident_date_zdroj"),
+        UniqueConstraint("source_recid", "zdroj", name="uq_ele_vse_source_recid_zdroj"),
+        Index("ix_ele_vse_ident_interval_slot", "identifikace", "interval_minutes", "day_of_week", "slot"),
+        Index("ix_ele_vse_ident_date", "identifikace", "date"),
+        Index("ix_ele_vse_date", "date"),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_recid: Mapped[int | None] = mapped_column(BigInteger, index=True, nullable=True)
+    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
+    seriove_cislo: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    date: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    objem: Mapped[float | None] = mapped_column(Float, nullable=True)
+    delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    day_of_week: Mapped[int] = mapped_column(Integer, nullable=False)
+    slot: Mapped[int] = mapped_column(Integer, nullable=False)
+    nocni_odber: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    platne: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    gap_detected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    synthetic: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    zdroj: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=func.now(), nullable=False)
+    reset_detected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"{self.date} - {self.identifikace} - {self.zdroj} - {self.delta}"
 
 
 # areálové elektroměry QGIS na PG

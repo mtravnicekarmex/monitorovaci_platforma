@@ -18,23 +18,30 @@ from moduly.apps.dashboard.auth import require_page_access
 from moduly.apps.dashboard.elektromery_reports import (
     ElektromeryDashboardReportError,
     REPORT_PERIOD_OPTIONS,
+    build_axis_label_format,
+    build_axis_tick_times,
+    build_charge_session_stripe_dataframe,
     build_consumption_curve,
     build_device_summary,
+    build_interval_consumption_curve,
     build_ote_pdf_report,
     build_ote_report_pdf_filename,
     build_threshold_exceedance,
     describe_selected_identifications,
     ote_records_to_dataframe,
+    prepare_charge_session_overlays,
     render_ote_report_pdf,
     resolve_report_period,
     summarize_report,
 )
 from moduly.apps.dashboard.vodomery_shared import render_page_styles
 from core.db.connect import get_session_pg
+from moduly.apps.smartfuelpass.database.models import SmartFuelPassRelace
 from moduly.mereni.elektromery.database.models import Elektromer_OTE_Mereni
 
 
 REPORT_RESULT_KEY = "elektromery_reports_result"
+SHOW_CHARGING_OVERLAY_KEY = "elektromery_reports_show_charging_overlay"
 
 
 st.set_page_config(
@@ -64,6 +71,43 @@ def format_energy(value: object, unit: str = "kWh") -> str:
     if abs(numeric_value) < 0.0005:
         numeric_value = 0.0
     return f"{numeric_value:.3f} {unit}"
+
+
+@st.cache_data(ttl=60)
+def load_charge_session_overlay_rows(period_start, period_end) -> pd.DataFrame:
+    session = get_session_pg()
+    try:
+        rows = (
+            session.query(
+                SmartFuelPassRelace.id_relace,
+                SmartFuelPassRelace.started_at,
+                SmartFuelPassRelace.ended_at,
+                SmartFuelPassRelace.lokace,
+                SmartFuelPassRelace.kwh,
+                SmartFuelPassRelace.rychlost_nabijeni,
+            )
+            .filter(
+                SmartFuelPassRelace.started_at < period_end,
+                SmartFuelPassRelace.ended_at > period_start,
+            )
+            .order_by(SmartFuelPassRelace.started_at.asc(), SmartFuelPassRelace.id_relace.asc())
+            .all()
+        )
+        return pd.DataFrame(
+            [
+                {
+                    "id_relace": row.id_relace,
+                    "started_at": row.started_at,
+                    "ended_at": row.ended_at,
+                    "lokace": row.lokace,
+                    "kwh": row.kwh,
+                    "rychlost_nabijeni": row.rychlost_nabijeni,
+                }
+                for row in rows
+            ]
+        )
+    finally:
+        session.close()
 
 
 @st.cache_data(ttl=60)
@@ -147,27 +191,58 @@ def load_ote_measurements(period_start, period_end, selected_identifications: tu
         session.close()
 
 
-def build_curve_chart(curve_df: pd.DataFrame, reserved_power_kw: float | None) -> alt.Chart:
+def build_curve_chart(
+    curve_df: pd.DataFrame,
+    reserved_power_kw: float | None,
+    report_period,
+    *,
+    hide_x_axis: bool = False,
+) -> alt.Chart:
     chart_source = curve_df.copy()
     chart_source["spotreba_kwh"] = pd.to_numeric(chart_source["spotreba_kwh"], errors="coerce").round(3)
     chart_source["odber_kw"] = pd.to_numeric(chart_source["odber_kw"], errors="coerce").round(3)
+    axis_tick_times = build_axis_tick_times(report_period)
+    x_scale = alt.Scale(domain=[report_period.period_start, report_period.period_end])
+    peak_tooltip_needed = False
+    tooltip_items = [
+        alt.Tooltip("date:T", title="Interval"),
+        alt.Tooltip("spotreba_kwh:Q", title="Spotřeba [kWh]", format=".3f"),
+        alt.Tooltip("odber_kw:Q", title="Odběr [kW]", format=".3f"),
+    ]
+    if "peak_at" in chart_source.columns:
+        chart_source["peak_at"] = pd.to_datetime(chart_source["peak_at"], errors="coerce")
+        peak_tooltip_needed = not chart_source["peak_at"].equals(pd.to_datetime(chart_source["date"], errors="coerce"))
+        if peak_tooltip_needed:
+            tooltip_items.append(alt.Tooltip("peak_at:T", title="Špička v"))
 
     base = alt.Chart(chart_source).encode(
-        x=alt.X("date:T", title=None),
-        tooltip=[
-            alt.Tooltip("date:T", title="Datum"),
-            alt.Tooltip("spotreba_kwh:Q", title="Spotřeba [kWh]", format=".3f"),
-            alt.Tooltip("odber_kw:Q", title="Odběr [kW]", format=".3f"),
-        ],
+        x=alt.X(
+            "date:T",
+            title=None,
+            scale=x_scale,
+            axis=alt.Axis(
+                labels=not hide_x_axis,
+                ticks=not hide_x_axis,
+                domain=not hide_x_axis,
+                values=axis_tick_times,
+                format=build_axis_label_format(report_period),
+                grid=True,
+                gridColor="#d1d5db",
+                gridDash=[4, 4],
+                labelFlush=False,
+            ),
+        ),
+        tooltip=tooltip_items,
     )
     line = base.mark_line(color="#dc2626", strokeWidth=2.6).encode(
         y=alt.Y("odber_kw:Q", title="Odběr [kW]"),
     )
-    points = base.mark_point(color="#dc2626", size=24, opacity=0.72).encode(
-        y=alt.Y("odber_kw:Q", title="Odběr [kW]"),
-    )
-
-    chart = line + points
+    chart = line
+    if len(chart_source) <= 240:
+        points = base.mark_point(color="#dc2626", size=24, opacity=0.72).encode(
+            y=alt.Y("odber_kw:Q", title="Odběr [kW]"),
+        )
+        chart = chart + points
     if reserved_power_kw is not None and reserved_power_kw > 0:
         limit_df = pd.DataFrame({"rezervovana_hladina_kw": [float(reserved_power_kw)]})
         limit = alt.Chart(limit_df).mark_rule(color="#111827", strokeDash=[6, 4], strokeWidth=2).encode(
@@ -179,12 +254,94 @@ def build_curve_chart(curve_df: pd.DataFrame, reserved_power_kw: float | None) -
     return chart.properties(height=360).interactive()
 
 
+def build_curve_chart_with_charge_overlay(
+    curve_df: pd.DataFrame,
+    reserved_power_kw: float | None,
+    report_period,
+    overlay_df: pd.DataFrame,
+) -> alt.ConcatChart | alt.Chart:
+    if overlay_df.empty:
+        return build_curve_chart(curve_df, reserved_power_kw, report_period)
+
+    stripe_df = build_charge_session_stripe_dataframe(overlay_df, curve_df=curve_df)
+    top_chart = build_curve_chart(curve_df, reserved_power_kw, report_period, hide_x_axis=False)
+
+    stripe_layer = alt.Chart(stripe_df).mark_rule(
+        color="#2563eb",
+        opacity=0.22,
+        strokeWidth=2,
+    ).encode(
+        x=alt.X(
+            "stripe_at:T",
+            title=None,
+            scale=alt.Scale(domain=[report_period.period_start, report_period.period_end]),
+        ),
+        y=alt.Y("stripe_odber_kw:Q", title="Odběr [kW]"),
+        y2="zero_kw:Q",
+    )
+    layered_top_chart = (top_chart + stripe_layer).properties(height=360)
+
+    timeline_source = overlay_df.copy()
+    lane_order = [
+        lane_label
+        for _, lane_label in (
+            timeline_source[["lane", "lane_label"]]
+            .drop_duplicates()
+            .sort_values("lane", ascending=True)
+            .itertuples(index=False, name=None)
+        )
+    ]
+    lane_count = max(int(timeline_source["lane"].max()) + 1, 1)
+    timeline_height = min(max(44 + lane_count * 42, 72), 280)
+    timeline_base = alt.Chart(timeline_source).encode(
+        x=alt.X(
+            "midpoint_at:T",
+            title=None,
+            scale=alt.Scale(domain=[report_period.period_start, report_period.period_end]),
+            axis=alt.Axis(labels=False, ticks=False, domain=False),
+        ),
+        y=alt.Y("lane_label:N", sort=lane_order, title=None, axis=None),
+        tooltip=[
+            alt.Tooltip("started_at:T", title="Začátek"),
+            alt.Tooltip("ended_at:T", title="Konec"),
+            alt.Tooltip("lokace:N", title="Lokace"),
+            alt.Tooltip("duration_label:N", title="Trvání"),
+            alt.Tooltip("kwh:Q", title="Odebráno [kWh]", format=".3f"),
+            alt.Tooltip("rychlost_nabijeni:Q", title="Rychlost [kW]", format=".3f"),
+        ],
+    )
+    duration_text = timeline_base.mark_text(
+        align="center",
+        baseline="middle",
+        color="#1d4ed8",
+        fontSize=10,
+        dy=-12,
+    ).encode(text="duration_line:N")
+    energy_text = timeline_base.mark_text(
+        align="center",
+        baseline="middle",
+        color="#1d4ed8",
+        fontSize=10,
+        dy=0,
+    ).encode(text="kwh_line:N")
+    speed_text = timeline_base.mark_text(
+        align="center",
+        baseline="middle",
+        color="#1d4ed8",
+        fontSize=10,
+        dy=12,
+    ).encode(text="speed_line:N")
+    timeline_text = (duration_text + energy_text + speed_text).properties(height=timeline_height)
+    return alt.vconcat(layered_top_chart, timeline_text).resolve_scale(x="shared")
+
+
 def render_report_result(
     *,
     report_period,
     period_label: str,
     period_df: pd.DataFrame,
     curve_df: pd.DataFrame,
+    interval_curve_df: pd.DataFrame | None = None,
     device_summary_df: pd.DataFrame,
     reserved_power_kw: float | None,
     summary: dict[str, object],
@@ -192,9 +349,11 @@ def render_report_result(
     pdf_bytes: bytes | None,
     pdf_filename: str | None,
     pdf_error: str | None,
+    pdf_variants: dict[bool, dict[str, object]] | None = None,
     selected_identifications: tuple[str, ...] = (),
     available_identification_count: int = 0,
 ) -> None:
+    del interval_curve_df, pdf_bytes, pdf_filename, pdf_error, pdf_variants
     metric_cols = st.columns(5)
     metric_cols[0].metric("Spotřeba", format_energy(summary["total_consumption_kwh"]))
     metric_cols[1].metric("Max. odběr", format_energy(summary["max_power_kw"], unit="kW"))
@@ -209,7 +368,32 @@ def render_report_result(
         st.info("Pro zvolené období a výběr odběrných míst nejsou v databázi žádná OTE data.")
         return
 
-    chart = build_curve_chart(curve_df, reserved_power_kw)
+    show_charging_overlay = st.checkbox(
+        "Zobrazit nabíjecí relace SmartFuelPass v grafu",
+        key=SHOW_CHARGING_OVERLAY_KEY,
+        help=(
+            "Do časové křivky odběru přidá modré šrafování odpovídající době nabíjení "
+            "a dole zobrazí trvání, odebranou energii a rychlost nabíjení."
+        ),
+    )
+
+    chart = build_curve_chart(curve_df, reserved_power_kw, report_period)
+    overlay_df = pd.DataFrame()
+    if show_charging_overlay:
+        charge_sessions_df = load_charge_session_overlay_rows(
+            report_period.period_start,
+            report_period.period_end,
+        )
+        overlay_df = prepare_charge_session_overlays(
+            charge_sessions_df,
+            period_start=report_period.period_start,
+            period_end=report_period.period_end,
+        )
+        if overlay_df.empty:
+            st.info("Pro zvolené období nejsou ve SmartFuelPass databázi žádné dokončené nabíjecí relace.")
+        else:
+            chart = build_curve_chart_with_charge_overlay(curve_df, reserved_power_kw, report_period, overlay_df)
+
     st.altair_chart(chart, width="stretch")
 
     table_cols = st.columns(2)
@@ -233,16 +417,18 @@ def _build_report_result(
     period_label: str,
     period_df: pd.DataFrame,
     curve_df: pd.DataFrame,
+    interval_curve_df: pd.DataFrame,
     device_summary_df: pd.DataFrame,
     reserved_power_kw: float | None,
     selected_identifications: tuple[str, ...],
     available_identification_count: int,
 ) -> dict[str, object]:
-    summary = summarize_report(period_df, curve_df)
-    exceedance_df = build_threshold_exceedance(curve_df, reserved_power_kw)
+    summary = summarize_report(period_df, curve_df, peak_curve_df=interval_curve_df)
+    exceedance_df = build_threshold_exceedance(interval_curve_df, reserved_power_kw)
     pdf_bytes = None
     pdf_filename = None
     pdf_error = None
+    pdf_variants: dict[bool, dict[str, object]] = {}
 
     if not curve_df.empty:
         pdf_report = build_ote_pdf_report(
@@ -252,6 +438,8 @@ def _build_report_result(
             curve_df=curve_df,
             device_summary_df=device_summary_df,
             reserved_power_kw=reserved_power_kw,
+            peak_curve_df=interval_curve_df,
+            exceedance_curve_df=interval_curve_df,
             selected_identifications=selected_identifications,
             available_identification_count=available_identification_count,
         )
@@ -262,12 +450,18 @@ def _build_report_result(
             pdf_error = str(exc)
         except Exception as exc:
             pdf_error = f"PDF report se nepodařilo připravit: {exc.__class__.__name__}."
+        pdf_variants[False] = {
+            "pdf_bytes": pdf_bytes,
+            "pdf_filename": pdf_filename,
+            "pdf_error": pdf_error,
+        }
 
     return {
         "report_period": report_period,
         "period_label": period_label,
         "period_df": period_df,
         "curve_df": curve_df,
+        "interval_curve_df": interval_curve_df,
         "device_summary_df": device_summary_df,
         "reserved_power_kw": reserved_power_kw,
         "selected_identifications": selected_identifications,
@@ -277,7 +471,83 @@ def _build_report_result(
         "pdf_bytes": pdf_bytes,
         "pdf_filename": pdf_filename,
         "pdf_error": pdf_error,
+        "pdf_variants": pdf_variants,
     }
+
+
+def _resolve_pdf_variant(report_result: dict[str, object], include_charge_overlay: bool) -> dict[str, object]:
+    pdf_variants = report_result.setdefault("pdf_variants", {})
+    if not isinstance(pdf_variants, dict):
+        pdf_variants = {}
+        report_result["pdf_variants"] = pdf_variants
+
+    if include_charge_overlay in pdf_variants:
+        variant = pdf_variants[include_charge_overlay]
+        if isinstance(variant, dict):
+            return variant
+
+    curve_df = report_result.get("curve_df")
+    if not isinstance(curve_df, pd.DataFrame) or curve_df.empty:
+        variant = {"pdf_bytes": None, "pdf_filename": None, "pdf_error": None}
+        pdf_variants[include_charge_overlay] = variant
+        return variant
+
+    report_period = report_result["report_period"]
+    period_label = str(report_result["period_label"])
+    period_df = report_result["period_df"]
+    interval_curve_df = report_result.get("interval_curve_df")
+    device_summary_df = report_result["device_summary_df"]
+    reserved_power_kw = report_result["reserved_power_kw"]
+    selected_identifications = tuple(report_result.get("selected_identifications") or ())
+    available_identification_count = int(report_result.get("available_identification_count") or 0)
+
+    charge_overlay_df = None
+    if include_charge_overlay:
+        charge_sessions_df = load_charge_session_overlay_rows(
+            report_period.period_start,
+            report_period.period_end,
+        )
+        overlay_df = prepare_charge_session_overlays(
+            charge_sessions_df,
+            period_start=report_period.period_start,
+            period_end=report_period.period_end,
+        )
+        if not overlay_df.empty:
+            charge_overlay_df = overlay_df
+
+    pdf_report = build_ote_pdf_report(
+        period=report_period,
+        period_label=period_label,
+        period_df=period_df,
+        curve_df=curve_df,
+        device_summary_df=device_summary_df,
+        reserved_power_kw=reserved_power_kw,
+        peak_curve_df=interval_curve_df if isinstance(interval_curve_df, pd.DataFrame) else None,
+        exceedance_curve_df=interval_curve_df if isinstance(interval_curve_df, pd.DataFrame) else None,
+        charge_overlay_df=charge_overlay_df,
+        selected_identifications=selected_identifications,
+        available_identification_count=available_identification_count,
+    )
+    try:
+        variant = {
+            "pdf_bytes": render_ote_report_pdf(pdf_report),
+            "pdf_filename": build_ote_report_pdf_filename(pdf_report),
+            "pdf_error": None,
+        }
+    except ElektromeryDashboardReportError as exc:
+        variant = {
+            "pdf_bytes": None,
+            "pdf_filename": None,
+            "pdf_error": str(exc),
+        }
+    except Exception as exc:
+        variant = {
+            "pdf_bytes": None,
+            "pdf_filename": None,
+            "pdf_error": f"PDF report se nepodařilo připravit: {exc.__class__.__name__}.",
+        }
+    pdf_variants[include_charge_overlay] = variant
+    return variant
 
 
 def render_dashboard() -> None:
@@ -344,6 +614,7 @@ def render_dashboard() -> None:
                 report_period.period_end,
                 selected_identifications_tuple,
             )
+            interval_curve_df = build_interval_consumption_curve(period_df)
             curve_df = build_consumption_curve(period_df, report_period)
             device_summary_df = build_device_summary(period_df)
             period_label = (
@@ -354,6 +625,7 @@ def render_dashboard() -> None:
                 period_label=period_label,
                 period_df=period_df,
                 curve_df=curve_df,
+                interval_curve_df=interval_curve_df,
                 device_summary_df=device_summary_df,
                 reserved_power_kw=reserved_power_kw,
                 selected_identifications=selected_identifications_tuple,
@@ -365,9 +637,11 @@ def render_dashboard() -> None:
         return
 
     with action_cols[1]:
-        pdf_bytes = report_result.get("pdf_bytes")
-        pdf_filename = report_result.get("pdf_filename")
-        pdf_error = report_result.get("pdf_error")
+        include_charge_overlay = bool(st.session_state.get(SHOW_CHARGING_OVERLAY_KEY, False))
+        pdf_variant = _resolve_pdf_variant(report_result, include_charge_overlay)
+        pdf_bytes = pdf_variant.get("pdf_bytes")
+        pdf_filename = pdf_variant.get("pdf_filename")
+        pdf_error = pdf_variant.get("pdf_error")
         if pdf_bytes is not None and pdf_filename is not None:
             st.download_button(
                 "Stáhnout PDF report",

@@ -1087,6 +1087,7 @@ def render_module_card(card: dict[str, object]) -> None:
     is_manometry = section_key == "manometry"
     is_vodomery = section_key == "vodomery"
     is_vodomery_alarm = section_key == "vodomery_alarm"
+    is_nabijecky = section_key == "nabijecky"
 
     with st.container(border=True):
         if is_manometry:
@@ -1151,6 +1152,26 @@ def render_module_card(card: dict[str, object]) -> None:
             render_vodomery_alarm_card(card)
             return
 
+        if is_nabijecky:
+            metric_cols = st.columns(3)
+            metric_cols[0].metric("Lokace", f"{int(card.get('total_devices') or 0):,}".replace(",", " "))
+            metric_cols[1].metric(
+                f"S relacemi / {recent_window_label}",
+                f"{int(card.get('recent_devices') or 0):,}".replace(",", " "),
+            )
+            metric_cols[2].metric(
+                f"Relace / {recent_window_label}",
+                f"{int(card.get('recent_measurements') or 0):,}".replace(",", " "),
+            )
+
+            render_module_badges(list(card.get("badges") or []))
+            st.markdown(
+                f"<div class='dashboard-overview-muted'>Poslední ukončená relace: <strong>{format_overview_timestamp(card.get('last_measurement_at'))}</strong></div>",
+                unsafe_allow_html=True,
+            )
+            render_module_page_link(card)
+            return
+
         metric_cols = st.columns(3)
         metric_cols[0].metric("Zařízení", f"{int(card.get('total_devices') or 0):,}".replace(",", " "))
         metric_cols[1].metric(
@@ -1183,7 +1204,7 @@ def render_module_grid(cards: list[dict[str, object]]) -> None:
     ]
     third_row_cards = [
         card_by_section[section_key]
-        for section_key in ("plynomery", "elektromery", "kalorimetry")
+        for section_key in ("plynomery", "elektromery", "nabijecky", "kalorimetry")
         if section_key in card_by_section
     ]
 

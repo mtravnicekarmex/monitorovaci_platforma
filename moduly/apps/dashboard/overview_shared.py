@@ -37,6 +37,7 @@ from moduly.apps.dashboard.vodomery_shared import (
     load_ident_options as load_vodomery_ident_options,
     load_overview_metrics as load_vodomery_overview_metrics,
 )
+from moduly.apps.smartfuelpass.database.models import SmartFuelPassRelace
 from moduly.mereni.elektromery.database.models import Mereni_elektromery
 from moduly.mereni.kalorimetry.database.models import Kalorimetr_areal_Mereni
 from moduly.mereni.manometry.database.models import Mereni_manometry
@@ -52,6 +53,7 @@ MODULE_OVERVIEW_PAGE_KEYS = {
     "manometry": "manometry_overview",
     "plynomery": "plynomery_overview",
     "elektromery": "elektromery_overview",
+    "nabijecky": "nabijecky_overview",
     "kalorimetry": "kalorimetry_overview",
 }
 MODULE_ACCENT_COLORS = {
@@ -59,6 +61,7 @@ MODULE_ACCENT_COLORS = {
     "manometry": "#2563eb",
     "plynomery": "#d97706",
     "elektromery": "#dc2626",
+    "nabijecky": "#16a34a",
     "kalorimetry": "#ea580c",
 }
 VODOMERY_ALARM_EVENT_LIMIT = 6
@@ -558,6 +561,63 @@ def _load_elektromery_card(allowed_devices: tuple[str, ...], user_is_admin: bool
     return card
 
 
+def _load_nabijecky_card(allowed_devices: tuple[str, ...], user_is_admin: bool) -> dict[str, object]:
+    del allowed_devices, user_is_admin
+    now = prague_now_naive()
+    recent_cutoff = now - datetime.timedelta(days=RECENT_WINDOW_DAYS)
+
+    session = get_session_pg()
+    try:
+        total_locations_query = session.query(func.count(func.distinct(SmartFuelPassRelace.lokace))).filter(
+            SmartFuelPassRelace.lokace.is_not(None),
+        )
+        recent_locations_query = session.query(func.count(func.distinct(SmartFuelPassRelace.lokace))).filter(
+            SmartFuelPassRelace.lokace.is_not(None),
+            SmartFuelPassRelace.ended_at.is_not(None),
+            SmartFuelPassRelace.ended_at >= recent_cutoff,
+            SmartFuelPassRelace.ended_at <= now,
+        )
+        recent_sessions_query = session.query(SmartFuelPassRelace).filter(
+            SmartFuelPassRelace.ended_at.is_not(None),
+            SmartFuelPassRelace.ended_at >= recent_cutoff,
+            SmartFuelPassRelace.ended_at <= now,
+        )
+        last_session_query = session.query(func.max(SmartFuelPassRelace.ended_at)).filter(
+            SmartFuelPassRelace.ended_at.is_not(None),
+        )
+        recent_kwh_query = session.query(func.coalesce(func.sum(SmartFuelPassRelace.kwh), 0)).filter(
+            SmartFuelPassRelace.ended_at.is_not(None),
+            SmartFuelPassRelace.ended_at >= recent_cutoff,
+            SmartFuelPassRelace.ended_at <= now,
+        )
+        recent_suma_query = session.query(func.coalesce(func.sum(SmartFuelPassRelace.suma), 0)).filter(
+            SmartFuelPassRelace.ended_at.is_not(None),
+            SmartFuelPassRelace.ended_at >= recent_cutoff,
+            SmartFuelPassRelace.ended_at <= now,
+        )
+
+        card = _build_empty_card(
+            "nabijecky",
+            accessible=True,
+            description="Dokončené nabíjecí relace uložené ze SmartFuelPass.",
+        )
+        card.update(
+            {
+                "total_devices": int(total_locations_query.scalar() or 0),
+                "recent_devices": int(recent_locations_query.scalar() or 0),
+                "recent_measurements": int(recent_sessions_query.count()),
+                "last_measurement_at": last_session_query.scalar(),
+                "badges": [
+                    {"label": "Energie / 7 dní", "value": f"{float(recent_kwh_query.scalar() or 0):.3f} kWh"},
+                    {"label": "Suma / 7 dní", "value": f"{float(recent_suma_query.scalar() or 0):.2f} Kč"},
+                ],
+            }
+        )
+        return card
+    finally:
+        session.close()
+
+
 def _load_kalorimetry_card(allowed_devices: tuple[str, ...], user_is_admin: bool) -> dict[str, object]:
     metrics = _load_ms_measurement_metrics(
         measurement_model=Kalorimetr_areal_Mereni,
@@ -587,6 +647,8 @@ def _load_accessible_card(section_key: str, allowed_devices: tuple[str, ...], us
         return _load_plynomery_card(allowed_devices, user_is_admin)
     if section_key == "elektromery":
         return _load_elektromery_card(allowed_devices, user_is_admin)
+    if section_key == "nabijecky":
+        return _load_nabijecky_card(allowed_devices, user_is_admin)
     if section_key == "kalorimetry":
         return _load_kalorimetry_card(allowed_devices, user_is_admin)
     return _build_empty_card(section_key, accessible=True, description="Sekce zatím nemá overview loader.")

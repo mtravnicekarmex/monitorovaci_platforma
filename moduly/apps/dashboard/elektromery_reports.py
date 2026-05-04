@@ -21,10 +21,14 @@ REPORT_PERIOD_OPTIONS: dict[str, str] = {
     "week": "Týdenní",
     "month": "Měsíční",
 }
+OTE_INTERVAL_HOURS = 0.25
 
 _CURVE_COLOR = "#dc2626"
 _CURVE_FILL = "#fee2e2"
 _LIMIT_COLOR = "#111827"
+CHARGING_STRIPE_FREQUENCY = "15min"
+_X_TICK_GRID_COLOR = "#d1d5db"
+_X_TICK_GRID_DASHARRAY = "4 4"
 
 
 class ElektromeryDashboardReportError(RuntimeError):
@@ -71,6 +75,18 @@ class OteExceedanceRow:
 
 
 @dataclass(frozen=True)
+class OteChargeOverlayRow:
+    id_relace: str
+    overlay_start: datetime.datetime
+    overlay_end: datetime.datetime
+    midpoint_at: datetime.datetime
+    lane: int
+    duration_line: str
+    kwh_line: str
+    speed_line: str
+
+
+@dataclass(frozen=True)
 class OtePdfReport:
     generated_at: datetime.datetime
     period: OteReportPeriod
@@ -85,8 +101,37 @@ class OtePdfReport:
     curve_rows: tuple[OteCurveRow, ...]
     device_rows: tuple[OteDeviceSummaryRow, ...]
     exceedance_rows: tuple[OteExceedanceRow, ...]
+    charge_overlay_rows: tuple[OteChargeOverlayRow, ...] = ()
     selected_identifications: tuple[str, ...] = ()
     available_identification_count: int | None = None
+
+
+def _format_charge_overlay_value(value: object, *, unit: str = "", digits: int = 3) -> str:
+    if value is None:
+        return "-"
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    if pd.isna(numeric_value) or not isfinite(numeric_value):
+        return "-"
+    if abs(numeric_value) < 0.0005:
+        numeric_value = 0.0
+    suffix = f" {unit}" if unit else ""
+    return f"{numeric_value:.{digits}f}{suffix}"
+
+
+def _format_charge_overlay_duration(value: object) -> str:
+    try:
+        total_minutes = max(int(round(float(value or 0))), 0)
+    except (TypeError, ValueError):
+        return "-"
+    hours, minutes = divmod(total_minutes, 60)
+    if hours <= 0:
+        return f"{minutes} min"
+    if minutes == 0:
+        return f"{hours} h"
+    return f"{hours} h {minutes} min"
 
 
 def _record_value(record: object, key: str) -> object:
@@ -158,8 +203,8 @@ def resolve_report_period(period_kind: str, selected_date: datetime.date) -> Ote
             label=REPORT_PERIOD_OPTIONS[period_kind],
             period_start=datetime.datetime.combine(month_start, datetime.time.min),
             period_end=datetime.datetime.combine(next_month, datetime.time.min),
-            bucket_frequency="D",
-            bucket_label="den",
+            bucket_frequency="h",
+            bucket_label="hodina",
         )
 
     raise ValueError(f"Neznamy typ reportu: {period_kind}")
@@ -174,7 +219,7 @@ def filter_measurements_for_period(df: pd.DataFrame, period: OteReportPeriod) ->
 
 def _bucket_hours(period: OteReportPeriod) -> float:
     if period.bucket_frequency == "15min":
-        return 0.25
+        return OTE_INTERVAL_HOURS
     if period.bucket_frequency == "h":
         return 1.0
     if period.bucket_frequency == "D":
@@ -182,30 +227,58 @@ def _bucket_hours(period: OteReportPeriod) -> float:
     return 1.0
 
 
-def build_consumption_curve(period_df: pd.DataFrame, period: OteReportPeriod) -> pd.DataFrame:
+def build_interval_consumption_curve(period_df: pd.DataFrame) -> pd.DataFrame:
     if period_df.empty:
-        return pd.DataFrame(columns=["date", "spotreba_kwh", "odber_kw", "pocet_mereni"])
+        return pd.DataFrame(columns=["date", "peak_at", "spotreba_kwh", "odber_kw", "pocet_mereni"])
 
     prepared = period_df.copy()
     prepared["date"] = pd.to_datetime(prepared["date"], errors="coerce")
     prepared["spotreba_kwh"] = pd.to_numeric(prepared["spotreba_kwh"], errors="coerce").fillna(0.0)
     prepared = prepared.dropna(subset=["date"]).copy()
     if prepared.empty:
-        return pd.DataFrame(columns=["date", "spotreba_kwh", "odber_kw", "pocet_mereni"])
+        return pd.DataFrame(columns=["date", "peak_at", "spotreba_kwh", "odber_kw", "pocet_mereni"])
 
     curve = (
-        prepared.set_index("date")
-        .resample(period.bucket_frequency)
+        prepared.groupby("date", as_index=False)
         .agg(
             spotreba_kwh=("spotreba_kwh", "sum"),
             pocet_mereni=("spotreba_kwh", "count"),
         )
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
+    curve["spotreba_kwh"] = curve["spotreba_kwh"].round(6)
+    curve["odber_kw"] = (curve["spotreba_kwh"] / OTE_INTERVAL_HOURS).round(6)
+    curve["peak_at"] = curve["date"]
+    return curve[["date", "peak_at", "spotreba_kwh", "odber_kw", "pocet_mereni"]].copy()
+
+
+def build_consumption_curve(period_df: pd.DataFrame, period: OteReportPeriod) -> pd.DataFrame:
+    interval_curve = build_interval_consumption_curve(period_df)
+    if interval_curve.empty:
+        return pd.DataFrame(columns=["date", "peak_at", "spotreba_kwh", "odber_kw", "pocet_mereni"])
+    if period.bucket_frequency == "15min":
+        return interval_curve
+
+    indexed_curve = interval_curve.set_index("date")
+    curve = (
+        indexed_curve.resample(period.bucket_frequency)
+        .agg(
+            spotreba_kwh=("spotreba_kwh", "sum"),
+            odber_kw=("odber_kw", "max"),
+            pocet_mereni=("pocet_mereni", "sum"),
+        )
         .reset_index()
     )
+    peak_at_series = indexed_curve["odber_kw"].resample(period.bucket_frequency).apply(
+        lambda values: values.idxmax() if len(values) else pd.NaT
+    )
+    curve["peak_at"] = peak_at_series.to_numpy()
     curve = curve[curve["pocet_mereni"] > 0].copy()
-    curve["spotreba_kwh"] = curve["spotreba_kwh"].round(6)
-    curve["odber_kw"] = (curve["spotreba_kwh"] / _bucket_hours(period)).round(6)
-    return curve.reset_index(drop=True)
+    curve["spotreba_kwh"] = pd.to_numeric(curve["spotreba_kwh"], errors="coerce").round(6)
+    curve["odber_kw"] = pd.to_numeric(curve["odber_kw"], errors="coerce").round(6)
+    curve["peak_at"] = pd.to_datetime(curve["peak_at"], errors="coerce")
+    return curve[["date", "peak_at", "spotreba_kwh", "odber_kw", "pocet_mereni"]].reset_index(drop=True)
 
 
 def build_device_summary(period_df: pd.DataFrame) -> pd.DataFrame:
@@ -226,7 +299,234 @@ def build_device_summary(period_df: pd.DataFrame) -> pd.DataFrame:
     return summary
 
 
-def summarize_report(period_df: pd.DataFrame, curve_df: pd.DataFrame) -> dict[str, object]:
+def prepare_charge_session_overlays(
+    charge_sessions_df: pd.DataFrame,
+    *,
+    period_start: datetime.datetime,
+    period_end: datetime.datetime,
+) -> pd.DataFrame:
+    if charge_sessions_df.empty:
+        return pd.DataFrame(
+            columns=[
+                "id_relace",
+                "lokace",
+                "started_at",
+                "ended_at",
+                "overlay_start",
+                "overlay_end",
+                "midpoint_at",
+                "duration_minutes",
+                "duration_label",
+                "kwh",
+                "kwh_label",
+                "rychlost_nabijeni",
+                "speed_label",
+                "annotation_label",
+                "duration_line",
+                "kwh_line",
+                "speed_line",
+                "lane",
+                "lane_label",
+            ]
+        )
+
+    prepared = charge_sessions_df.copy()
+    for column in ("started_at", "ended_at"):
+        prepared[column] = pd.to_datetime(prepared[column], errors="coerce")
+    for column in ("kwh", "rychlost_nabijeni"):
+        prepared[column] = pd.to_numeric(prepared[column], errors="coerce")
+    prepared["id_relace"] = prepared.get("id_relace", pd.Series(dtype="string")).astype("string")
+    prepared["lokace"] = prepared.get("lokace", pd.Series(dtype="string")).astype("string")
+    prepared = prepared.dropna(subset=["started_at", "ended_at"]).copy()
+    prepared = prepared.loc[
+        (prepared["started_at"] < period_end) & (prepared["ended_at"] > period_start)
+    ].copy()
+    if prepared.empty:
+        return pd.DataFrame(
+            columns=[
+                "id_relace",
+                "lokace",
+                "started_at",
+                "ended_at",
+                "overlay_start",
+                "overlay_end",
+                "midpoint_at",
+                "duration_minutes",
+                "duration_label",
+                "kwh",
+                "kwh_label",
+                "rychlost_nabijeni",
+                "speed_label",
+                "annotation_label",
+                "duration_line",
+                "kwh_line",
+                "speed_line",
+                "lane",
+                "lane_label",
+            ]
+        )
+
+    prepared["overlay_start"] = prepared["started_at"].clip(lower=period_start)
+    prepared["overlay_end"] = prepared["ended_at"].clip(upper=period_end)
+    prepared = prepared.loc[prepared["overlay_end"] > prepared["overlay_start"]].copy()
+    prepared = prepared.sort_values(["overlay_start", "overlay_end", "id_relace"]).reset_index(drop=True)
+    if prepared.empty:
+        return pd.DataFrame(
+            columns=[
+                "id_relace",
+                "lokace",
+                "started_at",
+                "ended_at",
+                "overlay_start",
+                "overlay_end",
+                "midpoint_at",
+                "duration_minutes",
+                "duration_label",
+                "kwh",
+                "kwh_label",
+                "rychlost_nabijeni",
+                "speed_label",
+                "annotation_label",
+                "duration_line",
+                "kwh_line",
+                "speed_line",
+                "lane",
+                "lane_label",
+            ]
+        )
+
+    prepared["duration_minutes"] = (
+        (prepared["ended_at"] - prepared["started_at"]).dt.total_seconds().div(60).clip(lower=0).round(1)
+    )
+    prepared["duration_label"] = prepared["duration_minutes"].map(_format_charge_overlay_duration)
+    prepared["kwh_label"] = prepared["kwh"].map(lambda value: _format_charge_overlay_value(value, unit="kWh"))
+    prepared["speed_label"] = prepared["rychlost_nabijeni"].map(
+        lambda value: _format_charge_overlay_value(value, unit="kW")
+    )
+    prepared["annotation_label"] = prepared.apply(
+        lambda row: (
+            f"Trvání {row['duration_label']} | "
+            f"Odebráno {row['kwh_label']} | "
+            f"Rychlost {row['speed_label']}"
+        ),
+        axis=1,
+    )
+    prepared["duration_line"] = prepared["duration_label"].map(lambda value: f"Trvání: {value}")
+    prepared["kwh_line"] = prepared["kwh_label"].map(lambda value: f"Odebráno: {value}")
+    prepared["speed_line"] = prepared["speed_label"].map(lambda value: f"Rychlost: {value}")
+    prepared["midpoint_at"] = prepared["overlay_start"] + (
+        prepared["overlay_end"] - prepared["overlay_start"]
+    ) / 2
+
+    lane_end_times: list[pd.Timestamp] = []
+    lane_values: list[int] = []
+    for row in prepared.itertuples(index=False):
+        assigned_lane = None
+        overlay_start = pd.Timestamp(row.overlay_start)
+        overlay_end = pd.Timestamp(row.overlay_end)
+        for lane_index, lane_end in enumerate(lane_end_times):
+            if overlay_start >= lane_end:
+                assigned_lane = lane_index
+                lane_end_times[lane_index] = overlay_end
+                break
+        if assigned_lane is None:
+            assigned_lane = len(lane_end_times)
+            lane_end_times.append(overlay_end)
+        lane_values.append(assigned_lane)
+
+    prepared["lane"] = lane_values
+    prepared["lane_label"] = prepared["lane"].map(lambda lane: f"Relace {int(lane) + 1}")
+    return prepared[
+        [
+            "id_relace",
+            "lokace",
+            "started_at",
+            "ended_at",
+            "overlay_start",
+            "overlay_end",
+            "midpoint_at",
+            "duration_minutes",
+            "duration_label",
+            "kwh",
+            "kwh_label",
+            "rychlost_nabijeni",
+            "speed_label",
+            "annotation_label",
+            "duration_line",
+            "kwh_line",
+            "speed_line",
+            "lane",
+            "lane_label",
+        ]
+    ].copy()
+
+
+def build_charge_session_stripe_dataframe(
+    overlay_df: pd.DataFrame,
+    *,
+    curve_df: pd.DataFrame | None = None,
+    stripe_frequency: str = CHARGING_STRIPE_FREQUENCY,
+) -> pd.DataFrame:
+    if overlay_df.empty:
+        return pd.DataFrame(columns=["id_relace", "stripe_at", "stripe_odber_kw", "zero_kw"])
+
+    curve_points: list[tuple[pd.Timestamp, float]] = []
+    if curve_df is not None and not curve_df.empty:
+        prepared_curve = curve_df.copy()
+        prepared_curve["date"] = pd.to_datetime(prepared_curve["date"], errors="coerce")
+        prepared_curve["odber_kw"] = pd.to_numeric(prepared_curve["odber_kw"], errors="coerce")
+        prepared_curve = prepared_curve.dropna(subset=["date", "odber_kw"]).sort_values("date").reset_index(drop=True)
+        curve_points = [
+            (pd.Timestamp(row.date), float(row.odber_kw))
+            for row in prepared_curve.itertuples(index=False)
+        ]
+
+    def interpolate_odber_kw(target_time: pd.Timestamp) -> float | None:
+        if not curve_points:
+            return None
+        if len(curve_points) == 1:
+            return curve_points[0][1]
+        if target_time <= curve_points[0][0]:
+            return curve_points[0][1]
+        if target_time >= curve_points[-1][0]:
+            return curve_points[-1][1]
+        for index in range(1, len(curve_points)):
+            left_time, left_value = curve_points[index - 1]
+            right_time, right_value = curve_points[index]
+            if target_time <= right_time:
+                total_seconds = (right_time - left_time).total_seconds()
+                if total_seconds <= 0:
+                    return right_value
+                offset_seconds = (target_time - left_time).total_seconds()
+                ratio = offset_seconds / total_seconds
+                return left_value + (right_value - left_value) * ratio
+        return curve_points[-1][1]
+
+    stripe_rows: list[dict[str, object]] = []
+    for row in overlay_df.itertuples(index=False):
+        overlay_start = pd.Timestamp(row.overlay_start)
+        overlay_end = pd.Timestamp(row.overlay_end)
+        stripe_times = pd.date_range(start=overlay_start, end=overlay_end, freq=stripe_frequency, inclusive="left")
+        if len(stripe_times) == 0:
+            stripe_times = pd.DatetimeIndex([overlay_start])
+        for stripe_at in stripe_times:
+            stripe_rows.append(
+                {
+                    "id_relace": row.id_relace,
+                    "stripe_at": stripe_at.to_pydatetime(),
+                    "stripe_odber_kw": interpolate_odber_kw(pd.Timestamp(stripe_at)),
+                    "zero_kw": 0.0,
+                }
+            )
+    return pd.DataFrame(stripe_rows)
+
+
+def summarize_report(
+    period_df: pd.DataFrame,
+    curve_df: pd.DataFrame,
+    *,
+    peak_curve_df: pd.DataFrame | None = None,
+) -> dict[str, object]:
     total_consumption = 0.0
     measurement_count = 0
     device_count = 0
@@ -237,10 +537,13 @@ def summarize_report(period_df: pd.DataFrame, curve_df: pd.DataFrame) -> dict[st
 
     max_power_kw = None
     max_power_at = None
-    if not curve_df.empty:
-        max_index = pd.to_numeric(curve_df["odber_kw"], errors="coerce").idxmax()
-        max_power_kw = round(float(curve_df.loc[max_index, "odber_kw"]), 3)
-        max_power_at = pd.to_datetime(curve_df.loc[max_index, "date"]).to_pydatetime()
+    peak_source_df = curve_df if peak_curve_df is None else peak_curve_df
+    if not peak_source_df.empty:
+        power_series = pd.to_numeric(peak_source_df["odber_kw"], errors="coerce")
+        max_index = power_series.idxmax()
+        max_power_kw = round(float(peak_source_df.loc[max_index, "odber_kw"]), 3)
+        peak_timestamp = peak_source_df.loc[max_index, "peak_at"] if "peak_at" in peak_source_df.columns else peak_source_df.loc[max_index, "date"]
+        max_power_at = pd.to_datetime(peak_timestamp).to_pydatetime()
 
     return {
         "total_consumption_kwh": total_consumption,
@@ -257,8 +560,10 @@ def build_threshold_exceedance(curve_df: pd.DataFrame, reserved_power_kw: float 
 
     prepared = curve_df.copy()
     prepared["odber_kw"] = pd.to_numeric(prepared["odber_kw"], errors="coerce")
+    timestamp_column = "peak_at" if "peak_at" in prepared.columns else "date"
     prepared["prekroceni_kw"] = (prepared["odber_kw"] - float(reserved_power_kw)).round(3)
-    return prepared.loc[prepared["prekroceni_kw"] > 0, ["date", "odber_kw", "prekroceni_kw"]].reset_index(drop=True)
+    result = prepared.loc[prepared["prekroceni_kw"] > 0, [timestamp_column, "odber_kw", "prekroceni_kw"]].copy()
+    return result.rename(columns={timestamp_column: "date"}).reset_index(drop=True)
 
 
 def describe_selected_identifications(
@@ -295,12 +600,18 @@ def build_ote_pdf_report(
     curve_df: pd.DataFrame,
     device_summary_df: pd.DataFrame,
     reserved_power_kw: float | None,
+    peak_curve_df: pd.DataFrame | None = None,
+    exceedance_curve_df: pd.DataFrame | None = None,
+    charge_overlay_df: pd.DataFrame | None = None,
     generated_at: datetime.datetime | None = None,
     selected_identifications: Iterable[str] | None = None,
     available_identification_count: int | None = None,
 ) -> OtePdfReport:
-    summary = summarize_report(period_df, curve_df)
-    exceedance_df = build_threshold_exceedance(curve_df, reserved_power_kw)
+    summary = summarize_report(period_df, curve_df, peak_curve_df=peak_curve_df)
+    exceedance_df = build_threshold_exceedance(
+        curve_df if exceedance_curve_df is None else exceedance_curve_df,
+        reserved_power_kw,
+    )
     normalized_selected_identifications = tuple(
         str(item).strip()
         for item in (selected_identifications or ())
@@ -332,6 +643,19 @@ def build_ote_pdf_report(
         )
         for row in exceedance_df.itertuples(index=False)
     )
+    overlay_rows = tuple(
+        OteChargeOverlayRow(
+            id_relace=str(row.id_relace),
+            overlay_start=pd.to_datetime(row.overlay_start).to_pydatetime(),
+            overlay_end=pd.to_datetime(row.overlay_end).to_pydatetime(),
+            midpoint_at=pd.to_datetime(row.midpoint_at).to_pydatetime(),
+            lane=int(row.lane),
+            duration_line=str(row.duration_line),
+            kwh_line=str(row.kwh_line),
+            speed_line=str(row.speed_line),
+        )
+        for row in (charge_overlay_df if charge_overlay_df is not None else pd.DataFrame()).itertuples(index=False)
+    )
 
     return OtePdfReport(
         generated_at=generated_at or datetime.datetime.now(),
@@ -347,6 +671,7 @@ def build_ote_pdf_report(
         curve_rows=curve_rows,
         device_rows=device_rows,
         exceedance_rows=exceedance_rows,
+        charge_overlay_rows=overlay_rows,
         selected_identifications=normalized_selected_identifications,
         available_identification_count=available_identification_count,
     )
@@ -449,22 +774,39 @@ def _axis_ceiling(max_value: float) -> float:
 def _curve_label(value: datetime.datetime, period: OteReportPeriod) -> str:
     if period.kind == "day":
         return value.strftime("%H:%M")
-    if period.kind == "week":
+    if period.kind in {"week", "month"}:
         return value.strftime("%d.%m. %H:%M")
     return value.strftime("%d.%m.")
 
 
-def _label_indexes(item_count: int, *, max_labels: int) -> list[int]:
-    if item_count <= 0:
-        return []
-    if item_count <= max_labels:
-        return list(range(item_count))
-    indexes = {0, item_count - 1}
-    step_count = max_labels - 1
-    for step in range(1, step_count):
-        index = round((item_count - 1) * step / step_count)
-        indexes.add(index)
-    return sorted(indexes)
+def _axis_label(value: datetime.datetime, *, period: OteReportPeriod, tick_step: datetime.timedelta) -> str:
+    if period.kind == "day":
+        return value.strftime("%H:%M")
+    if tick_step >= datetime.timedelta(days=1):
+        return value.strftime("%d.%m.")
+    return _curve_label(value, period)
+
+
+def build_axis_label_format(period: OteReportPeriod) -> str:
+    if period.kind == "day":
+        return "%H:%M"
+    return "%d.%m."
+
+
+def build_axis_tick_times(period: OteReportPeriod) -> list[datetime.datetime]:
+    if period.kind == "day":
+        tick_step = datetime.timedelta(hours=1)
+    elif period.kind == "week":
+        tick_step = datetime.timedelta(days=1)
+    else:
+        tick_step = datetime.timedelta(days=1)
+
+    tick_times: list[datetime.datetime] = []
+    current_tick = period.period_start
+    while current_tick < period.period_end:
+        tick_times.append(current_tick)
+        current_tick += tick_step
+    return tick_times
 
 
 def _build_curve_svg(report: OtePdfReport) -> str:
@@ -472,11 +814,13 @@ def _build_curve_svg(report: OtePdfReport) -> str:
         return "<div class='chart-empty'>Pro zvolené období nejsou k dispozici data pro křivku odběru.</div>"
 
     width = 920
-    height = 300
     margin_left = 58
     margin_right = 18
     margin_top = 18
-    margin_bottom = 54
+    overlay_lane_count = max((row.lane for row in report.charge_overlay_rows), default=-1) + 1
+    overlay_text_height = overlay_lane_count * 34 if overlay_lane_count > 0 else 0
+    margin_bottom = 54 + overlay_text_height
+    height = 300 + overlay_text_height
     plot_width = width - margin_left - margin_right
     plot_height = height - margin_top - margin_bottom
     bottom = margin_top + plot_height
@@ -487,17 +831,22 @@ def _build_curve_svg(report: OtePdfReport) -> str:
     axis_max = _axis_ceiling(peak_value)
     tick_values = [axis_max * index / 4 for index in range(5)]
 
-    def x_position(index: int) -> float:
+    period_start = report.period.period_start
+    period_duration_seconds = max((report.period.period_end - report.period.period_start).total_seconds(), 1.0)
+
+    def x_position_for_timestamp(value: datetime.datetime) -> float:
         if len(report.curve_rows) == 1:
             return margin_left + plot_width / 2
-        return margin_left + plot_width * index / (len(report.curve_rows) - 1)
+        offset_seconds = (value - period_start).total_seconds()
+        ratio = min(max(offset_seconds / period_duration_seconds, 0.0), 1.0)
+        return margin_left + plot_width * ratio
 
     def y_position(value: float) -> float:
         if axis_max <= 0:
             return float(bottom)
         return bottom - (value / axis_max) * plot_height
 
-    points = [(x_position(index), y_position(row.odber_kw), row) for index, row in enumerate(report.curve_rows)]
+    points = [(x_position_for_timestamp(row.date), y_position(row.odber_kw), row) for row in report.curve_rows]
     area_path = " ".join(
         ["M", f"{points[0][0]:.2f}", f"{bottom:.2f}", "L"]
         + [f"{x:.2f} {y:.2f}" for x, y, _ in points]
@@ -517,14 +866,29 @@ def _build_curve_svg(report: OtePdfReport) -> str:
         )
         for tick in tick_values
     )
+    axis_label_y = bottom + 18 + overlay_text_height
+    axis_tick_times = build_axis_tick_times(report.period)
+    axis_tick_step = (
+        axis_tick_times[1] - axis_tick_times[0]
+        if len(axis_tick_times) > 1
+        else datetime.timedelta(hours=4 if report.period.kind == "day" else 24)
+    )
+    x_grid = "".join(
+        (
+            f"<line x1='{x_position_for_timestamp(tick_time):.2f}' y1='{margin_top}' "
+            f"x2='{x_position_for_timestamp(tick_time):.2f}' y2='{bottom:.2f}' "
+            f"stroke='{_X_TICK_GRID_COLOR}' stroke-width='1' stroke-dasharray='{_X_TICK_GRID_DASHARRAY}' />"
+        )
+        for tick_time in axis_tick_times
+    )
     x_labels = "".join(
         (
-            f"<line x1='{x_position(index):.2f}' y1='{bottom}' x2='{x_position(index):.2f}' y2='{bottom + 4}' "
+            f"<line x1='{x_position_for_timestamp(tick_time):.2f}' y1='{bottom}' x2='{x_position_for_timestamp(tick_time):.2f}' y2='{bottom + 4}' "
             "stroke='#94a3b8' stroke-width='1' />"
-            f"<text x='{x_position(index):.2f}' y='{bottom + 18}' text-anchor='middle' class='chart-axis-label'>"
-            f"{escape(_curve_label(report.curve_rows[index].date, report.period))}</text>"
+            f"<text x='{x_position_for_timestamp(tick_time):.2f}' y='{axis_label_y}' text-anchor='middle' class='chart-axis-label'>"
+            f"{escape(_axis_label(tick_time, period=report.period, tick_step=axis_tick_step))}</text>"
         )
-        for index in _label_indexes(len(report.curve_rows), max_labels=7 if report.period.kind == "day" else 6)
+        for tick_time in axis_tick_times
     )
 
     circle_points = ""
@@ -534,6 +898,55 @@ def _build_curve_svg(report: OtePdfReport) -> str:
             for x, y, _ in points
         )
 
+    point_time_offsets = [
+        (row.date - period_start).total_seconds()
+        for row in report.curve_rows
+    ]
+
+    def y_curve_at(value: datetime.datetime) -> float:
+        if not points:
+            return float(bottom)
+        if len(points) == 1:
+            return points[0][1]
+        target_offset = (value - period_start).total_seconds()
+        if target_offset <= point_time_offsets[0]:
+            return points[0][1]
+        if target_offset >= point_time_offsets[-1]:
+            return points[-1][1]
+        for index in range(1, len(points)):
+            left_offset = point_time_offsets[index - 1]
+            right_offset = point_time_offsets[index]
+            if target_offset <= right_offset:
+                left_x, left_y, _ = points[index - 1]
+                right_x, right_y, _ = points[index]
+                if right_offset == left_offset:
+                    return right_y
+                ratio = (target_offset - left_offset) / (right_offset - left_offset)
+                return left_y + (right_y - left_y) * ratio
+        return points[-1][1]
+
+    charge_stripe_lines = ""
+    if report.charge_overlay_rows:
+        stripe_segments: list[str] = []
+        for overlay_row in report.charge_overlay_rows:
+            stripe_times = pd.date_range(
+                start=overlay_row.overlay_start,
+                end=overlay_row.overlay_end,
+                freq=CHARGING_STRIPE_FREQUENCY,
+                inclusive="left",
+            )
+            if len(stripe_times) == 0:
+                stripe_times = pd.DatetimeIndex([overlay_row.overlay_start])
+            for stripe_at in stripe_times:
+                stripe_dt = stripe_at.to_pydatetime()
+                stripe_x = x_position_for_timestamp(stripe_dt)
+                stripe_y = y_curve_at(stripe_dt)
+                stripe_segments.append(
+                    f"<line x1='{stripe_x:.2f}' y1='{bottom:.2f}' x2='{stripe_x:.2f}' y2='{stripe_y:.2f}' "
+                    "stroke='#2563eb' stroke-width='2' opacity='0.22' />"
+                )
+        charge_stripe_lines = "".join(stripe_segments)
+
     limit_line = ""
     legend_items = [
         (
@@ -542,6 +955,12 @@ def _build_curve_svg(report: OtePdfReport) -> str:
             "<span>Odběr [kW]</span></span>"
         )
     ]
+    if report.charge_overlay_rows:
+        legend_items.append(
+            "<span class='chart-line-legend-item'>"
+            "<span class='chart-line-legend-rule' style='border-top-style:solid;border-top-color:#2563eb;opacity:0.45;'></span>"
+            "<span>Nabíjecí relace</span></span>"
+        )
     if report.reserved_power_kw is not None and report.reserved_power_kw > 0:
         limit_y = y_position(float(report.reserved_power_kw))
         limit_line = (
@@ -554,15 +973,37 @@ def _build_curve_svg(report: OtePdfReport) -> str:
             "<span>Rezervovaná hladina</span></span>"
         )
 
+    overlay_text_svg = ""
+    if report.charge_overlay_rows:
+        text_rows = []
+        text_start_y = bottom + 14
+        for overlay_row in report.charge_overlay_rows:
+            text_x = x_position_for_timestamp(overlay_row.midpoint_at)
+            lane_y = text_start_y + overlay_row.lane * 34
+            text_rows.append(
+                (
+                    f"<text x='{text_x:.2f}' y='{lane_y:.2f}' text-anchor='middle' fill='#1d4ed8' "
+                    "font-size='9.5px' font-family='Segoe UI, Arial, sans-serif'>"
+                    f"<tspan x='{text_x:.2f}' dy='0'>{escape(overlay_row.duration_line)}</tspan>"
+                    f"<tspan x='{text_x:.2f}' dy='11'>{escape(overlay_row.kwh_line)}</tspan>"
+                    f"<tspan x='{text_x:.2f}' dy='11'>{escape(overlay_row.speed_line)}</tspan>"
+                    "</text>"
+                )
+            )
+        overlay_text_svg = "".join(text_rows)
+
     return (
         "<div class='branch-chart'>"
         f"<svg viewBox='0 0 {width} {height}' role='img' aria-label='Křivka odběru'>"
         f"{y_grid}"
+        f"{x_grid}"
         f"<line x1='{margin_left}' y1='{bottom}' x2='{width - margin_right}' y2='{bottom}' stroke='#94a3b8' stroke-width='1.2' />"
         f"<path d='{area_path}' fill='{_CURVE_FILL}' opacity='0.95' />"
+        f"{charge_stripe_lines}"
         f"{limit_line}"
         f"<path d='{line_path}' fill='none' stroke='{_CURVE_COLOR}' stroke-width='2.5' stroke-linejoin='round' stroke-linecap='round' />"
         f"{circle_points}"
+        f"{overlay_text_svg}"
         f"{x_labels}"
         f"<text x='{margin_left}' y='{margin_top - 6}' class='chart-axis-label'>Odběr [kW]</text>"
         "</svg>"

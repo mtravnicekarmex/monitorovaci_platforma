@@ -31,6 +31,7 @@ SECTIONS: tuple[DashboardSection, ...] = (
     DashboardSection(key="manometry", label="Manometry", icon="🎚️"),
     DashboardSection(key="plynomery", label="Plynoměry", icon="🔥"),
     DashboardSection(key="elektromery", label="Elektroměry", icon="⚡"),
+    DashboardSection(key="nabijecky", label="Nabíječky", icon="🔌", requires_device_permissions=False),
     DashboardSection(key="kalorimetry", label="Kalorimetry", icon="♨️"),
 )
 
@@ -153,6 +154,14 @@ PAGES: tuple[DashboardPage, ...] = (
         icon="🆕",
         section_key="elektromery",
         admin_only=True,
+    ),
+    DashboardPage(
+        key="nabijecky_overview",
+        path="pages/26_nabijecky.py",
+        title="Přehled",
+        icon="🔌",
+        section_key="nabijecky",
+        configurable=True,
     ),
     DashboardPage(
         key="kalorimetry_overview",

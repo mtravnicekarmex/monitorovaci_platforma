@@ -265,6 +265,17 @@ def test_describe_selected_identifications_formats_full_selection():
     assert description == "Všechna odběrná místa (2)"
 
 
+def test_describe_selected_identifications_can_force_explicit_full_selection_list():
+    description = elektromery_reports.describe_selected_identifications(
+        ("TS1", "TS2"),
+        total_available_count=2,
+        preview_limit=None,
+        collapse_full_selection=False,
+    )
+
+    assert description == "2 / 2 odběrných míst: TS1, TS2"
+
+
 def test_build_ote_report_html_contains_pdf_sections():
     measurements = [
         _measurement("TS1 + TS3", datetime.datetime(2026, 2, 1, 0, 15), 1.0),
@@ -304,6 +315,34 @@ def test_build_ote_report_html_contains_pdf_sections():
     assert "01.02.2026 00:15" in html
     assert "<svg" in html
     assert "data:image/png;base64" in html
+
+
+def test_build_ote_report_html_lists_all_selected_identifications_for_full_selection():
+    measurements = [
+        _measurement("TS1", datetime.datetime(2026, 2, 1, 0, 15), 1.0),
+        _measurement("TS2", datetime.datetime(2026, 2, 1, 0, 15), 2.0),
+    ]
+    df = elektromery_reports.ote_records_to_dataframe(measurements)
+    period = elektromery_reports.resolve_report_period("day", datetime.date(2026, 2, 1))
+    period_df = elektromery_reports.filter_measurements_for_period(df, period)
+    curve_df = elektromery_reports.build_consumption_curve(period_df, period)
+    device_summary_df = elektromery_reports.build_device_summary(period_df)
+    report = elektromery_reports.build_ote_pdf_report(
+        period=period,
+        period_label="Denní report | 01.02.2026 | krok 15 min",
+        period_df=period_df,
+        curve_df=curve_df,
+        device_summary_df=device_summary_df,
+        reserved_power_kw=10.0,
+        generated_at=datetime.datetime(2026, 2, 2, 6, 0, 0),
+        selected_identifications=("TS1", "TS2"),
+        available_identification_count=2,
+    )
+
+    html = elektromery_reports.build_ote_report_html(report)
+
+    assert "Odběrná místa:</strong> 2 / 2 odběrných míst: TS1, TS2" in html
+    assert "Všechna odběrná místa (2)" not in html
 
 
 def test_build_ote_report_html_contains_charge_overlay_annotations():

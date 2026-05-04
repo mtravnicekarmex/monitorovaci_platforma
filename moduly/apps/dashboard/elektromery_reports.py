@@ -570,7 +570,8 @@ def describe_selected_identifications(
     selected_identifications: Iterable[str] | tuple[str, ...],
     *,
     total_available_count: int | None = None,
-    preview_limit: int = 5,
+    preview_limit: int | None = 5,
+    collapse_full_selection: bool = True,
 ) -> str:
     normalized = tuple(
         str(item).strip()
@@ -579,8 +580,11 @@ def describe_selected_identifications(
     )
     if not normalized:
         return "Bez vybraných odběrných míst"
-    if total_available_count is not None and len(normalized) == total_available_count:
+    if collapse_full_selection and total_available_count is not None and len(normalized) == total_available_count:
         return f"Všechna odběrná místa ({total_available_count})"
+
+    if preview_limit is None or preview_limit <= 0:
+        preview_limit = len(normalized)
 
     preview = ", ".join(normalized[:preview_limit])
     remaining = len(normalized) - preview_limit
@@ -1079,6 +1083,8 @@ def build_ote_report_html(report: OtePdfReport) -> str:
     selection_summary = describe_selected_identifications(
         report.selected_identifications,
         total_available_count=report.available_identification_count,
+        preview_limit=None,
+        collapse_full_selection=False,
     )
     reserved_value = (
         _format_value(report.reserved_power_kw, unit="kW")

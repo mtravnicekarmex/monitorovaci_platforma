@@ -411,10 +411,14 @@ def test_daily_job_runs_elektromery_vse_import_after_softlink(monkeypatch):
     def fake_meteo_sync():
         return None
 
+    def fake_sync_charge_sessions_to_db():
+        return {"upserted_count": 2}
+
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "SOFTLINK_save_to_database_all", fake_softlink_import)
     monkeypatch.setattr(scheduler, "elektromery_db_import", fake_elektromery_import)
     monkeypatch.setattr(scheduler, "meteo_sync", fake_meteo_sync)
+    monkeypatch.setattr(scheduler, "sync_charge_sessions_to_db", fake_sync_charge_sessions_to_db)
 
     scheduler.daily_job.__scheduler_unlocked_fn__()
 
@@ -422,6 +426,7 @@ def test_daily_job_runs_elektromery_vse_import_after_softlink(monkeypatch):
         "fake_softlink_import",
         "fake_elektromery_import",
         "fake_meteo_sync",
+        "fake_sync_charge_sessions_to_db",
     ]
 
 

@@ -64,7 +64,7 @@ from moduly.mereni.plynomery.plynomery_events import detect_events_from_scores a
 from moduly.mereni.plynomery.alerting import process_plynomery_alerts
 from moduly.mereni.plynomery.reporting import send_plynomery_model_rebuild_report
 from moduly.apps.meteo.meteo_sync import meteo_sync
-from moduly.apps.smartfuelpass import send_charge_sessions_report_email
+from moduly.apps.smartfuelpass import send_charge_sessions_report_email, sync_charge_sessions_to_db
 
 if os.name == "nt":
     import msvcrt
@@ -636,6 +636,7 @@ def daily_job():
     safe_call(SOFTLINK_save_to_database_all)
     safe_call(elektromery_db_import)
     safe_call(meteo_sync)
+    safe_call(sync_charge_sessions_to_db)
 
 
 # Denní email report větví vodoměrů.

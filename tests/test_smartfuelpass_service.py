@@ -111,6 +111,13 @@ def test_parse_report_targets_keeps_urls_with_query_parameters(monkeypatch):
     ]
 
 
+def test_weekly_report_recipients_require_explicit_configuration(monkeypatch):
+    monkeypatch.setattr(service, "config", lambda key, default="": default)
+
+    with pytest.raises(service.SmartFuelPassError, match="SMARTFUELPASS_WEEKLY_REPORT_RECIPIENTS"):
+        service._smartfuel_weekly_report_recipients()
+
+
 def test_create_authenticated_session_loads_cookie_payload(tmp_path):
     cookie_path = tmp_path / "cookies.json"
     cookie_path.write_text(
@@ -206,6 +213,8 @@ def test_fetch_reporting_snapshots_auto_logs_in_when_cookie_session_is_missing(m
 
     monkeypatch.setattr(service, "create_authenticated_session", fake_create_authenticated_session)
     monkeypatch.setattr(service, "login_and_save_session_with_playwright", fake_auto_login)
+    monkeypatch.setattr(service, "_smartfuel_request_timeout_seconds", lambda: 11)
+    monkeypatch.setattr(service, "_smartfuel_login_timeout_seconds", lambda: 222)
 
     snapshots = service.fetch_reporting_snapshots(targets=(target,), cookie_path=cookie_path)
 
@@ -213,6 +222,7 @@ def test_fetch_reporting_snapshots_auto_logs_in_when_cookie_session_is_missing(m
     assert create_calls["count"] == 2
     assert len(login_calls) == 1
     assert login_calls[0]["cookie_path"] == cookie_path
+    assert login_calls[0]["timeout_seconds"] == 222
     assert login_calls[0]["headless"] is True
     assert fake_session.closed is True
 
@@ -406,6 +416,86 @@ def test_auto_login_if_needed_skips_when_page_is_authenticated(tmp_path):
     assert did_login is False
 
 
+def test_fetch_charge_sessions_dataframe_uses_login_timeout_for_auto_login(monkeypatch, tmp_path):
+    captured = {}
+    expected = pd.DataFrame([{"col": "value"}])
+
+    class FakePageForFetch:
+        def __init__(self):
+            self.default_timeout = None
+            self.visited_urls = []
+
+        def set_default_timeout(self, timeout):
+            self.default_timeout = timeout
+
+        def goto(self, url, wait_until=None):
+            self.visited_urls.append((url, wait_until))
+
+        def wait_for_load_state(self, state, timeout=None):
+            captured["wait_for_load_state"] = (state, timeout)
+
+    class FakeContext:
+        def __init__(self):
+            self.page = FakePageForFetch()
+            self.closed = False
+
+        def new_page(self):
+            return self.page
+
+        def close(self):
+            self.closed = True
+
+    class FakeBrowser:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class FakePlaywrightManager:
+        def __init__(self):
+            self.browser = FakeBrowser()
+            self.chromium = self
+
+        def launch(self, headless=True):
+            captured["headless"] = headless
+            return self.browser
+
+    class FakeSyncPlaywright:
+        def __enter__(self):
+            self.playwright = FakePlaywrightManager()
+            return self.playwright
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    fake_context = FakeContext()
+
+    monkeypatch.setattr(service, "_load_playwright_api", lambda: (lambda: FakeSyncPlaywright(), RuntimeError))
+    monkeypatch.setattr(service, "_smartfuel_base_url", lambda: "https://portal.smartfuelpass.com/")
+    monkeypatch.setattr(service, "_smartfuel_dashboard_path", lambda: "/Fuel/Merchant/Dashboard?contractId=12147&accountId=0")
+    monkeypatch.setattr(service, "_smartfuel_request_timeout_seconds", lambda: 15)
+    monkeypatch.setattr(service, "_smartfuel_login_timeout_seconds", lambda: 333)
+    monkeypatch.setattr(service, "_create_playwright_context", lambda *args, **kwargs: fake_context)
+    monkeypatch.setattr(service, "_auto_login_if_needed", lambda page, context, **kwargs: captured.update({"auto_login": kwargs}) or False)
+    monkeypatch.setattr(service, "open_company_dashboard", lambda page, dashboard_path=None: captured.update({"dashboard_path": dashboard_path}))
+    monkeypatch.setattr(service, "open_charging_sessions", lambda page: captured.update({"opened_sessions": True}))
+    monkeypatch.setattr(service, "open_summary", lambda page: captured.update({"opened_summary": True}))
+    monkeypatch.setattr(service, "set_charge_sessions_page_length", lambda page: captured.update({"page_length_set": True}) or True)
+    monkeypatch.setattr(service, "load_main_table", lambda page: expected)
+
+    result = service.fetch_charge_sessions_dataframe(cookie_path=tmp_path / "cookies.json")
+
+    assert result is expected
+    assert captured["auto_login"]["timeout_seconds"] == 333
+    assert captured["page_length_set"] is True
+    assert fake_context.page.default_timeout == 15000
+    assert fake_context.page.visited_urls == [
+        ("https://portal.smartfuelpass.com/Fuel/Merchant/Dashboard?contractId=12147&accountId=0", "domcontentloaded")
+    ]
+    assert fake_context.closed is True
+
+
 def test_last_completed_week_period_uses_previous_seven_full_days():
     start, end = service.last_completed_week_period(datetime.datetime(2026, 4, 14, 8, 30))
 
@@ -434,6 +524,15 @@ def test_extract_tariff_label_uses_tariff_text_after_provider_parentheses():
     )
 
     assert service._extract_tariff_label(value) == "ARMEX HOLDING 15Kč + 20,00%"
+
+
+def test_extract_tariff_label_falls_back_to_inline_tariff_without_adhoc_badge():
+    value = (
+        "cb959684-8892-439e Domácí nabíjení Dokončeno 0 kW 15,955 kWh 86 % "
+        "null null ARMEX HOLDING 15Kč 229,35 Kč (239,32 Kč)"
+    )
+
+    assert service._extract_tariff_label(value) == "ARMEX HOLDING 15Kč"
 
 
 def test_build_charge_sessions_report_summarizes_last_week_previous_month_and_total():

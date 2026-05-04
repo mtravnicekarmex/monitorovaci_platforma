@@ -31,18 +31,19 @@ DEFAULT_BASE_URL = "https://portal.smartfuelpass.com/"
 DEFAULT_LOGIN_URL = "https://portal.smartfuelpass.com/User/Login"
 DEFAULT_SESSION_COOKIE_PATH = Path("data") / "smartfuelpass" / "session_cookies.json"
 DEFAULT_REPORT_EXPORT_PATH = Path("data") / "smartfuelpass" / "reporting_snapshot.json"
-DEFAULT_TIMEOUT_SECONDS = 30
+DEFAULT_TIMEOUT_SECONDS = 120
 DEFAULT_LOGIN_TIMEOUT_SECONDS = 300
 DEFAULT_TABLE_WAIT_TIMEOUT_SECONDS = 45
 DEFAULT_FETCH_ATTEMPTS = 2
 DEFAULT_FETCH_RETRY_DELAY_SECONDS = 5
 DEFAULT_NAVIGATION_TIMEOUT_MS = 15000
+DEFAULT_PAGE_LENGTH = "100"
 DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/135.0 Safari/537.36"
 DEFAULT_DASHBOARD_PATH = "/Fuel/Merchant/Dashboard?contractId=12147&accountId=0"
 DEFAULT_CHARGING_SESSIONS_LABEL = "Nabíjecí relace"
 DEFAULT_SUMMARY_LABEL = "Celkově"
 DEFAULT_REPORT_SUBJECT_NAME = "ARMEX HOLDING, a.s."
-DEFAULT_WEEKLY_REPORT_RECIPIENTS = "m.travnicek@armex.cz"
+DEFAULT_WEEKLY_REPORT_RECIPIENTS = ""
 DEFAULT_LOGO_PATH = Path("data") / "smartfuelpass" / "smfp_logo_white.svg"
 DEFAULT_ARMEX_LOGO_PATH = Path("data") / "ARMEX" / "logo_ARMEX.png"
 LOGIN_PATH_FRAGMENT = "/User/Login"
@@ -202,6 +203,22 @@ def _smartfuel_weekly_report_sender_alias() -> str | None:
         default=config("O_EMAIL_UPOZORNENI", default=""),
     ).strip()
     return sender_alias or None
+
+
+def _smartfuel_request_timeout_seconds() -> int:
+    return config(
+        "SMARTFUELPASS_REQUEST_TIMEOUT_SECONDS",
+        default=DEFAULT_TIMEOUT_SECONDS,
+        cast=int,
+    )
+
+
+def _smartfuel_login_timeout_seconds() -> int:
+    return config(
+        "SMARTFUELPASS_LOGIN_TIMEOUT_SECONDS",
+        default=DEFAULT_LOGIN_TIMEOUT_SECONDS,
+        cast=int,
+    )
 
 
 def _smartfuel_fetch_attempts() -> int:
@@ -463,11 +480,8 @@ def fetch_reporting_snapshots(
     if not resolved_targets:
         raise SmartFuelPassError("No SmartFuelPass report targets are configured.")
 
-    resolved_timeout = timeout_seconds or config(
-        "SMARTFUELPASS_REQUEST_TIMEOUT_SECONDS",
-        default=DEFAULT_TIMEOUT_SECONDS,
-        cast=int,
-    )
+    resolved_timeout = timeout_seconds or _smartfuel_request_timeout_seconds()
+    resolved_login_timeout = _smartfuel_login_timeout_seconds()
     resolved_cookie_path = _resolve_cookie_path(cookie_path)
 
     for attempt in range(2 if auto_login else 1):
@@ -478,7 +492,7 @@ def fetch_reporting_snapshots(
                 raise
             login_and_save_session_with_playwright(
                 cookie_path=resolved_cookie_path,
-                timeout_seconds=resolved_timeout,
+                timeout_seconds=resolved_login_timeout,
                 headless=headless,
             )
             continue
@@ -512,7 +526,7 @@ def fetch_reporting_snapshots(
                 raise
             login_and_save_session_with_playwright(
                 cookie_path=resolved_cookie_path,
-                timeout_seconds=resolved_timeout,
+                timeout_seconds=resolved_login_timeout,
                 headless=headless,
             )
         finally:
@@ -653,11 +667,7 @@ def bootstrap_browser_session(
         )
 
     resolved_login_url = login_url or _smartfuel_login_url()
-    resolved_timeout = timeout_seconds or config(
-        "SMARTFUELPASS_LOGIN_TIMEOUT_SECONDS",
-        default=DEFAULT_LOGIN_TIMEOUT_SECONDS,
-        cast=int,
-    )
+    resolved_timeout = timeout_seconds or _smartfuel_login_timeout_seconds()
     resolved_cookie_path = _resolve_cookie_path(cookie_path)
 
     driver = (driver_factory or _default_browser_driver_factory)()
@@ -734,11 +744,7 @@ def perform_playwright_login(
 ) -> str:
     _, playwright_timeout_error = _load_playwright_api()
     resolved_login_url = login_url or _smartfuel_login_url()
-    resolved_timeout_seconds = timeout_seconds or config(
-        "SMARTFUELPASS_LOGIN_TIMEOUT_SECONDS",
-        default=DEFAULT_LOGIN_TIMEOUT_SECONDS,
-        cast=int,
-    )
+    resolved_timeout_seconds = timeout_seconds or _smartfuel_login_timeout_seconds()
     resolved_timeout_ms = resolved_timeout_seconds * 1000
     resolved_email = email if email is not None else _smartfuel_email()
     resolved_password = password if password is not None else _smartfuel_password()
@@ -972,6 +978,35 @@ def open_summary(page: Any, *, timeout_ms: int | None = None) -> None:
     )
 
 
+def set_charge_sessions_page_length(
+    page: Any,
+    *,
+    page_length: str = DEFAULT_PAGE_LENGTH,
+    timeout_ms: int | None = None,
+) -> bool:
+    _, playwright_timeout_error = _load_playwright_api()
+    resolved_timeout = timeout_ms or DEFAULT_NAVIGATION_TIMEOUT_MS
+    selector = 'select[name="sessionsTable_length"]'
+    select = page.locator(selector).first
+
+    try:
+        select.wait_for(state="visible", timeout=resolved_timeout)
+    except playwright_timeout_error:
+        return False
+
+    try:
+        current_value = select.input_value(timeout=resolved_timeout)
+    except Exception:
+        current_value = ""
+
+    if current_value == page_length:
+        return True
+
+    select.select_option(value=page_length, timeout=resolved_timeout)
+    page.wait_for_timeout(1500)
+    return True
+
+
 def _score_charge_sessions_dataframe(dataframe: pd.DataFrame) -> int:
     canonical_columns = {
         _canonicalize_text(_flatten_dataframe_column(column))
@@ -1162,11 +1197,8 @@ def fetch_charge_sessions_dataframe(
     timeout_seconds: int | None = None,
 ) -> pd.DataFrame:
     sync_playwright, _ = _load_playwright_api()
-    resolved_timeout_seconds = timeout_seconds or config(
-        "SMARTFUELPASS_REQUEST_TIMEOUT_SECONDS",
-        default=DEFAULT_TIMEOUT_SECONDS,
-        cast=int,
-    )
+    resolved_timeout_seconds = timeout_seconds or _smartfuel_request_timeout_seconds()
+    resolved_login_timeout_seconds = _smartfuel_login_timeout_seconds()
     resolved_cookie_path = _resolve_cookie_path(cookie_path)
     target_url = urljoin(_smartfuel_base_url(), (dashboard_path or _smartfuel_dashboard_path()).lstrip("/"))
 
@@ -1190,11 +1222,12 @@ def fetch_charge_sessions_dataframe(
                 page,
                 context,
                 cookie_path=resolved_cookie_path,
-                timeout_seconds=resolved_timeout_seconds,
+                timeout_seconds=resolved_login_timeout_seconds,
             )
             open_company_dashboard(page, dashboard_path=dashboard_path)
             open_charging_sessions(page)
             open_summary(page)
+            set_charge_sessions_page_length(page)
             return load_main_table(page)
         finally:
             context.close()
@@ -1278,6 +1311,26 @@ def _extract_kwh_label(value: object) -> str:
     return f"{match.group(1).replace('.', ',')} kWh"
 
 
+def _extract_kwh_value(value: object) -> float | None:
+    text = str(value or "")
+    match = re.search(r"(\d+(?:[.,]\d+)?)\s*kWh", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return float(match.group(1).replace(",", "."))
+
+
+def _extract_battery_status(value: object) -> int | None:
+    text = str(value or "")
+    match = re.search(
+        r"\d+(?:[.,]\d+)?\s*kWh\s+(\d{1,3})\s*%",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return int(match.group(1))
+
+
 def _extract_tariff_label(value: object) -> str:
     text = re.sub(r"\s+", " ", str(value or "")).strip()
     match = re.search(
@@ -1299,6 +1352,27 @@ def _extract_tariff_label(value: object) -> str:
         tariff = tariff.replace("Kè", "Kč")
         if tariff:
             return tariff
+
+    fallback = text.replace("Kè", "Kč")
+    fallback = re.sub(r"^.*?\b\d+(?:[.,]\d+)?\s*kWh\b", "", fallback, flags=re.IGNORECASE)
+    fallback = re.sub(r"^\s*\d{1,3}\s*%\s*", "", fallback)
+    fallback = re.sub(r"\bnull\b", " ", fallback, flags=re.IGNORECASE)
+    fallback = re.sub(
+        r"AdHoc(?: nabíjení| charging)\s*-\s*[^()]+(?:\([^)]*\))?\s*",
+        "",
+        fallback,
+        flags=re.IGNORECASE,
+    )
+    fallback = re.sub(
+        r"\s+\d+(?:[.,]\d+)\s*Kč\s*(?:\(\d+(?:[.,]\d+)\s*Kč\))?\s*$",
+        "",
+        fallback,
+        flags=re.IGNORECASE,
+    )
+    fallback = re.sub(r"\s+\([^)]*\)\s*$", "", fallback).strip(" -")
+    fallback = re.sub(r"\s+%", "%", re.sub(r"\s+", " ", fallback).strip())
+    if fallback:
+        return fallback
     return "-"
 
 
@@ -1306,6 +1380,16 @@ def _clean_location_name(value: object) -> str:
     text = re.sub(r"\bnull\b", "", str(value or ""), flags=re.IGNORECASE)
     text = re.sub(r"\s+", " ", text).strip()
     return text or "-"
+
+
+def _normalize_charge_session_id(value: object) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    return "" if text in {"", "-"} else text
+
+
+def _is_completed_charge_session(value: object) -> bool:
+    canonical = _canonicalize_text(value)
+    return "dokonceno" in canonical or "completed" in canonical
 
 
 def _format_charge_session_period(started_at: datetime | None, ended_at: datetime | None) -> str:
@@ -1382,6 +1466,21 @@ def _parse_charge_session_datetimes(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series.map(_parse_datetime_text), errors="coerce")
 
 
+def _compute_charge_speed_kw(
+    kwh_value: float | None,
+    started_at: datetime | None,
+    ended_at: datetime | None,
+) -> float | None:
+    if kwh_value is None or started_at is None or ended_at is None:
+        return None
+
+    duration_seconds = (ended_at - started_at).total_seconds()
+    if duration_seconds <= 0:
+        return None
+
+    return round(float(kwh_value) / (duration_seconds / 3600), 3)
+
+
 def _prepare_charge_sessions_dataframe(dataframe: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     prepared = dataframe.copy()
     prepared.columns = [_flatten_dataframe_column(column) for column in prepared.columns]
@@ -1419,6 +1518,11 @@ def _prepare_charge_sessions_dataframe(dataframe: pd.DataFrame) -> tuple[pd.Data
         ("Veřejné ID", "Verejne ID", "Public ID", "Public id"),
         required=False,
     )
+    purchase_column = _resolve_dataframe_column(
+        prepared.columns,
+        ("Nákup", "Nakup", "Purchase"),
+        required=False,
+    )
 
     prepared["session_at"] = _parse_charge_session_datetimes(prepared[occurred_at_column])
     prepared["amount_czk"] = prepared[amount_column].map(parse_czech_currency)
@@ -1449,14 +1553,38 @@ def _prepare_charge_sessions_dataframe(dataframe: pd.DataFrame) -> tuple[pd.Data
         if public_id_column
         else "-"
     )
+    prepared["kwh"] = (
+        prepared[public_id_column].map(_extract_kwh_value)
+        if public_id_column
+        else None
+    )
+    prepared["battery_status"] = (
+        prepared[public_id_column].map(_extract_battery_status)
+        if public_id_column
+        else None
+    )
     prepared["tariff_label"] = (
         prepared[public_id_column].map(_extract_tariff_label)
         if public_id_column
         else "-"
     )
+    prepared["is_completed"] = (
+        prepared[public_id_column].map(_is_completed_charge_session)
+        if public_id_column
+        else False
+    )
+    prepared["id_relace"] = (
+        prepared[purchase_column].map(_normalize_charge_session_id)
+        if purchase_column
+        else ""
+    )
     prepared["price_label"] = prepared["amount_label"]
     prepared["date_range_label"] = prepared.apply(
         lambda row: _format_charge_session_period(row["started_at"], row["ended_at"]),
+        axis=1,
+    )
+    prepared["rychlost_nabijeni"] = prepared.apply(
+        lambda row: _compute_charge_speed_kw(row["kwh"], row["started_at"], row["ended_at"]),
         axis=1,
     )
 

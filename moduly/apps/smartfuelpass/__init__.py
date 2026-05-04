@@ -26,6 +26,7 @@ from moduly.apps.smartfuelpass.service import (
     send_charge_sessions_report_email,
     save_reporting_export,
 )
+from moduly.apps.smartfuelpass.sync import sync_charge_sessions_to_db
 
 __all__ = [
     "SmartFuelPassAuthenticationError",
@@ -54,4 +55,5 @@ __all__ = [
     "previous_month_period",
     "send_charge_sessions_report_email",
     "save_reporting_export",
+    "sync_charge_sessions_to_db",
 ]

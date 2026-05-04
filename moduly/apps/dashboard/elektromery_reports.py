@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from html import escape
 from math import floor, isfinite, log10
 from pathlib import Path
+import re
 import sys
 import warnings
 
@@ -29,6 +30,16 @@ _LIMIT_COLOR = "#111827"
 CHARGING_STRIPE_FREQUENCY = "15min"
 _X_TICK_GRID_COLOR = "#d1d5db"
 _X_TICK_GRID_DASHARRAY = "4 4"
+_CURVE_LAYER_PALETTE = (
+    (_CURVE_COLOR, _CURVE_FILL),
+    ("#059669", "#d1fae5"),
+    ("#d97706", "#fef3c7"),
+    ("#7c3aed", "#ede9fe"),
+    ("#0f766e", "#ccfbf1"),
+    ("#db2777", "#fce7f3"),
+    ("#2563eb", "#dbeafe"),
+)
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 class ElektromeryDashboardReportError(RuntimeError):
@@ -58,6 +69,17 @@ class OteCurveRow:
     spotreba_kwh: float
     odber_kw: float
     pocet_mereni: int
+    peak_at: datetime.datetime | None = None
+
+
+@dataclass(frozen=True)
+class OteCurveLayer:
+    key: str
+    label: str
+    color: str
+    fill_color: str
+    curve_rows: tuple[OteCurveRow, ...]
+    selected_identifications: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -101,6 +123,7 @@ class OtePdfReport:
     curve_rows: tuple[OteCurveRow, ...]
     device_rows: tuple[OteDeviceSummaryRow, ...]
     exceedance_rows: tuple[OteExceedanceRow, ...]
+    curve_layers: tuple[OteCurveLayer, ...] = ()
     charge_overlay_rows: tuple[OteChargeOverlayRow, ...] = ()
     selected_identifications: tuple[str, ...] = ()
     available_identification_count: int | None = None
@@ -596,6 +619,135 @@ def describe_selected_identifications(
     return f"{len(normalized)} odběrných míst: {preview}"
 
 
+def curve_layer_legend_label(layer: OteCurveLayer) -> str:
+    selected_identifications = _normalize_selected_identifications(layer.selected_identifications)
+    if selected_identifications:
+        return ", ".join(selected_identifications)
+    return layer.label
+
+
+def curve_layer_label(index: int) -> str:
+    if index <= 0:
+        return "Hlavní výběr"
+    return f"Vrstva {index}"
+
+
+def curve_layer_color(index: int) -> str:
+    return _CURVE_LAYER_PALETTE[index % len(_CURVE_LAYER_PALETTE)][0]
+
+
+def _normalize_curve_color(color: str | None, *, fallback: str) -> str:
+    if isinstance(color, str) and _HEX_COLOR_RE.fullmatch(color.strip()):
+        return color.strip().lower()
+    return fallback
+
+
+def _derive_curve_fill_color(color: str) -> str:
+    normalized = _normalize_curve_color(color, fallback=_CURVE_COLOR)
+    red = int(normalized[1:3], 16)
+    green = int(normalized[3:5], 16)
+    blue = int(normalized[5:7], 16)
+
+    def mix_with_white(channel: int) -> int:
+        return round(channel + (255 - channel) * 0.82)
+
+    return "#{:02x}{:02x}{:02x}".format(
+        mix_with_white(red),
+        mix_with_white(green),
+        mix_with_white(blue),
+    )
+
+
+def curve_layer_fill_color(index: int, color: str | None = None) -> str:
+    if color is not None:
+        return _derive_curve_fill_color(color)
+    return _CURVE_LAYER_PALETTE[index % len(_CURVE_LAYER_PALETTE)][1]
+
+
+def _normalize_selected_identifications(selected_identifications: Iterable[str] | None) -> tuple[str, ...]:
+    return tuple(
+        str(item).strip()
+        for item in (selected_identifications or ())
+        if item is not None and str(item).strip()
+    )
+
+
+def _build_curve_rows(curve_df: pd.DataFrame) -> tuple[OteCurveRow, ...]:
+    return tuple(
+        OteCurveRow(
+            date=pd.to_datetime(row.date).to_pydatetime(),
+            spotreba_kwh=round(float(row.spotreba_kwh), 3),
+            odber_kw=round(float(row.odber_kw), 3),
+            pocet_mereni=int(row.pocet_mereni),
+            peak_at=(
+                pd.to_datetime(row.peak_at).to_pydatetime()
+                if getattr(row, "peak_at", None) is not None and not pd.isna(getattr(row, "peak_at", None))
+                else None
+            ),
+        )
+        for row in curve_df.itertuples(index=False)
+    )
+
+
+def build_curve_layer(
+    *,
+    index: int,
+    curve_df: pd.DataFrame,
+    selected_identifications: Iterable[str] | None = None,
+    key: str | None = None,
+    label: str | None = None,
+    color: str | None = None,
+) -> OteCurveLayer:
+    layer_index = max(int(index), 0)
+    resolved_color = _normalize_curve_color(color, fallback=curve_layer_color(layer_index))
+    return OteCurveLayer(
+        key=key or f"curve-layer-{layer_index}",
+        label=label or curve_layer_label(layer_index),
+        color=resolved_color,
+        fill_color=curve_layer_fill_color(layer_index, resolved_color if color is not None else None),
+        curve_rows=_build_curve_rows(curve_df),
+        selected_identifications=_normalize_selected_identifications(selected_identifications),
+    )
+
+
+def coerce_curve_layers(curve_layers: Iterable[object] | None) -> tuple[OteCurveLayer, ...]:
+    normalized_layers: list[OteCurveLayer] = []
+    for index, layer in enumerate(curve_layers or ()):
+        if layer is None:
+            continue
+        normalized_layers.append(
+            OteCurveLayer(
+                key=str(getattr(layer, "key", f"curve-layer-{index}")),
+                label=str(getattr(layer, "label", curve_layer_label(index))),
+                color=_normalize_curve_color(getattr(layer, "color", None), fallback=curve_layer_color(index)),
+                fill_color=_normalize_curve_color(
+                    getattr(layer, "fill_color", None),
+                    fallback=curve_layer_fill_color(index, getattr(layer, "color", None)),
+                ),
+                curve_rows=tuple(getattr(layer, "curve_rows", ()) or ()),
+                selected_identifications=_normalize_selected_identifications(
+                    getattr(layer, "selected_identifications", ())
+                ),
+            )
+        )
+    return tuple(normalized_layers)
+
+
+def _resolve_report_curve_layers(report: OtePdfReport) -> tuple[OteCurveLayer, ...]:
+    if report.curve_layers:
+        return coerce_curve_layers(report.curve_layers)
+    return (
+        OteCurveLayer(
+            key="curve-layer-0",
+            label=curve_layer_label(0),
+            color=curve_layer_color(0),
+            fill_color=curve_layer_fill_color(0),
+            curve_rows=report.curve_rows,
+            selected_identifications=report.selected_identifications,
+        ),
+    )
+
+
 def build_ote_pdf_report(
     *,
     period: OteReportPeriod,
@@ -604,6 +756,7 @@ def build_ote_pdf_report(
     curve_df: pd.DataFrame,
     device_summary_df: pd.DataFrame,
     reserved_power_kw: float | None,
+    curve_layers: Iterable[OteCurveLayer] | None = None,
     peak_curve_df: pd.DataFrame | None = None,
     exceedance_curve_df: pd.DataFrame | None = None,
     charge_overlay_df: pd.DataFrame | None = None,
@@ -616,21 +769,19 @@ def build_ote_pdf_report(
         curve_df if exceedance_curve_df is None else exceedance_curve_df,
         reserved_power_kw,
     )
-    normalized_selected_identifications = tuple(
-        str(item).strip()
-        for item in (selected_identifications or ())
-        if item is not None and str(item).strip()
-    )
+    normalized_selected_identifications = _normalize_selected_identifications(selected_identifications)
 
-    curve_rows = tuple(
-        OteCurveRow(
-            date=pd.to_datetime(row.date).to_pydatetime(),
-            spotreba_kwh=round(float(row.spotreba_kwh), 3),
-            odber_kw=round(float(row.odber_kw), 3),
-            pocet_mereni=int(row.pocet_mereni),
+    resolved_curve_layers = tuple(curve_layers or ())
+    if not resolved_curve_layers:
+        resolved_curve_layers = (
+            build_curve_layer(
+                index=0,
+                curve_df=curve_df,
+                selected_identifications=normalized_selected_identifications,
+            ),
         )
-        for row in curve_df.itertuples(index=False)
-    )
+
+    curve_rows = resolved_curve_layers[0].curve_rows if resolved_curve_layers else _build_curve_rows(curve_df)
     device_rows = tuple(
         OteDeviceSummaryRow(
             identifikace=str(row.identifikace),
@@ -675,6 +826,7 @@ def build_ote_pdf_report(
         curve_rows=curve_rows,
         device_rows=device_rows,
         exceedance_rows=exceedance_rows,
+        curve_layers=resolved_curve_layers,
         charge_overlay_rows=overlay_rows,
         selected_identifications=normalized_selected_identifications,
         available_identification_count=available_identification_count,
@@ -814,7 +966,9 @@ def build_axis_tick_times(period: OteReportPeriod) -> list[datetime.datetime]:
 
 
 def _build_curve_svg(report: OtePdfReport) -> str:
-    if not report.curve_rows:
+    resolved_curve_layers = _resolve_report_curve_layers(report)
+    plotted_curve_layers = tuple(layer for layer in resolved_curve_layers if layer.curve_rows)
+    if not plotted_curve_layers:
         return "<div class='chart-empty'>Pro zvolené období nejsou k dispozici data pro křivku odběru.</div>"
 
     width = 920
@@ -829,7 +983,7 @@ def _build_curve_svg(report: OtePdfReport) -> str:
     plot_height = height - margin_top - margin_bottom
     bottom = margin_top + plot_height
 
-    peak_value = max(row.odber_kw for row in report.curve_rows)
+    peak_value = max(row.odber_kw for layer in plotted_curve_layers for row in layer.curve_rows)
     if report.reserved_power_kw is not None and report.reserved_power_kw > 0:
         peak_value = max(peak_value, float(report.reserved_power_kw))
     axis_max = _axis_ceiling(peak_value)
@@ -837,9 +991,10 @@ def _build_curve_svg(report: OtePdfReport) -> str:
 
     period_start = report.period.period_start
     period_duration_seconds = max((report.period.period_end - report.period.period_start).total_seconds(), 1.0)
+    anchor_point_count = len(plotted_curve_layers[0].curve_rows)
 
     def x_position_for_timestamp(value: datetime.datetime) -> float:
-        if len(report.curve_rows) == 1:
+        if anchor_point_count == 1:
             return margin_left + plot_width / 2
         offset_seconds = (value - period_start).total_seconds()
         ratio = min(max(offset_seconds / period_duration_seconds, 0.0), 1.0)
@@ -850,15 +1005,17 @@ def _build_curve_svg(report: OtePdfReport) -> str:
             return float(bottom)
         return bottom - (value / axis_max) * plot_height
 
-    points = [(x_position_for_timestamp(row.date), y_position(row.odber_kw), row) for row in report.curve_rows]
-    area_path = " ".join(
-        ["M", f"{points[0][0]:.2f}", f"{bottom:.2f}", "L"]
-        + [f"{x:.2f} {y:.2f}" for x, y, _ in points]
-        + [f"L {points[-1][0]:.2f} {bottom:.2f}", "Z"]
-    )
-    line_path = " ".join(
-        ("M" if index == 0 else "L") + f" {x:.2f} {y:.2f}"
-        for index, (x, y, _) in enumerate(points)
+    points_by_layer = [
+        (layer, [(x_position_for_timestamp(row.date), y_position(row.odber_kw), row) for row in layer.curve_rows])
+        for layer in plotted_curve_layers
+    ]
+    anchor_layer, anchor_points = points_by_layer[0]
+    area_paths = "".join(
+        (
+            f"<path d='{' '.join(['M', f'{points[0][0]:.2f}', f'{bottom:.2f}', 'L'] + [f'{x:.2f} {y:.2f}' for x, y, _ in points] + [f'L {points[-1][0]:.2f} {bottom:.2f}', 'Z'])}' "
+            f"fill='{layer.fill_color}' opacity='0.88' />"
+        )
+        for layer, points in points_by_layer
     )
 
     y_grid = "".join(
@@ -895,39 +1052,47 @@ def _build_curve_svg(report: OtePdfReport) -> str:
         for tick_time in axis_tick_times
     )
 
+    curve_paths = "".join(
+        f"<path d='{' '.join((('M' if index == 0 else 'L') + f' {x:.2f} {y:.2f}') for index, (x, y, _) in enumerate(points))}' "
+        f"fill='none' stroke='{layer.color}' stroke-width='2.5' stroke-linejoin='round' stroke-linecap='round' />"
+        for layer, points in points_by_layer
+    )
+
+    total_point_count = sum(len(points) for _, points in points_by_layer)
     circle_points = ""
-    if len(points) <= 120:
+    if total_point_count <= 240:
         circle_points = "".join(
-            f"<circle cx='{x:.2f}' cy='{y:.2f}' r='2.2' fill='{_CURVE_COLOR}' />"
+            f"<circle cx='{x:.2f}' cy='{y:.2f}' r='2.2' fill='{layer.color}' />"
+            for layer, points in points_by_layer
             for x, y, _ in points
         )
 
     point_time_offsets = [
         (row.date - period_start).total_seconds()
-        for row in report.curve_rows
+        for row in anchor_layer.curve_rows
     ]
 
     def y_curve_at(value: datetime.datetime) -> float:
-        if not points:
+        if not anchor_points:
             return float(bottom)
-        if len(points) == 1:
-            return points[0][1]
+        if len(anchor_points) == 1:
+            return anchor_points[0][1]
         target_offset = (value - period_start).total_seconds()
         if target_offset <= point_time_offsets[0]:
-            return points[0][1]
+            return anchor_points[0][1]
         if target_offset >= point_time_offsets[-1]:
-            return points[-1][1]
-        for index in range(1, len(points)):
+            return anchor_points[-1][1]
+        for index in range(1, len(anchor_points)):
             left_offset = point_time_offsets[index - 1]
             right_offset = point_time_offsets[index]
             if target_offset <= right_offset:
-                left_x, left_y, _ = points[index - 1]
-                right_x, right_y, _ = points[index]
+                _, left_y, _ = anchor_points[index - 1]
+                _, right_y, _ = anchor_points[index]
                 if right_offset == left_offset:
                     return right_y
                 ratio = (target_offset - left_offset) / (right_offset - left_offset)
                 return left_y + (right_y - left_y) * ratio
-        return points[-1][1]
+        return anchor_points[-1][1]
 
     charge_stripe_lines = ""
     if report.charge_overlay_rows:
@@ -955,9 +1120,10 @@ def _build_curve_svg(report: OtePdfReport) -> str:
     legend_items = [
         (
             "<span class='chart-line-legend-item'>"
-            f"<span class='chart-line-legend-dot' style='background:{_CURVE_COLOR};'></span>"
-            "<span>Odběr [kW]</span></span>"
+            f"<span class='chart-line-legend-dot' style='background:{layer.color};'></span>"
+            f"<span>{escape(curve_layer_legend_label(layer))}</span></span>"
         )
+        for layer in plotted_curve_layers
     ]
     if report.charge_overlay_rows:
         legend_items.append(
@@ -1002,10 +1168,10 @@ def _build_curve_svg(report: OtePdfReport) -> str:
         f"{y_grid}"
         f"{x_grid}"
         f"<line x1='{margin_left}' y1='{bottom}' x2='{width - margin_right}' y2='{bottom}' stroke='#94a3b8' stroke-width='1.2' />"
-        f"<path d='{area_path}' fill='{_CURVE_FILL}' opacity='0.95' />"
+        f"{area_paths}"
         f"{charge_stripe_lines}"
         f"{limit_line}"
-        f"<path d='{line_path}' fill='none' stroke='{_CURVE_COLOR}' stroke-width='2.5' stroke-linejoin='round' stroke-linecap='round' />"
+        f"{curve_paths}"
         f"{circle_points}"
         f"{overlay_text_svg}"
         f"{x_labels}"
@@ -1085,6 +1251,14 @@ def build_ote_report_html(report: OtePdfReport) -> str:
         total_available_count=report.available_identification_count,
         preview_limit=None,
         collapse_full_selection=False,
+    )
+    additional_layer_meta_html = "".join(
+        (
+            f"<div class='report-meta'><strong>{escape(layer.label)}:</strong> "
+            f"{escape(describe_selected_identifications(layer.selected_identifications, total_available_count=report.available_identification_count, preview_limit=None, collapse_full_selection=False))}</div>"
+        )
+        for layer in _resolve_report_curve_layers(report)[1:]
+        if layer.selected_identifications
     )
     reserved_value = (
         _format_value(report.reserved_power_kw, unit="kW")
@@ -1366,6 +1540,7 @@ def build_ote_report_html(report: OtePdfReport) -> str:
         <h2>Křivka odběru a rezervovaná hladina</h2>
         <div class="report-meta"><strong>Typ reportu:</strong> {escape(report.period_label)}</div>
         <div class="report-meta"><strong>Odběrná místa:</strong> {escape(selection_summary)}</div>
+        {additional_layer_meta_html}
         <div class="report-description">
           Report vychází z OTE dat uložených v PostgreSQL a sleduje celkovou spotřebu, okamžitý odběr
           a případná překročení rezervované hladiny.

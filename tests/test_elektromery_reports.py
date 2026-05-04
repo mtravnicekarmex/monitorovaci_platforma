@@ -276,6 +276,56 @@ def test_describe_selected_identifications_can_force_explicit_full_selection_lis
     assert description == "2 / 2 odběrných míst: TS1, TS2"
 
 
+def test_build_curve_layer_assigns_label_color_and_peak_timestamp():
+    curve_df = pd.DataFrame(
+        [
+            {
+                "date": datetime.datetime(2026, 2, 1, 0, 0),
+                "peak_at": datetime.datetime(2026, 2, 1, 0, 15),
+                "spotreba_kwh": 1.25,
+                "odber_kw": 5.0,
+                "pocet_mereni": 2,
+            }
+        ]
+    )
+
+    layer = elektromery_reports.build_curve_layer(
+        index=1,
+        curve_df=curve_df,
+        selected_identifications=("TS3",),
+    )
+
+    assert layer.label == "Vrstva 1"
+    assert layer.color == "#059669"
+    assert layer.fill_color == "#d1fae5"
+    assert layer.selected_identifications == ("TS3",)
+    assert layer.curve_rows[0].peak_at == datetime.datetime(2026, 2, 1, 0, 15)
+    assert elektromery_reports.curve_layer_legend_label(layer) == "TS3"
+
+
+def test_build_curve_layer_respects_custom_color_and_derives_fill():
+    curve_df = pd.DataFrame(
+        [
+            {
+                "date": datetime.datetime(2026, 2, 1, 0, 0),
+                "peak_at": datetime.datetime(2026, 2, 1, 0, 0),
+                "spotreba_kwh": 1.0,
+                "odber_kw": 4.0,
+                "pocet_mereni": 1,
+            }
+        ]
+    )
+
+    layer = elektromery_reports.build_curve_layer(
+        index=2,
+        curve_df=curve_df,
+        color="#008000",
+    )
+
+    assert layer.color == "#008000"
+    assert layer.fill_color == "#d1e8d1"
+
+
 def test_build_ote_report_html_contains_pdf_sections():
     measurements = [
         _measurement("TS1 + TS3", datetime.datetime(2026, 2, 1, 0, 15), 1.0),
@@ -315,6 +365,49 @@ def test_build_ote_report_html_contains_pdf_sections():
     assert "01.02.2026 00:15" in html
     assert "<svg" in html
     assert "data:image/png;base64" in html
+
+
+def test_build_ote_report_html_contains_additional_curve_layer_summary():
+    measurements = [
+        _measurement("TS1", datetime.datetime(2026, 2, 1, 0, 15), 1.0),
+        _measurement("TS2", datetime.datetime(2026, 2, 1, 0, 30), 2.0),
+        _measurement("TS3", datetime.datetime(2026, 2, 1, 0, 45), 0.5),
+    ]
+    df = elektromery_reports.ote_records_to_dataframe(measurements)
+    period = elektromery_reports.resolve_report_period("day", datetime.date(2026, 2, 1))
+    period_df = elektromery_reports.filter_measurements_for_period(df, period)
+    primary_df = period_df[period_df["identifikace"].isin(["TS1", "TS2"])].copy()
+    secondary_df = period_df[period_df["identifikace"].isin(["TS3"])].copy()
+    curve_df = elektromery_reports.build_consumption_curve(primary_df, period)
+    device_summary_df = elektromery_reports.build_device_summary(primary_df)
+    report = elektromery_reports.build_ote_pdf_report(
+        period=period,
+        period_label="Denní report | 01.02.2026 | krok 15 min",
+        period_df=primary_df,
+        curve_df=curve_df,
+        device_summary_df=device_summary_df,
+        reserved_power_kw=10.0,
+        curve_layers=(
+            elektromery_reports.build_curve_layer(
+                index=0,
+                curve_df=curve_df,
+                selected_identifications=("TS1", "TS2"),
+            ),
+            elektromery_reports.build_curve_layer(
+                index=1,
+                curve_df=elektromery_reports.build_consumption_curve(secondary_df, period),
+                selected_identifications=("TS3",),
+            ),
+        ),
+        generated_at=datetime.datetime(2026, 2, 2, 6, 0, 0),
+        selected_identifications=("TS1", "TS2"),
+        available_identification_count=4,
+    )
+
+    html = elektromery_reports.build_ote_report_html(report)
+
+    assert "Vrstva 1:</strong> 1 / 4 odběrných míst: TS3" in html
+    assert ">TS3</span></span>" in html
 
 
 def test_build_ote_report_html_lists_all_selected_identifications_for_full_selection():
@@ -482,6 +575,82 @@ def test_build_curve_svg_adds_vertical_dashed_gridline_for_each_x_tick():
     assert svg.count("stroke='#d1d5db' stroke-width='1' stroke-dasharray='4 4'") == len(
         elektromery_reports.build_axis_tick_times(period)
     )
+
+
+def test_build_curve_svg_renders_additional_curve_layer_paths_and_legend():
+    period = elektromery_reports.resolve_report_period("day", datetime.date(2026, 2, 1))
+    primary_layer = elektromery_reports.build_curve_layer(
+        index=0,
+        curve_df=pd.DataFrame(
+            [
+                {
+                    "date": period.period_start + datetime.timedelta(hours=1),
+                    "peak_at": period.period_start + datetime.timedelta(hours=1),
+                    "spotreba_kwh": 1.0,
+                    "odber_kw": 4.0,
+                    "pocet_mereni": 1,
+                },
+                {
+                    "date": period.period_start + datetime.timedelta(hours=2),
+                    "peak_at": period.period_start + datetime.timedelta(hours=2),
+                    "spotreba_kwh": 2.0,
+                    "odber_kw": 8.0,
+                    "pocet_mereni": 1,
+                },
+            ]
+        ),
+        selected_identifications=("TS1",),
+    )
+    secondary_layer = elektromery_reports.build_curve_layer(
+        index=1,
+        curve_df=pd.DataFrame(
+            [
+                {
+                    "date": period.period_start + datetime.timedelta(hours=1),
+                    "peak_at": period.period_start + datetime.timedelta(hours=1),
+                    "spotreba_kwh": 0.5,
+                    "odber_kw": 2.0,
+                    "pocet_mereni": 1,
+                },
+                {
+                    "date": period.period_start + datetime.timedelta(hours=2),
+                    "peak_at": period.period_start + datetime.timedelta(hours=2),
+                    "spotreba_kwh": 1.0,
+                    "odber_kw": 4.0,
+                    "pocet_mereni": 1,
+                },
+            ]
+        ),
+        selected_identifications=("TS2",),
+    )
+    report = elektromery_reports.OtePdfReport(
+        generated_at=datetime.datetime(2026, 2, 2, 6, 0, 0),
+        period=period,
+        period_label="Denní report",
+        reserved_power_kw=10.0,
+        total_consumption_kwh=3.0,
+        measurement_count=2,
+        device_count=1,
+        max_power_kw=8.0,
+        max_power_at=period.period_start + datetime.timedelta(hours=2),
+        exceedance_count=0,
+        curve_rows=primary_layer.curve_rows,
+        device_rows=(),
+        exceedance_rows=(),
+        curve_layers=(primary_layer, secondary_layer),
+        charge_overlay_rows=(),
+        selected_identifications=("TS1",),
+        available_identification_count=2,
+    )
+
+    svg = elektromery_reports._build_curve_svg(report)
+
+    assert "stroke='#dc2626'" in svg
+    assert "stroke='#059669'" in svg
+    assert "fill='#fee2e2'" in svg
+    assert "fill='#d1fae5'" in svg
+    assert ">TS1</span></span>" in svg
+    assert ">TS2</span></span>" in svg
 
 
 def test_render_ote_report_pdf_uses_playwright(monkeypatch):

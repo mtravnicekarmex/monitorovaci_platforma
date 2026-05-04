@@ -17,16 +17,22 @@ if str(PROJECT_ROOT) not in sys.path:
 from moduly.apps.dashboard.auth import require_page_access
 from moduly.apps.dashboard.elektromery_reports import (
     ElektromeryDashboardReportError,
+    OteCurveLayer,
     REPORT_PERIOD_OPTIONS,
     build_axis_label_format,
     build_axis_tick_times,
     build_charge_session_stripe_dataframe,
     build_consumption_curve,
+    build_curve_layer,
     build_device_summary,
     build_interval_consumption_curve,
     build_ote_pdf_report,
     build_ote_report_pdf_filename,
     build_threshold_exceedance,
+    curve_layer_color,
+    curve_layer_legend_label,
+    coerce_curve_layers,
+    curve_layer_label,
     describe_selected_identifications,
     ote_records_to_dataframe,
     prepare_charge_session_overlays,
@@ -42,6 +48,9 @@ from moduly.mereni.elektromery.database.models import Elektromer_OTE_Mereni
 
 REPORT_RESULT_KEY = "elektromery_reports_result"
 SHOW_CHARGING_OVERLAY_KEY = "elektromery_reports_show_charging_overlay"
+REPORT_LAYER_COUNT_KEY = "elektromery_reports_layer_count"
+REPORT_LAYER_SELECTION_KEY_PREFIX = "elektromery_reports_layer_selection_"
+REPORT_LAYER_COLOR_KEY_PREFIX = "elektromery_reports_layer_color_"
 
 
 st.set_page_config(
@@ -191,20 +200,69 @@ def load_ote_measurements(period_start, period_end, selected_identifications: tu
         session.close()
 
 
+def _layer_selection_key(layer_number: int) -> str:
+    return f"{REPORT_LAYER_SELECTION_KEY_PREFIX}{layer_number}"
+
+
+def _layer_color_key(layer_number: int) -> str:
+    return f"{REPORT_LAYER_COLOR_KEY_PREFIX}{layer_number}"
+
+
+def _normalize_identification_selection(values: object) -> tuple[str, ...]:
+    if not isinstance(values, (list, tuple, set)):
+        return ()
+    return tuple(str(item).strip() for item in values if item is not None and str(item).strip())
+
+
+def _curve_layers_to_dataframe(curve_layers: tuple[OteCurveLayer, ...]) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for layer in curve_layers:
+        for row in layer.curve_rows:
+            rows.append(
+                {
+                    "layer_key": layer.key,
+                    "layer_label": layer.label,
+                    "layer_legend_label": curve_layer_legend_label(layer),
+                    "layer_color": layer.color,
+                    "date": row.date,
+                    "peak_at": row.peak_at if row.peak_at is not None else row.date,
+                    "spotreba_kwh": row.spotreba_kwh,
+                    "odber_kw": row.odber_kw,
+                    "pocet_mereni": row.pocet_mereni,
+                }
+            )
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "layer_key",
+            "layer_label",
+            "layer_legend_label",
+            "layer_color",
+            "date",
+            "peak_at",
+            "spotreba_kwh",
+            "odber_kw",
+            "pocet_mereni",
+        ],
+    )
+
+
 def build_curve_chart(
-    curve_df: pd.DataFrame,
+    curve_layers: tuple[OteCurveLayer, ...],
     reserved_power_kw: float | None,
     report_period,
     *,
     hide_x_axis: bool = False,
 ) -> alt.Chart:
-    chart_source = curve_df.copy()
+    visible_layers = tuple(layer for layer in coerce_curve_layers(curve_layers) if layer.curve_rows)
+    chart_source = _curve_layers_to_dataframe(visible_layers)
     chart_source["spotreba_kwh"] = pd.to_numeric(chart_source["spotreba_kwh"], errors="coerce").round(3)
     chart_source["odber_kw"] = pd.to_numeric(chart_source["odber_kw"], errors="coerce").round(3)
     axis_tick_times = build_axis_tick_times(report_period)
     x_scale = alt.Scale(domain=[report_period.period_start, report_period.period_end])
     peak_tooltip_needed = False
     tooltip_items = [
+        alt.Tooltip("layer_legend_label:N", title="Vrstva"),
         alt.Tooltip("date:T", title="Interval"),
         alt.Tooltip("spotreba_kwh:Q", title="Spotřeba [kWh]", format=".3f"),
         alt.Tooltip("odber_kw:Q", title="Odběr [kW]", format=".3f"),
@@ -234,13 +292,27 @@ def build_curve_chart(
         ),
         tooltip=tooltip_items,
     )
-    line = base.mark_line(color="#dc2626", strokeWidth=2.6).encode(
-        y=alt.Y("odber_kw:Q", title="Odběr [kW]"),
+    color_scale = alt.Scale(
+        domain=[curve_layer_legend_label(layer) for layer in visible_layers],
+        range=[layer.color for layer in visible_layers],
     )
-    chart = line
+    fill_scale = alt.Scale(
+        domain=[curve_layer_legend_label(layer) for layer in visible_layers],
+        range=[layer.fill_color for layer in visible_layers],
+    )
+    line = base.mark_line(strokeWidth=2.6).encode(
+        y=alt.Y("odber_kw:Q", title="Odběr [kW]"),
+        color=alt.Color("layer_legend_label:N", title=None, scale=color_scale),
+    )
+    area = base.mark_area(opacity=0.88).encode(
+        y=alt.Y("odber_kw:Q", title="Odběr [kW]", stack=None),
+        fill=alt.Fill("layer_legend_label:N", title=None, scale=fill_scale, legend=None),
+    )
+    chart = area + line
     if len(chart_source) <= 240:
-        points = base.mark_point(color="#dc2626", size=24, opacity=0.72).encode(
+        points = base.mark_point(size=24, opacity=0.72).encode(
             y=alt.Y("odber_kw:Q", title="Odběr [kW]"),
+            color=alt.Color("layer_legend_label:N", title=None, scale=color_scale, legend=None),
         )
         chart = chart + points
     if reserved_power_kw is not None and reserved_power_kw > 0:
@@ -255,16 +327,17 @@ def build_curve_chart(
 
 
 def build_curve_chart_with_charge_overlay(
-    curve_df: pd.DataFrame,
+    curve_layers: tuple[OteCurveLayer, ...],
+    primary_curve_df: pd.DataFrame,
     reserved_power_kw: float | None,
     report_period,
     overlay_df: pd.DataFrame,
 ) -> alt.ConcatChart | alt.Chart:
-    if overlay_df.empty:
-        return build_curve_chart(curve_df, reserved_power_kw, report_period)
+    if overlay_df.empty or primary_curve_df.empty:
+        return build_curve_chart(curve_layers, reserved_power_kw, report_period)
 
-    stripe_df = build_charge_session_stripe_dataframe(overlay_df, curve_df=curve_df)
-    top_chart = build_curve_chart(curve_df, reserved_power_kw, report_period, hide_x_axis=False)
+    stripe_df = build_charge_session_stripe_dataframe(overlay_df, curve_df=primary_curve_df)
+    top_chart = build_curve_chart(curve_layers, reserved_power_kw, report_period, hide_x_axis=False)
 
     stripe_layer = alt.Chart(stripe_df).mark_rule(
         color="#2563eb",
@@ -341,6 +414,7 @@ def render_report_result(
     period_label: str,
     period_df: pd.DataFrame,
     curve_df: pd.DataFrame,
+    curve_layers: tuple[OteCurveLayer, ...],
     interval_curve_df: pd.DataFrame | None = None,
     device_summary_df: pd.DataFrame,
     reserved_power_kw: float | None,
@@ -354,6 +428,7 @@ def render_report_result(
     available_identification_count: int = 0,
 ) -> None:
     del interval_curve_df, pdf_bytes, pdf_filename, pdf_error, pdf_variants
+    curve_layers = coerce_curve_layers(curve_layers)
     metric_cols = st.columns(5)
     metric_cols[0].metric("Spotřeba", format_energy(summary["total_consumption_kwh"]))
     metric_cols[1].metric("Max. odběr", format_energy(summary["max_power_kw"], unit="kW"))
@@ -361,12 +436,19 @@ def render_report_result(
     metric_cols[3].metric("Měřidla", summary["device_count"])
     metric_cols[4].metric("Překročení", len(exceedance_df))
     st.caption(
-        f"Výběr odběrných míst: {describe_selected_identifications(selected_identifications, total_available_count=available_identification_count)}"
+        f"Hlavní výběr: {describe_selected_identifications(selected_identifications, total_available_count=available_identification_count, collapse_full_selection=False)}"
     )
+    for layer in curve_layers[1:]:
+        st.caption(
+            f"{layer.label}: {describe_selected_identifications(layer.selected_identifications, total_available_count=available_identification_count, collapse_full_selection=False)}"
+        )
 
-    if curve_df.empty:
-        st.info("Pro zvolené období a výběr odběrných míst nejsou v databázi žádná OTE data.")
+    visible_curve_layers = tuple(layer for layer in curve_layers if layer.curve_rows)
+    if not visible_curve_layers:
+        st.info("Pro zvolené období a výběry vrstev nejsou v databázi žádná OTE data.")
         return
+    if curve_df.empty and visible_curve_layers:
+        st.info("Hlavní výběr nemá ve zvoleném období žádná OTE data. V grafu jsou zobrazeny pouze další vrstvy.")
 
     show_charging_overlay = st.checkbox(
         "Zobrazit nabíjecí relace SmartFuelPass v grafu",
@@ -377,7 +459,7 @@ def render_report_result(
         ),
     )
 
-    chart = build_curve_chart(curve_df, reserved_power_kw, report_period)
+    chart = build_curve_chart(visible_curve_layers, reserved_power_kw, report_period)
     overlay_df = pd.DataFrame()
     if show_charging_overlay:
         charge_sessions_df = load_charge_session_overlay_rows(
@@ -392,7 +474,13 @@ def render_report_result(
         if overlay_df.empty:
             st.info("Pro zvolené období nejsou ve SmartFuelPass databázi žádné dokončené nabíjecí relace.")
         else:
-            chart = build_curve_chart_with_charge_overlay(curve_df, reserved_power_kw, report_period, overlay_df)
+            chart = build_curve_chart_with_charge_overlay(
+                visible_curve_layers,
+                curve_df,
+                reserved_power_kw,
+                report_period,
+                overlay_df,
+            )
 
     st.altair_chart(chart, width="stretch")
 
@@ -417,6 +505,7 @@ def _build_report_result(
     period_label: str,
     period_df: pd.DataFrame,
     curve_df: pd.DataFrame,
+    curve_layers: tuple[OteCurveLayer, ...],
     interval_curve_df: pd.DataFrame,
     device_summary_df: pd.DataFrame,
     reserved_power_kw: float | None,
@@ -429,8 +518,9 @@ def _build_report_result(
     pdf_filename = None
     pdf_error = None
     pdf_variants: dict[bool, dict[str, object]] = {}
+    has_chart_data = any(layer.curve_rows for layer in curve_layers)
 
-    if not curve_df.empty:
+    if has_chart_data:
         pdf_report = build_ote_pdf_report(
             period=report_period,
             period_label=period_label,
@@ -438,6 +528,7 @@ def _build_report_result(
             curve_df=curve_df,
             device_summary_df=device_summary_df,
             reserved_power_kw=reserved_power_kw,
+            curve_layers=curve_layers,
             peak_curve_df=interval_curve_df,
             exceedance_curve_df=interval_curve_df,
             selected_identifications=selected_identifications,
@@ -461,6 +552,7 @@ def _build_report_result(
         "period_label": period_label,
         "period_df": period_df,
         "curve_df": curve_df,
+        "curve_layers": curve_layers,
         "interval_curve_df": interval_curve_df,
         "device_summary_df": device_summary_df,
         "reserved_power_kw": reserved_power_kw,
@@ -486,8 +578,9 @@ def _resolve_pdf_variant(report_result: dict[str, object], include_charge_overla
         if isinstance(variant, dict):
             return variant
 
+    curve_layers = tuple(report_result.get("curve_layers") or ())
     curve_df = report_result.get("curve_df")
-    if not isinstance(curve_df, pd.DataFrame) or curve_df.empty:
+    if (not isinstance(curve_df, pd.DataFrame) or curve_df.empty) and not any(layer.curve_rows for layer in curve_layers):
         variant = {"pdf_bytes": None, "pdf_filename": None, "pdf_error": None}
         pdf_variants[include_charge_overlay] = variant
         return variant
@@ -522,6 +615,7 @@ def _resolve_pdf_variant(report_result: dict[str, object], include_charge_overla
         curve_df=curve_df,
         device_summary_df=device_summary_df,
         reserved_power_kw=reserved_power_kw,
+        curve_layers=curve_layers,
         peak_curve_df=interval_curve_df if isinstance(interval_curve_df, pd.DataFrame) else None,
         exceedance_curve_df=interval_curve_df if isinstance(interval_curve_df, pd.DataFrame) else None,
         charge_overlay_df=charge_overlay_df,
@@ -593,7 +687,44 @@ def render_dashboard() -> None:
             default=list(identifikace_options),
             help="Hodnoty jsou načtené jako unikátní `identifikace` z PostgreSQL tabulky `dbo.Mereni_elektromery_OTE`.",
         )
+    main_layer_meta_cols = st.columns((3.6, 1))
+    with main_layer_meta_cols[1]:
+        main_layer_color = st.color_picker(
+            "Barva hlavní vrstvy",
+            value=curve_layer_color(0),
+            key=_layer_color_key(0),
+        )
     st.caption(f"Načteno {len(identifikace_options)} unikátních odběrných míst z databáze.")
+
+    additional_layer_count = int(st.session_state.get(REPORT_LAYER_COUNT_KEY, 0))
+    layer_control_cols = st.columns((1.2, 1.2, 4))
+    with layer_control_cols[0]:
+        if st.button("Přidat vrstvu", use_container_width=True):
+            st.session_state[REPORT_LAYER_COUNT_KEY] = additional_layer_count + 1
+            st.rerun()
+    with layer_control_cols[1]:
+        if st.button("Odebrat vrstvu", disabled=additional_layer_count <= 0, use_container_width=True):
+            st.session_state.pop(_layer_selection_key(additional_layer_count), None)
+            st.session_state.pop(_layer_color_key(additional_layer_count), None)
+            st.session_state[REPORT_LAYER_COUNT_KEY] = max(additional_layer_count - 1, 0)
+            st.rerun()
+
+    for layer_number in range(1, additional_layer_count + 1):
+        layer_cols = st.columns((3.6, 1))
+        with layer_cols[0]:
+            st.multiselect(
+                curve_layer_label(layer_number),
+                options=list(identifikace_options),
+                default=[],
+                key=_layer_selection_key(layer_number),
+                help="Další vrstva vykreslí samostatnou křivku ze součtu vybraných odběrných míst.",
+            )
+        with layer_cols[1]:
+            st.color_picker(
+                f"Barva {curve_layer_label(layer_number).lower()}",
+                value=curve_layer_color(layer_number),
+                key=_layer_color_key(layer_number),
+            )
 
     action_cols = st.columns((1.2, 1.2, 4))
     with action_cols[0]:
@@ -617,6 +748,35 @@ def render_dashboard() -> None:
             interval_curve_df = build_interval_consumption_curve(period_df)
             curve_df = build_consumption_curve(period_df, report_period)
             device_summary_df = build_device_summary(period_df)
+            curve_layers = [
+                build_curve_layer(
+                    index=0,
+                    curve_df=curve_df,
+                    selected_identifications=selected_identifications_tuple,
+                    color=main_layer_color,
+                )
+            ]
+            for layer_number in range(1, additional_layer_count + 1):
+                layer_identifications = _normalize_identification_selection(
+                    st.session_state.get(_layer_selection_key(layer_number), ())
+                )
+                layer_color = str(st.session_state.get(_layer_color_key(layer_number), curve_layer_color(layer_number)))
+                if not layer_identifications:
+                    continue
+                layer_period_df = load_ote_measurements(
+                    report_period.period_start,
+                    report_period.period_end,
+                    layer_identifications,
+                )
+                layer_curve_df = build_consumption_curve(layer_period_df, report_period)
+                curve_layers.append(
+                    build_curve_layer(
+                        index=layer_number,
+                        curve_df=layer_curve_df,
+                        selected_identifications=layer_identifications,
+                        color=layer_color,
+                    )
+                )
             period_label = (
                 f"{report_period.label} report | {report_period.date_range_label} | krok {report_period.bucket_label}"
             )
@@ -625,6 +785,7 @@ def render_dashboard() -> None:
                 period_label=period_label,
                 period_df=period_df,
                 curve_df=curve_df,
+                curve_layers=tuple(curve_layers),
                 interval_curve_df=interval_curve_df,
                 device_summary_df=device_summary_df,
                 reserved_power_kw=reserved_power_kw,

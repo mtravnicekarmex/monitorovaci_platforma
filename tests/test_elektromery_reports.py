@@ -1,4 +1,5 @@
 import datetime
+import re
 import sys
 from pathlib import Path
 
@@ -490,6 +491,74 @@ def test_build_ote_report_html_contains_charge_overlay_annotations():
     assert "Rychlost: 15.000 kW" in html
 
 
+def test_build_curve_svg_renders_charge_overlay_text_below_time_axis():
+    period = elektromery_reports.resolve_report_period("day", datetime.date(2026, 2, 1))
+    report = elektromery_reports.OtePdfReport(
+        generated_at=datetime.datetime(2026, 2, 2, 6, 0, 0),
+        period=period,
+        period_label="Denní report",
+        reserved_power_kw=10.0,
+        total_consumption_kwh=4.5,
+        measurement_count=3,
+        device_count=1,
+        max_power_kw=8.0,
+        max_power_at=period.period_start + datetime.timedelta(hours=1),
+        exceedance_count=0,
+        curve_rows=(
+            elektromery_reports.OteCurveRow(
+                date=period.period_start + datetime.timedelta(minutes=15),
+                peak_at=period.period_start + datetime.timedelta(minutes=15),
+                spotreba_kwh=1.0,
+                odber_kw=4.0,
+                pocet_mereni=1,
+            ),
+            elektromery_reports.OteCurveRow(
+                date=period.period_start + datetime.timedelta(hours=1),
+                peak_at=period.period_start + datetime.timedelta(hours=1),
+                spotreba_kwh=2.0,
+                odber_kw=8.0,
+                pocet_mereni=1,
+            ),
+            elektromery_reports.OteCurveRow(
+                date=period.period_start + datetime.timedelta(hours=2),
+                peak_at=period.period_start + datetime.timedelta(hours=2),
+                spotreba_kwh=1.5,
+                odber_kw=6.0,
+                pocet_mereni=1,
+            ),
+        ),
+        device_rows=(),
+        exceedance_rows=(),
+        charge_overlay_rows=(
+            elektromery_reports.OteChargeOverlayRow(
+                id_relace="rel-001",
+                overlay_start=period.period_start + datetime.timedelta(minutes=5),
+                overlay_end=period.period_start + datetime.timedelta(minutes=35),
+                midpoint_at=period.period_start + datetime.timedelta(minutes=20),
+                lane=0,
+                duration_line="Trvání: 30 min",
+                kwh_line="Odebráno: 7.500 kWh",
+                speed_line="Rychlost: 15.000 kW",
+            ),
+        ),
+    )
+
+    svg = elektromery_reports._build_curve_svg(report)
+
+    axis_match = re.search(
+        r"<text x='[^']+' y='([^']+)' text-anchor='middle' class='chart-axis-label'>00:00</text>",
+        svg,
+    )
+    overlay_match = re.search(
+        r"<text x='[^']+' y='([^']+)' text-anchor='middle' fill='#1d4ed8' [^>]*><tspan x='[^']+' dy='0'>Trvání: 30 min</tspan>",
+        svg,
+    )
+
+    assert axis_match is not None
+    assert overlay_match is not None
+    assert float(overlay_match.group(1)) > float(axis_match.group(1))
+
+
 def _svg_report(period: elektromery_reports.OteReportPeriod) -> elektromery_reports.OtePdfReport:
     curve_rows = (
         elektromery_reports.OteCurveRow(
@@ -541,6 +610,53 @@ def test_build_curve_svg_day_axis_uses_period_ticks():
     assert ">08:00</text>" in svg
     assert ">20:00</text>" in svg
     assert ">00:15</text>" not in svg
+
+
+def test_build_curve_svg_uses_nice_y_axis_ceiling_for_pdf_scale():
+    period = elektromery_reports.resolve_report_period("day", datetime.date(2026, 2, 1))
+    report = elektromery_reports.OtePdfReport(
+        generated_at=datetime.datetime(2026, 2, 2, 6, 0, 0),
+        period=period,
+        period_label="Denní report",
+        reserved_power_kw=0.0,
+        total_consumption_kwh=49.5,
+        measurement_count=3,
+        device_count=1,
+        max_power_kw=198.0,
+        max_power_at=period.period_start + datetime.timedelta(hours=2),
+        exceedance_count=0,
+        curve_rows=(
+            elektromery_reports.OteCurveRow(
+                date=period.period_start + datetime.timedelta(hours=1),
+                peak_at=period.period_start + datetime.timedelta(hours=1),
+                spotreba_kwh=12.0,
+                odber_kw=48.0,
+                pocet_mereni=1,
+            ),
+            elektromery_reports.OteCurveRow(
+                date=period.period_start + datetime.timedelta(hours=2),
+                peak_at=period.period_start + datetime.timedelta(hours=2),
+                spotreba_kwh=49.5,
+                odber_kw=198.0,
+                pocet_mereni=1,
+            ),
+            elektromery_reports.OteCurveRow(
+                date=period.period_start + datetime.timedelta(hours=3),
+                peak_at=period.period_start + datetime.timedelta(hours=3),
+                spotreba_kwh=15.0,
+                odber_kw=60.0,
+                pocet_mereni=1,
+            ),
+        ),
+        device_rows=(),
+        exceedance_rows=(),
+        charge_overlay_rows=(),
+    )
+
+    svg = elektromery_reports._build_curve_svg(report)
+
+    assert ">200.0 kW</text>" in svg
+    assert ">500.0 kW</text>" not in svg
 
 
 def test_build_curve_svg_week_axis_uses_daily_ticks():

@@ -8,7 +8,7 @@ import mimetypes
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from html import escape
-from math import floor, isfinite, log10
+from math import ceil, floor, isfinite, log10, sqrt
 from pathlib import Path
 import re
 import sys
@@ -910,21 +910,29 @@ def _build_metric_card_html(
     )
 
 
-def _axis_ceiling(max_value: float) -> float:
+def _resolve_curve_y_axis(max_value: float, *, tick_count: int = 5) -> tuple[float, tuple[float, ...]]:
+    interval_count = max(int(tick_count) - 1, 1)
     if max_value <= 0:
-        return 1.0
-    scaled = max_value * 1.12
-    magnitude = 10 ** floor(log10(scaled))
-    normalized = scaled / magnitude
-    if normalized <= 1:
-        nice = 1
-    elif normalized <= 2:
-        nice = 2
-    elif normalized <= 5:
-        nice = 5
+        axis_max = 1.0
+        step = axis_max / interval_count
+        return axis_max, tuple(step * index for index in range(interval_count + 1))
+
+    raw_step = max_value / interval_count
+    magnitude = 10 ** floor(log10(raw_step))
+    error = raw_step / magnitude
+    if error >= sqrt(50):
+        factor = 10
+    elif error >= sqrt(10):
+        factor = 5
+    elif error >= sqrt(2):
+        factor = 2
     else:
-        nice = 10
-    return nice * magnitude
+        factor = 1
+
+    step = factor * magnitude
+    axis_max = step * ceil(max_value / step)
+    tick_total = max(int(round(axis_max / step)), 1)
+    return axis_max, tuple(step * index for index in range(tick_total + 1))
 
 
 def _curve_label(value: datetime.datetime, period: OteReportPeriod) -> str:
@@ -986,8 +994,7 @@ def _build_curve_svg(report: OtePdfReport) -> str:
     peak_value = max(row.odber_kw for layer in plotted_curve_layers for row in layer.curve_rows)
     if report.reserved_power_kw is not None and report.reserved_power_kw > 0:
         peak_value = max(peak_value, float(report.reserved_power_kw))
-    axis_max = _axis_ceiling(peak_value)
-    tick_values = [axis_max * index / 4 for index in range(5)]
+    axis_max, tick_values = _resolve_curve_y_axis(peak_value)
 
     period_start = report.period.period_start
     period_duration_seconds = max((report.period.period_end - report.period.period_start).total_seconds(), 1.0)
@@ -1027,7 +1034,7 @@ def _build_curve_svg(report: OtePdfReport) -> str:
         )
         for tick in tick_values
     )
-    axis_label_y = bottom + 18 + overlay_text_height
+    axis_label_y = bottom + 18
     axis_tick_times = build_axis_tick_times(report.period)
     axis_tick_step = (
         axis_tick_times[1] - axis_tick_times[0]
@@ -1146,7 +1153,7 @@ def _build_curve_svg(report: OtePdfReport) -> str:
     overlay_text_svg = ""
     if report.charge_overlay_rows:
         text_rows = []
-        text_start_y = bottom + 14
+        text_start_y = axis_label_y + 16
         for overlay_row in report.charge_overlay_rows:
             text_x = x_position_for_timestamp(overlay_row.midpoint_at)
             lane_y = text_start_y + overlay_row.lane * 34

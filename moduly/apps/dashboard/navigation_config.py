@@ -68,6 +68,14 @@ PAGES: tuple[DashboardPage, ...] = (
         admin_only=True,
     ),
     DashboardPage(
+        key="vodomery_reports",
+        path="pages/27_vodomery_reporty.py",
+        title="Reporty",
+        icon="📈",
+        section_key="vodomery",
+        admin_only=True,
+    ),
+    DashboardPage(
         key="vodomery_anomalie_eventy",
         path="pages/4_vodomery_anomalie_eventy.py",
         title="Anomalie a eventy",

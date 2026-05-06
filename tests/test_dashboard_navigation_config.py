@@ -73,6 +73,16 @@ def test_vodomery_billing_page_is_in_main_navigation_after_branch_overview():
     assert main_page_keys.index("vodomery_branch_overview") < main_page_keys.index("vodomery_billing")
 
 
+def test_vodomery_reports_page_is_after_billing():
+    main_page_keys = [page.key for page in get_dashboard_pages("main")]
+
+    assert "vodomery_billing" in main_page_keys
+    assert "vodomery_reports" in main_page_keys
+    assert "vodomery_anomalie_eventy" in main_page_keys
+    assert main_page_keys.index("vodomery_billing") < main_page_keys.index("vodomery_reports")
+    assert main_page_keys.index("vodomery_reports") < main_page_keys.index("vodomery_anomalie_eventy")
+
+
 def test_plynomery_anomalie_eventy_page_is_between_overview_and_detail():
     main_page_keys = [page.key for page in get_dashboard_pages("main")]
 

@@ -255,13 +255,16 @@ def test_daily_web_monitor_job_aggregates_failed_targets(monkeypatch):
     assert session.closed is True
 
 
-def test_monthly_job_calls_both_monthly_reports(monkeypatch):
+def test_monthly_job_calls_all_monthly_reports(monkeypatch):
     calls = []
 
     def fake_vodomery_report():
         return None
 
     def fake_monthly_branch_report():
+        return None
+
+    def fake_monthly_billing_summary_report():
         return None
 
     def fake_b1_report():
@@ -272,6 +275,7 @@ def test_monthly_job_calls_both_monthly_reports(monkeypatch):
 
     monkeypatch.setattr(scheduler, "send_monthly_vodomery_consumption_report", fake_vodomery_report)
     monkeypatch.setattr(scheduler, "send_monthly_vodomery_branch_report", fake_monthly_branch_report)
+    monkeypatch.setattr(scheduler, "send_monthly_vodomery_billing_summary_report", fake_monthly_billing_summary_report)
     monkeypatch.setattr(scheduler, "send_monthly_b1_consumption_report", fake_b1_report)
     monkeypatch.setattr(scheduler, "send_monthly_elektromery_branch_report", fake_monthly_elektromery_report)
     monkeypatch.setattr(
@@ -285,6 +289,7 @@ def test_monthly_job_calls_both_monthly_reports(monkeypatch):
     assert [fn for fn, _, _ in calls] == [
         fake_vodomery_report,
         fake_monthly_branch_report,
+        fake_monthly_billing_summary_report,
         fake_b1_report,
         fake_monthly_elektromery_report,
     ]
@@ -300,12 +305,23 @@ def test_daily_vodomery_branch_report_job_sends_email_report(monkeypatch):
     def fake_send_daily_vodomery_branch_report():
         return {"recipient_count": 1}
 
+    def fake_send_daily_vodomery_billing_summary_report():
+        return {"recipient_count": 1}
+
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "send_daily_vodomery_branch_report", fake_send_daily_vodomery_branch_report)
+    monkeypatch.setattr(
+        scheduler,
+        "send_daily_vodomery_billing_summary_report",
+        fake_send_daily_vodomery_billing_summary_report,
+    )
 
     scheduler.daily_vodomery_branch_report_job()
 
-    assert [name for name, _, _ in calls] == ["fake_send_daily_vodomery_branch_report"]
+    assert [name for name, _, _ in calls] == [
+        "fake_send_daily_vodomery_branch_report",
+        "fake_send_daily_vodomery_billing_summary_report",
+    ]
 
 
 def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(monkeypatch):
@@ -471,6 +487,9 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
     def fake_send_weekly_vodomery_branch_report():
         return {"recipient_count": 1}
 
+    def fake_send_weekly_vodomery_billing_summary_report():
+        return {"recipient_count": 1}
+
     def fake_send_weekly_elektromery_branch_report():
         return {"recipient_count": 1}
 
@@ -483,6 +502,11 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
     monkeypatch.setattr(scheduler, "send_vodomery_model_rebuild_report", fake_send_vodomery_model_rebuild_report)
     monkeypatch.setattr(scheduler, "send_plynomery_model_rebuild_report", fake_send_plynomery_model_rebuild_report)
     monkeypatch.setattr(scheduler, "send_weekly_vodomery_branch_report", fake_send_weekly_vodomery_branch_report)
+    monkeypatch.setattr(
+        scheduler,
+        "send_weekly_vodomery_billing_summary_report",
+        fake_send_weekly_vodomery_billing_summary_report,
+    )
     monkeypatch.setattr(scheduler, "send_weekly_elektromery_branch_report", fake_send_weekly_elektromery_branch_report)
     monkeypatch.setattr(scheduler, "send_weekly_new_elektromery_report", fake_send_weekly_new_elektromery_report)
 
@@ -494,6 +518,7 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
         "fake_send_vodomery_model_rebuild_report",
         "fake_send_plynomery_model_rebuild_report",
         "fake_send_weekly_vodomery_branch_report",
+        "fake_send_weekly_vodomery_billing_summary_report",
         "fake_send_weekly_elektromery_branch_report",
         "fake_send_weekly_new_elektromery_report",
     ]

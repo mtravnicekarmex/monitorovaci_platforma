@@ -41,8 +41,11 @@ from moduly.mereni.vodomery.vodomery_anomaly import score_new_measurements
 from moduly.mereni.vodomery.alerting import process_vodomery_alerts
 from moduly.mereni.vodomery.reporting import (
     send_daily_vodomery_branch_report,
+    send_daily_vodomery_billing_summary_report,
     send_weekly_vodomery_branch_report,
+    send_weekly_vodomery_billing_summary_report,
     send_monthly_vodomery_branch_report,
+    send_monthly_vodomery_billing_summary_report,
     send_monthly_b1_consumption_report,
     send_vodomery_model_rebuild_report,
     send_monthly_vodomery_consumption_report,
@@ -643,6 +646,7 @@ def daily_job():
 @locked_job
 def daily_vodomery_branch_report_job():
     safe_call(send_daily_vodomery_branch_report)
+    safe_call(send_daily_vodomery_billing_summary_report)
 
 
 # Týdenní rebuild profilů vodoměrů i plynoměrů a report větví vodoměrů.
@@ -653,6 +657,7 @@ def weekly_job():
     safe_call(send_vodomery_model_rebuild_report, rebuild_result)
     safe_call(send_plynomery_model_rebuild_report, plynomery_rebuild_result)
     safe_call(send_weekly_vodomery_branch_report)
+    safe_call(send_weekly_vodomery_billing_summary_report)
     safe_call(send_weekly_elektromery_branch_report)
     safe_call(send_weekly_new_elektromery_report)
 
@@ -668,6 +673,7 @@ def smartfuelpass_weekly_report_job():
 def monthly_job():
     safe_call(send_monthly_vodomery_consumption_report)
     safe_call(send_monthly_vodomery_branch_report)
+    safe_call(send_monthly_vodomery_billing_summary_report)
     safe_call(send_monthly_b1_consumption_report)
     safe_call(send_monthly_elektromery_branch_report)
 
@@ -921,6 +927,15 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             kind="internal_step",
         ),
         ManualRunnableSpec(
+            id="send_daily_vodomery_billing_summary_report",
+            label="Denni souhrn SCVK vs. odberna mista",
+            description="Odeslani denniho souhrnneho reportu SČVK vodomeru proti odbernym mistum.",
+            run_fn=send_daily_vodomery_billing_summary_report,
+            lock_names=("daily_vodomery_branch_report_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
             id="rebuild_profiles",
             label="Rebuild modelu vodomeru",
             description="Tydenni rebuild profilu a modelovych podkladu pro vodomery.",
@@ -966,6 +981,15 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             kind="internal_step",
         ),
         ManualRunnableSpec(
+            id="send_weekly_vodomery_billing_summary_report",
+            label="Tydenni souhrn SCVK vs. odberna mista",
+            description="Odeslani tydenniho souhrnneho reportu SČVK vodomeru proti odbernym mistum.",
+            run_fn=send_weekly_vodomery_billing_summary_report,
+            lock_names=("weekly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
             id="send_weekly_elektromery_branch_report",
             label="Tydenni report elektromeru",
             description="Odeslani tydenniho email reportu spotreby elektromeru po trafostanicich.",
@@ -1006,6 +1030,15 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             label="Mesicni report vetvi vodomeru",
             description="Odeslani mesicniho reportu vetvi vodomeru.",
             run_fn=send_monthly_vodomery_branch_report,
+            lock_names=("monthly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="send_monthly_vodomery_billing_summary_report",
+            label="Mesicni souhrn SCVK vs. odberna mista",
+            description="Odeslani mesicniho souhrnneho reportu SČVK vodomeru proti odbernym mistum.",
+            run_fn=send_monthly_vodomery_billing_summary_report,
             lock_names=("monthly_job",),
             is_scheduled=False,
             kind="internal_step",

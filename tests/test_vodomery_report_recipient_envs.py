@@ -6,6 +6,7 @@ import pytest
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from moduly.mereni.vodomery.reporting import _email_config as email_config
+from moduly.mereni.vodomery.reporting import billing_summary_report
 from moduly.mereni.vodomery.reporting import model_rebuild_report
 from moduly.mereni.vodomery.reporting import monthly_b1_consumption_report
 from moduly.mereni.vodomery.reporting import monthly_branch_report
@@ -79,3 +80,31 @@ def test_elektromery_monthly_report_can_fallback_to_legacy_daily_recipient_env(m
     monkeypatch.setattr(email_config, "config", lambda key, default="": values.get(key, default))
 
     assert elektromery_branch_report._load_monthly_recipients() == ("elektro@armex.cz",)
+
+
+def test_daily_billing_summary_report_prefers_dedicated_recipient_env(monkeypatch):
+    values = {
+        "VODOMERY_DAILY_BILLING_SUMMARY_REPORT_RECIPIENTS": "souhrn@armex.cz",
+        "VODOMERY_DAILY_BRANCH_REPORT_RECIPIENTS": "denni@armex.cz",
+    }
+    monkeypatch.setattr(email_config, "config", lambda key, default="": values.get(key, default))
+
+    assert billing_summary_report._load_daily_recipients() == ("souhrn@armex.cz",)
+
+
+def test_weekly_billing_summary_report_can_fallback_to_weekly_branch_recipients(monkeypatch):
+    values = {
+        "VODOMERY_WEEKLY_BRANCH_REPORT_RECIPIENTS": "tydenni@armex.cz",
+    }
+    monkeypatch.setattr(email_config, "config", lambda key, default="": values.get(key, default))
+
+    assert billing_summary_report._load_weekly_recipients() == ("tydenni@armex.cz",)
+
+
+def test_monthly_billing_summary_report_can_fallback_to_monthly_branch_recipients(monkeypatch):
+    values = {
+        "VODOMERY_MONTHLY_BRANCH_REPORT_RECIPIENTS": "mesicni@armex.cz",
+    }
+    monkeypatch.setattr(email_config, "config", lambda key, default="": values.get(key, default))
+
+    assert billing_summary_report._load_monthly_recipients() == ("mesicni@armex.cz",)

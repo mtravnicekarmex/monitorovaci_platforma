@@ -1095,6 +1095,37 @@ def _read_table_html(table_html: str) -> list[pd.DataFrame]:
         return _parse_html_table_fallback(table_html)
 
 
+def _safe_page_url(page: Any) -> str:
+    url = getattr(page, "url", None)
+    if callable(url):
+        try:
+            url = url()
+        except Exception:
+            return "-"
+    if isinstance(url, str) and url.strip():
+        return url.strip()
+    return "-"
+
+
+def _build_table_not_found_message(
+    *,
+    page: Any,
+    selector_counts: dict[str, object],
+    last_error: Exception | None,
+) -> str:
+    selector_parts = ", ".join(
+        f"{selector}={count}"
+        for selector, count in selector_counts.items()
+    ) or "-"
+    message = (
+        f"{TABLE_NOT_FOUND_MESSAGE} "
+        f"URL: {_safe_page_url(page)} | visible tables: {selector_parts}"
+    )
+    if last_error is not None:
+        message = f"{message} | last error: {type(last_error).__name__}: {last_error}"
+    return message
+
+
 def load_main_table(page: Any, *, timeout_seconds: int | None = None) -> pd.DataFrame:
     resolved_timeout_seconds = timeout_seconds or config(
         "SMARTFUELPASS_TABLE_WAIT_TIMEOUT_SECONDS",
@@ -1112,11 +1143,19 @@ def load_main_table(page: Any, *, timeout_seconds: int | None = None) -> pd.Data
     best_score = -1
     best_area = -1
     last_error: Exception | None = None
+    selector_counts: dict[str, object] = {selector: 0 for selector in selectors}
 
     while time.time() < deadline:
         for selector in selectors:
-            tables = page.locator(selector)
-            table_count = tables.count()
+            try:
+                tables = page.locator(selector)
+                table_count = tables.count()
+            except Exception as exc:
+                last_error = exc
+                selector_counts[selector] = "error"
+                continue
+
+            selector_counts[selector] = table_count
 
             for index in range(table_count):
                 table = tables.nth(index)
@@ -1147,17 +1186,25 @@ def load_main_table(page: Any, *, timeout_seconds: int | None = None) -> pd.Data
     if best_dataframe is not None:
         return best_dataframe
 
-    raise SmartFuelPassError(TABLE_NOT_FOUND_MESSAGE) from last_error
+    raise SmartFuelPassError(
+        _build_table_not_found_message(
+            page=page,
+            selector_counts=selector_counts,
+            last_error=last_error,
+        )
+    ) from last_error
 
 
 def _is_retryable_charge_sessions_fetch_error(error: Exception) -> bool:
     return isinstance(error, SmartFuelPassError) and TABLE_NOT_FOUND_MESSAGE in str(error)
 
 
-def _fetch_charge_sessions_dataframe_with_retries(
+def fetch_charge_sessions_dataframe_with_retries(
     *,
     cookie_path: str | Path | None = None,
     headless: bool = True,
+    dashboard_path: str | None = None,
+    timeout_seconds: int | None = None,
     attempts: int | None = None,
     retry_delay_seconds: float | None = None,
 ) -> pd.DataFrame:
@@ -1173,6 +1220,8 @@ def _fetch_charge_sessions_dataframe_with_retries(
             return fetch_charge_sessions_dataframe(
                 cookie_path=cookie_path,
                 headless=headless,
+                dashboard_path=dashboard_path,
+                timeout_seconds=timeout_seconds,
             )
         except SmartFuelPassError as exc:
             if attempt >= resolved_attempts or not _is_retryable_charge_sessions_fetch_error(exc):
@@ -2057,7 +2106,7 @@ def build_charge_sessions_report_from_portal(
     subject_name: str | None = None,
     headless: bool = True,
 ) -> SmartFuelPassChargeSessionsReport:
-    dataframe = _fetch_charge_sessions_dataframe_with_retries(
+    dataframe = fetch_charge_sessions_dataframe_with_retries(
         cookie_path=cookie_path,
         headless=headless,
     )

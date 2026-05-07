@@ -133,7 +133,7 @@ def test_upsert_charge_sessions_sync_rows_executes_single_statement_and_commits(
     assert "DO NOTHING" in str(fake_session.statements[0])
 
 
-def test_sync_charge_sessions_to_db_fetches_rows_and_closes_owned_session(monkeypatch):
+def test_sync_charge_sessions_to_db_fetches_rows_through_retry_helper_and_closes_owned_session(monkeypatch):
     class FakeSession:
         def __init__(self):
             self.closed = False
@@ -146,17 +146,26 @@ def test_sync_charge_sessions_to_db_fetches_rows_and_closes_owned_session(monkey
 
     monkeypatch.setattr(sync, "ensure_smartfuelpass_tables", lambda: captured.update({"ensure_called": True}))
     monkeypatch.setattr(sync, "get_session_pg", lambda: fake_session)
-    monkeypatch.setattr(sync, "fetch_charge_sessions_dataframe", lambda **kwargs: _sample_sync_dataframe())
+    monkeypatch.setattr(
+        sync,
+        "fetch_charge_sessions_dataframe_with_retries",
+        lambda **kwargs: captured.update({"fetch_kwargs": kwargs}) or _sample_sync_dataframe(),
+    )
     monkeypatch.setattr(
         sync,
         "upsert_charge_sessions_sync_rows",
         lambda db_session, rows: captured.update({"rows": rows, "db_session": db_session}) or len(rows),
     )
 
-    result = sync.sync_charge_sessions_to_db(headless=True)
+    result = sync.sync_charge_sessions_to_db(headless=True, timeout_seconds=17)
 
     assert captured["ensure_called"] is True
     assert captured["db_session"] is fake_session
+    assert captured["fetch_kwargs"] == {
+        "cookie_path": None,
+        "headless": True,
+        "timeout_seconds": 17,
+    }
     assert len(captured["rows"]) == 2
     assert result["upserted_count"] == 2
     assert result["raw_row_count"] == 3

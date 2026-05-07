@@ -156,6 +156,8 @@ def test_build_periodic_vodomery_billing_summary_report_aggregates_branch_report
     assert "Cena stočné</div>" in html
     assert '<header class="page-header">' in html
     assert "display: none;" not in html
+    assert ".metric-grid.balance-metric-grid" in html
+    assert "grid-template-columns: repeat(4, 1fr);" in html
     assert ".branch-table .column-device" in html
     assert "width: 104px;" in html
     assert "<th class='column-device'>Odběrné místo</th>" in html

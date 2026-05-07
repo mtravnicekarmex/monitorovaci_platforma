@@ -738,6 +738,67 @@ def test_build_charge_sessions_report_from_portal_retries_missing_table(monkeypa
     assert report.total.total_amount == 120.5
 
 
+def test_fetch_charge_sessions_dataframe_with_retries_forwards_timeout_and_dashboard(monkeypatch):
+    expected = pd.DataFrame([{"col": "value"}])
+    fetch_calls = []
+
+    monkeypatch.setattr(
+        service,
+        "fetch_charge_sessions_dataframe",
+        lambda **kwargs: fetch_calls.append(kwargs) or expected,
+    )
+
+    result = service.fetch_charge_sessions_dataframe_with_retries(
+        cookie_path="cookies.json",
+        headless=False,
+        dashboard_path="/Report/List",
+        timeout_seconds=21,
+        attempts=1,
+    )
+
+    assert result is expected
+    assert fetch_calls == [
+        {
+            "cookie_path": "cookies.json",
+            "headless": False,
+            "dashboard_path": "/Report/List",
+            "timeout_seconds": 21,
+        }
+    ]
+
+
+def test_load_main_table_error_includes_url_and_selector_counts(monkeypatch):
+    class FakeLocatorCollection:
+        def count(self):
+            return 0
+
+        def nth(self, index):
+            raise AssertionError(index)
+
+    class FakePageForTableSearch:
+        def __init__(self):
+            self.url = "https://portal.smartfuelpass.com/Fuel/Merchant/Dashboard?contractId=12147&accountId=0"
+
+        def locator(self, selector):
+            return FakeLocatorCollection()
+
+        def wait_for_timeout(self, timeout):
+            return None
+
+    time_values = iter((0.0, 2.0))
+    monkeypatch.setattr(service.time, "time", lambda: next(time_values))
+
+    with pytest.raises(service.SmartFuelPassError) as exc_info:
+        service.load_main_table(FakePageForTableSearch(), timeout_seconds=1)
+
+    message = str(exc_info.value)
+    assert service.TABLE_NOT_FOUND_MESSAGE in message
+    assert "URL: https://portal.smartfuelpass.com/Fuel/Merchant/Dashboard?contractId=12147&accountId=0" in message
+    assert "main table:visible=0" in message
+    assert '[role="main"] table:visible=0' in message
+    assert "table:visible=0" in message
+
+
 def test_send_charge_sessions_report_email_generates_pdf_and_sends_attachment(monkeypatch, tmp_path):
     dataframe = pd.DataFrame(
         [

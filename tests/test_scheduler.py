@@ -174,6 +174,8 @@ def test_job_error_listener_sends_readable_alert(monkeypatch, fake_metrics_store
     assert "https://a.example" in sent_email["body"]
     assert "Duvod" in sent_email["body"]
     assert "Cile" in sent_email["body"]
+    assert "background:#ffffff" in sent_email["body"]
+    assert "color:#1f2328" in sent_email["body"]
 
 
 def test_job_success_listener_records_skipped_and_success(monkeypatch, fake_metrics_store):
@@ -546,6 +548,12 @@ def test_scheduler_job_registry_matches_schedule_specs():
     assert set(scheduler._get_job_functions()) == {
         job_spec.id for job_spec in get_scheduler_job_specs()
     }
+
+
+def test_daily_job_schedule_description_mentions_smartfuelpass_sync():
+    daily_job_spec = next(job_spec for job_spec in get_scheduler_job_specs() if job_spec.id == "daily_job")
+
+    assert "SmartFuelPass" in daily_job_spec.description
 
 
 def test_main_scheduler_registers_monthly_and_daily_report_jobs(monkeypatch, fake_metrics_store):

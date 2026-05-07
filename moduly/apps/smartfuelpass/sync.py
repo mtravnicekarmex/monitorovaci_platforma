@@ -11,7 +11,7 @@ from moduly.apps.smartfuelpass.database.db_init import ensure_smartfuelpass_tabl
 from moduly.apps.smartfuelpass.database.models import SmartFuelPassRelace
 from moduly.apps.smartfuelpass.service import (
     _prepare_charge_sessions_dataframe,
-    fetch_charge_sessions_dataframe,
+    fetch_charge_sessions_dataframe_with_retries,
 )
 
 
@@ -78,7 +78,7 @@ def sync_charge_sessions_to_db(
     owns_session = db_session is None
     session = db_session or get_session_pg()
     try:
-        dataframe = fetch_charge_sessions_dataframe(
+        dataframe = fetch_charge_sessions_dataframe_with_retries(
             cookie_path=cookie_path,
             headless=headless,
             timeout_seconds=timeout_seconds,

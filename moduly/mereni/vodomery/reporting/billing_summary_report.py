@@ -782,7 +782,7 @@ def build_vodomery_billing_summary_report_html(report: BillingSummaryReport) -> 
     .balance-summary-card .metric-detail {{
       white-space: pre-line;
     }}
-    .balance-metric-grid {{
+    .metric-grid.balance-metric-grid {{
       grid-template-columns: repeat(4, 1fr);
       margin-bottom: 8px;
     }}

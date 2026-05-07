@@ -258,6 +258,12 @@ def _build_scheduler_alert_body(
     reason: str | None = None,
     targets: tuple[str, ...] = (),
 ) -> str:
+    value_cell_style = (
+        "padding:6px 10px;border:1px solid #d0d7de;background:#ffffff;color:#1f2328;"
+    )
+    label_cell_style = (
+        "padding:6px 10px;border:1px solid #d0d7de;background:#f6f8fa;color:#1f2328;"
+    )
     detail_rows = [
         ("Job", job_id),
         ("Stav", status_text),
@@ -268,8 +274,8 @@ def _build_scheduler_alert_body(
     row_html = "".join(
         (
             "<tr>"
-            f"<td style='padding:6px 10px;border:1px solid #d0d7de;background:#f6f8fa;'><strong>{html.escape(label)}</strong></td>"
-            f"<td style='padding:6px 10px;border:1px solid #d0d7de;'>{html.escape(value)}</td>"
+            f"<td style='{label_cell_style}'><strong>{html.escape(label)}</strong></td>"
+            f"<td style='{value_cell_style}'>{html.escape(value)}</td>"
             "</tr>"
         )
         for label, value in detail_rows
@@ -278,8 +284,10 @@ def _build_scheduler_alert_body(
     reason_html = ""
     if reason:
         reason_html = (
-            "<p style='margin:16px 0 6px;'><strong>Duvod</strong></p>"
+            "<div style='margin:16px 0 0;padding:12px;border:1px solid #d0d7de;background:#ffffff;color:#1f2328;'>"
+            "<p style='margin:0 0 6px;'><strong>Duvod</strong></p>"
             f"<p style='margin:0;'>{html.escape(reason)}</p>"
+            "</div>"
         )
 
     targets_html = ""
@@ -289,15 +297,17 @@ def _build_scheduler_alert_body(
             for target in targets
         )
         targets_html = (
-            "<p style='margin:16px 0 6px;'><strong>Cile</strong></p>"
-            f"<ul style='margin:0 0 0 18px;padding:0;'>{target_items}</ul>"
+            "<div style='margin:16px 0 0;padding:12px;border:1px solid #d0d7de;background:#ffffff;color:#1f2328;'>"
+            "<p style='margin:0 0 6px;'><strong>Cile</strong></p>"
+            f"<ul style='margin:0 0 0 18px;padding:0;color:#1f2328;'>{target_items}</ul>"
+            "</div>"
         )
 
     return (
-        "<html><body style='font-family:Segoe UI,Arial,sans-serif;color:#1f2328;'>"
+        "<html><body style='font-family:Segoe UI,Arial,sans-serif;background:#ffffff;color:#1f2328;'>"
         "<h2 style='margin:0 0 12px;'>Scheduler alert</h2>"
         f"<p style='margin:0 0 16px;'>{html.escape(description)}</p>"
-        "<table style='border-collapse:collapse;font-size:14px;'>"
+        "<table style='border-collapse:collapse;font-size:14px;background:#ffffff;color:#1f2328;'>"
         f"{row_html}"
         "</table>"
         f"{reason_html}"
@@ -633,7 +643,7 @@ def daily_seven_and_two_job():
     safe_call(daily_web_monitor_job)
 
 
-# Noční SOFTLINK import a synchronizace meteo dat.
+# Nocni SOFTLINK import, elektromery import, synchronizace meteo dat a SmartFuelPass relaci.
 @locked_job
 def daily_job():
     safe_call(SOFTLINK_save_to_database_all)

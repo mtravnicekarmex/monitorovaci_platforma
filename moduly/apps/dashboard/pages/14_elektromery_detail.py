@@ -29,6 +29,7 @@ from moduly.apps.dashboard.elektromery_shared import (
     load_ident_options,
     load_measurement_series,
     prepare_measurements,
+    render_device_photo,
     round_consumption_columns,
 )
 
@@ -170,7 +171,7 @@ def render_dashboard() -> None:
     history_df = prepare_measurements(measurements_df) if not measurements_df.empty else pd.DataFrame()
     change_table = build_change_table(history_df) if not history_df.empty else pd.DataFrame()
 
-    top_cols = st.columns([2, 1, 1, 1])
+    top_cols = st.columns(5, vertical_alignment="bottom")
     first_measurement_date = "-"
     latest_total_state = "-"
     latest_tariffs = "-"
@@ -182,9 +183,11 @@ def render_dashboard() -> None:
         latest_total_state = format_energy_metric(latest_row["stav_celkem"])
         latest_tariffs = format_tariff_snapshot(latest_row["vt"], latest_row["nt"])
     top_cols[0].metric("Elektroměr", selected_ident)
-    top_cols[1].metric("Měřeno od:", first_measurement_date)
-    top_cols[2].metric("Poslední stav", latest_total_state)
-    top_cols[3].metric("Poslední VT / NT", latest_tariffs)
+    with top_cols[1]:
+        render_device_photo(device_detail)
+    top_cols[2].metric("Měřeno od:", first_measurement_date)
+    top_cols[3].metric("Poslední stav", latest_total_state)
+    top_cols[4].metric("Poslední VT / NT", latest_tariffs)
 
     with st.container(border=True):
         st.subheader("Detail odběrného místa")

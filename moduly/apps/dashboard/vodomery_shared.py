@@ -30,6 +30,11 @@ from moduly.apps.dashboard.api_client import (
     get_vodomery_resolved_events as api_get_vodomery_resolved_events,
 )
 from moduly.apps.dashboard.auth import get_allowed_devices, get_auth_token, is_admin
+from moduly.apps.dashboard.device_photo import (
+    build_photo_data_uri,
+    render_clickable_device_photo,
+    resolve_photo_path,
+)
 
 
 MAX_IDENT_OPTIONS = 500
@@ -481,6 +486,22 @@ def load_event_history(
         ],
     )
     return filter_min_duration_events(df)
+
+
+def resolve_device_photo_path(photo_value: object) -> Path | None:
+    return resolve_photo_path(photo_value, project_root=PROJECT_ROOT)
+
+
+def build_device_photo_data_uri(photo_path: Path | None) -> str | None:
+    return build_photo_data_uri(photo_path)
+
+
+def render_device_photo(device_detail: dict[str, object] | None) -> bool:
+    return render_clickable_device_photo(
+        device_detail,
+        project_root=PROJECT_ROOT,
+        aria_label="Zvětšit fotografii vodoměru",
+    )
 
 
 def render_sidebar_filters(

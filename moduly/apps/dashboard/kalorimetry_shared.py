@@ -14,6 +14,11 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.db.connect import get_session_ms
 from moduly.apps.dashboard.auth import get_allowed_devices, is_admin
+from moduly.apps.dashboard.device_photo import (
+    build_photo_data_uri,
+    render_clickable_device_photo,
+    resolve_photo_path,
+)
 from moduly.apps.dashboard.vodomery_shared import (
     format_consumption_dataframe,
     format_consumption_with_unit,
@@ -98,6 +103,25 @@ def load_measurement_series(
         session.close()
 
 
+def _serialize_device_detail(device: Kalorimetr_areal_Zarizeni) -> dict[str, object]:
+    return {
+        "identifikace": device.identifikace,
+        "seriove_cislo": device.seriove_cislo,
+        "mbus": device.MBUS,
+        "objekt": device.objekt,
+        "patro": device.patro,
+        "mistnost": device.mistnost,
+        "umisteni": device.umisteni,
+        "napaji": device.napaji,
+        "zdroj": device.zdroj,
+        "zdroj_mereni": device.zdroj_mereni,
+        "koncovy_odberatel": device.koncovy_odberatel,
+        "platnost_cejchu": device.platnost_cejchu,
+        "poznamka": device.poznamka_kalorimetry,
+        "foto": device.foto,
+    }
+
+
 @st.cache_data(ttl=60)
 def load_device_detail(identifikace: str, allowed_devices: tuple[str, ...], user_is_admin: bool) -> dict[str, object] | None:
     if not user_is_admin and identifikace not in allowed_devices:
@@ -112,23 +136,25 @@ def load_device_detail(identifikace: str, allowed_devices: tuple[str, ...], user
         )
         if device is None:
             return None
-        return {
-            "identifikace": device.identifikace,
-            "seriove_cislo": device.seriove_cislo,
-            "mbus": device.MBUS,
-            "objekt": device.objekt,
-            "patro": device.patro,
-            "mistnost": device.mistnost,
-            "umisteni": device.umisteni,
-            "napaji": device.napaji,
-            "zdroj": device.zdroj,
-            "zdroj_mereni": device.zdroj_mereni,
-            "koncovy_odberatel": device.koncovy_odberatel,
-            "platnost_cejchu": device.platnost_cejchu,
-            "poznamka": device.poznamka_kalorimetry,
-        }
+        return _serialize_device_detail(device)
     finally:
         session_ms.close()
+
+
+def resolve_device_photo_path(photo_value: object) -> Path | None:
+    return resolve_photo_path(photo_value, project_root=PROJECT_ROOT)
+
+
+def build_device_photo_data_uri(photo_path: Path | None) -> str | None:
+    return build_photo_data_uri(photo_path)
+
+
+def render_device_photo(device_detail: dict[str, object] | None) -> bool:
+    return render_clickable_device_photo(
+        device_detail,
+        project_root=PROJECT_ROOT,
+        aria_label="Zvětšit fotografii kalorimetru",
+    )
 
 
 def format_energy_metric(value: object) -> str:

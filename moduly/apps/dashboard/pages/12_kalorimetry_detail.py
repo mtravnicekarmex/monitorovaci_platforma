@@ -25,6 +25,7 @@ from moduly.apps.dashboard.kalorimetry_shared import (
     load_device_detail,
     load_ident_options,
     load_measurement_series,
+    render_device_photo,
     round_consumption_columns,
 )
 
@@ -263,7 +264,7 @@ def render_dashboard() -> None:
     history_df = prepare_consumption_history(measurements_df) if not measurements_df.empty else pd.DataFrame()
     change_table = build_change_table(history_df) if not history_df.empty else pd.DataFrame()
 
-    top_cols = st.columns([2, 1, 1, 1])
+    top_cols = st.columns(5, vertical_alignment="bottom")
     first_measurement_date = "-"
     latest_state = "-"
     invalid_measurements = 0
@@ -275,9 +276,11 @@ def render_dashboard() -> None:
         latest_state = format_energy_metric(latest_row["spotreba_energie"])
         invalid_measurements = int((~history_df["platne"]).sum())
     top_cols[0].metric("Kalorimetr", selected_ident)
-    top_cols[1].metric("Měřeno od:", first_measurement_date)
-    top_cols[2].metric("Poslední stav", latest_state)
-    top_cols[3].metric("Neplatná měření", invalid_measurements)
+    with top_cols[1]:
+        render_device_photo(device_detail)
+    top_cols[2].metric("Měřeno od:", first_measurement_date)
+    top_cols[3].metric("Poslední stav", latest_state)
+    top_cols[4].metric("Neplatná měření", invalid_measurements)
 
     with st.container(border=True):
         st.subheader("Detail odběrného místa")

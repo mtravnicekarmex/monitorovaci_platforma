@@ -1017,22 +1017,27 @@ def load_device_detail(
             .one_or_none()
         )
         if device is not None:
-            return {
-                "identifikace": str(device.identifikace),
-                "seriove_cislo": str(device.seriove_cislo) if device.seriove_cislo is not None else None,
-                "mbus": str(device.MBUS) if device.MBUS is not None else None,
-                "objekt": str(device.objekt) if device.objekt is not None else None,
-                "patro": str(device.patro) if device.patro is not None else None,
-                "mistnost": str(device.mistnost) if device.mistnost is not None else None,
-                "umisteni": str(device.umisteni) if device.umisteni is not None else None,
-                "napaji": str(device.napaji) if device.napaji is not None else None,
-                "koncovy_odberatel": str(device.koncovy_odberatel) if device.koncovy_odberatel is not None else None,
-                "platnost_cejchu": device.platnost_cejchu,
-                "poznamka": str(device.poznamka_vodomery) if device.poznamka_vodomery is not None else None,
-            }
+            return _serialize_device_detail(device)
     finally:
         session_ms.close()
     return None
+
+
+def _serialize_device_detail(device: Vodomer_areal_Zarizeni) -> dict[str, object]:
+    return {
+        "identifikace": str(device.identifikace),
+        "seriove_cislo": str(device.seriove_cislo) if device.seriove_cislo is not None else None,
+        "mbus": str(device.MBUS) if device.MBUS is not None else None,
+        "objekt": str(device.objekt) if device.objekt is not None else None,
+        "patro": str(device.patro) if device.patro is not None else None,
+        "mistnost": str(device.mistnost) if device.mistnost is not None else None,
+        "umisteni": str(device.umisteni) if device.umisteni is not None else None,
+        "napaji": str(device.napaji) if device.napaji is not None else None,
+        "koncovy_odberatel": str(device.koncovy_odberatel) if device.koncovy_odberatel is not None else None,
+        "platnost_cejchu": device.platnost_cejchu,
+        "poznamka": str(device.poznamka_vodomery) if device.poznamka_vodomery is not None else None,
+        "foto": str(device.foto) if device.foto is not None else None,
+    }
 
 
 def load_branch_day_overview(

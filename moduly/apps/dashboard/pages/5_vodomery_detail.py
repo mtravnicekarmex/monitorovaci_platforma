@@ -30,6 +30,7 @@ from moduly.apps.dashboard.vodomery_shared import (
     load_prediction_profiles,
     load_recent_anomalies,
     prepare_event_display_dataframe,
+    render_device_photo,
     round_consumption_columns,
 )
 
@@ -333,7 +334,7 @@ def render_dashboard() -> None:
     history_df = prepare_consumption_history(measurements_df) if not measurements_df.empty else pd.DataFrame()
     expected_daily_map = build_expected_daily_map(profiles_df)
 
-    top_cols = st.columns([2, 1, 1, 1])
+    top_cols = st.columns(5, vertical_alignment="bottom")
     first_measurement_date = "-"
     latest_state = "-"
     if not measurements_df.empty:
@@ -344,9 +345,11 @@ def render_dashboard() -> None:
         if latest_measurement is not None:
             latest_state = format_consumption_with_unit(latest_measurement["objem"])
     top_cols[0].metric("Vodoměr", selected_ident)
-    top_cols[1].metric("Aktuální stav:", latest_state)
+    with top_cols[1]:
+        render_device_photo(device_detail)
     top_cols[2].metric("Měřeno od:", first_measurement_date)
-    top_cols[3].metric("Anomalie v obdobi", len(anomalies_df))
+    top_cols[3].metric("Aktuální stav:", latest_state)
+    top_cols[4].metric("Anomalie v obdobi", len(anomalies_df))
 
     with st.container(border=True):
         st.subheader("Detail odberného místa")

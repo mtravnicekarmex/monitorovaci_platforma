@@ -14,6 +14,11 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.db.connect import get_session_ms, get_session_pg
 from moduly.apps.dashboard.auth import get_allowed_devices, is_admin
+from moduly.apps.dashboard.device_photo import (
+    build_photo_data_uri,
+    render_clickable_device_photo,
+    resolve_photo_path,
+)
 from moduly.apps.dashboard.vodomery_shared import (
     format_consumption_dataframe,
     format_consumption_with_unit,
@@ -143,6 +148,7 @@ def _serialize_device_detail(device: Elektromer_areal_Zarizeni) -> dict[str, obj
         "plomb": device.plomb,
         "mis_id": device.mis_id,
         "met_id": device.met_id,
+        "foto": device.foto,
     }
 
 
@@ -163,6 +169,22 @@ def load_device_detail(identifikace: str, allowed_devices: tuple[str, ...], user
         return _serialize_device_detail(device)
     finally:
         session_ms.close()
+
+
+def resolve_device_photo_path(photo_value: object) -> Path | None:
+    return resolve_photo_path(photo_value, project_root=PROJECT_ROOT)
+
+
+def build_device_photo_data_uri(photo_path: Path | None) -> str | None:
+    return build_photo_data_uri(photo_path)
+
+
+def render_device_photo(device_detail: dict[str, object] | None) -> bool:
+    return render_clickable_device_photo(
+        device_detail,
+        project_root=PROJECT_ROOT,
+        aria_label="Zvětšit fotografii elektroměru",
+    )
 
 
 def format_energy_metric(value: object, unit: str = "kWh", signed: bool = False) -> str:

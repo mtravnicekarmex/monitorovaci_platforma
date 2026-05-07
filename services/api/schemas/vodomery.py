@@ -153,6 +153,7 @@ class VodomeryDeviceDetail(BaseModel):
     koncovy_odberatel: str | None = None
     platnost_cejchu: datetime | None = None
     poznamka: str | None = None
+    foto: str | None = None
 
 
 class VodomeryDeviceDetailResponse(BaseModel):

@@ -151,6 +151,74 @@ def test_hledat_nove_vyskyt_returns_link_and_body_hits(monkeypatch):
     assert len(session.added) == 2
 
 
+def test_scan_web_hits_extracts_structured_table_rows_with_attachment_links(monkeypatch):
+    html = """
+    <html>
+        <body>
+            <div>
+                <table>
+                    <tr>
+                        <td>Veřejné vyhlášky</td>
+                        <td>06.05.2026</td>
+                        <td>22.05.2026</td>
+                        <td>Veřejná vyhláška - stavba "I/13 Děčín - OK Benešovská", více viz příloha.</td>
+                        <td>KUUK/085742/2026</td>
+                        <td>Krajský úřad Ústeckého kraje</td>
+                        <td class="prilohy">
+                            <a href="https://twist.mmdecin.cz/ost/xml/export.php?command=getfile&fileid=U1850233" class="ikona-souboru" title="Stáhnout přílohu"></a>
+                            <a href="#" class="open-details" data-priloha_urls='["https:\\/\\/twist.mmdecin.cz\\/ost\\/xml\\/export.php?command=getfile&fileid=U1850233","https:\\/\\/twist.mmdecin.cz\\/ost\\/xml\\/export.php?command=getfile&fileid=U1850234"]' title="Informace o dokumentu"></a>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Dražba</td>
+                        <td>05.05.2026</td>
+                        <td>21.05.2026</td>
+                        <td>Usnesení o odročení dražebního jednání na neurčito, pov.: Michal Zvolský, více viz příloha.</td>
+                        <td>043 EX 26/25 - 57</td>
+                        <td>Exekutorský úřad Ostrava</td>
+                        <td class="prilohy">
+                            <a href="https://twist.mmdecin.cz/ost/xml/export.php?command=getfile&fileid=U1850215" class="ikona-souboru" title="Stáhnout přílohu"></a>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </body>
+    </html>
+    """
+
+    monkeypatch.setattr(
+        service.requests,
+        "get",
+        lambda *args, **kwargs: SimpleNamespace(
+            text=html,
+            raise_for_status=lambda: None,
+        ),
+    )
+
+    hits = service.scan_web_hits(
+        "https://www.mmdecin.cz/uredni-deska-top",
+        ["Benešovská", "I/13 Děčín", "Dražba"],
+    )
+
+    benesovska_hits = [hit for hit in hits if hit[0] == "Benešovská"]
+    draza_hits = [hit for hit in hits if hit[0] == "Dražba"]
+
+    assert benesovska_hits == [
+        (
+            "Benešovská",
+            'Veřejné vyhlášky 06.05.2026 22.05.2026 Veřejná vyhláška - stavba "I/13 Děčín - OK Benešovská", více viz příloha. KUUK/085742/2026 Krajský úřad Ústeckého kraje',
+            "https://twist.mmdecin.cz/ost/xml/export.php?command=getfile&fileid=U1850233",
+        )
+    ]
+    assert draza_hits == [
+        (
+            "Dražba",
+            "Dražba 05.05.2026 21.05.2026 Usnesení o odročení dražebního jednání na neurčito, pov.: Michal Zvolský, více viz příloha. 043 EX 26/25 - 57 Exekutorský úřad Ostrava",
+            "https://twist.mmdecin.cz/ost/xml/export.php?command=getfile&fileid=U1850215",
+        )
+    ]
+
+
 def test_build_pdf_attachments_collects_unique_pdf_files(monkeypatch):
     responses = {
         "https://example.com/page": FakeHttpResponse(
@@ -217,6 +285,86 @@ def test_build_pdf_attachments_uses_attachment_marker_and_content_disposition(mo
     assert [filename for filename, *_ in attachments] == [
         "ISSR-19794_24_SP_OK_Benesovska_Decin_Valbek_rozh2.pdf"
     ]
+
+
+def test_build_pdf_attachments_collects_only_matching_row_attachments(monkeypatch):
+    page_url = "https://www.mmdecin.cz/uredni-deska-top"
+    row_snippet = (
+        'Veřejné vyhlášky 06.05.2026 22.05.2026 Veřejná vyhláška - stavba "I/13 Děčín - OK Benešovská", '
+        "více viz příloha. KUUK/085742/2026 Krajský úřad Ústeckého kraje"
+    )
+    responses = {
+        page_url: FakeHttpResponse(
+            text="""
+            <html>
+                <body>
+                    <table>
+                        <tr>
+                            <td>Veřejné vyhlášky</td>
+                            <td>06.05.2026</td>
+                            <td>22.05.2026</td>
+                            <td>Veřejná vyhláška - stavba "I/13 Děčín - OK Benešovská", více viz příloha.</td>
+                            <td>KUUK/085742/2026</td>
+                            <td>Krajský úřad Ústeckého kraje</td>
+                            <td class="prilohy">
+                                <a href="https://twist.mmdecin.cz/ost/xml/export.php?command=getfile&fileid=U1850233" class="ikona-souboru" title="Stáhnout přílohu"></a>
+                                <a href="https://twist.mmdecin.cz/ost/xml/export.php?command=getfile&fileid=U1850234" class="ikona-souboru" title="Stáhnout přílohu"></a>
+                                <a href="#" class="zip-download" data-priloha_urls='["https:\\/\\/twist.mmdecin.cz\\/ost\\/xml\\/export.php?command=getfile&fileid=U1850233","https:\\/\\/twist.mmdecin.cz\\/ost\\/xml\\/export.php?command=getfile&fileid=U1850234"]' title="Stáhnout všechny přílohy jako ZIP"></a>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Dražba</td>
+                            <td>05.05.2026</td>
+                            <td>21.05.2026</td>
+                            <td>Usnesení o odročení dražebního jednání na neurčito, pov.: Michal Zvolský, více viz příloha.</td>
+                            <td>043 EX 26/25 - 57</td>
+                            <td>Exekutorský úřad Ostrava</td>
+                            <td class="prilohy">
+                                <a href="https://twist.mmdecin.cz/ost/xml/export.php?command=getfile&fileid=U1850215" class="ikona-souboru" title="Stáhnout přílohu"></a>
+                            </td>
+                        </tr>
+                    </table>
+                </body>
+            </html>
+            """
+        ),
+        "https://twist.mmdecin.cz/ost/xml/export.php?command=getfile&fileid=U1850233": FakeHttpResponse(
+            content=b"%PDF-benesovska-1",
+            headers={
+                "Content-Type": "application/pdf",
+                "Content-Disposition": "attachment; filename=benesovska-1.pdf",
+            },
+        ),
+        "https://twist.mmdecin.cz/ost/xml/export.php?command=getfile&fileid=U1850234": FakeHttpResponse(
+            content=b"%PDF-benesovska-2",
+            headers={
+                "Content-Type": "application/pdf",
+                "Content-Disposition": "attachment; filename=benesovska-2.pdf",
+            },
+        ),
+        "https://twist.mmdecin.cz/ost/xml/export.php?command=getfile&fileid=U1850215": FakeHttpResponse(
+            content=b"%PDF-drazba",
+            headers={
+                "Content-Type": "application/pdf",
+                "Content-Disposition": "attachment; filename=drazba.pdf",
+            },
+        ),
+    }
+
+    monkeypatch.setattr(service.requests, "get", lambda url, **kwargs: responses[url])
+
+    attachments = service.build_pdf_attachments(
+        page_url,
+        [
+            (
+                "Benešovská",
+                row_snippet,
+                "https://twist.mmdecin.cz/ost/xml/export.php?command=getfile&fileid=U1850233",
+            )
+        ],
+    )
+
+    assert [filename for filename, *_ in attachments] == ["benesovska-1.pdf", "benesovska-2.pdf"]
 
 
 def test_build_pdf_attachments_scans_found_detail_pages_for_pdf(monkeypatch):
@@ -330,6 +478,11 @@ def test_poslat_email_html_vyraz_sends_html_email_and_escapes_content(monkeypatc
                 "A&B <b>snippet</b>",
                 None,
             ),
+            (
+                "Structured",
+                "Row context",
+                "https://example.com/download?id=42",
+            ),
         ],
         source_url="example.com/page",
     )
@@ -340,6 +493,8 @@ def test_poslat_email_html_vyraz_sends_html_email_and_escapes_content(monkeypatc
     assert "<strong>Body</strong>: …A&amp;B &lt;b&gt;snippet&lt;/b&gt;…" in captured["body"]
     assert "A&amp;B &lt;b&gt;snippet&lt;/b&gt;" in captured["body"]
     assert 'href="https://example.com/doc.pdf?x=1&amp;y=2"' in captured["body"]
+    assert "Row context" in captured["body"]
+    assert 'href="https://example.com/download?id=42"' in captured["body"]
 
 
 def test_poslat_email_html_vyraz_reraises_delivery_failures(monkeypatch):

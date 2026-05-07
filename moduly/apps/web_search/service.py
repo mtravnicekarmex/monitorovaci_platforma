@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from html import escape
+import json
 import logging
 import re
 from collections.abc import Iterable
@@ -25,6 +27,13 @@ MAX_PDF_ATTACHMENT_BYTES = 10 * 1024 * 1024
 MAX_TOTAL_PDF_BYTES = 20 * 1024 * 1024
 MAX_PDF_SOURCE_PAGES = 5
 PDF_MAGIC = b"%PDF"
+
+
+@dataclass(frozen=True)
+class SearchLinkEntry:
+    text: str
+    href: str | None
+    snippet: str | None = None
 
 
 def ensure_url_scheme(url: str) -> str:
@@ -110,6 +119,170 @@ def has_pdf_attachment_marker(marker: str | None) -> bool:
     return (marker or "").strip().casefold() == "pdf"
 
 
+def looks_like_download_reference(
+    url: str | None,
+    link_text: str | None = None,
+    title: str | None = None,
+) -> bool:
+    """Return True when the URL or metadata looks like a direct file download."""
+    if not url:
+        return False
+
+    parsed = urlparse(url)
+    haystacks = [
+        url.lower(),
+        parsed.path.lower(),
+        parsed.query.lower(),
+        (link_text or "").lower(),
+        (title or "").lower(),
+    ]
+    keywords = (
+        "/file/",
+        "download",
+        "getfile",
+        "stahni",
+        "stáhnout",
+        "priloha",
+        "příloha",
+        "attachment",
+        "id_priloha",
+        "fileid=",
+        "export.php",
+    )
+    return any(keyword in haystack for haystack in haystacks for keyword in keywords)
+
+
+def normalize_match_text(text: str | None) -> str:
+    """Normalize text for fuzzy row matching."""
+    return re.sub(r"\s+", " ", (text or "")).strip().casefold()
+
+
+def parse_attachment_url_list(raw_urls: str | None) -> list[str]:
+    """Parse JSON-like attachment URL lists from HTML attributes."""
+    if not raw_urls:
+        return []
+
+    candidates = [raw_urls]
+    cleaned = raw_urls.replace("&quot;", '"')
+    if cleaned != raw_urls:
+        candidates.append(cleaned)
+
+    for candidate in candidates:
+        try:
+            decoded = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(decoded, list):
+            return [str(item) for item in decoded if item]
+
+    return []
+
+
+def extract_attachment_urls_from_element(element: BeautifulSoup, page_url: str) -> list[str]:
+    """Extract direct attachment URLs from an element and its descendants."""
+    attachment_urls: list[str] = []
+    seen: set[str] = set()
+
+    def add_attachment_url(candidate: str | None) -> None:
+        if not candidate:
+            return
+        normalized_candidate = ensure_url_scheme(urljoin(page_url, candidate.strip()))
+        if normalized_candidate in seen:
+            return
+        seen.add(normalized_candidate)
+        attachment_urls.append(normalized_candidate)
+
+    for tag in [element, *element.find_all(True)]:
+        raw_urls = tag.get("data-priloha_urls")
+        for candidate in parse_attachment_url_list(raw_urls):
+            add_attachment_url(candidate)
+
+        if tag.name != "a":
+            continue
+
+        href = tag.get("href")
+        link_text = tag.get_text(" ", strip=True)
+        title = tag.get("title")
+        attachment_type = tag.get("data-attachment-type")
+        classes = set(tag.get("class", []))
+        if href and href != "#" and (
+            has_pdf_attachment_marker(attachment_type)
+            or looks_like_pdf_reference(href, link_text)
+            or looks_like_download_reference(href, link_text, title)
+            or "ikona-souboru" in classes
+        ):
+            add_attachment_url(href)
+
+    return attachment_urls
+
+
+def extract_structured_row_entries(soup: BeautifulSoup, page_url: str) -> list[SearchLinkEntry]:
+    """Build synthetic link entries for table-like rows with attachment icons."""
+    entries: list[SearchLinkEntry] = []
+    seen: set[tuple[str, str]] = set()
+
+    for row in soup.find_all("tr"):
+        row_text = row.get_text(" ", strip=True)
+        attachment_urls = extract_attachment_urls_from_element(row, page_url)
+        if not row_text or not attachment_urls:
+            continue
+
+        key = (row_text, attachment_urls[0])
+        if key in seen:
+            continue
+
+        entries.append(
+            SearchLinkEntry(
+                text=row_text,
+                href=attachment_urls[0],
+                snippet=row_text,
+            )
+        )
+        seen.add(key)
+
+    return entries
+
+
+def row_relates_to_hit(row_text: str, vyraz: str, snippet: str | None) -> bool:
+    """Return True when a table row likely belongs to a found hit."""
+    normalized_row = normalize_match_text(row_text)
+    normalized_vyraz = normalize_match_text(vyraz)
+    normalized_snippet = normalize_match_text(snippet)
+
+    if normalized_snippet and (
+        normalized_snippet in normalized_row or normalized_row in normalized_snippet
+    ):
+        return True
+    return bool(normalized_vyraz and normalized_vyraz in normalized_row)
+
+
+def extract_contextual_attachment_urls(
+    soup: BeautifulSoup,
+    page_url: str,
+    vyskyt_list: Iterable[tuple[str, str | None, str | None]],
+) -> list[str]:
+    """Collect attachment URLs only from rows that match current hits."""
+    contextual_urls: list[str] = []
+    seen: set[str] = set()
+
+    def add_attachment_url(candidate: str) -> None:
+        if candidate in seen:
+            return
+        seen.add(candidate)
+        contextual_urls.append(candidate)
+
+    for row in soup.find_all("tr"):
+        row_text = row.get_text(" ", strip=True)
+        if not row_text:
+            continue
+        if not any(row_relates_to_hit(row_text, vyraz, snippet) for vyraz, snippet, _ in vyskyt_list):
+            continue
+        for candidate in extract_attachment_urls_from_element(row, page_url):
+            add_attachment_url(candidate)
+
+    return contextual_urls
+
+
 def extract_filename_from_response(response: requests.Response, fallback_url: str, index: int) -> str:
     """Prefer filename from Content-Disposition, otherwise derive it from URL."""
     content_disposition = response.headers.get("Content-Disposition", "")
@@ -142,6 +315,8 @@ def collect_pdf_urls(
         candidate: str | None,
         link_text: str | None = None,
         attachment_type: str | None = None,
+        title: str | None = None,
+        allow_download: bool = False,
     ) -> None:
         if not candidate:
             return
@@ -149,12 +324,13 @@ def collect_pdf_urls(
         if (
             has_pdf_attachment_marker(attachment_type)
             or looks_like_pdf_reference(normalized_candidate, link_text)
+            or (allow_download and looks_like_download_reference(normalized_candidate, link_text, title))
         ) and normalized_candidate not in seen:
             seen.add(normalized_candidate)
             pdf_urls.append(normalized_candidate)
 
     for _, _, odkaz in vyskyt_list:
-        add_pdf_url(odkaz)
+        add_pdf_url(odkaz, allow_download=True)
 
     pages_to_scan: list[str] = []
     queued_pages: set[str] = set()
@@ -163,7 +339,12 @@ def collect_pdf_urls(
         if not candidate:
             return
         normalized_candidate = normalize_monitor_url(candidate)
-        if not normalized_candidate or is_pdf_url(normalized_candidate) or normalized_candidate in queued_pages:
+        if (
+            not normalized_candidate
+            or is_pdf_url(normalized_candidate)
+            or looks_like_download_reference(normalized_candidate)
+            or normalized_candidate in queued_pages
+        ):
             return
         queued_pages.add(normalized_candidate)
         pages_to_scan.append(normalized_candidate)
@@ -181,11 +362,19 @@ def collect_pdf_urls(
             continue
 
         soup = BeautifulSoup(response.text, "html.parser")
+        contextual_attachment_urls = extract_contextual_attachment_urls(soup, page_url, vyskyt_list)
+        if contextual_attachment_urls:
+            for attachment_url in contextual_attachment_urls:
+                add_pdf_url(attachment_url, allow_download=True)
+            continue
+
         for anchor in soup.find_all("a", href=True):
             add_pdf_url(
                 urljoin(page_url, anchor["href"]),
                 anchor.get_text(" ", strip=True),
                 anchor.get("data-attachment-type"),
+                anchor.get("title"),
+                allow_download=True,
             )
 
         text_length = len(soup.get_text(strip=True))
@@ -204,6 +393,8 @@ def collect_pdf_urls(
                     link.get_attribute("href"),
                     link.text,
                     link.get_attribute("data-attachment-type"),
+                    link.get_attribute("title"),
+                    allow_download=True,
                 )
         except Exception as exc:
             logger.warning("Chyba pri renderovani stranky pro PDF prilohy %s: %s", page_url, exc)
@@ -278,7 +469,7 @@ def build_pdf_attachments(
     return attachments
 
 
-def _load_search_page(url: str) -> tuple[list[tuple[str, str | None]], list[str]]:
+def _load_search_page(url: str) -> tuple[list[SearchLinkEntry], list[str]]:
     response = requests.get(url, headers=REQUEST_HEADERS, timeout=10)
     response.raise_for_status()
     html = response.text
@@ -296,13 +487,16 @@ def _load_search_page(url: str) -> tuple[list[tuple[str, str | None]], list[str]
             body_elem = driver.find_element("tag name", "body")
             text = body_elem.text
             link_entries = [
-                (link.text, link.get_attribute("href"))
+                SearchLinkEntry(
+                    text=link.text,
+                    href=link.get_attribute("href"),
+                )
                 for link in driver.find_elements("tag name", "a")
             ]
         finally:
             driver.quit()
 
-        link_text_set = {text.strip() for text, _ in link_entries if text and text.strip()}
+        link_text_set = {entry.text.strip() for entry in link_entries if entry.text and entry.text.strip()}
         lines = [
             line.strip()
             for line in text.split("\n")
@@ -311,9 +505,14 @@ def _load_search_page(url: str) -> tuple[list[tuple[str, str | None]], list[str]
         return link_entries, lines
 
     link_entries = [
-        (anchor.get_text(), anchor.get("href"))
+        SearchLinkEntry(
+            text=anchor.get_text(" ", strip=True),
+            href=anchor.get("href"),
+        )
         for anchor in soup.find_all("a")
+        if anchor.get_text(" ", strip=True)
     ]
+    link_entries.extend(extract_structured_row_entries(soup, url))
     text_soup = BeautifulSoup(html, "html.parser")
     for anchor in text_soup.find_all("a"):
         anchor.decompose()
@@ -340,24 +539,37 @@ def scan_web_hits(
     hits: list[tuple[str, str | None, str | None]] = []
     seen_link_hits: set[tuple[str, str]] = set()
     seen_snippet_hits: set[tuple[str, str]] = set()
+    linked_snippet_hits: set[tuple[str, str]] = set()
 
     for vyraz in normalized_vyrazy:
         pattern = re.compile(re.escape(vyraz), re.IGNORECASE)
 
-        for link_text, href in link_entries:
-            if not pattern.search(link_text or ""):
+        for link_entry in link_entries:
+            if not pattern.search(link_entry.text or ""):
                 continue
-            odkaz = urljoin(normalized_url, href) if href else normalized_url
+            odkaz = urljoin(normalized_url, link_entry.href) if link_entry.href else normalized_url
             key = (vyraz, odkaz)
             if key in seen_link_hits:
                 continue
-            hits.append((vyraz, None, odkaz))
+            hits.append((vyraz, link_entry.snippet, odkaz))
             seen_link_hits.add(key)
+            if link_entry.snippet:
+                linked_snippet_hits.add((vyraz, normalize_match_text(link_entry.snippet)))
 
         for line in lines:
             if not pattern.search(line):
                 continue
             snippet = line.strip()
+            normalized_snippet = normalize_match_text(snippet)
+            if any(
+                existing_vyraz == vyraz
+                and (
+                    normalized_snippet in linked_snippet
+                    or linked_snippet in normalized_snippet
+                )
+                for existing_vyraz, linked_snippet in linked_snippet_hits
+            ):
+                continue
             key = (vyraz, snippet)
             if key in seen_snippet_hits:
                 continue
@@ -411,13 +623,13 @@ def hledat_nove_vyskyt(
                 monitor_id=monitor.id,
                 url=url,
                 vyraz=vyraz,
-                snippet=None,
+                snippet=snippet,
                 odkaz=odkaz,
                 datum=utc_now_naive(),
                 notified=False,
             )
             session.add(result)
-            nove_vyskyt.append((vyraz, None, odkaz))
+            nove_vyskyt.append((vyraz, snippet, odkaz))
             existing_link_hits.add(key)
             continue
 
@@ -485,7 +697,14 @@ def poslat_email_html_vyraz(
     html_parts = ["<h2>Nové výskyty na sledovaných stránkách</h2>", "<ul>"]
     for vyraz, snippet, odkaz in vyskyt_list:
         safe_vyraz = escape(vyraz)
-        if odkaz:
+        if odkaz and snippet:
+            safe_odkaz = escape(odkaz, quote=True)
+            safe_snippet = escape(snippet)
+            html_parts.append(
+                f'<li><strong>{safe_vyraz}</strong>: …{safe_snippet}… '
+                f'(<a href="{safe_odkaz}" target="_blank" rel="noopener noreferrer">{safe_odkaz}</a>)</li>'
+            )
+        elif odkaz:
             safe_odkaz = escape(odkaz, quote=True)
             html_parts.append(
                 f'<li><strong>{safe_vyraz}:</strong> '

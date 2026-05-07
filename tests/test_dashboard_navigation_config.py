@@ -57,6 +57,14 @@ def test_nabijecky_section_and_page_are_configurable():
     assert "nabijecky_overview" in page_keys
 
 
+def test_revize_section_and_page_are_configurable():
+    section_keys = get_configurable_section_keys()
+    page_keys = get_configurable_page_keys(section_keys)
+
+    assert "revize" in section_keys
+    assert "revize_overview" in page_keys
+
+
 def test_dashboard_overview_is_first_main_page():
     main_page_keys = [page.key for page in get_dashboard_pages("main")]
 
@@ -115,3 +123,11 @@ def test_nabijecky_page_is_after_elektromery_pages():
     assert "elektromery_new_devices" in main_page_keys
     assert "nabijecky_overview" in main_page_keys
     assert main_page_keys.index("elektromery_new_devices") < main_page_keys.index("nabijecky_overview")
+
+
+def test_revize_page_is_after_kalorimetry_pages():
+    main_page_keys = [page.key for page in get_dashboard_pages("main")]
+
+    assert "kalorimetry_detail" in main_page_keys
+    assert "revize_overview" in main_page_keys
+    assert main_page_keys.index("kalorimetry_detail") < main_page_keys.index("revize_overview")

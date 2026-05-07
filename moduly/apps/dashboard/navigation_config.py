@@ -33,6 +33,7 @@ SECTIONS: tuple[DashboardSection, ...] = (
     DashboardSection(key="elektromery", label="Elektroměry", icon="⚡"),
     DashboardSection(key="nabijecky", label="Nabíječky", icon="🔌", requires_device_permissions=False),
     DashboardSection(key="kalorimetry", label="Kalorimetry", icon="♨️"),
+    DashboardSection(key="revize", label="Revize", icon="📋", requires_device_permissions=False),
 )
 
 
@@ -185,6 +186,14 @@ PAGES: tuple[DashboardPage, ...] = (
         title="Detail",
         icon="🧭",
         section_key="kalorimetry",
+        configurable=True,
+    ),
+    DashboardPage(
+        key="revize_overview",
+        path="pages/28_revize.py",
+        title="Přehled",
+        icon="📋",
+        section_key="revize",
         configurable=True,
     ),
     DashboardPage(

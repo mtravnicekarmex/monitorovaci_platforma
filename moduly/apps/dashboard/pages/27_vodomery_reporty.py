@@ -20,6 +20,7 @@ from moduly.apps.dashboard.vodomery_reports import (
     REPORT_PERIOD_OPTIONS,
     VodomeryDashboardReportError,
     VodomeryCurveLayer,
+    build_axis_grid_times,
     build_axis_label_format,
     build_axis_tick_times,
     build_consumption_curve,
@@ -124,7 +125,7 @@ def load_vodomery_measurements(
 
     session = get_session_pg()
     try:
-        query = (
+        current_period_query = (
             session.query(
                 Mereni_vodomery.date,
                 Mereni_vodomery.identifikace,
@@ -144,9 +145,57 @@ def load_vodomery_measurements(
             )
         )
         if selected_identifications:
-            query = query.filter(Mereni_vodomery.identifikace.in_(selected_identifications))
-        rows = (
-            query
+            current_period_query = current_period_query.filter(Mereni_vodomery.identifikace.in_(selected_identifications))
+
+        ranked_previous_measurements = (
+            session.query(
+                Mereni_vodomery.date.label("date"),
+                Mereni_vodomery.identifikace.label("identifikace"),
+                Mereni_vodomery.seriove_cislo.label("seriove_cislo"),
+                Mereni_vodomery.objem.label("objem"),
+                Mereni_vodomery.delta.label("delta"),
+                Mereni_vodomery.interval_minutes.label("interval_minutes"),
+                Mereni_vodomery.platne.label("platne"),
+                Mereni_vodomery.reset_detected.label("reset_detected"),
+                Mereni_vodomery.zdroj.label("zdroj"),
+                func.row_number().over(
+                    partition_by=Mereni_vodomery.identifikace,
+                    order_by=Mereni_vodomery.date.desc(),
+                ).label("row_num"),
+            )
+            .filter(
+                Mereni_vodomery.date < period_start,
+                Mereni_vodomery.identifikace.is_not(None),
+                Mereni_vodomery.objem.is_not(None),
+                Mereni_vodomery.platne.is_(True),
+            )
+        )
+        if selected_identifications:
+            ranked_previous_measurements = ranked_previous_measurements.filter(
+                Mereni_vodomery.identifikace.in_(selected_identifications)
+            )
+        previous_measurements_subquery = ranked_previous_measurements.subquery()
+        previous_rows = (
+            session.query(
+                previous_measurements_subquery.c.date,
+                previous_measurements_subquery.c.identifikace,
+                previous_measurements_subquery.c.seriove_cislo,
+                previous_measurements_subquery.c.objem,
+                previous_measurements_subquery.c.delta,
+                previous_measurements_subquery.c.interval_minutes,
+                previous_measurements_subquery.c.platne,
+                previous_measurements_subquery.c.reset_detected,
+                previous_measurements_subquery.c.zdroj,
+            )
+            .filter(previous_measurements_subquery.c.row_num == 1)
+            .order_by(
+                previous_measurements_subquery.c.identifikace.asc(),
+                previous_measurements_subquery.c.date.asc(),
+            )
+            .all()
+        )
+        current_rows = (
+            current_period_query
             .order_by(Mereni_vodomery.identifikace.asc(), Mereni_vodomery.date.asc())
             .all()
         )
@@ -162,7 +211,7 @@ def load_vodomery_measurements(
                 "reset_detected": row.reset_detected,
                 "zdroj": row.zdroj,
             }
-            for row in rows
+            for row in (*previous_rows, *current_rows)
         )
     finally:
         session.close()
@@ -222,21 +271,14 @@ def build_curve_chart(
     visible_layers = tuple(layer for layer in coerce_curve_layers(curve_layers) if layer.curve_rows)
     chart_source = _curve_layers_to_dataframe(visible_layers)
     chart_source["spotreba_m3"] = pd.to_numeric(chart_source["spotreba_m3"], errors="coerce").round(3)
-    chart_source["prutok_m3h"] = pd.to_numeric(chart_source["prutok_m3h"], errors="coerce").round(3)
     axis_tick_times = build_axis_tick_times(report_period)
+    axis_grid_times = build_axis_grid_times(report_period)
     x_scale = alt.Scale(domain=[report_period.period_start, report_period.period_end])
-    peak_tooltip_needed = False
     tooltip_items = [
         alt.Tooltip("layer_legend_label:N", title="Vrstva"),
-        alt.Tooltip("date:T", title="Interval"),
+        alt.Tooltip("date:T", title="Hodina"),
         alt.Tooltip("spotreba_m3:Q", title="Spotřeba [m³]", format=".3f"),
-        alt.Tooltip("prutok_m3h:Q", title="Průtok [m³/h]", format=".3f"),
     ]
-    if "peak_at" in chart_source.columns:
-        chart_source["peak_at"] = pd.to_datetime(chart_source["peak_at"], errors="coerce")
-        peak_tooltip_needed = not chart_source["peak_at"].equals(pd.to_datetime(chart_source["date"], errors="coerce"))
-        if peak_tooltip_needed:
-            tooltip_items.append(alt.Tooltip("peak_at:T", title="Špička v"))
 
     base = alt.Chart(chart_source).encode(
         x=alt.X(
@@ -246,13 +288,17 @@ def build_curve_chart(
             axis=alt.Axis(
                 values=axis_tick_times,
                 format=build_axis_label_format(report_period),
-                grid=True,
-                gridColor="#d1d5db",
-                gridDash=[4, 4],
+                grid=False,
                 labelFlush=False,
+                labelOverlap=False,
             ),
         ),
         tooltip=tooltip_items,
+    )
+    grid_chart = (
+        alt.Chart(pd.DataFrame({"date": axis_grid_times}))
+        .mark_rule(color="#d1d5db", strokeDash=[4, 4])
+        .encode(x=alt.X("date:T", scale=x_scale))
     )
     color_scale = alt.Scale(
         domain=[curve_layer_legend_label(layer) for layer in visible_layers],
@@ -263,18 +309,21 @@ def build_curve_chart(
         range=[layer.fill_color for layer in visible_layers],
     )
     line = base.mark_line(strokeWidth=2.6).encode(
-        y=alt.Y("prutok_m3h:Q", title="Průtok [m³/h]"),
+        y=alt.Y("spotreba_m3:Q", title="Hodinová spotřeba [m³]"),
         color=alt.Color("layer_legend_label:N", title=None, scale=color_scale),
+        detail=alt.Detail("layer_key:N"),
     )
     area = base.mark_area(opacity=0.88).encode(
-        y=alt.Y("prutok_m3h:Q", title="Průtok [m³/h]", stack=None),
+        y=alt.Y("spotreba_m3:Q", title="Hodinová spotřeba [m³]", stack=None),
         fill=alt.Fill("layer_legend_label:N", title=None, scale=fill_scale, legend=None),
+        detail=alt.Detail("layer_key:N"),
     )
-    chart = area + line
+    chart = grid_chart + area + line
     if len(chart_source) <= 240:
         points = base.mark_point(size=24, opacity=0.72).encode(
-            y=alt.Y("prutok_m3h:Q", title="Průtok [m³/h]"),
+            y=alt.Y("spotreba_m3:Q", title="Hodinová spotřeba [m³]"),
             color=alt.Color("layer_legend_label:N", title=None, scale=color_scale, legend=None),
+            detail=alt.Detail("layer_key:N"),
         )
         chart = chart + points
     return chart.properties(height=360).interactive()
@@ -296,17 +345,18 @@ def render_report_result(
     selected_identifications: tuple[str, ...] = (),
     available_identification_count: int = 0,
 ) -> None:
-    del period_label, period_df, interval_curve_df, pdf_bytes, pdf_filename, pdf_error
+    del period_label, period_df, interval_curve_df, pdf_bytes, pdf_filename, pdf_error, summary
     curve_layers = coerce_curve_layers(curve_layers)
-    metric_cols = st.columns(5)
-    metric_cols[0].metric("Spotřeba", f"{float(summary['total_consumption_m3'] or 0.0):.3f} m³")
-    metric_cols[1].metric("Max. průtok", "-" if summary["max_flow_m3h"] is None else f"{float(summary['max_flow_m3h']):.3f} m³/h")
-    metric_cols[2].metric(
-        "Datum maxima",
-        "-" if summary["max_flow_at"] is None else pd.to_datetime(summary["max_flow_at"]).strftime("%d.%m.%Y %H:%M"),
-    )
-    metric_cols[3].metric("Měřidla", summary["device_count"])
-    metric_cols[4].metric("Měření", summary["measurement_count"])
+    metric_cols = st.columns(len(curve_layers))
+    for layer_index, (metric_col, layer) in enumerate(zip(metric_cols, curve_layers), start=1):
+        layer_total_consumption = round(
+            sum(float(row.spotreba_m3 or 0.0) for row in layer.curve_rows),
+            3,
+        )
+        metric_col.metric(
+            f"Spotřeba {curve_layer_label(layer_index)}",
+            f"{layer_total_consumption:.3f} m³",
+        )
     st.caption(
         f"Hlavní výběr: {describe_selected_identifications(selected_identifications, total_available_count=available_identification_count, collapse_full_selection=False)}"
     )
@@ -322,6 +372,7 @@ def render_report_result(
     if curve_df.empty and visible_curve_layers:
         st.info("Hlavní výběr nemá ve zvoleném období žádná vodoměrová data. V grafu jsou zobrazeny pouze další vrstvy.")
 
+    st.caption("Graf zobrazuje hodinovou kumulaci spotřeby, aby byly vrstvy s různou hustotou odečtů porovnatelné.")
     st.altair_chart(build_curve_chart(visible_curve_layers, report_period), width="stretch")
     st.subheader("Souhrn měřidel")
     st.dataframe(device_summary_df, width="stretch", hide_index=True)

@@ -279,8 +279,8 @@ def resolve_report_period(period_kind: str, selected_date: datetime.date) -> Vod
             label=REPORT_PERIOD_OPTIONS[period_kind],
             period_start=period_start,
             period_end=period_start + datetime.timedelta(days=1),
-            bucket_frequency="15min",
-            bucket_label="15 min",
+            bucket_frequency="h",
+            bucket_label="hodina",
         )
 
     if period_kind == "week":
@@ -564,6 +564,19 @@ def _build_metric_card_html(label: str, value: str, detail: str | None = None, *
     )
 
 
+def _build_layer_metric_cards_html(report: VodomeryPdfReport) -> str:
+    return "".join(
+        _build_metric_card_html(
+            f"Spotřeba {curve_layer_label(layer_index)}",
+            _format_value(
+                round(sum(float(row.spotreba_m3 or 0.0) for row in layer.curve_rows), 3),
+                unit="m³",
+            ),
+        )
+        for layer_index, layer in enumerate(_resolve_report_curve_layers(report), start=1)
+    )
+
+
 def _resolve_curve_y_axis(max_value: float, *, tick_count: int = 5) -> tuple[float, tuple[float, ...]]:
     safe_max = max(float(max_value or 0.0), 0.0)
     if safe_max <= 0:
@@ -587,20 +600,19 @@ def _resolve_curve_y_axis(max_value: float, *, tick_count: int = 5) -> tuple[flo
 
 def _curve_label(value: datetime.datetime, period: VodomeryReportPeriod) -> str:
     if period.kind == "day":
-        return value.strftime("%H:%M")
+        return value.strftime("%H")
     return value.strftime("%d.%m.")
 
 
 def build_axis_label_format(period: VodomeryReportPeriod) -> str:
     if period.kind == "day":
-        return "%H:%M"
+        return "%H"
     return "%d.%m."
 
 
 def build_axis_tick_times(period: VodomeryReportPeriod) -> list[datetime.datetime]:
     if period.kind == "day":
-        hours = (0, 1, 2, 4, 8, 12, 16, 20)
-        return [period.period_start + datetime.timedelta(hours=hour) for hour in hours]
+        return [period.period_start + datetime.timedelta(hours=hour) for hour in range(24)]
     if period.kind == "week":
         return [period.period_start + datetime.timedelta(days=offset) for offset in range(7)]
 
@@ -621,6 +633,12 @@ def build_axis_tick_times(period: VodomeryReportPeriod) -> list[datetime.datetim
     return ticks
 
 
+def build_axis_grid_times(period: VodomeryReportPeriod) -> list[datetime.datetime]:
+    if period.kind == "day":
+        return [period.period_start + datetime.timedelta(hours=hour) for hour in range(24)]
+    return build_axis_tick_times(period)
+
+
 def _build_curve_svg(report: VodomeryPdfReport) -> str:
     plotted_curve_layers = tuple(layer for layer in _resolve_report_curve_layers(report) if layer.curve_rows)
     if not plotted_curve_layers:
@@ -638,9 +656,9 @@ def _build_curve_svg(report: VodomeryPdfReport) -> str:
     period_end = report.period.period_end
     total_seconds = max((period_end - period_start).total_seconds(), 1.0)
 
-    all_flow_values = [row.prutok_m3h for layer in plotted_curve_layers for row in layer.curve_rows]
-    max_flow = max(all_flow_values) if all_flow_values else 0.0
-    y_ceiling, y_ticks = _resolve_curve_y_axis(max_flow)
+    all_consumption_values = [row.spotreba_m3 for layer in plotted_curve_layers for row in layer.curve_rows]
+    max_consumption = max(all_consumption_values) if all_consumption_values else 0.0
+    y_ceiling, y_ticks = _resolve_curve_y_axis(max_consumption)
 
     def x_position_for_timestamp(value: datetime.datetime) -> float:
         seconds = (value - period_start).total_seconds()
@@ -653,10 +671,11 @@ def _build_curve_svg(report: VodomeryPdfReport) -> str:
         return bottom - ratio * usable_height
 
     x_tick_times = build_axis_tick_times(report.period)
+    x_grid_times = build_axis_grid_times(report.period)
     x_grid = "".join(
         f"<line x1='{x_position_for_timestamp(value):.2f}' y1='{margin_top}' x2='{x_position_for_timestamp(value):.2f}' y2='{bottom}' "
         "stroke='#d1d5db' stroke-width='1' stroke-dasharray='4 4' />"
-        for value in x_tick_times
+        for value in x_grid_times
     )
     x_labels = "".join(
         f"<text x='{x_position_for_timestamp(value):.2f}' y='{bottom + 18}' text-anchor='middle' class='chart-axis-label'>{escape(_curve_label(value, report.period))}</text>"
@@ -665,14 +684,14 @@ def _build_curve_svg(report: VodomeryPdfReport) -> str:
     y_grid = "".join(
         f"<line x1='{margin_left}' y1='{y_position(value):.2f}' x2='{width - margin_right}' y2='{y_position(value):.2f}' "
         "stroke='#e5e7eb' stroke-width='1' />"
-        f"<text x='{margin_left - 8}' y='{y_position(value) + 3:.2f}' text-anchor='end' class='chart-axis-label'>{escape(_format_value(value, unit='m³/h', digits=1))}</text>"
+        f"<text x='{margin_left - 8}' y='{y_position(value) + 3:.2f}' text-anchor='end' class='chart-axis-label'>{escape(_format_value(value, unit='m³', digits=1))}</text>"
         for value in y_ticks
     )
 
     points_by_layer: list[tuple[VodomeryCurveLayer, list[tuple[float, float]]]] = []
     for layer in plotted_curve_layers:
         points = [
-            (x_position_for_timestamp(row.date), y_position(row.prutok_m3h))
+            (x_position_for_timestamp(row.date), y_position(row.spotreba_m3))
             for row in layer.curve_rows
         ]
         points_by_layer.append((layer, points))
@@ -712,11 +731,11 @@ def _build_curve_svg(report: VodomeryPdfReport) -> str:
 
     return (
         "<div class='branch-chart'>"
-        f"<svg viewBox='0 0 {width} {height}' role='img' aria-label='Křivka průtoku'>"
+        f"<svg viewBox='0 0 {width} {height}' role='img' aria-label='Křivka hodinové spotřeby'>"
         f"{y_grid}{x_grid}"
         f"<line x1='{margin_left}' y1='{bottom}' x2='{width - margin_right}' y2='{bottom}' stroke='#94a3b8' stroke-width='1.2' />"
         f"{area_paths}{curve_paths}{circle_points}{x_labels}"
-        f"<text x='{margin_left}' y='{margin_top - 6}' class='chart-axis-label'>Průtok [m³/h]</text>"
+        f"<text x='{margin_left}' y='{margin_top - 6}' class='chart-axis-label'>Hodinová spotřeba [m³]</text>"
         "</svg>"
         f"<div class='chart-line-legend'>{legend_items}</div>"
         "</div>"
@@ -839,7 +858,7 @@ def build_vodomery_report_html(report: VodomeryPdfReport) -> str:
     }}
     .report-hero {{
       display: grid;
-      grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+      grid-template-columns: minmax(0, 1fr);
       gap: 8px;
       align-items: stretch;
       margin-bottom: 8px;
@@ -858,7 +877,7 @@ def build_vodomery_report_html(report: VodomeryPdfReport) -> str:
     }}
     .metric-grid {{
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 8px;
       margin-bottom: 8px;
     }}
@@ -1013,35 +1032,24 @@ def build_vodomery_report_html(report: VodomeryPdfReport) -> str:
     <div class="report-hero">
       <div class="report-title-block">
         <div class="title-eyebrow">Souhrn reportu</div>
-        <h2>Křivka průtoku a spotřeby</h2>
+        <h2>Křivka hodinové spotřeby</h2>
         <div class="report-meta"><strong>Typ reportu:</strong> {escape(report.period_label)}</div>
         <div class="report-meta"><strong>Odběrná místa:</strong> {escape(selection_summary)}</div>
         {additional_layer_meta_html}
         <div class="report-description">
           Report vychází z provozních měření uložených v PostgreSQL tabulce
-          <strong>monitoring.Mereni_vodomery_vse</strong> a sleduje celkovou spotřebu,
-          průtokovou špičku a souhrn vybraných odběrných míst.
+          <strong>monitoring.Mereni_vodomery_vse</strong> a sleduje hodinovou kumulaci
+          spotřeby a souhrn vybraných odběrných míst.
         </div>
-      </div>
-      <div class="report-summary-card">
-        {_build_metric_card_html(
-            "Celková spotřeba",
-            _format_value(report.total_consumption_m3, unit="m³"),
-            f"Maximum {_format_value(report.max_flow_m3h, unit='m³/h')} | Měřidla {report.device_count}",
-            primary=True,
-        )}
       </div>
     </div>
 
     <div class="metric-grid">
-      {_build_metric_card_html("Max. průtok", _format_value(report.max_flow_m3h, unit="m³/h"), _format_datetime(report.max_flow_at))}
-      {_build_metric_card_html("Měřidla", str(report.device_count), "Unikátní odběrná místa")}
-      {_build_metric_card_html("Měření", str(report.measurement_count), f"Krok {report.period.bucket_label}")}
-      {_build_metric_card_html("Vrstev", str(len(_resolve_report_curve_layers(report))), "Vykreslené křivky")}
+      {_build_layer_metric_cards_html(report)}
     </div>
 
     <div class="branch-chart-wrap">
-      <div class="branch-subtitle">Křivka průtoku</div>
+      <div class="branch-subtitle">Hodinová spotřeba</div>
       {chart_svg}
     </div>
 

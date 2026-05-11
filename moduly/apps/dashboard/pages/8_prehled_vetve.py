@@ -209,7 +209,15 @@ def build_branch_stacked_area_chart(
         return None
 
     prediction_df = hourly_df.loc[:, ["date", "ocekavana_spotreba"]].copy()
+    prediction_df["ocekavana_spotreba"] = pd.to_numeric(prediction_df["ocekavana_spotreba"], errors="coerce")
     prediction_df = prediction_df.dropna(subset=["date", "ocekavana_spotreba"])
+
+    billing_df = pd.DataFrame()
+    if "fakturacni_spotreba" in hourly_df.columns:
+        billing_df = hourly_df.loc[:, ["date", "fakturacni_spotreba"]].copy()
+        billing_df["fakturacni_spotreba"] = pd.to_numeric(billing_df["fakturacni_spotreba"], errors="coerce")
+        billing_df = billing_df.dropna(subset=["date", "fakturacni_spotreba"])
+        billing_df = billing_df.loc[billing_df["date"] <= last_actual_hour].copy()
 
     area_chart = (
         alt.Chart(area_df)
@@ -228,22 +236,40 @@ def build_branch_stacked_area_chart(
         )
         .properties(height=220)
     )
-    if prediction_df.empty:
-        return area_chart.configure_view(stroke=None).interactive()
 
-    prediction_chart = (
-        alt.Chart(prediction_df)
-        .mark_line(color="#dedcd9", strokeWidth=2.5)
-        .encode(
-            x=alt.X("date:T", title=None),
-            y=alt.Y("ocekavana_spotreba:Q", title="Spotřeba [m³]"),
-            tooltip=[
-                alt.Tooltip("date:T", title="Čas"),
-                alt.Tooltip("ocekavana_spotreba:Q", title="Predikce [m³]", format=".3f"),
-            ],
+    layered_chart = area_chart
+
+    if not prediction_df.empty:
+        prediction_chart = (
+            alt.Chart(prediction_df)
+            .mark_line(color="#dedcd9", strokeWidth=2.5)
+            .encode(
+                x=alt.X("date:T", title=None),
+                y=alt.Y("ocekavana_spotreba:Q", title="Spotřeba [m³]"),
+                tooltip=[
+                    alt.Tooltip("date:T", title="Čas"),
+                    alt.Tooltip("ocekavana_spotreba:Q", title="Predikce [m³]", format=".3f"),
+                ],
+            )
         )
-    )
-    return (area_chart + prediction_chart).configure_view(stroke=None).interactive()
+        layered_chart = layered_chart + prediction_chart
+
+    if not billing_df.empty:
+        billing_chart = (
+            alt.Chart(billing_df)
+            .mark_line(color="#f97316", strokeWidth=2.5)
+            .encode(
+                x=alt.X("date:T", title=None),
+                y=alt.Y("fakturacni_spotreba:Q", title="Spotřeba [m³]"),
+                tooltip=[
+                    alt.Tooltip("date:T", title="Čas"),
+                    alt.Tooltip("fakturacni_spotreba:Q", title="SČVK [m³]", format=".3f"),
+                ],
+            )
+        )
+        layered_chart = layered_chart + billing_chart
+
+    return layered_chart.configure_view(stroke=None).interactive()
 
 
 def render_branch_donut_labels(chart_data: pd.DataFrame) -> None:
@@ -365,7 +391,7 @@ def render_branch_card(branch_data: dict[str, object], selected_date: datetime.d
                 last_actual_timestamp,
             )
             with st.container(border=True):
-                st.caption("Okamžitá spotřeba podle odběrných míst a hodinová predikce pro celý den")
+                st.caption("Okamžitá spotřeba podle odběrných míst, SČVK vodoměr a hodinová predikce pro celý den")
                 if area_chart is None:
                     st.info("Pro vybraný den zatím není k dispozici hodinová spotřeba odběrných míst.")
                 else:

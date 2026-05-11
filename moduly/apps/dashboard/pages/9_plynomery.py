@@ -215,7 +215,7 @@ def dataframe_to_excel_bytes(df: pd.DataFrame, sheet_name: str) -> bytes:
             if export_df.empty:
                 max_width = len(str(column)) + 2
             else:
-                series_width = export_df[column].astype(str).str.len().max()
+                series_width = export_df[column].astype("string").fillna("").str.len().max()
                 max_width = max(len(str(column)), int(series_width)) + 2
             worksheet.set_column(idx, idx, min(max_width, 32))
     buffer.seek(0)

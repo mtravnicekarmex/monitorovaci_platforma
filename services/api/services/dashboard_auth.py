@@ -17,7 +17,7 @@ from moduly.apps.dashboard.database.users import (
     update_password,
     verify_user_password,
 )
-from moduly.apps.dashboard.navigation_config import get_section_definition
+from moduly.apps.dashboard.navigation_config import get_page_definition, get_section_definition
 
 
 class AuthenticationError(ValueError):
@@ -112,6 +112,23 @@ def require_section_access(user_context: DashboardUserContext, section_key: str)
 
     if section.requires_device_permissions and not user_context.allowed_devices:
         raise AuthorizationError("Uzivateli nejsou prirazena zadna zarizeni pro tuto sekci.")
+
+
+def require_page_access(user_context: DashboardUserContext, page_key: str) -> None:
+    page = get_page_definition(page_key)
+    if page is None:
+        raise AuthorizationError("Neznama stranka dashboardu.")
+
+    if user_context.is_admin:
+        return
+
+    if page.admin_only:
+        raise AuthorizationError("Tato stranka je dostupna pouze adminovi.")
+
+    if page.section_key is not None:
+        require_section_access(user_context, page.section_key)
+    if page.configurable and page.key not in user_context.allowed_pages:
+        raise AuthorizationError("Na tuto stranku nemate opravneni.")
 
 
 def require_device_access(user_context: DashboardUserContext, identifikace: str) -> None:

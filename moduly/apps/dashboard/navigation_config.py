@@ -34,6 +34,7 @@ SECTIONS: tuple[DashboardSection, ...] = (
     DashboardSection(key="nabijecky", label="Nabíječky", icon="🔌", requires_device_permissions=False),
     DashboardSection(key="kalorimetry", label="Kalorimetry", icon="♨️"),
     DashboardSection(key="revize", label="Revize", icon="📋", requires_device_permissions=False),
+    DashboardSection(key="sprava", label="Správa", icon="⚙️", requires_device_permissions=False),
 )
 
 
@@ -43,6 +44,7 @@ PAGES: tuple[DashboardPage, ...] = (
         path="pages/0_overview.py",
         title="Overview",
         icon="🏠",
+        configurable=True,
     ),
     DashboardPage(
         key="vodomery_overview",
@@ -208,9 +210,10 @@ PAGES: tuple[DashboardPage, ...] = (
         key="web_search_monitor",
         path="pages/15_web_search.py",
         title="Web search",
+        section_key="sprava",
         icon="🔍",
         sidebar_location="footer",
-        admin_only=True,
+        configurable=True,
     ),
     DashboardPage(
         key="alerting",
@@ -313,7 +316,7 @@ def normalize_page_keys(page_keys: Iterable[str] | None, allowed_section_keys: I
         page = PAGE_MAP.get(page_key)
         if page is None or not page.configurable or page_key in seen:
             continue
-        if allowed_sections is not None and page.section_key not in allowed_sections:
+        if allowed_sections is not None and page.section_key is not None and page.section_key not in allowed_sections:
             continue
         seen.add(page_key)
         normalized.append(page_key)

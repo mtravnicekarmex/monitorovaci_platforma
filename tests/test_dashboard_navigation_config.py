@@ -7,6 +7,8 @@ from moduly.apps.dashboard.navigation_config import (
     get_configurable_page_keys,
     get_configurable_section_keys,
     get_dashboard_pages,
+    get_page_definition,
+    normalize_page_keys,
 )
 
 
@@ -63,6 +65,25 @@ def test_revize_section_and_page_are_configurable():
 
     assert "revize" in section_keys
     assert "revize_overview" in page_keys
+
+
+def test_sprava_section_exposes_only_web_search_to_users():
+    section_keys = get_configurable_section_keys()
+    page_keys = get_configurable_page_keys(("sprava",))
+
+    assert "sprava" in section_keys
+    assert page_keys == ["web_search_monitor"]
+
+
+def test_dashboard_overview_is_configurable_without_section():
+    page = get_page_definition("dashboard_overview")
+    page_keys = get_configurable_page_keys()
+
+    assert page is not None
+    assert page.section_key is None
+    assert page.configurable is True
+    assert "dashboard_overview" in page_keys
+    assert normalize_page_keys(["dashboard_overview"], allowed_section_keys=("sprava",)) == ["dashboard_overview"]
 
 
 def test_dashboard_overview_is_first_main_page():

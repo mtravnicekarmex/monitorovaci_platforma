@@ -82,7 +82,8 @@ def render_login_page() -> None:
             except DashboardApiError as exc:
                 st.error(str(exc))
             else:
-                st.session_state["post_login_redirect"] = default_target_page()
+                redirect_target = st.session_state.pop("requested_login_redirect", "") or default_target_page()
+                st.session_state["post_login_redirect"] = redirect_target
                 st.rerun()
 
 

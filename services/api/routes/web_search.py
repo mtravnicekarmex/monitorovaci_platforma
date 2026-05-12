@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
-from services.api.core.dependencies import get_current_admin_user
+from services.api.core.dependencies import get_current_web_search_user
 from services.api.schemas.web_search import (
     WebSearchMonitorRecord,
     WebSearchMonitorsResponse,
@@ -33,10 +33,10 @@ router = APIRouter(prefix="/api/v1/web-search", tags=["web-search"])
     response_model=WebSearchMonitorsResponse,
     summary="List web search monitors",
     description="Vrací seznam všech nakonfigurovaných web monitorů. "
-    "Vyžaduje admin oprávnění.",
+    "Vyžaduje oprávnění ke stránce Web search.",
 )
 def get_web_search_monitors(
-    current_user: DashboardUserContext = Depends(get_current_admin_user),
+    current_user: DashboardUserContext = Depends(get_current_web_search_user),
 ) -> WebSearchMonitorsResponse:
     rows = list_monitors_admin(current_user)
     return WebSearchMonitorsResponse(total=len(rows), rows=rows)
@@ -48,11 +48,11 @@ def get_web_search_monitors(
     summary="Preview web search hits",
     description="Provede náhledové hledání výrazů na URL bez vytvoření monitoru. "
     "Užitečné pro testování před vytvořením monitoru. "
-    "Vyžaduje admin oprávnění.",
+    "Vyžaduje oprávnění ke stránce Web search.",
 )
 def preview_web_search(
     payload: WebSearchPreviewRequest,
-    current_user: DashboardUserContext = Depends(get_current_admin_user),
+    current_user: DashboardUserContext = Depends(get_current_web_search_user),
 ) -> WebSearchPreviewResponse:
     try:
         preview = preview_hits_admin(
@@ -73,11 +73,11 @@ def preview_web_search(
     response_model=WebSearchResultsResponse,
     summary="List web search results",
     description="Vrací historii výsledků web monitoringu (nalezené výskyty). "
-    "Vyžaduje admin oprávnění.",
+    "Vyžaduje oprávnění ke stránce Web search.",
 )
 def get_web_search_results(
     limit: int = Query(default=200, ge=1, le=5000),
-    current_user: DashboardUserContext = Depends(get_current_admin_user),
+    current_user: DashboardUserContext = Depends(get_current_web_search_user),
 ) -> WebSearchResultsResponse:
     rows = list_results_admin(current_user, limit=limit)
     return WebSearchResultsResponse(total=len(rows), rows=rows)
@@ -89,11 +89,11 @@ def get_web_search_results(
     summary="Create web search monitor",
     description="Vytvoří nový web monitor pro sledování výskytu výrazů na URL. "
     "Monitor pravidelně kontroluje stránku a zasílá upozornění při nových výskytech. "
-    "Vyžaduje admin oprávnění.",
+    "Vyžaduje oprávnění ke stránce Web search.",
 )
 def create_web_search_monitor(
     payload: WebSearchMonitorUpsertRequest,
-    current_user: DashboardUserContext = Depends(get_current_admin_user),
+    current_user: DashboardUserContext = Depends(get_current_web_search_user),
 ) -> WebSearchMonitorUpsertResponse:
     try:
         response = upsert_monitor_admin(
@@ -119,12 +119,12 @@ def create_web_search_monitor(
     response_model=WebSearchMonitorRecord,
     summary="Update web search monitor",
     description="Aktualizuje existující web monitor. "
-    "Vyžaduje admin oprávnění.",
+    "Vyžaduje oprávnění ke stránce Web search.",
 )
 def update_web_search_monitor(
     monitor_id: int,
     payload: WebSearchMonitorUpsertRequest,
-    current_user: DashboardUserContext = Depends(get_current_admin_user),
+    current_user: DashboardUserContext = Depends(get_current_web_search_user),
 ) -> WebSearchMonitorRecord:
     try:
         row = update_monitor_admin(
@@ -147,11 +147,11 @@ def update_web_search_monitor(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete web search monitor",
     description="Smaže web monitor a jeho historii výsledků. "
-    "Vyžaduje admin oprávnění.",
+    "Vyžaduje oprávnění ke stránce Web search.",
 )
 def delete_web_search_monitor(
     monitor_id: int,
-    current_user: DashboardUserContext = Depends(get_current_admin_user),
+    current_user: DashboardUserContext = Depends(get_current_web_search_user),
 ) -> Response:
     delete_monitor_admin(current_user, monitor_id=monitor_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

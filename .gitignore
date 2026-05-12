@@ -10,8 +10,10 @@ node_modules/
 npm-debug.log*
 
 .idea/workspace.xml
+.conv/
 
 core/scheduler/logs/
+core/scheduler/locks/scheduler_process.lock
 core/scheduler/data/*.parquet
 data/*.parquet
 scheduler.log

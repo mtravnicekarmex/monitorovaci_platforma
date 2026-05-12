@@ -39,6 +39,7 @@ def init_auth_state() -> None:
     st.session_state.setdefault("auth_allowed_devices", ())
     st.session_state.setdefault("auth_last_login_at", None)
     st.session_state.setdefault("post_login_redirect", "")
+    st.session_state.setdefault("requested_login_redirect", "")
 
 
 def any_dashboard_users() -> bool:
@@ -118,7 +119,7 @@ def has_page_access(page_key: str) -> bool:
         return True
     if page.section_key and not has_section_access(page.section_key):
         return False
-    if page.section_key and page.key not in get_allowed_pages():
+    if page.configurable and page.key not in get_allowed_pages():
         return False
     return True
 
@@ -196,10 +197,13 @@ def refresh_current_user() -> bool:
     return True
 
 
-def require_login() -> None:
+def require_login(redirect_target: str | None = None) -> None:
     init_auth_state()
     if not st.session_state["authenticated"]:
+        if redirect_target:
+            st.session_state["requested_login_redirect"] = redirect_target
         st.warning("Nejprve se prihlas na strance Login.")
+        st.page_link("login.py", label="Prejit na Login")
         st.stop()
     if not refresh_current_user():
         st.warning("Prihlaseni expirovalo nebo API neni dostupne. Prihlas se znovu.")
@@ -214,9 +218,9 @@ def require_admin() -> None:
 
 
 def require_page_access(page_key: str) -> None:
-    require_login()
-
     page = get_page_definition(page_key)
+    require_login(page.path if page is not None else None)
+
     if page is None:
         st.error("Neznama stranka dashboardu.")
         st.stop()
@@ -233,7 +237,7 @@ def require_page_access(page_key: str) -> None:
             st.error("Na tuto stranku nemas opravneni.")
         st.stop()
 
-    if page.section_key and not is_admin() and page.key not in get_allowed_pages():
+    if page.configurable and not is_admin() and page.key not in get_allowed_pages():
         st.error("Na tuto stranku nemas opravneni.")
         st.stop()
 
@@ -302,6 +306,7 @@ def render_sidebar_footer(pages: list[object], current_page: object) -> None:
 
     with st.sidebar:
         st.markdown("---")
+        st.caption("Správa")
 
         for page_definition in get_dashboard_pages("footer"):
             page = footer_pages.get(page_definition.key)

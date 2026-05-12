@@ -105,7 +105,7 @@ def render_web_search_admin_page() -> None:
 
     st.title("Monitor webových stránek")
     st.caption(
-        "Admin rozhraní pro správu monitorů a ruční preview hledaných výrazů. "
+        "Rozhraní pro správu monitorů a ruční preview hledaných výrazů. "
         "Dashboard používá pouze API přístup."
     )
     st.caption("Automatické odesílání upozornění běží podle aktuální konfigurace scheduleru.")

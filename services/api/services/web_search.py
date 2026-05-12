@@ -13,16 +13,15 @@ from moduly.apps.web_search.service import (
     normalize_monitor_url,
     scan_web_hits,
 )
-from services.api.services.dashboard_auth import AuthorizationError, DashboardUserContext
+from services.api.services.dashboard_auth import DashboardUserContext, require_page_access
 
 
 class WebSearchOperationError(ValueError):
     """Raised when a web search admin operation is invalid."""
 
 
-def require_admin_access(user_context: DashboardUserContext) -> None:
-    if not user_context.is_admin:
-        raise AuthorizationError("Tato operace je dostupna pouze adminovi.")
+def require_web_search_access(user_context: DashboardUserContext) -> None:
+    require_page_access(user_context, "web_search_monitor")
 
 
 def _serialize_monitor_record(monitor: Monitor, *, results_count: int = 0) -> dict[str, object]:
@@ -71,7 +70,7 @@ def _normalize_monitor_payload(url: str, email: str, expressions: list[str]) -> 
 
 
 def list_monitors_admin(user_context: DashboardUserContext) -> list[dict[str, object]]:
-    require_admin_access(user_context)
+    require_web_search_access(user_context)
 
     session = get_session_pg()
     try:
@@ -97,7 +96,7 @@ def list_results_admin(
     *,
     limit: int = 200,
 ) -> list[dict[str, object]]:
-    require_admin_access(user_context)
+    require_web_search_access(user_context)
 
     session = get_session_pg()
     try:
@@ -119,7 +118,7 @@ def preview_hits_admin(
     url: str,
     expressions: list[str],
 ) -> dict[str, object]:
-    require_admin_access(user_context)
+    require_web_search_access(user_context)
 
     normalized_url = normalize_monitor_url(url)
     if not normalized_url:
@@ -151,7 +150,7 @@ def upsert_monitor_admin(
     email: str,
     expressions: list[str],
 ) -> dict[str, object]:
-    require_admin_access(user_context)
+    require_web_search_access(user_context)
     normalized_url, clean_email, normalized_expressions = _normalize_monitor_payload(url, email, expressions)
 
     session = get_session_pg()
@@ -199,7 +198,7 @@ def update_monitor_admin(
     email: str,
     expressions: list[str],
 ) -> dict[str, object]:
-    require_admin_access(user_context)
+    require_web_search_access(user_context)
     normalized_url, clean_email, normalized_expressions = _normalize_monitor_payload(url, email, expressions)
 
     session = get_session_pg()
@@ -238,7 +237,7 @@ def delete_monitor_admin(
     *,
     monitor_id: int,
 ) -> None:
-    require_admin_access(user_context)
+    require_web_search_access(user_context)
 
     session = get_session_pg()
     try:

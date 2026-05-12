@@ -213,22 +213,12 @@ def build_branch_stacked_area_chart(
     prediction_df = prediction_df.dropna(subset=["date", "ocekavana_spotreba"])
 
     billing_df = pd.DataFrame()
-    if "fakturacni_spotreba" in hourly_df.columns:
-        billing_visible_until = None
-        if "fakturacni_kumulovana_spotreba_graf" in hourly_df.columns:
-            billing_visibility_df = hourly_df.loc[
-                hourly_df["fakturacni_kumulovana_spotreba_graf"].notna(),
-                ["date"],
-            ].dropna(subset=["date"])
-            if not billing_visibility_df.empty:
-                billing_visible_until = billing_visibility_df["date"].max()
-        billing_df = hourly_df.loc[:, ["date", "fakturacni_spotreba"]].copy()
+    billing_columns = {"date", "fakturacni_spotreba", "fakturacni_kumulovana_spotreba_graf"}
+    if billing_columns.issubset(hourly_df.columns):
+        visible_billing_mask = hourly_df["fakturacni_kumulovana_spotreba_graf"].notna()
+        billing_df = hourly_df.loc[visible_billing_mask, ["date", "fakturacni_spotreba"]].copy()
         billing_df["fakturacni_spotreba"] = pd.to_numeric(billing_df["fakturacni_spotreba"], errors="coerce")
         billing_df = billing_df.dropna(subset=["date", "fakturacni_spotreba"])
-        if billing_visible_until is not None:
-            billing_df = billing_df.loc[billing_df["date"] <= billing_visible_until].copy()
-        else:
-            billing_df = billing_df.iloc[0:0].copy()
 
     area_chart = (
         alt.Chart(area_df)

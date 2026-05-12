@@ -8,6 +8,7 @@ from services.api.services.dashboard_auth import (
     AuthorizationError,
     DashboardUserContext,
     get_dashboard_user_context,
+    require_page_access,
     require_section_access,
 )
 
@@ -97,4 +98,18 @@ def get_current_admin_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Tato operace je dostupna pouze adminovi.",
         )
+    return current_user
+
+
+def get_current_web_search_user(
+    current_user: DashboardUserContext = Depends(get_current_user),
+) -> DashboardUserContext:
+    try:
+        require_page_access(current_user, "web_search_monitor")
+    except AuthorizationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+
     return current_user

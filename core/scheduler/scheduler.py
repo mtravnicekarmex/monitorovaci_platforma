@@ -28,7 +28,7 @@ from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED, EVENT_JOB_MA
 from app.channels.email import send_email_outlook
 from app.time_utils import utc_now_naive
 from core.scheduler.job_schedule import SCHEDULER_TIMEZONE_NAME, get_scheduler_job_specs
-from core.scheduler.metrics import get_metrics_store
+from core.scheduler.metrics import SCHEDULER_HEARTBEAT_TTL_SECONDS, get_metrics_store
 from decouple import config
 from moduly.mereni.vodomery.database.vodomery_db_vse import vodomery_db_import
 from moduly.mereni.elektromery.database.elektromery_db_vse import elektromery_db_import
@@ -1259,7 +1259,7 @@ def _run_main_scheduler_loop():
         while True:
             scheduler_metrics.heartbeat()
             _sync_all_job_next_runs()
-            time.sleep(300)
+            time.sleep(SCHEDULER_HEARTBEAT_TTL_SECONDS)
     except KeyboardInterrupt:
         logger.info("Ukončuji scheduler...")
         scheduler.shutdown()

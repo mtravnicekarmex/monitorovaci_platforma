@@ -1,2 +1,7 @@
 [client]
 showSidebarNavigation = false
+
+[server]
+address = "127.0.0.1"
+port = 8001
+headless = true

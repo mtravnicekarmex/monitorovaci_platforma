@@ -9,7 +9,7 @@ import threading
 
 
 DEFAULT_WINDOW_HOURS = 24
-SCHEDULER_HEARTBEAT_TTL_SECONDS = 180
+SCHEDULER_HEARTBEAT_TTL_SECONDS = 300
 SCHEDULER_METRICS_PATH = Path(__file__).resolve().parent / "logs" / "scheduler_metrics.json"
 
 

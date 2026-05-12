@@ -5,8 +5,6 @@ set "PROJECT_DIR=%~dp0"
 
 if /I "%~1"=="api" goto run_api
 if /I "%~1"=="dashboard" goto run_dashboard
-if /I "%~1"=="scheduler" goto run_scheduler
-if /I "%~1"=="caddy" goto run_caddy
 
 cd /d "%PROJECT_DIR%"
 
@@ -19,9 +17,6 @@ if not exist "%PROJECT_DIR%.venv\Scripts\python.exe" (
 
 echo Spoustim API na http://127.0.0.1:8000
 start "Monitoring API" cmd /k call "%~f0" api
-
-echo Spoustim scheduler
-start "Monitoring Scheduler" cmd /k call "%~f0" scheduler
 
 echo Cekam na dostupnost API...
 set "API_READY=0"
@@ -47,14 +42,9 @@ if not "%API_READY%"=="1" (
 echo Spoustim dashboard na http://127.0.0.1:8001
 start "Monitoring Dashboard" cmd /k call "%~f0" dashboard
 
-echo Spoustim Caddy reverse proxy na http://0.0.0.0:8080
-start "Caddy Reverse Proxy" cmd /k call "%~f0" caddy
-
 echo.
 echo API:       http://127.0.0.1:8000
 echo Dashboard: http://127.0.0.1:8001
-echo Proxy:     http://VEREJNA_IP:8080
-echo Scheduler: bezi v okne "Monitoring Scheduler"
 exit /b 0
 
 :run_api
@@ -66,25 +56,5 @@ exit /b %ERRORLEVEL%
 :run_dashboard
 cd /d "%PROJECT_DIR%"
 set "DASHBOARD_API_BASE_URL=http://127.0.0.1:8000"
-"%PROJECT_DIR%.venv\Scripts\python.exe" -m streamlit run moduly\apps\dashboard\login.py --server.address 127.0.0.1 --server.port 8001 --server.headless true
-exit /b %ERRORLEVEL%
-
-:run_scheduler
-cd /d "%PROJECT_DIR%"
-"%PROJECT_DIR%.venv\Scripts\python.exe" main.py
-exit /b %ERRORLEVEL%
-
-:run_caddy
-cd /d "%PROJECT_DIR%"
-set "CADDY_EXE=%LOCALAPPDATA%\Microsoft\WinGet\Packages\CaddyServer.Caddy_Microsoft.Winget.Source_8wekyb3d8bbwe\caddy.exe"
-if not exist "%CADDY_EXE%" set "CADDY_EXE=caddy"
-tasklist /FI "IMAGENAME eq caddy.exe" 2>nul | find /I "caddy.exe" >nul
-if not errorlevel 1 (
-    "%CADDY_EXE%" reload --config Caddyfile --adapter caddyfile
-    if not errorlevel 1 (
-        echo Caddy uz bezi; konfigurace byla reloadovana.
-    )
-    exit /b %ERRORLEVEL%
-)
-"%CADDY_EXE%" run --config Caddyfile --adapter caddyfile
+"%PROJECT_DIR%.venv\Scripts\python.exe" -m streamlit run moduly\apps\dashboard\login.py --server.port 8001
 exit /b %ERRORLEVEL%

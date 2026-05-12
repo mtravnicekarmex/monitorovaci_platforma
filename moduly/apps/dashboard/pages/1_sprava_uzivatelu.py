@@ -157,8 +157,8 @@ def render_page() -> None:
                         "admin": "ANO" if user["is_admin"] else "NE",
                         "aktivni": "ANO" if user["is_active"] else "NE",
                         "sekce": "vsechny" if user["is_admin"] else format_section_summary(list(user["available_sections"])),
-                        "stranky": "vsechny" if user["is_admin"] else len(user["available_pages"]),
-                        "zarizeni": "vsechna" if user["is_admin"] else len(user["device_ids"]),
+                        "stranky": "vsechny" if user["is_admin"] else str(len(user["available_pages"])),
+                        "zarizeni": "vsechna" if user["is_admin"] else str(len(user["device_ids"])),
                         "posledni_login": format_timestamp(user["last_login_at"]),
                     }
                     for user in users

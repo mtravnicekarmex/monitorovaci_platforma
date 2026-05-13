@@ -32,6 +32,7 @@ from core.scheduler.metrics import SCHEDULER_HEARTBEAT_TTL_SECONDS, get_metrics_
 from decouple import config
 from moduly.mereni.vodomery.database.vodomery_db_vse import vodomery_db_import
 from moduly.mereni.elektromery.database.elektromery_db_vse import elektromery_db_import
+from moduly.mereni.elektromery.database.binary_ts_import import sync_changed_binary_meter_sources
 from moduly.mereni.vodomery.vodomery_prediction import (
     get_candidate_model_versions,
     get_runtime_model_version,
@@ -649,6 +650,7 @@ def daily_seven_and_two_job():
 def daily_job():
     safe_call(SOFTLINK_save_to_database_all)
     safe_call(elektromery_db_import)
+    safe_call(sync_changed_binary_meter_sources)
     safe_call(meteo_sync)
     safe_call(sync_charge_sessions_to_db)
 
@@ -915,6 +917,15 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             label="Import elektromeru vse",
             description="Denní import SOFTLINK a OTE elektromernych dat do monitoring.Mereni_elektromery_vse.",
             run_fn=elektromery_db_import,
+            lock_names=("daily_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="elektromery_binary_import",
+            label="Import binarnich elektromeru",
+            description="Kontrola binarnich elektromernych souboru a import zmenenych zdroju do monitoring.Mereni_elektromery_vse.",
+            run_fn=sync_changed_binary_meter_sources,
             lock_names=("daily_job",),
             is_scheduled=False,
             kind="internal_step",

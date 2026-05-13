@@ -27,7 +27,7 @@ OTE_INTERVAL_HOURS = 0.25
 _CURVE_COLOR = "#dc2626"
 _CURVE_FILL = "#fee2e2"
 _LIMIT_COLOR = "#111827"
-CHARGING_STRIPE_FREQUENCY = "15min"
+CHARGING_STRIPE_FREQUENCY = "2min"
 _X_TICK_GRID_COLOR = "#d1d5db"
 _X_TICK_GRID_DASHARRAY = "4 4"
 _CURVE_LAYER_PALETTE = (
@@ -87,6 +87,7 @@ class OteDeviceSummaryRow:
     identifikace: str
     spotreba_kwh: float
     pocet_mereni: int
+    summary_row: bool = False
 
 
 @dataclass(frozen=True)
@@ -149,12 +150,7 @@ def _format_charge_overlay_duration(value: object) -> str:
         total_minutes = max(int(round(float(value or 0))), 0)
     except (TypeError, ValueError):
         return "-"
-    hours, minutes = divmod(total_minutes, 60)
-    if hours <= 0:
-        return f"{minutes} min"
-    if minutes == 0:
-        return f"{hours} h"
-    return f"{hours} h {minutes} min"
+    return f"{total_minutes} min"
 
 
 def _record_value(record: object, key: str) -> object:
@@ -322,6 +318,30 @@ def build_device_summary(period_df: pd.DataFrame) -> pd.DataFrame:
     return summary
 
 
+def build_layer_consumption_summary(curve_layers: Iterable[OteCurveLayer]) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for layer in coerce_curve_layers(curve_layers):
+        if not layer.curve_rows:
+            continue
+        rows.append(
+            {
+                "identifikace": curve_layer_legend_label(layer),
+                "spotreba_kwh": round(sum(float(row.spotreba_kwh) for row in layer.curve_rows), 3),
+                "pocet_mereni": int(sum(int(row.pocet_mereni) for row in layer.curve_rows)),
+                "summary_row": True,
+            }
+        )
+    return pd.DataFrame(rows, columns=["identifikace", "spotreba_kwh", "pocet_mereni", "summary_row"])
+
+
+def build_device_summary_with_layer_totals(
+    device_summary_df: pd.DataFrame,
+    curve_layers: Iterable[OteCurveLayer],
+) -> pd.DataFrame:
+    del device_summary_df
+    return build_layer_consumption_summary(curve_layers)
+
+
 def prepare_charge_session_overlays(
     charge_sessions_df: pd.DataFrame,
     *,
@@ -434,9 +454,9 @@ def prepare_charge_session_overlays(
         ),
         axis=1,
     )
-    prepared["duration_line"] = prepared["duration_label"].map(lambda value: f"Trvání: {value}")
-    prepared["kwh_line"] = prepared["kwh_label"].map(lambda value: f"Odebráno: {value}")
-    prepared["speed_line"] = prepared["speed_label"].map(lambda value: f"Rychlost: {value}")
+    prepared["duration_line"] = prepared["duration_label"]
+    prepared["kwh_line"] = prepared["kwh_label"]
+    prepared["speed_line"] = prepared["speed_label"]
     prepared["midpoint_at"] = prepared["overlay_start"] + (
         prepared["overlay_end"] - prepared["overlay_start"]
     ) / 2
@@ -782,13 +802,18 @@ def build_ote_pdf_report(
         )
 
     curve_rows = resolved_curve_layers[0].curve_rows if resolved_curve_layers else _build_curve_rows(curve_df)
+    report_device_summary_df = build_device_summary_with_layer_totals(
+        device_summary_df,
+        resolved_curve_layers,
+    )
     device_rows = tuple(
         OteDeviceSummaryRow(
             identifikace=str(row.identifikace),
             spotreba_kwh=round(float(row.spotreba_kwh), 3),
             pocet_mereni=int(row.pocet_mereni),
+            summary_row=bool(getattr(row, "summary_row", False)),
         )
-        for row in device_summary_df.itertuples(index=False)
+        for row in report_device_summary_df.itertuples(index=False)
     )
     exceedance_rows = tuple(
         OteExceedanceRow(
@@ -839,8 +864,8 @@ def build_ote_report_pdf_filename(report: OtePdfReport) -> str:
         "week": "Tydenni",
         "month": "Mesicni",
     }
-    prefix = prefix_by_kind.get(report.period.kind, "OTE")
-    return f"{prefix} report OTE elektromeru - {report.period.date_range_label}.pdf"
+    prefix = prefix_by_kind.get(report.period.kind, "Report")
+    return f"{prefix} report elektromeru - {report.period.date_range_label}.pdf"
 
 
 def _load_playwright_api():
@@ -1151,7 +1176,7 @@ def _build_curve_svg(report: OtePdfReport) -> str:
         )
 
     overlay_text_svg = ""
-    if report.charge_overlay_rows:
+    if report.charge_overlay_rows and report.period.kind != "month":
         text_rows = []
         text_start_y = axis_label_y + 16
         for overlay_row in report.charge_overlay_rows:
@@ -1191,33 +1216,33 @@ def _build_curve_svg(report: OtePdfReport) -> str:
 
 def _build_device_table_html(report: OtePdfReport) -> str:
     if not report.device_rows:
-        return "<p class='empty-state'>Ve zvoleném období nebyla nalezena žádná měřidla.</p>"
+        return "<p class='empty-state'>Ve zvoleném období nebyla nalezena žádná data vrstev.</p>"
 
-    rows_html = "".join(
-        (
-            "<tr>"
-            f"<td>{escape(row.identifikace)}</td>"
-            f"<td class='numeric'>{escape(_format_value(row.spotreba_kwh, unit='kWh'))}</td>"
-            f"<td class='numeric'>{row.pocet_mereni}</td>"
-            "</tr>"
+    row_parts: list[str] = []
+    for row in report.device_rows:
+        is_summary = bool(row.summary_row)
+        row_class = " class='balance-total-row'" if is_summary else ""
+        identifikace = escape(row.identifikace)
+        spotreba = escape(_format_value(row.spotreba_kwh, unit="kWh"))
+        if is_summary:
+            identifikace = f"<strong>{identifikace}</strong>"
+            spotreba = f"<strong>{spotreba}</strong>"
+        row_parts.append(
+            (
+                f"<tr{row_class}>"
+                f"<td>{identifikace}</td>"
+                f"<td class='numeric'>{spotreba}</td>"
+                "</tr>"
+            )
         )
-        for row in report.device_rows
-    )
-    total_row_html = (
-        "<tr class='balance-total-row'>"
-        "<td><strong>Celkem</strong></td>"
-        f"<td class='numeric'><strong>{escape(_format_value(report.total_consumption_kwh, unit='kWh'))}</strong></td>"
-        f"<td class='numeric'><strong>{report.measurement_count}</strong></td>"
-        "</tr>"
-    )
+    rows_html = "".join(row_parts)
     return (
         "<table class='branch-table'>"
         "<thead><tr>"
-        "<th>Odběrné místo</th>"
-        "<th class='numeric'>Spotřeba</th>"
-        "<th class='numeric'>Počet měření</th>"
+        "<th>Vrstva</th>"
+        "<th class='numeric'>kWh</th>"
         "</tr></thead>"
-        f"<tbody>{rows_html}{total_row_html}</tbody>"
+        f"<tbody>{rows_html}</tbody>"
         "</table>"
     )
 
@@ -1253,20 +1278,6 @@ def _build_exceedance_table_html(report: OtePdfReport) -> str:
 def build_ote_report_html(report: OtePdfReport) -> str:
     armex_logo_data_uri = _load_image_data_uri(_armex_logo_path())
     chart_svg = _build_curve_svg(report)
-    selection_summary = describe_selected_identifications(
-        report.selected_identifications,
-        total_available_count=report.available_identification_count,
-        preview_limit=None,
-        collapse_full_selection=False,
-    )
-    additional_layer_meta_html = "".join(
-        (
-            f"<div class='report-meta'><strong>{escape(layer.label)}:</strong> "
-            f"{escape(describe_selected_identifications(layer.selected_identifications, total_available_count=report.available_identification_count, preview_limit=None, collapse_full_selection=False))}</div>"
-        )
-        for layer in _resolve_report_curve_layers(report)[1:]
-        if layer.selected_identifications
-    )
     reserved_value = (
         _format_value(report.reserved_power_kw, unit="kW")
         if report.reserved_power_kw is not None and report.reserved_power_kw > 0
@@ -1536,7 +1547,7 @@ def build_ote_report_html(report: OtePdfReport) -> str:
     <div class="page-meta">
       <strong>Období:</strong> {escape(report.period.date_range_label)}<br>
       <strong>Vygenerováno:</strong> {escape(_format_datetime(report.generated_at))}<br>
-      <strong>Zdroj:</strong> dbo.Mereni_elektromery_OTE
+      <strong>Zdroj:</strong> dbo.Mereni_elektromery_BINARY
     </div>
   </header>
 
@@ -1546,12 +1557,6 @@ def build_ote_report_html(report: OtePdfReport) -> str:
         <div class="title-eyebrow">Souhrn reportu</div>
         <h2>Křivka odběru a rezervovaná hladina</h2>
         <div class="report-meta"><strong>Typ reportu:</strong> {escape(report.period_label)}</div>
-        <div class="report-meta"><strong>Odběrná místa:</strong> {escape(selection_summary)}</div>
-        {additional_layer_meta_html}
-        <div class="report-description">
-          Report vychází z OTE dat uložených v PostgreSQL a sleduje celkovou spotřebu, okamžitý odběr
-          a případná překročení rezervované hladiny.
-        </div>
       </div>
       <div class="report-summary-card">
         {_build_metric_card_html(

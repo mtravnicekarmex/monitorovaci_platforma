@@ -6,7 +6,7 @@ import sys
 import altair as alt
 import pandas as pd
 import streamlit as st
-from sqlalchemy import func
+from sqlalchemy import bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 
 
@@ -25,6 +25,7 @@ from moduly.apps.dashboard.elektromery_reports import (
     build_consumption_curve,
     build_curve_layer,
     build_device_summary,
+    build_device_summary_with_layer_totals,
     build_interval_consumption_curve,
     build_ote_pdf_report,
     build_ote_report_pdf_filename,
@@ -43,7 +44,6 @@ from moduly.apps.dashboard.elektromery_reports import (
 from moduly.apps.dashboard.vodomery_shared import render_page_styles
 from core.db.connect import get_session_pg
 from moduly.apps.smartfuelpass.database.models import SmartFuelPassRelace
-from moduly.mereni.elektromery.database.models import Elektromer_OTE_Mereni
 
 
 REPORT_RESULT_KEY = "elektromery_reports_result"
@@ -123,20 +123,27 @@ def load_charge_session_overlay_rows(period_start, period_end) -> pd.DataFrame:
 def load_ote_data_bounds() -> dict[str, object]:
     session = get_session_pg()
     try:
-        row = (
-            session.query(
-                func.min(Elektromer_OTE_Mereni.date).label("date_min"),
-                func.max(Elektromer_OTE_Mereni.date).label("date_max"),
-                func.count(Elektromer_OTE_Mereni.recid).label("measurement_count"),
-                func.count(func.distinct(Elektromer_OTE_Mereni.identifikace)).label("device_count"),
+        row = session.execute(
+            text(
+                """
+                SELECT
+                    MIN(date) AS date_min,
+                    MAX(date) AS date_max,
+                    COUNT(recid) AS measurement_count,
+                    COUNT(DISTINCT identifikace) AS device_count
+                FROM dbo."Mereni_elektromery_BINARY"
+                WHERE
+                    date IS NOT NULL
+                    AND identifikace IS NOT NULL
+                    AND delta IS NOT NULL
+                """
             )
-            .one()
-        )
+        ).mappings().one()
         return {
-            "date_min": row.date_min,
-            "date_max": row.date_max,
-            "measurement_count": int(row.measurement_count or 0),
-            "device_count": int(row.device_count or 0),
+            "date_min": row["date_min"],
+            "date_max": row["date_max"],
+            "measurement_count": int(row["measurement_count"] or 0),
+            "device_count": int(row["device_count"] or 0),
         }
     finally:
         session.close()
@@ -146,14 +153,21 @@ def load_ote_data_bounds() -> dict[str, object]:
 def load_ote_identifikace_options() -> tuple[str, ...]:
     session = get_session_pg()
     try:
-        rows = (
-            session.query(Elektromer_OTE_Mereni.identifikace)
-            .filter(Elektromer_OTE_Mereni.identifikace.is_not(None))
-            .distinct()
-            .order_by(Elektromer_OTE_Mereni.identifikace.asc())
-            .all()
+        rows = session.execute(
+            text(
+                """
+                SELECT DISTINCT identifikace
+                FROM dbo."Mereni_elektromery_BINARY"
+                WHERE identifikace IS NOT NULL
+                ORDER BY identifikace ASC
+                """
+            )
+        ).mappings().all()
+        return tuple(
+            str(row["identifikace"]).strip()
+            for row in rows
+            if row["identifikace"] and str(row["identifikace"]).strip()
         )
-        return tuple(str(row.identifikace).strip() for row in rows if row.identifikace and str(row.identifikace).strip())
     finally:
         session.close()
 
@@ -165,35 +179,35 @@ def load_ote_measurements(period_start, period_end, selected_identifications: tu
 
     session = get_session_pg()
     try:
-        query = (
-            session.query(
-                Elektromer_OTE_Mereni.date,
-                Elektromer_OTE_Mereni.identifikace,
-                Elektromer_OTE_Mereni.seriove_cislo,
-                Elektromer_OTE_Mereni.objem,
-                Elektromer_OTE_Mereni.source_file,
-            )
-            .filter(
-                Elektromer_OTE_Mereni.date >= period_start,
-                Elektromer_OTE_Mereni.date < period_end,
-                Elektromer_OTE_Mereni.objem.is_not(None),
-            )
-        )
+        query_text = """
+            SELECT
+                date,
+                identifikace,
+                seriove_cislo,
+                delta AS spotreba_kwh,
+                source_file
+            FROM dbo."Mereni_elektromery_BINARY"
+            WHERE
+                date >= :period_start
+                AND date < :period_end
+                AND identifikace IS NOT NULL
+                AND delta IS NOT NULL
+        """
+        params = {
+            "period_start": period_start,
+            "period_end": period_end,
+        }
         if selected_identifications:
-            query = query.filter(Elektromer_OTE_Mereni.identifikace.in_(selected_identifications))
-        rows = (
-            query
-            .order_by(Elektromer_OTE_Mereni.date.asc(), Elektromer_OTE_Mereni.identifikace.asc())
-            .all()
-        )
+            query_text += " AND identifikace IN :selected_identifications"
+            params["selected_identifications"] = tuple(selected_identifications)
+        query_text += " ORDER BY date ASC, identifikace ASC"
+
+        statement = text(query_text)
+        if selected_identifications:
+            statement = statement.bindparams(bindparam("selected_identifications", expanding=True))
+        rows = session.execute(statement, params).mappings().all()
         return ote_records_to_dataframe(
-            {
-                "date": row.date,
-                "identifikace": row.identifikace,
-                "seriove_cislo": row.seriove_cislo,
-                "objem": row.objem,
-                "source_file": row.source_file,
-            }
+            dict(row)
             for row in rows
         )
     finally:
@@ -353,6 +367,8 @@ def build_curve_chart_with_charge_overlay(
         y2="zero_kw:Q",
     )
     layered_top_chart = (top_chart + stripe_layer).properties(height=360)
+    if report_period.kind == "month":
+        return layered_top_chart
 
     timeline_source = overlay_df.copy()
     lane_order = [
@@ -445,10 +461,10 @@ def render_report_result(
 
     visible_curve_layers = tuple(layer for layer in curve_layers if layer.curve_rows)
     if not visible_curve_layers:
-        st.info("Pro zvolené období a výběry vrstev nejsou v databázi žádná OTE data.")
+        st.info("Pro zvolené období a výběry vrstev nejsou v databázi žádná binární data elektroměrů.")
         return
     if curve_df.empty and visible_curve_layers:
-        st.info("Hlavní výběr nemá ve zvoleném období žádná OTE data. V grafu jsou zobrazeny pouze další vrstvy.")
+        st.info("Hlavní výběr nemá ve zvoleném období žádná binární data elektroměrů. V grafu jsou zobrazeny pouze další vrstvy.")
 
     show_charging_overlay = st.checkbox(
         "Zobrazit nabíjecí relace SmartFuelPass v grafu",
@@ -487,7 +503,16 @@ def render_report_result(
     table_cols = st.columns(2)
     with table_cols[0]:
         st.subheader("Souhrn měřidel")
-        st.dataframe(device_summary_df, width="stretch", hide_index=True)
+        st.dataframe(
+            device_summary_df[["identifikace", "spotreba_kwh"]].rename(
+                columns={
+                    "identifikace": "Vrstva",
+                    "spotreba_kwh": "kWh",
+                }
+            ),
+            width="stretch",
+            hide_index=True,
+        )
     with table_cols[1]:
         st.subheader("Překročení hladiny")
         if exceedance_df.empty:
@@ -514,6 +539,10 @@ def _build_report_result(
 ) -> dict[str, object]:
     summary = summarize_report(period_df, curve_df, peak_curve_df=interval_curve_df)
     exceedance_df = build_threshold_exceedance(interval_curve_df, reserved_power_kw)
+    device_summary_with_layers_df = build_device_summary_with_layer_totals(
+        device_summary_df,
+        curve_layers,
+    )
     pdf_bytes = None
     pdf_filename = None
     pdf_error = None
@@ -526,7 +555,7 @@ def _build_report_result(
             period_label=period_label,
             period_df=period_df,
             curve_df=curve_df,
-            device_summary_df=device_summary_df,
+            device_summary_df=device_summary_with_layers_df,
             reserved_power_kw=reserved_power_kw,
             curve_layers=curve_layers,
             peak_curve_df=interval_curve_df,
@@ -554,7 +583,7 @@ def _build_report_result(
         "curve_df": curve_df,
         "curve_layers": curve_layers,
         "interval_curve_df": interval_curve_df,
-        "device_summary_df": device_summary_df,
+        "device_summary_df": device_summary_with_layers_df,
         "reserved_power_kw": reserved_power_kw,
         "selected_identifications": selected_identifications,
         "available_identification_count": available_identification_count,
@@ -647,16 +676,16 @@ def _resolve_pdf_variant(report_result: dict[str, object], include_charge_overla
 def render_dashboard() -> None:
     render_page_styles()
     st.title("Reporty elektroměrů")
-    st.caption("Manuální vytvoření reportu z PostgreSQL tabulky `dbo.Mereni_elektromery_OTE`.")
+    st.caption("Manuální vytvoření reportu z PostgreSQL tabulky `dbo.Mereni_elektromery_BINARY`.")
 
     bounds = load_ote_data_bounds()
     if not bounds["measurement_count"] or bounds["date_min"] is None or bounds["date_max"] is None:
-        st.info("V tabulce `dbo.Mereni_elektromery_OTE` zatím nejsou žádná data pro report.")
+        st.info("V tabulce `dbo.Mereni_elektromery_BINARY` zatím nejsou žádná data pro report.")
         return
 
     identifikace_options = load_ote_identifikace_options()
     if not identifikace_options:
-        st.info("V tabulce `dbo.Mereni_elektromery_OTE` nejsou dostupné žádné identifikace odběrných míst.")
+        st.info("V tabulce `dbo.Mereni_elektromery_BINARY` nejsou dostupné žádné identifikace odběrných míst.")
         return
 
     min_date = pd.to_datetime(bounds["date_min"]).date()
@@ -685,7 +714,7 @@ def render_dashboard() -> None:
             "Zahrnout do reportu",
             options=list(identifikace_options),
             default=list(identifikace_options),
-            help="Hodnoty jsou načtené jako unikátní `identifikace` z PostgreSQL tabulky `dbo.Mereni_elektromery_OTE`.",
+            help="Hodnoty jsou načtené jako unikátní `identifikace` z PostgreSQL tabulky `dbo.Mereni_elektromery_BINARY`.",
         )
     main_layer_meta_cols = st.columns((3.6, 1))
     with main_layer_meta_cols[1]:
@@ -821,5 +850,5 @@ def render_dashboard() -> None:
 try:
     render_dashboard()
 except SQLAlchemyError as exc:
-    st.error("Nepodařilo se načíst OTE data z PostgreSQL.")
+    st.error("Nepodařilo se načíst binární data elektroměrů z PostgreSQL.")
     st.exception(exc)

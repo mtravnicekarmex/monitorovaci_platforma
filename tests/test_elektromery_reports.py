@@ -175,19 +175,19 @@ def test_prepare_charge_session_overlays_clips_period_and_assigns_lanes():
         "Trvání 35 min | Odebráno 8.250 kWh | Rychlost 14.143 kW",
     ]
     assert overlay_df["duration_line"].tolist() == [
-        "Trvání: 15 min",
-        "Trvání: 30 min",
-        "Trvání: 35 min",
+        "15 min",
+        "30 min",
+        "35 min",
     ]
     assert overlay_df["kwh_line"].tolist() == [
-        "Odebráno: 1.000 kWh",
-        "Odebráno: 7.500 kWh",
-        "Odebráno: 8.250 kWh",
+        "1.000 kWh",
+        "7.500 kWh",
+        "8.250 kWh",
     ]
     assert overlay_df["speed_line"].tolist() == [
-        "Rychlost: 4.000 kW",
-        "Rychlost: 15.000 kW",
-        "Rychlost: 14.143 kW",
+        "4.000 kW",
+        "15.000 kW",
+        "14.143 kW",
     ]
 
 
@@ -224,9 +224,40 @@ def test_build_charge_session_stripe_dataframe_keeps_at_least_one_stripe_per_ses
     rel_002_df = stripe_df[stripe_df["id_relace"] == "rel-002"].reset_index(drop=True)
     assert rel_002_df["stripe_at"].tolist() == [
         datetime.datetime(2026, 2, 1, 0, 20),
-        datetime.datetime(2026, 2, 1, 0, 35),
+        datetime.datetime(2026, 2, 1, 0, 22),
+        datetime.datetime(2026, 2, 1, 0, 24),
+        datetime.datetime(2026, 2, 1, 0, 26),
+        datetime.datetime(2026, 2, 1, 0, 28),
+        datetime.datetime(2026, 2, 1, 0, 30),
+        datetime.datetime(2026, 2, 1, 0, 32),
+        datetime.datetime(2026, 2, 1, 0, 34),
+        datetime.datetime(2026, 2, 1, 0, 36),
+        datetime.datetime(2026, 2, 1, 0, 38),
+        datetime.datetime(2026, 2, 1, 0, 40),
+        datetime.datetime(2026, 2, 1, 0, 42),
+        datetime.datetime(2026, 2, 1, 0, 44),
+        datetime.datetime(2026, 2, 1, 0, 46),
+        datetime.datetime(2026, 2, 1, 0, 48),
     ]
-    assert rel_002_df["stripe_odber_kw"].tolist() == pytest.approx([16.666666666666664, 21.666666666666668])
+    assert rel_002_df["stripe_odber_kw"].tolist() == pytest.approx(
+        [
+            16.666666666666664,
+            17.333333333333332,
+            18.0,
+            18.666666666666668,
+            19.333333333333332,
+            20.0,
+            20.666666666666668,
+            21.333333333333332,
+            22.0,
+            22.666666666666668,
+            23.333333333333332,
+            24.0,
+            24.666666666666668,
+            25.333333333333332,
+            26.0,
+        ]
+    )
 
 
 def test_build_device_summary_sorts_by_consumption():
@@ -242,6 +273,56 @@ def test_build_device_summary_sorts_by_consumption():
     assert summary[["identifikace", "spotreba_kwh", "pocet_mereni"]].to_dict(orient="records") == [
         {"identifikace": "TS2", "spotreba_kwh": 2.0, "pocet_mereni": 1},
         {"identifikace": "TS1 + TS3", "spotreba_kwh": 1.5, "pocet_mereni": 2},
+    ]
+
+
+def test_build_device_summary_with_layer_totals_returns_only_graph_layer_totals():
+    period = elektromery_reports.resolve_report_period("day", datetime.date(2026, 2, 1))
+    device_summary_df = pd.DataFrame(
+        [
+            {"identifikace": "TS1", "spotreba_kwh": 1.0, "pocet_mereni": 1},
+            {"identifikace": "TS2", "spotreba_kwh": 2.0, "pocet_mereni": 1},
+        ]
+    )
+    primary_layer = elektromery_reports.build_curve_layer(
+        index=0,
+        selected_identifications=("TS1", "TS2"),
+        curve_df=pd.DataFrame(
+            [
+                {
+                    "date": period.period_start + datetime.timedelta(minutes=15),
+                    "peak_at": period.period_start + datetime.timedelta(minutes=15),
+                    "spotreba_kwh": 3.0,
+                    "odber_kw": 12.0,
+                    "pocet_mereni": 2,
+                },
+            ]
+        ),
+    )
+    secondary_layer = elektromery_reports.build_curve_layer(
+        index=1,
+        selected_identifications=("TS3",),
+        curve_df=pd.DataFrame(
+            [
+                {
+                    "date": period.period_start + datetime.timedelta(minutes=30),
+                    "peak_at": period.period_start + datetime.timedelta(minutes=30),
+                    "spotreba_kwh": 0.5,
+                    "odber_kw": 2.0,
+                    "pocet_mereni": 1,
+                },
+            ]
+        ),
+    )
+
+    summary = elektromery_reports.build_device_summary_with_layer_totals(
+        device_summary_df,
+        (primary_layer, secondary_layer),
+    )
+
+    assert summary[["identifikace", "spotreba_kwh", "pocet_mereni", "summary_row"]].to_dict(orient="records") == [
+        {"identifikace": "TS1, TS2", "spotreba_kwh": 3.0, "pocet_mereni": 2, "summary_row": True},
+        {"identifikace": "TS3", "spotreba_kwh": 0.5, "pocet_mereni": 1, "summary_row": True},
     ]
 
 
@@ -356,9 +437,10 @@ def test_build_ote_report_html_contains_pdf_sections():
     assert "Křivka odběru a rezervovaná hladina" in html
     assert "Souhrn měřidel" in html
     assert "Překročení rezervované hladiny" in html
-    assert "dbo.Mereni_elektromery_OTE" in html
+    assert "dbo.Mereni_elektromery_BINARY" in html
     assert "chart-line-legend" in html
-    assert "Odběrná místa:</strong> 2 / 4 odběrných míst: TS1 + TS3, TS2" in html
+    assert "Odběrná místa:</strong>" not in html
+    assert "Report vychází z" not in html
     assert "TS1 + TS3" in html
     assert "TS2" in html
     assert "3.500 kWh" in html
@@ -407,8 +489,13 @@ def test_build_ote_report_html_contains_additional_curve_layer_summary():
 
     html = elektromery_reports.build_ote_report_html(report)
 
-    assert "Vrstva 1:</strong> 1 / 4 odběrných míst: TS3" in html
+    assert "Vrstva 1:</strong>" not in html
     assert ">TS3</span></span>" in html
+    assert "Součet vrstvy" not in html
+    assert ">TS1, TS2</strong></td>" in html
+    assert ">TS3</strong></td>" in html
+    assert "3.000 kWh" in html
+    assert "0.500 kWh" in html
 
 
 def test_build_ote_report_html_lists_all_selected_identifications_for_full_selection():
@@ -435,7 +522,7 @@ def test_build_ote_report_html_lists_all_selected_identifications_for_full_selec
 
     html = elektromery_reports.build_ote_report_html(report)
 
-    assert "Odběrná místa:</strong> 2 / 2 odběrných míst: TS1, TS2" in html
+    assert "Odběrná místa:</strong>" not in html
     assert "Všechna odběrná místa (2)" not in html
 
 
@@ -486,9 +573,12 @@ def test_build_ote_report_html_contains_charge_overlay_annotations():
     html = elektromery_reports.build_ote_report_html(report)
 
     assert "Nabíjecí relace" in html
-    assert "Trvání: 30 min" in html
-    assert "Odebráno: 7.500 kWh" in html
-    assert "Rychlost: 15.000 kW" in html
+    assert ">30 min<" in html
+    assert ">7.500 kWh<" in html
+    assert ">15.000 kW<" in html
+    assert "Trvání: 30 min" not in html
+    assert "Odebráno: 7.500 kWh" not in html
+    assert "Rychlost: 15.000 kW" not in html
 
 
 def test_build_curve_svg_renders_charge_overlay_text_below_time_axis():
@@ -536,9 +626,9 @@ def test_build_curve_svg_renders_charge_overlay_text_below_time_axis():
                 overlay_end=period.period_start + datetime.timedelta(minutes=35),
                 midpoint_at=period.period_start + datetime.timedelta(minutes=20),
                 lane=0,
-                duration_line="Trvání: 30 min",
-                kwh_line="Odebráno: 7.500 kWh",
-                speed_line="Rychlost: 15.000 kW",
+                duration_line="30 min",
+                kwh_line="7.500 kWh",
+                speed_line="15.000 kW",
             ),
         ),
     )
@@ -550,13 +640,60 @@ def test_build_curve_svg_renders_charge_overlay_text_below_time_axis():
         svg,
     )
     overlay_match = re.search(
-        r"<text x='[^']+' y='([^']+)' text-anchor='middle' fill='#1d4ed8' [^>]*><tspan x='[^']+' dy='0'>Trvání: 30 min</tspan>",
+        r"<text x='[^']+' y='([^']+)' text-anchor='middle' fill='#1d4ed8' [^>]*><tspan x='[^']+' dy='0'>30 min</tspan>",
         svg,
     )
 
     assert axis_match is not None
     assert overlay_match is not None
     assert float(overlay_match.group(1)) > float(axis_match.group(1))
+    assert "transform='rotate(90" not in svg
+
+
+def test_build_curve_svg_hides_charge_overlay_text_for_month_report():
+    period = elektromery_reports.resolve_report_period("month", datetime.date(2026, 2, 1))
+    report = elektromery_reports.OtePdfReport(
+        generated_at=datetime.datetime(2026, 2, 2, 6, 0, 0),
+        period=period,
+        period_label="Měsíční report",
+        reserved_power_kw=10.0,
+        total_consumption_kwh=4.5,
+        measurement_count=3,
+        device_count=1,
+        max_power_kw=8.0,
+        max_power_at=period.period_start + datetime.timedelta(hours=1),
+        exceedance_count=0,
+        curve_rows=(
+            elektromery_reports.OteCurveRow(
+                date=period.period_start + datetime.timedelta(hours=1),
+                peak_at=period.period_start + datetime.timedelta(hours=1),
+                spotreba_kwh=2.0,
+                odber_kw=8.0,
+                pocet_mereni=1,
+            ),
+        ),
+        device_rows=(),
+        exceedance_rows=(),
+        charge_overlay_rows=(
+            elektromery_reports.OteChargeOverlayRow(
+                id_relace="rel-001",
+                overlay_start=period.period_start + datetime.timedelta(minutes=5),
+                overlay_end=period.period_start + datetime.timedelta(minutes=35),
+                midpoint_at=period.period_start + datetime.timedelta(minutes=20),
+                lane=0,
+                duration_line="30 min",
+                kwh_line="7.500 kWh",
+                speed_line="15.000 kW",
+            ),
+        ),
+    )
+
+    svg = elektromery_reports._build_curve_svg(report)
+
+    assert "Nabíjecí relace" in svg
+    assert "30 min" not in svg
+    assert "7.500 kWh" not in svg
+    assert "15.000 kW" not in svg
 
 
 def _svg_report(period: elektromery_reports.OteReportPeriod) -> elektromery_reports.OtePdfReport:

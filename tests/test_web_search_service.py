@@ -640,3 +640,43 @@ def test_send_email_outlook_builds_plain_html_and_attachment(monkeypatch):
     assert attachment_parts[0].get_content_disposition() == "attachment"
     assert any(part.get_content_type() == "text/plain" for part in msg.walk())
     assert any(part.get_content_type() == "text/html" for part in msg.walk())
+
+
+def test_send_email_outlook_retries_transient_outlook_limit(monkeypatch):
+    attempts = {"count": 0}
+
+    class FakeSMTP:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def ehlo(self):
+            return None
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, user, password):
+            return None
+
+        def send_message(self, msg):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise email_module.smtplib.SMTPDataError(432, b"Concurrent connections limit exceeded")
+
+    monkeypatch.setattr(email_module, "config", lambda key: "x@example.com")
+    monkeypatch.setattr(email_module.smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(email_module.time, "sleep", lambda seconds: None)
+
+    email_module.send_email_outlook(
+        email_receiver="to@example.com",
+        subject="Subject",
+        body="Body",
+    )
+
+    assert attempts["count"] == 2

@@ -83,6 +83,7 @@ SCHEDULER_DIR = Path(__file__).resolve().parent
 SCHEDULER_LOGS_DIR = SCHEDULER_DIR / "logs"
 SCHEDULER_LOCKS_DIR = SCHEDULER_DIR / "locks"
 SCHEDULER_LOG_PATH = SCHEDULER_LOGS_DIR / "scheduler.log"
+SCHEDULER_MISFIRE_GRACE_SECONDS = config("SCHEDULER_MISFIRE_GRACE_SECONDS", default=900, cast=int)
 
 
 def setup_logging(*, enable_file: bool = False):
@@ -1222,7 +1223,7 @@ def _run_main_scheduler_loop():
         timezone=SCHEDULER_TIMEZONE_NAME,
         job_defaults={
             "coalesce": True,
-            "misfire_grace_time": 60,
+            "misfire_grace_time": SCHEDULER_MISFIRE_GRACE_SECONDS,
             "max_instances": 1
         }
     )

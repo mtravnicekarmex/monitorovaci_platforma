@@ -3,7 +3,15 @@ from email.message import EmailMessage
 import os
 import re
 import smtplib
+import threading
+import time
 from decouple import config
+
+
+_OUTLOOK_SMTP_LOCK = threading.Lock()
+_OUTLOOK_SMTP_MAX_ATTEMPTS = 3
+_OUTLOOK_SMTP_RETRY_DELAY_SECONDS = 5
+_OUTLOOK_SMTP_TRANSIENT_CODES = {421, 432, 451, 452}
 
 
 
@@ -57,6 +65,21 @@ def _html_to_plain_text(body: str) -> str:
     return text.strip()
 
 
+def _is_transient_outlook_smtp_error(exc: BaseException) -> bool:
+    if not isinstance(exc, smtplib.SMTPResponseException):
+        return False
+    return int(exc.smtp_code) in _OUTLOOK_SMTP_TRANSIENT_CODES
+
+
+def _send_outlook_message_once(email_sender: str, email_password: str, msg: EmailMessage, context: ssl.SSLContext) -> None:
+    with smtplib.SMTP('smtp.office365.com', 587, timeout=30) as smtp:
+        smtp.ehlo()
+        smtp.starttls(context=context)
+        smtp.ehlo()
+        smtp.login(email_sender, email_password)
+        smtp.send_message(msg)
+
+
 def send_email_outlook(email_receiver, subject, body, sender_alias=None, file_path=None, is_html=False, attachments=None):
     """ Send email with attachment"""
     email_sender = config('O_EMAIL')
@@ -98,13 +121,15 @@ def send_email_outlook(email_receiver, subject, body, sender_alias=None, file_pa
                 disposition='attachment',
             )
 
-    # Log in and send the email
-    with smtplib.SMTP('smtp.office365.com', 587, timeout=30) as smtp:
-        smtp.ehlo()
-        smtp.starttls(context=context)
-        smtp.ehlo()
-        smtp.login(email_sender, email_password)
-        smtp.send_message(msg)
+    with _OUTLOOK_SMTP_LOCK:
+        for attempt in range(1, _OUTLOOK_SMTP_MAX_ATTEMPTS + 1):
+            try:
+                _send_outlook_message_once(email_sender, email_password, msg, context)
+                return
+            except Exception as exc:
+                if attempt >= _OUTLOOK_SMTP_MAX_ATTEMPTS or not _is_transient_outlook_smtp_error(exc):
+                    raise
+                time.sleep(_OUTLOOK_SMTP_RETRY_DELAY_SECONDS * attempt)
 
 
 

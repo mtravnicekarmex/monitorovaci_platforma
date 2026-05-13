@@ -48,3 +48,27 @@ class MeteoHourly(Base):
 
     # 📅 Audit
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=func.now(), nullable=False)
+
+
+class MeteoForecastHourly(Base):
+    __tablename__ = "meteo_forecast_hourly"
+    __table_args__ = (
+        Index("ix_meteo_forecast_hourly_run_at", "forecast_run_at"),
+        {"schema": "monitoring"},
+    )
+
+    datetime_hour: Mapped[datetime] = mapped_column(DateTime(timezone=False), primary_key=True, nullable=False)
+    forecast_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+
+    temperature: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    apparent_temperature: Mapped[float] = mapped_column(Numeric(5, 2), nullable=True)
+    relative_humidity: Mapped[float] = mapped_column(Numeric(5, 2), nullable=True)
+    precipitation: Mapped[float] = mapped_column(Numeric(6, 2), nullable=True)
+    snowfall: Mapped[float] = mapped_column(Numeric(6, 2), nullable=True)
+    cloud_cover: Mapped[float] = mapped_column(Numeric(5, 2), nullable=True)
+    wind_speed: Mapped[float] = mapped_column(Numeric(5, 2), nullable=True)
+    surface_pressure: Mapped[float] = mapped_column(Numeric(7, 2), nullable=True)
+    heating_degree_hours: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    cooling_degree_hours: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=func.now(), nullable=False)

@@ -132,6 +132,7 @@ def _build_email_body(selection_result: dict[str, object]) -> str:
         "</tr>"
         f"{candidate_table_rows}"
         "</table>"
+        f"{_build_metric_explanation_html()}"
         "</body></html>"
     )
 
@@ -173,3 +174,18 @@ def _format_metric(value: object) -> str:
     if value is None:
         return "-"
     return f"{float(value):.4f}"
+
+
+def _build_metric_explanation_html() -> str:
+    return (
+        "<div style='font-size:13px;line-height:1.45;margin-top:14px;color:#57606a;max-width:920px;'>"
+        "<p style='margin:0 0 6px;'><strong>Vysvetleni metrik:</strong></p>"
+        "<p style='margin:0 0 4px;'><strong>MAE</strong> je prumerna absolutni chyba predikce. "
+        "Nizsi hodnota znamena presnejsi model.</p>"
+        "<p style='margin:0 0 4px;'><strong>RMSE</strong> je odmocnina prumerne kvadraticke chyby. "
+        "Vice zvyraznuje velke odchylky, proto je citlivejsi na spicky.</p>"
+        "<p style='margin:0;'><strong>Bias</strong> je prumerna podepsana chyba "
+        "(skutecna spotreba minus predikce). Kladna hodnota znamena, ze model spotrebu spis podhodnocuje; "
+        "zaporna hodnota znamena, ze ji spis nadhodnocuje.</p>"
+        "</div>"
+    )

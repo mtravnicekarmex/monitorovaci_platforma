@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Sequence
 
 from sqlalchemy import text
@@ -19,8 +20,8 @@ from moduly.mereni.plynomery.database.models import (
 MODEL_VERSION_BASELINE = 1
 MODEL_VERSION_WEATHER_ADJUSTED = 2
 DEFAULT_MODEL_VERSION = MODEL_VERSION_BASELINE
-MODEL_REBUILD_LOOKBACK_DAYS = 120
-MODEL_VALIDATION_WINDOW_DAYS = 7
+MODEL_REBUILD_TRAINING_MONTHS = 3
+MODEL_VALIDATION_MONTHS = 1
 MODEL_SELECTION_COVERAGE_THRESHOLD = 0.85
 MODEL_EVALUATION_VERSION_OFFSET = 1000
 MIN_EXACT_HISTORY = 8
@@ -273,15 +274,15 @@ def get_runtime_model_version(*, session=None, default: int = DEFAULT_MODEL_VERS
 def build_rebuild_windows(
     reference_time: datetime | None = None,
     *,
-    lookback_days: int = MODEL_REBUILD_LOOKBACK_DAYS,
-    validation_window_days: int = MODEL_VALIDATION_WINDOW_DAYS,
+    training_window_months: int = MODEL_REBUILD_TRAINING_MONTHS,
+    validation_window_months: int = MODEL_VALIDATION_MONTHS,
 ) -> RebuildWindows:
     deploy_end = reference_time or prague_now_naive()
     validation_end = deploy_end
-    validation_start = validation_end - timedelta(days=validation_window_days)
-    train_start = deploy_end - timedelta(days=lookback_days)
+    validation_start = _subtract_months(validation_end, validation_window_months)
     train_end = validation_start
-    deploy_start = deploy_end - timedelta(days=lookback_days)
+    train_start = _subtract_months(train_end, training_window_months)
+    deploy_start = train_start
     return RebuildWindows(
         train_start=train_start,
         train_end=train_end,
@@ -290,6 +291,14 @@ def build_rebuild_windows(
         deploy_start=deploy_start,
         deploy_end=deploy_end,
     )
+
+
+def _subtract_months(value: datetime, months: int) -> datetime:
+    month_index = value.month - months - 1
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
 
 
 def select_best_model_summary(

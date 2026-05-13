@@ -31,16 +31,17 @@ class FakeSelectionSession:
         return FakeScalarResult(self.selected_model_version)
 
 
-def test_plynomery_build_rebuild_windows_reserves_last_week_for_validation():
+def test_plynomery_build_rebuild_windows_uses_one_month_validation_after_three_month_training():
     reference_time = datetime.datetime(2026, 4, 10, 6, 10, 5)
 
     windows = build_rebuild_windows(reference_time=reference_time)
 
     assert windows.deploy_end == reference_time
     assert windows.validation_end == reference_time
-    assert windows.validation_start == reference_time - datetime.timedelta(days=7)
-    assert windows.train_start == reference_time - datetime.timedelta(days=120)
+    assert windows.validation_start == datetime.datetime(2026, 3, 10, 6, 10, 5)
+    assert windows.train_start == datetime.datetime(2025, 12, 10, 6, 10, 5)
     assert windows.train_end == windows.validation_start
+    assert windows.deploy_start == windows.train_start
 
 
 def test_plynomery_candidate_model_versions_includes_weather_adjusted_candidate():

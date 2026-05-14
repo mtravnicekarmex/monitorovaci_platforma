@@ -211,6 +211,16 @@ def get_scheduler_health(access_token: str) -> dict[str, object]:
     return dict(response.json())
 
 
+def get_scheduler_log(access_token: str, *, lines: int = 300) -> dict[str, object]:
+    response = _request(
+        "GET",
+        "/health/scheduler/log",
+        access_token=access_token,
+        params={"lines": int(lines)},
+    )
+    return dict(response.json())
+
+
 def run_scheduler_job_once(access_token: str, job_id: str) -> dict[str, object]:
     response = _request(
         "POST",

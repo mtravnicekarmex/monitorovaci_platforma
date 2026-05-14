@@ -113,3 +113,37 @@ def test_scheduler_health_route_returns_degraded_status(monkeypatch):
     assert job_by_id["daily_job"].last_status == "error"
     assert job_by_id["quarter_hour_job"].last_status == "success"
     assert [item.job_id for item in response.schedule] == ["hourly_job"]
+
+
+def test_scheduler_log_route_returns_tail_lines(monkeypatch, tmp_path):
+    log_path = tmp_path / "scheduler.log"
+    log_path.write_text("\n".join(f"line {index}" for index in range(1, 6)), encoding="utf-8")
+    monkeypatch.setattr(scheduler_health, "SCHEDULER_LOG_PATH", log_path)
+
+    response = scheduler_health.get_scheduler_log(
+        lines=3,
+        current_user=SimpleNamespace(is_admin=True),
+    )
+
+    assert response.exists is True
+    assert response.path == str(log_path)
+    assert response.max_lines == 3
+    assert response.lines_returned == 3
+    assert response.content == "line 3\nline 4\nline 5"
+    assert response.updated_at is not None
+
+
+def test_scheduler_log_route_handles_missing_log_file(monkeypatch, tmp_path):
+    log_path = tmp_path / "missing-scheduler.log"
+    monkeypatch.setattr(scheduler_health, "SCHEDULER_LOG_PATH", log_path)
+
+    response = scheduler_health.get_scheduler_log(
+        lines=100,
+        current_user=SimpleNamespace(is_admin=True),
+    )
+
+    assert response.exists is False
+    assert response.path == str(log_path)
+    assert response.lines_returned == 0
+    assert response.content == ""
+    assert response.updated_at is None

@@ -11,13 +11,21 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from moduly.apps.dashboard import elektromery_reports
 
 
-def _measurement(identifikace: str, dt: datetime.datetime, objem: float) -> dict[str, object]:
+def _measurement(
+    identifikace: str,
+    dt: datetime.datetime,
+    objem: float,
+    *,
+    interval_minutes: int | None = None,
+    source_file: str = "LDS 2026-02.xlsx",
+) -> dict[str, object]:
     return {
         "identifikace": identifikace,
         "seriove_cislo": 1,
         "date": dt,
         "objem": objem,
-        "source_file": "LDS 2026-02.xlsx",
+        "interval_minutes": interval_minutes,
+        "source_file": source_file,
     }
 
 
@@ -40,6 +48,17 @@ def test_resolve_report_period_builds_month_window_with_hour_bucket():
     assert period.bucket_frequency == "h"
     assert period.bucket_label == "hodina"
     assert period.date_range_label == "01.02.2026 - 28.02.2026"
+
+
+def test_resolve_report_period_builds_year_window_with_day_bucket():
+    period = elektromery_reports.resolve_report_period("year", datetime.date(2026, 5, 14))
+
+    assert period.label == "Roční"
+    assert period.period_start == datetime.datetime(2026, 1, 1, 0, 0)
+    assert period.period_end == datetime.datetime(2027, 1, 1, 0, 0)
+    assert period.bucket_frequency == "D"
+    assert period.bucket_label == "den"
+    assert period.date_range_label == "01.01.2026 - 31.12.2026"
 
 
 def test_build_consumption_curve_aggregates_ote_measurements_from_db_shape():
@@ -65,6 +84,100 @@ def test_build_consumption_curve_aggregates_ote_measurements_from_db_shape():
     assert summary["max_power_kw"] == 12.0
     assert exceedance[["odber_kw", "prekroceni_kw"]].to_dict(orient="records") == [
         {"odber_kw": 12.0, "prekroceni_kw": 2.0},
+    ]
+
+
+def test_build_consumption_curve_uses_actual_measurement_interval_minutes():
+    measurements = [
+        _measurement("TS15", datetime.datetime(2026, 2, 1, 0, 0), 1.0, interval_minutes=15),
+        _measurement("TS60", datetime.datetime(2026, 2, 1, 0, 0), 1.0, interval_minutes=60),
+        _measurement("TS24H", datetime.datetime(2026, 2, 1, 0, 0), 24.0, interval_minutes=1440),
+    ]
+    df = elektromery_reports.ote_records_to_dataframe(measurements)
+    period = elektromery_reports.resolve_report_period("day", datetime.date(2026, 2, 1))
+
+    period_df = elektromery_reports.filter_measurements_for_period(df, period)
+    curve = elektromery_reports.build_consumption_curve(period_df, period)
+
+    assert len(curve) == 96
+    assert curve[["date", "spotreba_kwh", "odber_kw", "pocet_mereni"]].head(5).to_dict(orient="records") == [
+        {
+            "date": datetime.datetime(2026, 2, 1, 0, 0),
+            "spotreba_kwh": 1.5,
+            "odber_kw": 6.0,
+            "pocet_mereni": 3,
+        },
+        {
+            "date": datetime.datetime(2026, 2, 1, 0, 15),
+            "spotreba_kwh": 0.5,
+            "odber_kw": 2.0,
+            "pocet_mereni": 2,
+        },
+        {
+            "date": datetime.datetime(2026, 2, 1, 0, 30),
+            "spotreba_kwh": 0.5,
+            "odber_kw": 2.0,
+            "pocet_mereni": 2,
+        },
+        {
+            "date": datetime.datetime(2026, 2, 1, 0, 45),
+            "spotreba_kwh": 0.5,
+            "odber_kw": 2.0,
+            "pocet_mereni": 2,
+        },
+        {
+            "date": datetime.datetime(2026, 2, 1, 1, 0),
+            "spotreba_kwh": 0.25,
+            "odber_kw": 1.0,
+            "pocet_mereni": 1,
+        },
+    ]
+    assert curve["spotreba_kwh"].sum() == pytest.approx(26.0)
+    assert curve["odber_kw"].max() == 6.0
+    assert elektromery_reports.describe_measurement_intervals(period_df) == "15 min, 1 h, 1 den"
+
+
+def test_build_consumption_curve_places_softlink_state_deltas_before_reading_timestamp():
+    measurements = [
+        _measurement(
+            "SOFT",
+            datetime.datetime(2026, 2, 1, 1, 0),
+            4.0,
+            interval_minutes=60,
+            source_file="SOFTLINK",
+        ),
+    ]
+    df = elektromery_reports.ote_records_to_dataframe(measurements)
+    period = elektromery_reports.resolve_report_period("day", datetime.date(2026, 2, 1))
+
+    period_df = elektromery_reports.filter_measurements_for_period(df, period)
+    curve = elektromery_reports.build_consumption_curve(period_df, period)
+
+    assert curve[["date", "spotreba_kwh", "odber_kw", "pocet_mereni"]].to_dict(orient="records") == [
+        {
+            "date": datetime.datetime(2026, 2, 1, 0, 0),
+            "spotreba_kwh": 1.0,
+            "odber_kw": 4.0,
+            "pocet_mereni": 1,
+        },
+        {
+            "date": datetime.datetime(2026, 2, 1, 0, 15),
+            "spotreba_kwh": 1.0,
+            "odber_kw": 4.0,
+            "pocet_mereni": 1,
+        },
+        {
+            "date": datetime.datetime(2026, 2, 1, 0, 30),
+            "spotreba_kwh": 1.0,
+            "odber_kw": 4.0,
+            "pocet_mereni": 1,
+        },
+        {
+            "date": datetime.datetime(2026, 2, 1, 0, 45),
+            "spotreba_kwh": 1.0,
+            "odber_kw": 4.0,
+            "pocet_mereni": 1,
+        },
     ]
 
 
@@ -109,6 +222,36 @@ def test_build_consumption_curve_month_uses_hourly_peak_power_and_hourly_consump
             "date": datetime.datetime(2026, 2, 1, 0, 45),
             "odber_kw": 16.0,
             "prekroceni_kw": 6.0,
+        },
+    ]
+
+
+def test_build_consumption_curve_year_uses_daily_consumption_and_daily_peak_power():
+    measurements = [
+        _measurement("TS1", datetime.datetime(2026, 1, 1, 0, 0), 1.0),
+        _measurement("TS1", datetime.datetime(2026, 1, 1, 0, 15), 2.0),
+        _measurement("TS1", datetime.datetime(2026, 1, 2, 0, 0), 0.5),
+    ]
+    df = elektromery_reports.ote_records_to_dataframe(measurements)
+    period = elektromery_reports.resolve_report_period("year", datetime.date(2026, 5, 14))
+
+    period_df = elektromery_reports.filter_measurements_for_period(df, period)
+    curve = elektromery_reports.build_consumption_curve(period_df, period)
+
+    assert curve[["date", "peak_at", "spotreba_kwh", "odber_kw", "pocet_mereni"]].to_dict(orient="records") == [
+        {
+            "date": datetime.datetime(2026, 1, 1, 0, 0),
+            "peak_at": datetime.datetime(2026, 1, 1, 0, 15),
+            "spotreba_kwh": 3.0,
+            "odber_kw": 8.0,
+            "pocet_mereni": 2,
+        },
+        {
+            "date": datetime.datetime(2026, 1, 2, 0, 0),
+            "peak_at": datetime.datetime(2026, 1, 2, 0, 0),
+            "spotreba_kwh": 0.5,
+            "odber_kw": 2.0,
+            "pocet_mereni": 1,
         },
     ]
 
@@ -437,7 +580,7 @@ def test_build_ote_report_html_contains_pdf_sections():
     assert "Křivka odběru a rezervovaná hladina" in html
     assert "Souhrn měřidel" in html
     assert "Překročení rezervované hladiny" in html
-    assert "dbo.Mereni_elektromery_BINARY" in html
+    assert "monitoring.Mereni_elektromery_vse" in html
     assert "chart-line-legend" in html
     assert "Odběrná místa:</strong>" not in html
     assert "Report vychází z" not in html
@@ -696,6 +839,52 @@ def test_build_curve_svg_hides_charge_overlay_text_for_month_report():
     assert "15.000 kW" not in svg
 
 
+def test_build_curve_svg_hides_charge_overlay_text_for_year_report():
+    period = elektromery_reports.resolve_report_period("year", datetime.date(2026, 5, 14))
+    report = elektromery_reports.OtePdfReport(
+        generated_at=datetime.datetime(2026, 5, 14, 6, 0, 0),
+        period=period,
+        period_label="Roční report",
+        reserved_power_kw=10.0,
+        total_consumption_kwh=4.5,
+        measurement_count=3,
+        device_count=1,
+        max_power_kw=8.0,
+        max_power_at=period.period_start + datetime.timedelta(days=1),
+        exceedance_count=0,
+        curve_rows=(
+            elektromery_reports.OteCurveRow(
+                date=period.period_start + datetime.timedelta(days=1),
+                peak_at=period.period_start + datetime.timedelta(days=1),
+                spotreba_kwh=2.0,
+                odber_kw=8.0,
+                pocet_mereni=1,
+            ),
+        ),
+        device_rows=(),
+        exceedance_rows=(),
+        charge_overlay_rows=(
+            elektromery_reports.OteChargeOverlayRow(
+                id_relace="rel-001",
+                overlay_start=period.period_start + datetime.timedelta(hours=1),
+                overlay_end=period.period_start + datetime.timedelta(hours=2),
+                midpoint_at=period.period_start + datetime.timedelta(hours=1, minutes=30),
+                lane=0,
+                duration_line="1 h",
+                kwh_line="7.500 kWh",
+                speed_line="15.000 kW",
+            ),
+        ),
+    )
+
+    svg = elektromery_reports._build_curve_svg(report)
+
+    assert "Nabíjecí relace" in svg
+    assert "1 h" not in svg
+    assert "7.500 kWh" not in svg
+    assert "15.000 kW" not in svg
+
+
 def _svg_report(period: elektromery_reports.OteReportPeriod) -> elektromery_reports.OtePdfReport:
     curve_rows = (
         elektromery_reports.OteCurveRow(
@@ -818,6 +1007,17 @@ def test_build_curve_svg_month_axis_uses_regular_date_ticks():
     assert ">16.02.</text>" in svg
     assert ">26.02.</text>" in svg
     assert ">01.02. 00:00</text>" not in svg
+
+
+def test_build_curve_svg_year_axis_uses_monthly_ticks():
+    period = elektromery_reports.resolve_report_period("year", datetime.date(2026, 5, 14))
+
+    svg = elektromery_reports._build_curve_svg(_svg_report(period))
+
+    assert ">01/2026</text>" in svg
+    assert ">06/2026</text>" in svg
+    assert ">12/2026</text>" in svg
+    assert len(elektromery_reports.build_axis_tick_times(period)) == 12
 
 
 def test_build_curve_svg_adds_vertical_dashed_gridline_for_each_x_tick():

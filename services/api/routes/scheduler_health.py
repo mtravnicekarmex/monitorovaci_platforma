@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from core.scheduler.job_schedule import build_schedule_runs, get_scheduler_job_specs
 from core.scheduler.metrics import JobMetrics, get_metrics_store
-from core.scheduler.scheduler import get_manual_run_specs, trigger_manual_job
+from core.scheduler.scheduler import SCHEDULER_LOG_PATH, get_manual_run_specs, trigger_manual_job
 from services.api.core.dependencies import get_current_admin_user
 from services.api.schemas.admin import (
     SchedulerHealthResponse,
     SchedulerJobHealth,
+    SchedulerLogResponse,
     SchedulerJobRunResponse,
     SchedulerScheduledRun,
 )
@@ -18,6 +21,30 @@ from services.api.services.dashboard_auth import DashboardUserContext
 
 
 router = APIRouter(prefix="/health", tags=["health"])
+
+
+def _tail_text_file(path: Path, *, max_lines: int) -> str:
+    if max_lines <= 0:
+        return ""
+
+    chunk_size = 8192
+    chunks: list[bytes] = []
+    newline_count = 0
+    with path.open("rb") as file_handle:
+        file_handle.seek(0, 2)
+        position = file_handle.tell()
+        while position > 0 and newline_count <= max_lines:
+            read_size = min(chunk_size, position)
+            position -= read_size
+            file_handle.seek(position)
+            chunk = file_handle.read(read_size)
+            chunks.append(chunk)
+            newline_count += chunk.count(b"\n")
+
+    data = b"".join(reversed(chunks))
+    text = data.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    return "\n".join(lines[-max_lines:])
 
 
 @router.get(
@@ -99,6 +126,46 @@ def get_scheduler_health(
         jobs=jobs,
         schedule=schedule,
         checked_at=datetime.now(),
+    )
+
+
+@router.get(
+    "/scheduler/log",
+    response_model=SchedulerLogResponse,
+    summary="Scheduler log tail",
+    description="Vraci posledni radky aktualniho souboru scheduler.log. Vyzaduje admin opravneni.",
+)
+def get_scheduler_log(
+    lines: Annotated[int, Query(ge=1, le=2000)] = 300,
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> SchedulerLogResponse:
+    del current_user
+
+    log_path = SCHEDULER_LOG_PATH
+    if not log_path.exists():
+        return SchedulerLogResponse(
+            path=str(log_path),
+            exists=False,
+            max_lines=lines,
+            lines_returned=0,
+            content="",
+            updated_at=None,
+        )
+
+    try:
+        content = _tail_text_file(log_path, max_lines=lines)
+        stat = log_path.stat()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Nepodarilo se nacist scheduler log: {exc}") from exc
+
+    returned_lines = 0 if not content else len(content.splitlines())
+    return SchedulerLogResponse(
+        path=str(log_path),
+        exists=True,
+        max_lines=lines,
+        lines_returned=returned_lines,
+        content=content,
+        updated_at=datetime.fromtimestamp(stat.st_mtime),
     )
 
 

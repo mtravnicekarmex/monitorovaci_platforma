@@ -84,3 +84,12 @@ class SchedulerJobRunResponse(BaseModel):
     status: str = Field(..., pattern="^(started|busy)$")
     detail: str
     requested_at: datetime
+
+
+class SchedulerLogResponse(BaseModel):
+    path: str
+    exists: bool
+    max_lines: int = Field(ge=1)
+    lines_returned: int = Field(ge=0)
+    content: str
+    updated_at: datetime | None = None

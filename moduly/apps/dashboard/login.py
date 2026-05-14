@@ -28,11 +28,25 @@ from moduly.apps.dashboard.navigation_config import format_page_label, get_page_
 st.set_page_config(
     page_title="Login",
     page_icon="🔐",
-    layout="centered",
+    layout="wide",
 )
 
 
 init_auth_state()
+
+
+LOGIN_PAGE_STYLE = """
+<style>
+section.main > div.block-container,
+div[data-testid="stMainBlockContainer"] {
+    max-width: 46rem;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 2rem;
+    padding-right: 2rem;
+}
+</style>
+"""
 
 
 def default_target_page() -> str:
@@ -40,6 +54,7 @@ def default_target_page() -> str:
 
 
 def render_login_page() -> None:
+    st.markdown(LOGIN_PAGE_STYLE, unsafe_allow_html=True)
     st.title("Login do dashboardu")
     st.caption("Uvodni stranka pro pristup k interni aplikaci monitorovaci platformy.")
     auth_notice = str(st.session_state.pop("auth_notice", "") or "")

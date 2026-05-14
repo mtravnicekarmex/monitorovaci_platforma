@@ -99,4 +99,4 @@ if submitted:
         else:
             logout()
             st.session_state["auth_notice"] = "Heslo bylo změněno. Přihlaste se znovu."
-            st.switch_page("login.py")
+            st.rerun()

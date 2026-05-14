@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from moduly.apps.dashboard.auth import require_page_access
 from moduly.apps.dashboard.elektromery_reports import (
+    ELECTROMERY_REPORT_DATA_SOURCE_LABEL,
     ElektromeryDashboardReportError,
     OteCurveLayer,
     REPORT_PERIOD_OPTIONS,
@@ -34,6 +35,7 @@ from moduly.apps.dashboard.elektromery_reports import (
     curve_layer_legend_label,
     coerce_curve_layers,
     curve_layer_label,
+    describe_measurement_intervals,
     describe_selected_identifications,
     ote_records_to_dataframe,
     prepare_charge_session_overlays,
@@ -129,13 +131,14 @@ def load_ote_data_bounds() -> dict[str, object]:
                 SELECT
                     MIN(date) AS date_min,
                     MAX(date) AS date_max,
-                    COUNT(recid) AS measurement_count,
+                    COUNT(id) AS measurement_count,
                     COUNT(DISTINCT identifikace) AS device_count
-                FROM dbo."Mereni_elektromery_BINARY"
+                FROM monitoring."Mereni_elektromery_vse"
                 WHERE
                     date IS NOT NULL
                     AND identifikace IS NOT NULL
                     AND delta IS NOT NULL
+                    AND platne IS TRUE
                 """
             )
         ).mappings().one()
@@ -157,8 +160,11 @@ def load_ote_identifikace_options() -> tuple[str, ...]:
             text(
                 """
                 SELECT DISTINCT identifikace
-                FROM dbo."Mereni_elektromery_BINARY"
-                WHERE identifikace IS NOT NULL
+                FROM monitoring."Mereni_elektromery_vse"
+                WHERE
+                    identifikace IS NOT NULL
+                    AND delta IS NOT NULL
+                    AND platne IS TRUE
                 ORDER BY identifikace ASC
                 """
             )
@@ -175,7 +181,9 @@ def load_ote_identifikace_options() -> tuple[str, ...]:
 @st.cache_data(ttl=60)
 def load_ote_measurements(period_start, period_end, selected_identifications: tuple[str, ...] | None = None) -> pd.DataFrame:
     if selected_identifications is not None and len(selected_identifications) == 0:
-        return pd.DataFrame(columns=["date", "identifikace", "seriove_cislo", "spotreba_kwh", "source_file"])
+        return pd.DataFrame(
+            columns=["date", "identifikace", "seriove_cislo", "spotreba_kwh", "interval_minutes", "source_file"]
+        )
 
     session = get_session_pg()
     try:
@@ -185,13 +193,15 @@ def load_ote_measurements(period_start, period_end, selected_identifications: tu
                 identifikace,
                 seriove_cislo,
                 delta AS spotreba_kwh,
-                source_file
-            FROM dbo."Mereni_elektromery_BINARY"
+                interval_minutes,
+                zdroj AS source_file
+            FROM monitoring."Mereni_elektromery_vse"
             WHERE
                 date >= :period_start
                 AND date < :period_end
                 AND identifikace IS NOT NULL
                 AND delta IS NOT NULL
+                AND platne IS TRUE
         """
         params = {
             "period_start": period_start,
@@ -367,7 +377,7 @@ def build_curve_chart_with_charge_overlay(
         y2="zero_kw:Q",
     )
     layered_top_chart = (top_chart + stripe_layer).properties(height=360)
-    if report_period.kind == "month":
+    if report_period.kind in {"month", "year"}:
         return layered_top_chart
 
     timeline_source = overlay_df.copy()
@@ -442,6 +452,7 @@ def render_report_result(
     pdf_variants: dict[bool, dict[str, object]] | None = None,
     selected_identifications: tuple[str, ...] = (),
     available_identification_count: int = 0,
+    measurement_interval_label: str | None = None,
 ) -> None:
     del interval_curve_df, pdf_bytes, pdf_filename, pdf_error, pdf_variants
     curve_layers = coerce_curve_layers(curve_layers)
@@ -454,6 +465,8 @@ def render_report_result(
     st.caption(
         f"Hlavní výběr: {describe_selected_identifications(selected_identifications, total_available_count=available_identification_count, collapse_full_selection=False)}"
     )
+    if measurement_interval_label:
+        st.caption(f"Intervaly měření: {measurement_interval_label}")
     for layer in curve_layers[1:]:
         st.caption(
             f"{layer.label}: {describe_selected_identifications(layer.selected_identifications, total_available_count=available_identification_count, collapse_full_selection=False)}"
@@ -461,10 +474,10 @@ def render_report_result(
 
     visible_curve_layers = tuple(layer for layer in curve_layers if layer.curve_rows)
     if not visible_curve_layers:
-        st.info("Pro zvolené období a výběry vrstev nejsou v databázi žádná binární data elektroměrů.")
+        st.info("Pro zvolené období a výběry vrstev nejsou v databázi žádná data elektroměrů.")
         return
     if curve_df.empty and visible_curve_layers:
-        st.info("Hlavní výběr nemá ve zvoleném období žádná binární data elektroměrů. V grafu jsou zobrazeny pouze další vrstvy.")
+        st.info("Hlavní výběr nemá ve zvoleném období žádná data elektroměrů. V grafu jsou zobrazeny pouze další vrstvy.")
 
     show_charging_overlay = st.checkbox(
         "Zobrazit nabíjecí relace SmartFuelPass v grafu",
@@ -543,6 +556,7 @@ def _build_report_result(
         device_summary_df,
         curve_layers,
     )
+    measurement_interval_label = describe_measurement_intervals(period_df)
     pdf_bytes = None
     pdf_filename = None
     pdf_error = None
@@ -587,6 +601,7 @@ def _build_report_result(
         "reserved_power_kw": reserved_power_kw,
         "selected_identifications": selected_identifications,
         "available_identification_count": available_identification_count,
+        "measurement_interval_label": measurement_interval_label,
         "summary": summary,
         "exceedance_df": exceedance_df,
         "pdf_bytes": pdf_bytes,
@@ -676,16 +691,16 @@ def _resolve_pdf_variant(report_result: dict[str, object], include_charge_overla
 def render_dashboard() -> None:
     render_page_styles()
     st.title("Reporty elektroměrů")
-    st.caption("Manuální vytvoření reportu z PostgreSQL tabulky `dbo.Mereni_elektromery_BINARY`.")
+    st.caption(f"Manuální vytvoření reportu z PostgreSQL tabulky `{ELECTROMERY_REPORT_DATA_SOURCE_LABEL}`.")
 
     bounds = load_ote_data_bounds()
     if not bounds["measurement_count"] or bounds["date_min"] is None or bounds["date_max"] is None:
-        st.info("V tabulce `dbo.Mereni_elektromery_BINARY` zatím nejsou žádná data pro report.")
+        st.info(f"V tabulce `{ELECTROMERY_REPORT_DATA_SOURCE_LABEL}` zatím nejsou žádná data pro report.")
         return
 
     identifikace_options = load_ote_identifikace_options()
     if not identifikace_options:
-        st.info("V tabulce `dbo.Mereni_elektromery_BINARY` nejsou dostupné žádné identifikace odběrných míst.")
+        st.info(f"V tabulce `{ELECTROMERY_REPORT_DATA_SOURCE_LABEL}` nejsou dostupné žádné identifikace odběrných míst.")
         return
 
     min_date = pd.to_datetime(bounds["date_min"]).date()
@@ -714,7 +729,7 @@ def render_dashboard() -> None:
             "Zahrnout do reportu",
             options=list(identifikace_options),
             default=list(identifikace_options),
-            help="Hodnoty jsou načtené jako unikátní `identifikace` z PostgreSQL tabulky `dbo.Mereni_elektromery_BINARY`.",
+            help=f"Hodnoty jsou načtené jako unikátní `identifikace` z PostgreSQL tabulky `{ELECTROMERY_REPORT_DATA_SOURCE_LABEL}`.",
         )
     main_layer_meta_cols = st.columns((3.6, 1))
     with main_layer_meta_cols[1]:
@@ -774,7 +789,8 @@ def render_dashboard() -> None:
                 report_period.period_end,
                 selected_identifications_tuple,
             )
-            interval_curve_df = build_interval_consumption_curve(period_df)
+            measurement_interval_label = describe_measurement_intervals(period_df)
+            interval_curve_df = build_interval_consumption_curve(period_df, report_period)
             curve_df = build_consumption_curve(period_df, report_period)
             device_summary_df = build_device_summary(period_df)
             curve_layers = [
@@ -807,7 +823,7 @@ def render_dashboard() -> None:
                     )
                 )
             period_label = (
-                f"{report_period.label} report | {report_period.date_range_label} | krok {report_period.bucket_label}"
+                f"{report_period.label} report | {report_period.date_range_label} | interval měření {measurement_interval_label}"
             )
             st.session_state[REPORT_RESULT_KEY] = _build_report_result(
                 report_period=report_period,
@@ -850,5 +866,5 @@ def render_dashboard() -> None:
 try:
     render_dashboard()
 except SQLAlchemyError as exc:
-    st.error("Nepodařilo se načíst binární data elektroměrů z PostgreSQL.")
+    st.error("Nepodařilo se načíst data elektroměrů z PostgreSQL.")
     st.exception(exc)

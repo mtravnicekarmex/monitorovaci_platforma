@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import html
 from pathlib import Path
 import sys
 
@@ -15,9 +16,11 @@ if str(PROJECT_ROOT) not in sys.path:
 from moduly.apps.dashboard.api_client import (
     DashboardApiError,
     get_scheduler_health as api_get_scheduler_health,
+    get_scheduler_log as api_get_scheduler_log,
     run_scheduler_job_once as api_run_scheduler_job_once,
 )
 from moduly.apps.dashboard.auth import get_auth_token, require_page_access
+from moduly.apps.dashboard.scheduler_log_view import extract_error_log_blocks
 
 
 st.set_page_config(
@@ -36,6 +39,24 @@ STATUS_LABELS = {
     "error": "ERROR",
 }
 
+SCHEDULER_ERROR_LOG_STYLE = """
+<style>
+.scheduler-error-log {
+    background: #7f1d1d;
+    border: 1px solid #ef4444;
+    border-radius: 8px;
+    color: #fee2e2;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    font-size: 0.86rem;
+    line-height: 1.45;
+    max-height: 360px;
+    overflow: auto;
+    padding: 0.85rem 1rem;
+    white-space: pre-wrap;
+}
+</style>
+"""
+
 
 def _require_access_token() -> str:
     access_token = get_auth_token()
@@ -47,6 +68,11 @@ def _require_access_token() -> str:
 @st.cache_data(ttl=30)
 def load_scheduler_health(access_token: str) -> dict[str, object]:
     return api_get_scheduler_health(access_token)
+
+
+@st.cache_data(ttl=5)
+def load_scheduler_log(access_token: str, lines: int) -> dict[str, object]:
+    return api_get_scheduler_log(access_token, lines=lines)
 
 
 def _parse_datetime(value: object) -> datetime | None:
@@ -261,6 +287,78 @@ def _render_manual_run_section(access_token: str, rows: list[dict[str, object]])
                 st.exception(exc)
 
 
+def _render_scheduler_log_section(access_token: str) -> None:
+    st.subheader("Log scheduleru")
+    st.caption("Aktualni vyrez ze souboru `core/scheduler/logs/scheduler.log`.")
+
+    control_col, refresh_col = st.columns([4, 1])
+    with control_col:
+        selected_line_count = int(
+            st.selectbox(
+                "Pocet zobrazenych radku",
+                options=[100, 300, 1000, 2000],
+                index=1,
+                key="scheduler_log_line_count",
+            )
+        )
+    with refresh_col:
+        st.write("")
+        st.write("")
+        if st.button("Obnovit log", width="stretch"):
+            load_scheduler_log.clear()
+            st.rerun()
+
+    try:
+        payload = load_scheduler_log(access_token, selected_line_count)
+    except DashboardApiError as exc:
+        st.error("Nepodarilo se nacist log scheduleru.")
+        st.exception(exc)
+        return
+
+    log_path = str(payload.get("path") or "")
+    exists = bool(payload.get("exists"))
+    content = str(payload.get("content") or "")
+    lines_returned = int(payload.get("lines_returned") or 0)
+    updated_at = _format_timestamp(payload.get("updated_at"))
+
+    if not exists:
+        st.info(f"Soubor logu zatim neexistuje: `{log_path}`")
+        return
+
+    st.caption(
+        f"Soubor: `{log_path}` | posledni zmena: {updated_at} | zobrazeno radku: {lines_returned}"
+    )
+    if not content:
+        st.info("Log je zatim prazdny.")
+        return
+
+    error_blocks = extract_error_log_blocks(content)
+    if error_blocks:
+        st.markdown("**Chybove zaznamy v nactenem vyrezu**")
+        st.markdown(SCHEDULER_ERROR_LOG_STYLE, unsafe_allow_html=True)
+        error_log_html = html.escape("\n\n".join(error_blocks))
+        st.markdown(
+            f'<div class="scheduler-error-log">{error_log_html}</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.success("V nactenem vyrezu logu nejsou zadne ERROR zaznamy.")
+
+    st.text_area(
+        "Obsah logu",
+        value=content,
+        height=420,
+        disabled=True,
+        label_visibility="collapsed",
+    )
+    st.download_button(
+        "Stahnout zobrazeny vyrez logu",
+        data=content,
+        file_name="scheduler.log.tail.txt",
+        mime="text/plain",
+    )
+
+
 def render_page() -> None:
     access_token = _require_access_token()
 
@@ -340,6 +438,8 @@ def render_page() -> None:
         )
     else:
         st.info("Pro nasledujicich 24 hodin nebyly vypocteny zadne behy.")
+
+    _render_scheduler_log_section(access_token)
 
     _render_manual_run_section(access_token, manual_runnable_jobs)
 

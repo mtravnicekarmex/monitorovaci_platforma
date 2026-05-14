@@ -21,8 +21,13 @@ REPORT_PERIOD_OPTIONS: dict[str, str] = {
     "day": "Denní",
     "week": "Týdenní",
     "month": "Měsíční",
+    "year": "Roční",
 }
-OTE_INTERVAL_HOURS = 0.25
+ELECTROMERY_REPORT_DATA_SOURCE_LABEL = "monitoring.Mereni_elektromery_vse"
+DEFAULT_MEASUREMENT_INTERVAL_MINUTES = 15
+CANONICAL_CURVE_INTERVAL_MINUTES = DEFAULT_MEASUREMENT_INTERVAL_MINUTES
+OTE_INTERVAL_HOURS = DEFAULT_MEASUREMENT_INTERVAL_MINUTES / 60
+END_ANCHORED_MEASUREMENT_SOURCES = frozenset({"SOFTLINK"})
 
 _CURVE_COLOR = "#dc2626"
 _CURVE_FILL = "#fee2e2"
@@ -128,6 +133,7 @@ class OtePdfReport:
     charge_overlay_rows: tuple[OteChargeOverlayRow, ...] = ()
     selected_identifications: tuple[str, ...] = ()
     available_identification_count: int | None = None
+    measurement_interval_label: str | None = None
 
 
 def _format_charge_overlay_value(value: object, *, unit: str = "", digits: int = 3) -> str:
@@ -170,21 +176,73 @@ def ote_records_to_dataframe(records: Iterable[object]) -> pd.DataFrame:
             "identifikace": _record_value(record, "identifikace"),
             "seriove_cislo": _record_value(record, "seriove_cislo"),
             "spotreba_kwh": consumption_value(record),
+            "interval_minutes": _record_value(record, "interval_minutes"),
             "source_file": _record_value(record, "source_file"),
         }
         for record in records
     ]
     df = pd.DataFrame(rows)
     if df.empty:
-        return pd.DataFrame(columns=["date", "identifikace", "seriove_cislo", "spotreba_kwh", "source_file"])
+        return pd.DataFrame(
+            columns=["date", "identifikace", "seriove_cislo", "spotreba_kwh", "interval_minutes", "source_file"]
+        )
 
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["spotreba_kwh"] = pd.to_numeric(df["spotreba_kwh"], errors="coerce")
+    interval_minutes = pd.to_numeric(df["interval_minutes"], errors="coerce")
+    interval_minutes = interval_minutes.where(interval_minutes > 0, DEFAULT_MEASUREMENT_INTERVAL_MINUTES)
+    df["interval_minutes"] = interval_minutes.fillna(DEFAULT_MEASUREMENT_INTERVAL_MINUTES).astype(int)
     df = df.dropna(subset=["date", "identifikace", "spotreba_kwh"]).copy()
     df["identifikace"] = df["identifikace"].astype(str)
     df["source_file"] = df["source_file"].astype("string")
     df = df.sort_values(["date", "identifikace"]).reset_index(drop=True)
     return df
+
+
+def format_measurement_interval(minutes: object) -> str:
+    try:
+        interval_minutes = int(float(minutes))
+    except (TypeError, ValueError):
+        interval_minutes = DEFAULT_MEASUREMENT_INTERVAL_MINUTES
+    if interval_minutes <= 0:
+        interval_minutes = DEFAULT_MEASUREMENT_INTERVAL_MINUTES
+    if interval_minutes % 1440 == 0:
+        days = interval_minutes // 1440
+        return "1 den" if days == 1 else f"{days} d"
+    if interval_minutes % 60 == 0:
+        hours = interval_minutes // 60
+        return "1 h" if hours == 1 else f"{hours} h"
+    return f"{interval_minutes} min"
+
+
+def describe_measurement_intervals(df: pd.DataFrame, *, preview_limit: int = 4) -> str:
+    if df.empty or "interval_minutes" not in df.columns:
+        return format_measurement_interval(DEFAULT_MEASUREMENT_INTERVAL_MINUTES)
+    interval_values = (
+        pd.to_numeric(df["interval_minutes"], errors="coerce")
+        .dropna()
+        .loc[lambda values: values > 0]
+        .astype(int)
+        .drop_duplicates()
+        .sort_values()
+        .tolist()
+    )
+    if not interval_values:
+        return format_measurement_interval(DEFAULT_MEASUREMENT_INTERVAL_MINUTES)
+    labels = [format_measurement_interval(value) for value in interval_values]
+    if len(labels) > preview_limit:
+        return f"{', '.join(labels[:preview_limit])} + {len(labels) - preview_limit} další"
+    return ", ".join(labels)
+
+
+def _source_label(value: object) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip().upper()
+
+
+def _is_end_anchored_measurement(source: object) -> bool:
+    return _source_label(source) in END_ANCHORED_MEASUREMENT_SOURCES
 
 
 def resolve_report_period(period_kind: str, selected_date: datetime.date) -> OteReportPeriod:
@@ -226,6 +284,18 @@ def resolve_report_period(period_kind: str, selected_date: datetime.date) -> Ote
             bucket_label="hodina",
         )
 
+    if period_kind == "year":
+        year_start = selected_date.replace(month=1, day=1)
+        next_year = year_start.replace(year=year_start.year + 1)
+        return OteReportPeriod(
+            kind=period_kind,
+            label=REPORT_PERIOD_OPTIONS[period_kind],
+            period_start=datetime.datetime.combine(year_start, datetime.time.min),
+            period_end=datetime.datetime.combine(next_year, datetime.time.min),
+            bucket_frequency="D",
+            bucket_label="den",
+        )
+
     raise ValueError(f"Neznamy typ reportu: {period_kind}")
 
 
@@ -246,36 +316,152 @@ def _bucket_hours(period: OteReportPeriod) -> float:
     return 1.0
 
 
-def build_interval_consumption_curve(period_df: pd.DataFrame) -> pd.DataFrame:
+def _empty_consumption_curve() -> pd.DataFrame:
+    return pd.DataFrame(columns=["date", "peak_at", "spotreba_kwh", "odber_kw", "pocet_mereni"])
+
+
+def _build_timestamp_consumption_curve(period_df: pd.DataFrame) -> pd.DataFrame:
     if period_df.empty:
-        return pd.DataFrame(columns=["date", "peak_at", "spotreba_kwh", "odber_kw", "pocet_mereni"])
+        return _empty_consumption_curve()
 
     prepared = period_df.copy()
     prepared["date"] = pd.to_datetime(prepared["date"], errors="coerce")
     prepared["spotreba_kwh"] = pd.to_numeric(prepared["spotreba_kwh"], errors="coerce").fillna(0.0)
+    interval_source = (
+        prepared["interval_minutes"]
+        if "interval_minutes" in prepared.columns
+        else pd.Series(DEFAULT_MEASUREMENT_INTERVAL_MINUTES, index=prepared.index)
+    )
+    interval_minutes = pd.to_numeric(interval_source, errors="coerce")
+    interval_minutes = interval_minutes.where(interval_minutes > 0, DEFAULT_MEASUREMENT_INTERVAL_MINUTES)
+    prepared["interval_hours"] = interval_minutes.fillna(DEFAULT_MEASUREMENT_INTERVAL_MINUTES) / 60
+    prepared["row_odber_kw"] = prepared["spotreba_kwh"] / prepared["interval_hours"]
     prepared = prepared.dropna(subset=["date"]).copy()
     if prepared.empty:
-        return pd.DataFrame(columns=["date", "peak_at", "spotreba_kwh", "odber_kw", "pocet_mereni"])
+        return _empty_consumption_curve()
 
     curve = (
         prepared.groupby("date", as_index=False)
         .agg(
             spotreba_kwh=("spotreba_kwh", "sum"),
+            odber_kw=("row_odber_kw", "sum"),
             pocet_mereni=("spotreba_kwh", "count"),
         )
         .sort_values("date")
         .reset_index(drop=True)
     )
     curve["spotreba_kwh"] = curve["spotreba_kwh"].round(6)
-    curve["odber_kw"] = (curve["spotreba_kwh"] / OTE_INTERVAL_HOURS).round(6)
+    curve["odber_kw"] = curve["odber_kw"].round(6)
     curve["peak_at"] = curve["date"]
     return curve[["date", "peak_at", "spotreba_kwh", "odber_kw", "pocet_mereni"]].copy()
 
 
+def build_interval_consumption_curve(
+    period_df: pd.DataFrame,
+    period: OteReportPeriod | None = None,
+    *,
+    bucket_minutes: int = CANONICAL_CURVE_INTERVAL_MINUTES,
+) -> pd.DataFrame:
+    if period is None:
+        return _build_timestamp_consumption_curve(period_df)
+    if period_df.empty:
+        return _empty_consumption_curve()
+
+    prepared = period_df.copy()
+    prepared["date"] = pd.to_datetime(prepared["date"], errors="coerce")
+    prepared["spotreba_kwh"] = pd.to_numeric(prepared["spotreba_kwh"], errors="coerce").fillna(0.0)
+    interval_source = (
+        prepared["interval_minutes"]
+        if "interval_minutes" in prepared.columns
+        else pd.Series(DEFAULT_MEASUREMENT_INTERVAL_MINUTES, index=prepared.index)
+    )
+    interval_minutes = pd.to_numeric(interval_source, errors="coerce")
+    interval_minutes = interval_minutes.where(interval_minutes > 0, DEFAULT_MEASUREMENT_INTERVAL_MINUTES)
+    prepared["interval_minutes"] = interval_minutes.fillna(DEFAULT_MEASUREMENT_INTERVAL_MINUTES).astype(int)
+    if "source_file" not in prepared.columns:
+        prepared["source_file"] = ""
+    prepared = prepared.dropna(subset=["date"]).copy()
+    if prepared.empty:
+        return _empty_consumption_curve()
+
+    normalized_bucket_minutes = int(bucket_minutes or CANONICAL_CURVE_INTERVAL_MINUTES)
+    if normalized_bucket_minutes <= 0:
+        normalized_bucket_minutes = CANONICAL_CURVE_INTERVAL_MINUTES
+    bucket_delta = pd.Timedelta(minutes=normalized_bucket_minutes)
+    bucket_seconds = float(bucket_delta.total_seconds())
+    period_start = pd.Timestamp(period.period_start)
+    period_end = pd.Timestamp(period.period_end)
+    if period_end <= period_start:
+        return _empty_consumption_curve()
+
+    rows_by_bucket: dict[pd.Timestamp, dict[str, object]] = {}
+    for row in prepared.itertuples(index=False):
+        interval = int(row.interval_minutes)
+        measurement_seconds = float(interval * 60)
+        if measurement_seconds <= 0:
+            continue
+
+        measured_at = pd.Timestamp(row.date)
+        measurement_delta = pd.Timedelta(minutes=interval)
+        if _is_end_anchored_measurement(getattr(row, "source_file", "")):
+            measurement_start = measured_at - measurement_delta
+            measurement_end = measured_at
+        else:
+            measurement_start = measured_at
+            measurement_end = measured_at + measurement_delta
+        if measurement_end <= period_start or measurement_start >= period_end:
+            continue
+
+        clipped_start = max(measurement_start, period_start)
+        clipped_end = min(measurement_end, period_end)
+        if clipped_end <= clipped_start:
+            continue
+
+        bucket_index = floor((clipped_start - period_start).total_seconds() / bucket_seconds)
+        bucket_start = period_start + bucket_index * bucket_delta
+        row_power_kw = float(row.spotreba_kwh) / (measurement_seconds / 3600)
+
+        while bucket_start < clipped_end and bucket_start < period_end:
+            bucket_end = min(bucket_start + bucket_delta, period_end)
+            overlap_start = max(clipped_start, bucket_start)
+            overlap_end = min(clipped_end, bucket_end)
+            overlap_seconds = float((overlap_end - overlap_start).total_seconds())
+            if overlap_seconds > 0:
+                bucket_duration_seconds = float((bucket_end - bucket_start).total_seconds())
+                overlap_kwh = row_power_kw * (overlap_seconds / 3600)
+                bucket = rows_by_bucket.setdefault(
+                    bucket_start,
+                    {
+                        "date": bucket_start,
+                        "peak_at": bucket_start,
+                        "spotreba_kwh": 0.0,
+                        "odber_kw": 0.0,
+                        "pocet_mereni": 0,
+                    },
+                )
+                bucket["spotreba_kwh"] = float(bucket["spotreba_kwh"]) + overlap_kwh
+                bucket["odber_kw"] = float(bucket["odber_kw"]) + row_power_kw * (
+                    overlap_seconds / bucket_duration_seconds
+                )
+                bucket["pocet_mereni"] = int(bucket["pocet_mereni"]) + 1
+            bucket_start += bucket_delta
+
+    if not rows_by_bucket:
+        return _empty_consumption_curve()
+
+    curve = pd.DataFrame(rows_by_bucket.values()).sort_values("date").reset_index(drop=True)
+    curve["spotreba_kwh"] = pd.to_numeric(curve["spotreba_kwh"], errors="coerce").fillna(0.0).round(6)
+    curve["odber_kw"] = pd.to_numeric(curve["odber_kw"], errors="coerce").fillna(0.0).round(6)
+    curve["pocet_mereni"] = pd.to_numeric(curve["pocet_mereni"], errors="coerce").fillna(0).astype(int)
+    curve["date"] = pd.to_datetime(curve["date"], errors="coerce")
+    curve["peak_at"] = pd.to_datetime(curve["peak_at"], errors="coerce")
+    return curve[["date", "peak_at", "spotreba_kwh", "odber_kw", "pocet_mereni"]].copy()
+
+
 def build_consumption_curve(period_df: pd.DataFrame, period: OteReportPeriod) -> pd.DataFrame:
-    interval_curve = build_interval_consumption_curve(period_df)
+    interval_curve = build_interval_consumption_curve(period_df, period)
     if interval_curve.empty:
-        return pd.DataFrame(columns=["date", "peak_at", "spotreba_kwh", "odber_kw", "pocet_mereni"])
+        return _empty_consumption_curve()
     if period.bucket_frequency == "15min":
         return interval_curve
 
@@ -855,6 +1041,7 @@ def build_ote_pdf_report(
         charge_overlay_rows=overlay_rows,
         selected_identifications=normalized_selected_identifications,
         available_identification_count=available_identification_count,
+        measurement_interval_label=describe_measurement_intervals(period_df),
     )
 
 
@@ -863,6 +1050,7 @@ def build_ote_report_pdf_filename(report: OtePdfReport) -> str:
         "day": "Denni",
         "week": "Tydenni",
         "month": "Mesicni",
+        "year": "Rocni",
     }
     prefix = prefix_by_kind.get(report.period.kind, "Report")
     return f"{prefix} report elektromeru - {report.period.date_range_label}.pdf"
@@ -971,6 +1159,8 @@ def _curve_label(value: datetime.datetime, period: OteReportPeriod) -> str:
 def _axis_label(value: datetime.datetime, *, period: OteReportPeriod, tick_step: datetime.timedelta) -> str:
     if period.kind == "day":
         return value.strftime("%H:%M")
+    if period.kind == "year":
+        return value.strftime("%m/%Y")
     if tick_step >= datetime.timedelta(days=1):
         return value.strftime("%d.%m.")
     return _curve_label(value, period)
@@ -979,7 +1169,15 @@ def _axis_label(value: datetime.datetime, *, period: OteReportPeriod, tick_step:
 def build_axis_label_format(period: OteReportPeriod) -> str:
     if period.kind == "day":
         return "%H:%M"
+    if period.kind == "year":
+        return "%m/%Y"
     return "%d.%m."
+
+
+def _add_month(value: datetime.datetime) -> datetime.datetime:
+    if value.month == 12:
+        return value.replace(year=value.year + 1, month=1)
+    return value.replace(month=value.month + 1)
 
 
 def build_axis_tick_times(period: OteReportPeriod) -> list[datetime.datetime]:
@@ -987,6 +1185,13 @@ def build_axis_tick_times(period: OteReportPeriod) -> list[datetime.datetime]:
         tick_step = datetime.timedelta(hours=1)
     elif period.kind == "week":
         tick_step = datetime.timedelta(days=1)
+    elif period.kind == "year":
+        tick_times: list[datetime.datetime] = []
+        current_tick = period.period_start
+        while current_tick < period.period_end:
+            tick_times.append(current_tick)
+            current_tick = _add_month(current_tick)
+        return tick_times
     else:
         tick_step = datetime.timedelta(days=1)
 
@@ -1176,7 +1381,7 @@ def _build_curve_svg(report: OtePdfReport) -> str:
         )
 
     overlay_text_svg = ""
-    if report.charge_overlay_rows and report.period.kind != "month":
+    if report.charge_overlay_rows and report.period.kind not in {"month", "year"}:
         text_rows = []
         text_start_y = axis_label_y + 16
         for overlay_row in report.charge_overlay_rows:
@@ -1283,6 +1488,7 @@ def build_ote_report_html(report: OtePdfReport) -> str:
         if report.reserved_power_kw is not None and report.reserved_power_kw > 0
         else "Nezadáno"
     )
+    measurement_interval_label = report.measurement_interval_label or report.period.bucket_label
     limit_alert = bool(
         report.reserved_power_kw is not None
         and report.reserved_power_kw > 0
@@ -1547,7 +1753,7 @@ def build_ote_report_html(report: OtePdfReport) -> str:
     <div class="page-meta">
       <strong>Období:</strong> {escape(report.period.date_range_label)}<br>
       <strong>Vygenerováno:</strong> {escape(_format_datetime(report.generated_at))}<br>
-      <strong>Zdroj:</strong> dbo.Mereni_elektromery_BINARY
+      <strong>Zdroj:</strong> {escape(ELECTROMERY_REPORT_DATA_SOURCE_LABEL)}
     </div>
   </header>
 
@@ -1572,7 +1778,7 @@ def build_ote_report_html(report: OtePdfReport) -> str:
       {_build_metric_card_html("Max. odběr", _format_value(report.max_power_kw, unit="kW"), _format_datetime(report.max_power_at))}
       {_build_metric_card_html("Rezervovaná hladina", reserved_value, "Kontrola limitu odběru", alert=limit_alert)}
       {_build_metric_card_html("Měřidla", str(report.device_count), "Unikátní odběrná místa")}
-      {_build_metric_card_html("Měření", str(report.measurement_count), f"Krok {report.period.bucket_label}")}
+      {_build_metric_card_html("Měření", str(report.measurement_count), f"Interval měření {escape(measurement_interval_label)}")}
     </div>
 
     <div class="branch-chart-wrap">

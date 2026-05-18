@@ -97,9 +97,34 @@ def render_overview_sidebar(
 
 def prepare_measurements(df: pd.DataFrame) -> pd.DataFrame:
     prepared = df.copy()
+    for column in (
+        "date",
+        "objem",
+        "delta",
+        "identifikace",
+        "seriove_cislo",
+        "zdroj",
+        "platne",
+        "gap_detected",
+        "synthetic",
+        "reset_detected",
+        "source_date",
+        "time_utc",
+        "time_basis",
+        "source_timezone",
+        "source_utc_offset_minutes",
+        "time_fold",
+        "timestamp_position",
+    ):
+        if column not in prepared.columns:
+            prepared[column] = pd.NA
+
     prepared["date"] = pd.to_datetime(prepared["date"], errors="coerce")
+    prepared["source_date"] = pd.to_datetime(prepared["source_date"], errors="coerce")
+    prepared["time_utc"] = pd.to_datetime(prepared["time_utc"], utc=True, errors="coerce")
     prepared["objem"] = pd.to_numeric(prepared["objem"], errors="coerce")
-    prepared["seriove_cislo"] = prepared["seriove_cislo"].astype(str)
+    prepared["delta"] = pd.to_numeric(prepared["delta"], errors="coerce")
+    prepared["seriove_cislo"] = prepared["seriove_cislo"].astype("string")
     prepared["platne"] = prepared["platne"].fillna(True).astype(bool)
     prepared = prepared.dropna(subset=["date", "objem"]).sort_values("date").reset_index(drop=True)
 
@@ -108,11 +133,14 @@ def prepare_measurements(df: pd.DataFrame) -> pd.DataFrame:
 
     diff_from_volume = prepared["objem"].diff()
     serial_changed = prepared["seriove_cislo"].ne(prepared["seriove_cislo"].shift())
-    reset_detected = diff_from_volume.lt(0).fillna(False) | serial_changed.fillna(False)
+    stored_reset = prepared["reset_detected"].map(lambda value: bool(value) if pd.notna(value) else False)
+    reset_detected = diff_from_volume.lt(0).fillna(False) | serial_changed.fillna(False) | stored_reset
     prepared["reset_detected"] = reset_detected
+    source_delta_available = prepared["delta"].notna()
     prepared["spotreba"] = diff_from_volume.fillna(0.0)
+    prepared.loc[source_delta_available, "spotreba"] = prepared.loc[source_delta_available, "delta"]
     prepared.loc[prepared["spotreba"] < 0, "spotreba"] = 0.0
-    prepared.loc[prepared["reset_detected"], "spotreba"] = 0.0
+    prepared.loc[prepared["reset_detected"] & ~source_delta_available, "spotreba"] = 0.0
     prepared.loc[~prepared["platne"], "spotreba"] = 0.0
     prepared["spotreba"] = prepared["spotreba"].round(3)
     prepared["kumulovana_spotreba"] = prepared["spotreba"].cumsum().round(3)

@@ -13,6 +13,10 @@ from sqlalchemy.orm import Session
 
 from core.db.connect import ENGINE_PG, SessionLocalPG
 from moduly.mereni.elektromery.database.elektromery_db_vse import import_measurements
+from moduly.mereni.elektromery.database.time_semantics import (
+    BINARY_TIME_SEMANTICS,
+    build_time_columns,
+)
 
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
@@ -32,6 +36,11 @@ class BinaryMeterFileConfig:
     interval_minutes: int
     source_name: str
     double_format: str = "<d"
+    time_basis: str = BINARY_TIME_SEMANTICS.time_basis
+    source_timezone: str = BINARY_TIME_SEMANTICS.source_timezone
+    source_utc_offset_minutes: int | None = BINARY_TIME_SEMANTICS.source_utc_offset_minutes
+    timestamp_position: str = BINARY_TIME_SEMANTICS.timestamp_position
+    time_fold: int | None = BINARY_TIME_SEMANTICS.time_fold
 
     @property
     def first_db_timestamp(self) -> datetime:
@@ -164,7 +173,7 @@ BINARY_METER_CONFIGS: dict[str, BinaryMeterFileConfig] = {
         identifikace="TS1 - přetoky",
         seriove_cislo=859182400407782429,
         first_timestamp=datetime(2024, 7, 1, 0, 0, 0),
-        timestamp_offset=timedelta(hours=1),
+        timestamp_offset=timedelta(0),
         interval_minutes=15,
         source_name="BINARY_19891",
     )
@@ -196,6 +205,16 @@ def chunked(items, size: int = BINARY_IMPORT_CHUNK_SIZE):
 
 def sample_index_to_timestamp(config: BinaryMeterFileConfig, sample_index: int) -> datetime:
     return config.first_db_timestamp + timedelta(minutes=config.interval_minutes * sample_index)
+
+
+def _config_time_semantics_row(config: BinaryMeterFileConfig) -> dict[str, object]:
+    return {
+        "time_basis": config.time_basis,
+        "source_timezone": config.source_timezone,
+        "source_utc_offset_minutes": config.source_utc_offset_minutes,
+        "timestamp_position": config.timestamp_position,
+        "time_fold": config.time_fold,
+    }
 
 
 def binary_source_file_changed(
@@ -319,6 +338,7 @@ def build_delta_source_rows(parsed: ParsedBinaryMeterFile) -> list[dict[str, obj
             "identifikace": parsed.config.identifikace,
             "seriove_cislo": parsed.config.seriove_cislo,
             "date": measurement.date,
+            **_config_time_semantics_row(parsed.config),
             "objem": None,
             "delta": measurement.delta,
             "interval_minutes": parsed.config.interval_minutes,
@@ -342,6 +362,7 @@ def build_delta_source_rows_from_raw_rows(
                 "identifikace": str(row["identifikace"]),
                 "seriove_cislo": None if row["seriove_cislo"] is None else int(row["seriove_cislo"]),
                 "date": row["date"],
+                **_config_time_semantics_row(config),
                 "objem": None,
                 "delta": float(row["delta"]),
                 "interval_minutes": config.interval_minutes,
@@ -368,6 +389,11 @@ def ensure_binary_import_tables() -> None:
                     interval_minutes INTEGER NOT NULL,
                     source_name VARCHAR(20) NOT NULL UNIQUE,
                     double_format VARCHAR(10) NOT NULL DEFAULT '<d',
+                    time_basis VARCHAR(40) NOT NULL DEFAULT 'FIXED_OFFSET',
+                    source_timezone VARCHAR(64) NOT NULL DEFAULT '+01:00',
+                    source_utc_offset_minutes INTEGER,
+                    timestamp_position VARCHAR(20) NOT NULL DEFAULT 'start',
+                    time_fold INTEGER,
                     enabled BOOLEAN NOT NULL DEFAULT true,
                     created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now(),
                     updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now()
@@ -385,6 +411,13 @@ def ensure_binary_import_tables() -> None:
                     identifikace VARCHAR(250) NOT NULL,
                     seriove_cislo BIGINT,
                     date TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+                    source_date TIMESTAMP WITHOUT TIME ZONE,
+                    time_utc TIMESTAMP WITH TIME ZONE,
+                    time_basis VARCHAR(40),
+                    source_timezone VARCHAR(64),
+                    source_utc_offset_minutes INTEGER,
+                    time_fold INTEGER,
+                    timestamp_position VARCHAR(20),
                     delta DOUBLE PRECISION NOT NULL,
                     source_file VARCHAR(255) NOT NULL,
                     source_byte_size BIGINT NOT NULL,
@@ -397,8 +430,42 @@ def ensure_binary_import_tables() -> None:
         conn.execute(
             text(
                 """
+                ALTER TABLE dbo.elektromery_binary_source_configs
+                    ADD COLUMN IF NOT EXISTS time_basis VARCHAR(40) NOT NULL DEFAULT 'FIXED_OFFSET',
+                    ADD COLUMN IF NOT EXISTS source_timezone VARCHAR(64) NOT NULL DEFAULT '+01:00',
+                    ADD COLUMN IF NOT EXISTS source_utc_offset_minutes INTEGER,
+                    ADD COLUMN IF NOT EXISTS timestamp_position VARCHAR(20) NOT NULL DEFAULT 'start',
+                    ADD COLUMN IF NOT EXISTS time_fold INTEGER
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                ALTER TABLE dbo."Mereni_elektromery_BINARY"
+                    ADD COLUMN IF NOT EXISTS source_date TIMESTAMP WITHOUT TIME ZONE,
+                    ADD COLUMN IF NOT EXISTS time_utc TIMESTAMP WITH TIME ZONE,
+                    ADD COLUMN IF NOT EXISTS time_basis VARCHAR(40),
+                    ADD COLUMN IF NOT EXISTS source_timezone VARCHAR(64),
+                    ADD COLUMN IF NOT EXISTS source_utc_offset_minutes INTEGER,
+                    ADD COLUMN IF NOT EXISTS time_fold INTEGER,
+                    ADD COLUMN IF NOT EXISTS timestamp_position VARCHAR(20)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
                 CREATE UNIQUE INDEX IF NOT EXISTS uq_ele_binary_source_sample
                 ON dbo."Mereni_elektromery_BINARY" (source_key, sample_index)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_ele_binary_time_utc
+                ON dbo."Mereni_elektromery_BINARY" (time_utc)
                 """
             )
         )
@@ -453,6 +520,11 @@ def seed_default_binary_meter_configs() -> None:
                         interval_minutes,
                         source_name,
                         double_format,
+                        time_basis,
+                        source_timezone,
+                        source_utc_offset_minutes,
+                        timestamp_position,
+                        time_fold,
                         enabled
                     )
                     VALUES (
@@ -465,6 +537,11 @@ def seed_default_binary_meter_configs() -> None:
                         :interval_minutes,
                         :source_name,
                         :double_format,
+                        :time_basis,
+                        :source_timezone,
+                        :source_utc_offset_minutes,
+                        :timestamp_position,
+                        :time_fold,
                         true
                     )
                     ON CONFLICT (source_key) DO NOTHING
@@ -487,7 +564,12 @@ def load_binary_meter_configs(*, enabled_only: bool = True) -> dict[str, BinaryM
             timestamp_offset_minutes,
             interval_minutes,
             source_name,
-            double_format
+            double_format,
+            time_basis,
+            source_timezone,
+            source_utc_offset_minutes,
+            timestamp_position,
+            time_fold
         FROM dbo.elektromery_binary_source_configs
     """
     if enabled_only:
@@ -513,6 +595,15 @@ def binary_meter_config_from_mapping(row) -> BinaryMeterFileConfig:
         interval_minutes=int(row["interval_minutes"]),
         source_name=str(row["source_name"]),
         double_format=str(row["double_format"] or "<d"),
+        time_basis=str(row.get("time_basis") or BINARY_TIME_SEMANTICS.time_basis),
+        source_timezone=str(row.get("source_timezone") or BINARY_TIME_SEMANTICS.source_timezone),
+        source_utc_offset_minutes=(
+            BINARY_TIME_SEMANTICS.source_utc_offset_minutes
+            if row.get("source_utc_offset_minutes") is None
+            else int(row["source_utc_offset_minutes"])
+        ),
+        timestamp_position=str(row.get("timestamp_position") or BINARY_TIME_SEMANTICS.timestamp_position),
+        time_fold=None if row.get("time_fold") is None else int(row["time_fold"]),
     )
 
 
@@ -761,6 +852,11 @@ def _config_to_db_params(config: BinaryMeterFileConfig) -> dict[str, object]:
         "interval_minutes": config.interval_minutes,
         "source_name": config.source_name,
         "double_format": config.double_format,
+        "time_basis": config.time_basis,
+        "source_timezone": config.source_timezone,
+        "source_utc_offset_minutes": config.source_utc_offset_minutes,
+        "timestamp_position": config.timestamp_position,
+        "time_fold": config.time_fold,
     }
 
 
@@ -841,6 +937,11 @@ def _insert_raw_measurements(
             "identifikace": parsed.config.identifikace,
             "seriove_cislo": parsed.config.seriove_cislo,
             "date": measurement.date,
+            **build_time_columns(
+                measurement.date,
+                parsed.config.source_name,
+                _config_time_semantics_row(parsed.config),
+            ),
             "delta": measurement.delta,
             "source_file": parsed.config.file_name,
             "source_byte_size": source_byte_size,
@@ -860,6 +961,13 @@ def _insert_raw_measurements(
             identifikace,
             seriove_cislo,
             date,
+            source_date,
+            time_utc,
+            time_basis,
+            source_timezone,
+            source_utc_offset_minutes,
+            time_fold,
+            timestamp_position,
             delta,
             source_file,
             source_byte_size,
@@ -871,6 +979,13 @@ def _insert_raw_measurements(
             :identifikace,
             :seriove_cislo,
             :date,
+            :source_date,
+            :time_utc,
+            :time_basis,
+            :source_timezone,
+            :source_utc_offset_minutes,
+            :time_fold,
+            :timestamp_position,
             :delta,
             :source_file,
             :source_byte_size,

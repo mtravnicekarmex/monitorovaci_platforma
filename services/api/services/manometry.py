@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 
-from core.db.connect import get_session_ms
-from moduly.mereni.manometry.database.models import Manometr_areal_Zarizeni, Mereni_manometry
+from core.db.connect import get_session_ms, get_session_pg
+from moduly.mereni.manometry.database.models import (
+    Manometr_areal_Zarizeni,
+    Mereni_manometry_vse,
+)
 from services.api.services.dashboard_auth import (
     DashboardUserContext,
     require_device_access,
@@ -34,8 +37,8 @@ def _serialize_device_detail(
     valid_measurement_count: int,
     first_measurement_at: datetime | None,
     last_measurement_at: datetime | None,
-    min_measurement: Mereni_manometry | None,
-    max_measurement: Mereni_manometry | None,
+    min_measurement: Mereni_manometry_vse | None,
+    max_measurement: Mereni_manometry_vse | None,
 ) -> dict[str, object]:
     return {
         "identifikace": identifikace,
@@ -63,12 +66,13 @@ def list_accessible_devices(
 ) -> list[str]:
     require_section_access(user_context, "manometry")
 
-    session = get_session_ms()
+    session_ms = get_session_ms()
+    session_pg = get_session_pg()
     try:
         identifiers: set[str] = set()
 
         device_rows = (
-            session.query(Manometr_areal_Zarizeni.identifikace)
+            session_ms.query(Manometr_areal_Zarizeni.identifikace)
             .distinct()
             .order_by(Manometr_areal_Zarizeni.identifikace)
             .all()
@@ -80,9 +84,9 @@ def list_accessible_devices(
         )
 
         measurement_rows = (
-            session.query(Mereni_manometry.identifikace)
+            session_pg.query(Mereni_manometry_vse.identifikace)
             .distinct()
-            .order_by(Mereni_manometry.identifikace)
+            .order_by(Mereni_manometry_vse.identifikace)
             .all()
         )
         identifiers.update(
@@ -96,7 +100,8 @@ def list_accessible_devices(
 
         return sorted(identifiers)[:limit]
     finally:
-        session.close()
+        session_ms.close()
+        session_pg.close()
 
 
 def load_measurement_series(
@@ -110,24 +115,32 @@ def load_measurement_series(
     require_device_access(user_context, identifikace)
     start_dt, end_dt = _build_datetime_range(start_date, end_date)
 
-    session = get_session_ms()
+    session = get_session_pg()
     try:
         rows = (
             session.query(
-                Mereni_manometry.date,
-                Mereni_manometry.identifikace,
-                Mereni_manometry.seriove_cislo,
-                Mereni_manometry.hodnota,
-                Mereni_manometry.platne,
+                Mereni_manometry_vse.date,
+                Mereni_manometry_vse.identifikace,
+                Mereni_manometry_vse.seriove_cislo,
+                Mereni_manometry_vse.hodnota,
+                Mereni_manometry_vse.platne,
+                Mereni_manometry_vse.zdroj,
+                Mereni_manometry_vse.source_date,
+                Mereni_manometry_vse.time_utc,
+                Mereni_manometry_vse.time_basis,
+                Mereni_manometry_vse.source_timezone,
+                Mereni_manometry_vse.source_utc_offset_minutes,
+                Mereni_manometry_vse.time_fold,
+                Mereni_manometry_vse.timestamp_position,
             )
             .filter(
-                Mereni_manometry.identifikace == identifikace,
-                Mereni_manometry.date >= start_dt,
-                Mereni_manometry.date <= end_dt,
-                Mereni_manometry.date.is_not(None),
-                Mereni_manometry.hodnota.is_not(None),
+                Mereni_manometry_vse.identifikace == identifikace,
+                Mereni_manometry_vse.date >= start_dt,
+                Mereni_manometry_vse.date <= end_dt,
+                Mereni_manometry_vse.date.is_not(None),
+                Mereni_manometry_vse.hodnota.is_not(None),
             )
-            .order_by(Mereni_manometry.date.asc())
+            .order_by(Mereni_manometry_vse.date.asc())
             .all()
         )
         return [
@@ -137,6 +150,14 @@ def load_measurement_series(
                 "seriove_cislo": str(row.seriove_cislo) if row.seriove_cislo is not None else None,
                 "hodnota": float(row.hodnota),
                 "platne": bool(row.platne) if row.platne is not None else None,
+                "zdroj": row.zdroj,
+                "source_date": row.source_date,
+                "time_utc": row.time_utc,
+                "time_basis": row.time_basis,
+                "source_timezone": row.source_timezone,
+                "source_utc_offset_minutes": row.source_utc_offset_minutes,
+                "time_fold": row.time_fold,
+                "timestamp_position": row.timestamp_position,
             }
             for row in rows
             if row.date is not None and row.identifikace is not None and row.hodnota is not None
@@ -153,33 +174,33 @@ def load_device_detail(
     require_section_access(user_context, "manometry")
     require_device_access(user_context, identifikace)
 
-    session = get_session_ms()
+    session_ms = get_session_ms()
+    session_pg = get_session_pg()
     try:
         device = (
-            session.query(Manometr_areal_Zarizeni)
+            session_ms.query(Manometr_areal_Zarizeni)
             .filter(Manometr_areal_Zarizeni.identifikace == identifikace)
             .one_or_none()
         )
 
-        base_query = session.query(Mereni_manometry).filter(Mereni_manometry.identifikace == identifikace)
+        base_query = session_pg.query(Mereni_manometry_vse).filter(Mereni_manometry_vse.identifikace == identifikace)
         stats_base_query = base_query.filter(
-            Mereni_manometry.date.is_not(None),
-            Mereni_manometry.hodnota.is_not(None),
+            Mereni_manometry_vse.date.is_not(None),
+            Mereni_manometry_vse.hodnota.is_not(None),
         )
-        # MSSQL BIT columns need `= 1`; `.is_(True)` renders invalid `IS 1`.
-        valid_query = stats_base_query.filter(Mereni_manometry.platne == True)
+        valid_query = stats_base_query.filter(Mereni_manometry_vse.platne.is_(True))
         measurement_count = int(stats_base_query.count())
         valid_measurement_count = int(valid_query.count())
 
         if measurement_count == 0 and device is None:
             return None
 
-        first_measurement = stats_base_query.order_by(Mereni_manometry.date.asc()).first()
-        last_measurement = stats_base_query.order_by(Mereni_manometry.date.desc()).first()
+        first_measurement = stats_base_query.order_by(Mereni_manometry_vse.date.asc()).first()
+        last_measurement = stats_base_query.order_by(Mereni_manometry_vse.date.desc()).first()
 
         stats_query = valid_query if valid_measurement_count > 0 else stats_base_query
-        min_measurement = stats_query.order_by(Mereni_manometry.hodnota.asc(), Mereni_manometry.date.asc()).first()
-        max_measurement = stats_query.order_by(Mereni_manometry.hodnota.desc(), Mereni_manometry.date.asc()).first()
+        min_measurement = stats_query.order_by(Mereni_manometry_vse.hodnota.asc(), Mereni_manometry_vse.date.asc()).first()
+        max_measurement = stats_query.order_by(Mereni_manometry_vse.hodnota.desc(), Mereni_manometry_vse.date.asc()).first()
 
         return _serialize_device_detail(
             identifikace=identifikace,
@@ -192,4 +213,5 @@ def load_device_detail(
             max_measurement=max_measurement,
         )
     finally:
-        session.close()
+        session_ms.close()
+        session_pg.close()

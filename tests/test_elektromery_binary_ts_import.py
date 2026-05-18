@@ -18,6 +18,21 @@ from moduly.mereni.elektromery.database.binary_ts_import import (
     sample_index_to_timestamp,
     summarize_parsed_file,
 )
+from moduly.mereni.elektromery.database.time_semantics import (
+    BINARY_FIXED_UTC_OFFSET_MINUTES,
+    SOURCE_TIMEZONE_FIXED_CET,
+    TIME_BASIS_FIXED_OFFSET,
+    TIMESTAMP_POSITION_START,
+)
+
+
+BINARY_TIME_METADATA = {
+    "time_basis": TIME_BASIS_FIXED_OFFSET,
+    "source_timezone": SOURCE_TIMEZONE_FIXED_CET,
+    "source_utc_offset_minutes": BINARY_FIXED_UTC_OFFSET_MINUTES,
+    "timestamp_position": TIMESTAMP_POSITION_START,
+    "time_fold": None,
+}
 
 
 def _payload(values):
@@ -93,6 +108,7 @@ def test_build_delta_source_rows_prepares_rows_for_existing_elektromery_import()
             "identifikace": "TS test",
             "seriove_cislo": 123,
             "date": datetime(2024, 7, 1, 1, 0, 0),
+            **BINARY_TIME_METADATA,
             "objem": None,
             "delta": 0.5,
             "interval_minutes": 15,
@@ -133,6 +149,7 @@ def test_build_delta_source_rows_from_raw_rows_uses_stable_sample_source_recid()
             "identifikace": "TS test",
             "seriove_cislo": 123,
             "date": datetime(2024, 7, 1, 3, 0, 0),
+            **BINARY_TIME_METADATA,
             "objem": None,
             "delta": 1.5,
             "interval_minutes": 15,
@@ -149,10 +166,13 @@ def test_19891_config_uses_requested_metadata():
     assert config.identifikace == "TS1 - přetoky"
     assert config.seriove_cislo == 859182400407782429
     assert config.first_timestamp == datetime(2024, 7, 1, 0, 0, 0)
-    assert config.timestamp_offset == timedelta(hours=1)
+    assert config.timestamp_offset == timedelta(0)
     assert config.interval_minutes == 15
     assert config.source_name == "BINARY_19891"
-    assert sample_index_to_timestamp(config, 104) == datetime(2024, 7, 2, 3, 0, 0)
+    assert config.time_basis == TIME_BASIS_FIXED_OFFSET
+    assert config.source_timezone == SOURCE_TIMEZONE_FIXED_CET
+    assert config.source_utc_offset_minutes == BINARY_FIXED_UTC_OFFSET_MINUTES
+    assert sample_index_to_timestamp(config, 104) == datetime(2024, 7, 2, 2, 0, 0)
 
 
 def test_binary_meter_config_from_mapping_reads_db_config_values():
@@ -163,7 +183,7 @@ def test_binary_meter_config_from_mapping_reads_db_config_values():
             "identifikace": "TS1 - přetoky",
             "seriove_cislo": 859182400407782429,
             "first_timestamp": datetime(2024, 7, 1, 0, 0, 0),
-            "timestamp_offset_minutes": 60,
+            "timestamp_offset_minutes": 0,
             "interval_minutes": 15,
             "source_name": "BINARY_19891",
             "double_format": "<d",

@@ -246,11 +246,18 @@ def render_dashboard() -> None:
             if history_df.empty:
                 st.info("Pro vybrany elektromer nejsou v danem obdobi zadna mereni.")
             else:
+                time_axis_column = (
+                    "chart_time"
+                    if "chart_time" in history_df.columns and history_df["chart_time"].notna().any()
+                    else "date"
+                )
                 monthly_history = (
-                    history_df.set_index("date")
+                    history_df.dropna(subset=[time_axis_column])
+                    .set_index(time_axis_column)
                     .resample("ME")
                     .agg(spotreba=("spotreba", "sum"))
                     .reset_index()
+                    .rename(columns={time_axis_column: "date"})
                 )
                 monthly_history = monthly_history[monthly_history["spotreba"].notna()].copy()
                 average_monthly_consumption = float(monthly_history["spotreba"].mean()) if not monthly_history.empty else 0.0

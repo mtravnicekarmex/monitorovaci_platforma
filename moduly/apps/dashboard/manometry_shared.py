@@ -25,6 +25,15 @@ from moduly.apps.dashboard.vodomery_shared import format_value, normalize_date_r
 
 MAX_IDENT_OPTIONS = 500
 KPA_PER_BAR = 100.0
+TIME_SEMANTICS_COLUMNS = (
+    "source_date",
+    "time_utc",
+    "time_basis",
+    "source_timezone",
+    "source_utc_offset_minutes",
+    "time_fold",
+    "timestamp_position",
+)
 DEFAULT_PRESSURE_COLUMNS = (
     "hodnota",
     "tlak_min",
@@ -112,6 +121,8 @@ def load_measurement_series(
             "seriove_cislo",
             "hodnota",
             "platne",
+            "zdroj",
+            *TIME_SEMANTICS_COLUMNS,
         ],
     )
     return convert_pressure_columns_to_bar(df, columns=("hodnota",))

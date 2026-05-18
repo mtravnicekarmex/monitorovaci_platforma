@@ -79,6 +79,37 @@ class Manometr_areal_Zarizeni_QGIS(Base):
         return f"{self.identifikace} - {self.seriove_cislo}"
 
 
+# arealove manometry monitoring na PG
+class Mereni_manometry_vse(Base):
+    __tablename__ = "Mereni_manometry_vse"
+    __table_args__ = (
+        UniqueConstraint("identifikace", "date", "zdroj", name="uq_manometry_ident_date_zdroj"),
+        UniqueConstraint("source_recid", "zdroj", name="uq_manometry_source_recid_zdroj"),
+        Index("ix_manometry_ident_date_desc", "identifikace", "date"),
+        Index("ix_manometry_date_desc", "date"),
+        Index("ix_manometry_vse_time_utc", "time_utc"),
+        Index("ix_manometry_vse_ident_time_utc", "identifikace", "time_utc"),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_recid: Mapped[int | None] = mapped_column(BigInteger, index=True, nullable=True)
+    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
+    seriove_cislo: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    date: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    source_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    time_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    time_basis: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    source_timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_utc_offset_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    time_fold: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    timestamp_position: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    hodnota: Mapped[float] = mapped_column(Float, nullable=False)
+    platne: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    zdroj: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=func.now(), nullable=False)
+
+
 
 
 

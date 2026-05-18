@@ -107,9 +107,16 @@ def prepare_measurements(df: pd.DataFrame) -> pd.DataFrame:
 
     diff_from_state = prepared["spotreba_energie"].diff()
     serial_changed = prepared["seriove_cislo"].ne(prepared["seriove_cislo"].shift())
-    reset_detected = diff_from_state.lt(0).fillna(False) | serial_changed.fillna(False)
-    prepared["reset_detected"] = reset_detected
-    prepared["spotreba"] = diff_from_state.fillna(0.0)
+    computed_reset_detected = diff_from_state.lt(0).fillna(False) | serial_changed.fillna(False)
+    if "reset_detected" in prepared.columns:
+        prepared["reset_detected"] = prepared["reset_detected"].fillna(False).astype(bool) | computed_reset_detected
+    else:
+        prepared["reset_detected"] = computed_reset_detected
+
+    if "delta" in prepared.columns:
+        prepared["spotreba"] = pd.to_numeric(prepared["delta"], errors="coerce").fillna(0.0)
+    else:
+        prepared["spotreba"] = diff_from_state.fillna(0.0)
     prepared.loc[prepared["spotreba"] < 0, "spotreba"] = 0.0
     prepared.loc[prepared["reset_detected"], "spotreba"] = 0.0
     prepared.loc[~prepared["platne"], "spotreba"] = 0.0

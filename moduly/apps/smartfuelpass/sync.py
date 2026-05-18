@@ -13,6 +13,30 @@ from moduly.apps.smartfuelpass.service import (
     _prepare_charge_sessions_dataframe,
     fetch_charge_sessions_dataframe_with_retries,
 )
+from moduly.mereni.time_semantics import build_time_columns
+
+
+SMARTFUELPASS_SOURCE_NAME = "SMARTFUELPASS"
+
+
+def build_charge_session_interval_time_columns(started_at: Any, ended_at: Any) -> dict[str, Any]:
+    started = started_at.to_pydatetime() if hasattr(started_at, "to_pydatetime") else started_at
+    ended = ended_at.to_pydatetime() if hasattr(ended_at, "to_pydatetime") else ended_at
+    started_columns = build_time_columns(started, SMARTFUELPASS_SOURCE_NAME)
+    ended_columns = build_time_columns(ended, SMARTFUELPASS_SOURCE_NAME)
+    return {
+        "source_started_at": started_columns["source_date"],
+        "source_ended_at": ended_columns["source_date"],
+        "started_at_utc": started_columns["time_utc"],
+        "ended_at_utc": ended_columns["time_utc"],
+        "time_basis": started_columns["time_basis"],
+        "source_timezone": started_columns["source_timezone"],
+        "started_utc_offset_minutes": started_columns["source_utc_offset_minutes"],
+        "ended_utc_offset_minutes": ended_columns["source_utc_offset_minutes"],
+        "started_time_fold": started_columns["time_fold"],
+        "ended_time_fold": ended_columns["time_fold"],
+        "timestamp_position": started_columns["timestamp_position"],
+    }
 
 
 def build_charge_sessions_sync_rows(dataframe: pd.DataFrame) -> tuple[list[dict[str, Any]], dict[str, int]]:
@@ -27,6 +51,8 @@ def build_charge_sessions_sync_rows(dataframe: pd.DataFrame) -> tuple[list[dict[
             skipped_missing_id_count += 1
             continue
 
+        started_at = row.started_at.to_pydatetime() if hasattr(row.started_at, "to_pydatetime") else row.started_at
+        ended_at = row.ended_at.to_pydatetime() if hasattr(row.ended_at, "to_pydatetime") else row.ended_at
         rows.append(
             {
                 "id_relace": id_relace,
@@ -34,8 +60,9 @@ def build_charge_sessions_sync_rows(dataframe: pd.DataFrame) -> tuple[list[dict[
                 "tarif": None if str(row.tariff_label).strip() in {"", "-"} else str(row.tariff_label).strip(),
                 "battery_status": None if pd.isna(row.battery_status) else int(row.battery_status),
                 "suma": round(float(row.amount_czk), 2),
-                "started_at": row.started_at.to_pydatetime() if hasattr(row.started_at, "to_pydatetime") else row.started_at,
-                "ended_at": row.ended_at.to_pydatetime() if hasattr(row.ended_at, "to_pydatetime") else row.ended_at,
+                "started_at": started_at,
+                "ended_at": ended_at,
+                **build_charge_session_interval_time_columns(started_at, ended_at),
                 "lokace": str(row.location_name).strip() or "-",
                 "rychlost_nabijeni": (
                     None if pd.isna(row.rychlost_nabijeni) else round(float(row.rychlost_nabijeni), 3)

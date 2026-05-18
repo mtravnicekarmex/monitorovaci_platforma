@@ -17,6 +17,7 @@ from moduly.mereni.vodomery.database.outlier_reviews import (
     upsert_outlier_review_candidates,
 )
 from moduly.mereni.vodomery.database.runtime_schema import drop_legacy_identifikace_fk
+from moduly.mereni.time_semantics import build_time_columns
 from core.db.connect import ENGINE_MS, ENGINE_PG
 from app.time_utils import utc_now_naive
 
@@ -62,9 +63,58 @@ def ensure_destination_table():
 
     if expected_table not in monitoring_tables:
         Mereni_vodomery.__table__.create(bind=engine, checkfirst=True)
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_vodomery_vse_time_utc
+                    ON monitoring."Mereni_vodomery_vse" (time_utc)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_vodomery_vse_ident_time_utc
+                    ON monitoring."Mereni_vodomery_vse" (identifikace, time_utc)
+                    """
+                )
+            )
         logger.info('Created missing table monitoring."%s"', expected_table)
 
     drop_legacy_identifikace_fk(expected_table)
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                ALTER TABLE monitoring."Mereni_vodomery_vse"
+                    ADD COLUMN IF NOT EXISTS source_date TIMESTAMP WITHOUT TIME ZONE,
+                    ADD COLUMN IF NOT EXISTS time_utc TIMESTAMP WITH TIME ZONE,
+                    ADD COLUMN IF NOT EXISTS time_basis VARCHAR(40),
+                    ADD COLUMN IF NOT EXISTS source_timezone VARCHAR(64),
+                    ADD COLUMN IF NOT EXISTS source_utc_offset_minutes INTEGER,
+                    ADD COLUMN IF NOT EXISTS time_fold INTEGER,
+                    ADD COLUMN IF NOT EXISTS timestamp_position VARCHAR(20)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_vodomery_vse_time_utc
+                ON monitoring."Mereni_vodomery_vse" (time_utc)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_vodomery_vse_ident_time_utc
+                ON monitoring."Mereni_vodomery_vse" (identifikace, time_utc)
+                """
+            )
+        )
 
 
 
@@ -363,11 +413,11 @@ def resolve_gap(ident, prev, current_dt, current_objem, interval, source_name):
 
     # rychlý exit
     if num_slots <= 1:
-        return []
+        return [], None
 
     total_delta = current_objem - prev_objem
     if total_delta <= 0:
-        return []
+        return [], None
 
     mean_delta = round(total_delta / num_slots, 6)
 
@@ -385,6 +435,7 @@ def resolve_gap(ident, prev, current_dt, current_objem, interval, source_name):
             "identifikace": ident,
             "seriove_cislo": seriove,
             "date": slot_time,
+            **build_time_columns(slot_time, source_name),
             "objem": objem,
             "delta": mean_delta,
             "interval_minutes": interval,
@@ -398,7 +449,7 @@ def resolve_gap(ident, prev, current_dt, current_objem, interval, source_name):
             "reset_detected": False,
         })
 
-    return rows
+    return rows, mean_delta
 
 
 # -------------------------------------------------
@@ -499,7 +550,7 @@ def prepare_rows(
 
                     if is_gap_outlier:
                         if review_override == "CONFIRMED_CONSUMPTION":
-                            synthetic_rows = resolve_gap(
+                            synthetic_rows, gap_delta = resolve_gap(
                                 ident,
                                 prev,
                                 dt,
@@ -509,7 +560,9 @@ def prepare_rows(
                             )
 
                             rows_to_insert.extend(synthetic_rows)
-                            gap_detected = True
+                            if synthetic_rows:
+                                gap_detected = True
+                                delta = gap_delta
                         else:
                             is_valid_row = False
                             outlier_count += 1
@@ -527,7 +580,7 @@ def prepare_rows(
                                     )
                                 )
                     else:
-                        synthetic_rows = resolve_gap(
+                        synthetic_rows, gap_delta = resolve_gap(
                             ident,
                             prev,
                             dt,
@@ -537,7 +590,9 @@ def prepare_rows(
                         )
 
                         rows_to_insert.extend(synthetic_rows)
-                        gap_detected = True
+                        if synthetic_rows:
+                            gap_detected = True
+                            delta = gap_delta
 
             else:
                 # ----------------------------
@@ -600,6 +655,7 @@ def prepare_rows(
             "identifikace": ident,
             "seriove_cislo": r["seriove_cislo"],
             "date": dt,
+            **build_time_columns(dt, source_name, r),
             "objem": objem,
             "delta": delta,
             "interval_minutes": interval,

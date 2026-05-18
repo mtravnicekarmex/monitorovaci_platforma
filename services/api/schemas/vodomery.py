@@ -52,6 +52,13 @@ class VodomeryMeasurementSeriesRow(BaseModel):
     nocni_odber: bool
     gap_detected: bool
     reset_detected: bool
+    source_date: datetime | None = None
+    time_utc: datetime | None = None
+    time_basis: str | None = None
+    source_timezone: str | None = None
+    source_utc_offset_minutes: int | None = None
+    time_fold: int | None = None
+    timestamp_position: str | None = None
 
 
 class VodomeryMeasurementSeriesResponse(BaseModel):

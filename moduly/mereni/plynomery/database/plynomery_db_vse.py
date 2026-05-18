@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.time_utils import utc_now_naive
 from core.db.connect import ENGINE_MS, ENGINE_PG
+from moduly.mereni.time_semantics import build_time_columns
 from moduly.mereni.plynomery.alerting.outlier_notifications import process_new_outlier_review_notifications
 from moduly.mereni.plynomery.database.models import (
     Mereni_plynomery,
@@ -95,6 +96,38 @@ def ensure_destination_table() -> None:
         logger.info('Created missing table monitoring."%s"', expected_table)
 
     _drop_legacy_identifikace_fk(expected_table)
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                ALTER TABLE monitoring."Mereni_plynomery_vse"
+                    ADD COLUMN IF NOT EXISTS source_date TIMESTAMP WITHOUT TIME ZONE,
+                    ADD COLUMN IF NOT EXISTS time_utc TIMESTAMP WITH TIME ZONE,
+                    ADD COLUMN IF NOT EXISTS time_basis VARCHAR(40),
+                    ADD COLUMN IF NOT EXISTS source_timezone VARCHAR(64),
+                    ADD COLUMN IF NOT EXISTS source_utc_offset_minutes INTEGER,
+                    ADD COLUMN IF NOT EXISTS time_fold INTEGER,
+                    ADD COLUMN IF NOT EXISTS timestamp_position VARCHAR(20)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_plynomery_vse_time_utc
+                ON monitoring."Mereni_plynomery_vse" (time_utc)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_plynomery_vse_ident_time_utc
+                ON monitoring."Mereni_plynomery_vse" (identifikace, time_utc)
+                """
+            )
+        )
 
 
 def get_last_imported_recid(session: Session, source_name: str) -> int | None:
@@ -187,6 +220,34 @@ def get_last_measurements(session: Session, affected_idents: set[str], *, only_v
             rows_by_ident[row.identifikace] = row
 
     return rows_by_ident
+
+
+def get_existing_measurement_dates(
+    session: Session | None,
+    affected_idents: set[str],
+    source_name: str,
+    *,
+    min_date: datetime,
+    max_date: datetime,
+) -> dict[str, set[datetime]]:
+    if session is None or not affected_idents:
+        return {}
+
+    dates_by_ident: dict[str, set[datetime]] = {}
+    for ident_chunk in chunked(list(affected_idents)):
+        query = (
+            select(Mereni_plynomery.identifikace, Mereni_plynomery.date)
+            .where(
+                Mereni_plynomery.identifikace.in_(ident_chunk),
+                Mereni_plynomery.zdroj == source_name,
+                Mereni_plynomery.date >= min_date,
+                Mereni_plynomery.date <= max_date,
+            )
+        )
+        for ident, measurement_date in session.execute(query).all():
+            dates_by_ident.setdefault(str(ident), set()).add(measurement_date)
+
+    return dates_by_ident
 
 
 def get_recent_delta_stats(
@@ -326,30 +387,35 @@ def resolve_gap(
     current_objem: float,
     interval: int,
     source_name: str,
-) -> tuple[list[dict[str, object]], float | None]:
+    occupied_dates: set[datetime] | None = None,
+) -> tuple[list[dict[str, object]], float | None, float | None]:
     prev_dt = prev["date"]
     prev_objem = prev["objem"]
 
     total_minutes = int((current_dt - prev_dt).total_seconds() // 60)
     num_slots = total_minutes // interval
     if num_slots <= 1:
-        return [], None
+        return [], None, None
 
     total_delta = current_objem - prev_objem
     if total_delta <= 0:
-        return [], None
+        return [], None, None
 
     mean_delta = round(total_delta / num_slots, 6)
     rows: list[dict[str, object]] = []
+    blocked_dates = occupied_dates or set()
 
     for index in range(1, num_slots):
         slot_time = prev_dt + timedelta(minutes=index * interval)
+        if slot_time in blocked_dates:
+            continue
         rows.append(
             {
                 "source_recid": None,
                 "identifikace": ident,
                 "seriove_cislo": prev.get("seriove_cislo"),
                 "date": slot_time,
+                **build_time_columns(slot_time, source_name),
                 "objem": round(prev_objem + mean_delta * index, 6),
                 "delta": mean_delta,
                 "interval_minutes": interval,
@@ -364,7 +430,52 @@ def resolve_gap(
             }
         )
 
-    return rows, mean_delta
+    terminal_delta = round(total_delta - mean_delta * len(rows), 6)
+    return rows, mean_delta, terminal_delta
+
+
+def build_occupied_dates(
+    session: Session | None,
+    new_rows: list[dict[str, object]],
+    previous_map: dict[str, dict[str, object] | None],
+    source_name: str,
+) -> dict[str, set[datetime]]:
+    affected_idents = set(previous_map.keys())
+    min_date = min(
+        (
+            date_value
+            for date_value in (
+                [row["date"] for row in new_rows if isinstance(row.get("date"), datetime)]
+                + [
+                    previous["date"]
+                    for previous in previous_map.values()
+                    if previous and isinstance(previous.get("date"), datetime)
+                ]
+            )
+        ),
+        default=None,
+    )
+    max_date = max(
+        (row["date"] for row in new_rows if isinstance(row.get("date"), datetime)),
+        default=None,
+    )
+    if min_date is None or max_date is None:
+        return {}
+
+    occupied_dates = get_existing_measurement_dates(
+        session,
+        affected_idents,
+        source_name,
+        min_date=min_date,
+        max_date=max_date,
+    )
+    for row in new_rows:
+        ident = str(row["identifikace"])
+        row_date = row.get("date")
+        if isinstance(row_date, datetime):
+            occupied_dates.setdefault(ident, set()).add(row_date)
+
+    return occupied_dates
 
 
 def filter_valid_rows(session: Session, rows: list[dict[str, object]], source_name: str) -> list[dict[str, object]]:
@@ -485,6 +596,7 @@ def prepare_rows(
                 "seriove_cislo": last.seriove_cislo,
             }
 
+    occupied_dates = build_occupied_dates(session, new_rows, previous_map, source_name)
     rows_to_insert: list[dict[str, object]] = []
     outlier_reviews: list[dict[str, object]] = []
     outlier_count = 0
@@ -510,48 +622,49 @@ def prepare_rows(
             actual_diff = dt - prev["date"]
 
             if actual_diff > expected_interval * MAX_GAP_MULTIPLIER and objem >= prev["objem"]:
-                synthetic_rows, gap_delta = resolve_gap(
+                synthetic_rows, mean_gap_delta, terminal_gap_delta = resolve_gap(
                     ident,
                     prev,
                     dt,
                     objem,
                     interval,
                     source_name,
+                    occupied_dates.get(ident),
                 )
                 is_gap_outlier = (
-                    gap_delta is not None
+                    mean_gap_delta is not None
                     and (
                         review_override == "CONFIRMED_OUTLIER"
-                        or is_delta_outlier(gap_delta, ident_stats)
+                        or is_delta_outlier(mean_gap_delta, ident_stats)
                     )
                 )
                 if is_gap_outlier:
                     if review_override == "CONFIRMED_CONSUMPTION":
                         rows_to_insert.extend(synthetic_rows)
-                        if synthetic_rows:
+                        if mean_gap_delta is not None:
                             gap_detected = True
-                            delta = gap_delta
+                            delta = terminal_gap_delta
                     else:
                         is_valid_row = False
                         outlier_count += 1
                         outlier_by_ident[ident] = outlier_by_ident.get(ident, 0) + 1
-                        if include_outlier_reviews and review_override != "CONFIRMED_OUTLIER" and gap_delta is not None:
+                        if include_outlier_reviews and review_override != "CONFIRMED_OUTLIER" and mean_gap_delta is not None:
                             outlier_reviews.append(
                                 build_outlier_review_payload(
                                     source_name=source_name,
                                     row=row,
                                     prev=prev,
                                     interval=interval,
-                                    candidate_delta=gap_delta,
+                                    candidate_delta=mean_gap_delta,
                                     stats=ident_stats,
                                     detection_kind="GAP_MEAN",
                                 )
                             )
                 else:
                     rows_to_insert.extend(synthetic_rows)
-                    if synthetic_rows:
+                    if mean_gap_delta is not None:
                         gap_detected = True
-                        delta = gap_delta
+                        delta = terminal_gap_delta
             elif objem >= prev["objem"]:
                 candidate_delta = objem - prev["objem"]
                 is_normal_outlier = (
@@ -600,6 +713,7 @@ def prepare_rows(
                 "identifikace": ident,
                 "seriove_cislo": row.get("seriove_cislo"),
                 "date": dt,
+                **build_time_columns(dt, source_name, row),
                 "objem": objem,
                 "delta": delta,
                 "interval_minutes": interval,

@@ -17,6 +17,7 @@ from moduly.mereni.elektromery.database.models import (
     Elektromer_OTE_Mereni,
     Elektromer_areal_Zarizeni,
 )
+from moduly.mereni.elektromery.database.time_semantics import build_time_columns
 
 
 HEADER_PATTERN = re.compile(
@@ -310,9 +311,41 @@ def ensure_elektromery_ote_table() -> bool:
     inspector = inspect(ENGINE_PG)
     table_name = Elektromer_OTE_Mereni.__tablename__
     if table_name in inspector.get_table_names(schema="dbo"):
+        with ENGINE_PG.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    ALTER TABLE dbo."Mereni_elektromery_OTE"
+                        ADD COLUMN IF NOT EXISTS source_date TIMESTAMP WITHOUT TIME ZONE,
+                        ADD COLUMN IF NOT EXISTS time_utc TIMESTAMP WITH TIME ZONE,
+                        ADD COLUMN IF NOT EXISTS time_basis VARCHAR(40),
+                        ADD COLUMN IF NOT EXISTS source_timezone VARCHAR(64),
+                        ADD COLUMN IF NOT EXISTS source_utc_offset_minutes INTEGER,
+                        ADD COLUMN IF NOT EXISTS time_fold INTEGER,
+                        ADD COLUMN IF NOT EXISTS timestamp_position VARCHAR(20)
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_ele_ote_time_utc
+                    ON dbo."Mereni_elektromery_OTE" (time_utc)
+                    """
+                )
+            )
         return False
 
     Elektromer_OTE_Mereni.__table__.create(bind=ENGINE_PG, checkfirst=True)
+    with ENGINE_PG.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_ele_ote_time_utc
+                ON dbo."Mereni_elektromery_OTE" (time_utc)
+                """
+            )
+        )
     return True
 
 
@@ -510,6 +543,7 @@ def import_main_meter_xlsx(
                     seriove_cislo=measurement.seriove_cislo,
                     objem=measurement.objem,
                     date=measurement.date,
+                    **build_time_columns(measurement.date, "OTE"),
                     source_file=source_file,
                 )
             )

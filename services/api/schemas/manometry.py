@@ -16,6 +16,14 @@ class ManometryMeasurementSeriesRow(BaseModel):
     seriove_cislo: str | None = None
     hodnota: float
     platne: bool | None = None
+    zdroj: str | None = None
+    source_date: datetime | None = None
+    time_utc: datetime | None = None
+    time_basis: str | None = None
+    source_timezone: str | None = None
+    source_utc_offset_minutes: int | None = None
+    time_fold: int | None = None
+    timestamp_position: str | None = None
 
 
 class ManometryMeasurementSeriesResponse(BaseModel):

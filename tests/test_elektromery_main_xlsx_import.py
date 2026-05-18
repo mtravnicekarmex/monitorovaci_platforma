@@ -105,6 +105,9 @@ def test_ote_raw_table_schema_targets_postgres_dbo():
     assert {"identifikace", "seriove_cislo", "objem", "date"}.issubset(
         Elektromer_OTE_Mereni.__table__.c.keys()
     )
+    assert {"source_date", "time_utc", "time_basis", "source_timezone"}.issubset(
+        Elektromer_OTE_Mereni.__table__.c.keys()
+    )
 
 
 def test_unknown_identification_issues_are_built_from_ms_lookup(monkeypatch):

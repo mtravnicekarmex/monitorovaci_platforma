@@ -7,6 +7,28 @@ import pandas as pd
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from moduly.apps.smartfuelpass import sync
+from moduly.apps.smartfuelpass.database.models import SmartFuelPassRelace
+from moduly.mereni.time_semantics import (
+    SOURCE_TIMEZONE_EUROPE_PRAGUE,
+    TIME_BASIS_EUROPE_PRAGUE_CIVIL,
+    TIMESTAMP_POSITION_INTERVAL,
+)
+
+
+def test_smartfuelpass_relace_model_has_interval_time_semantics_columns():
+    assert SmartFuelPassRelace.__tablename__ == "smartfuelpass_relace"
+    assert SmartFuelPassRelace.__table__.schema == "monitoring"
+    assert {
+        "source_started_at",
+        "source_ended_at",
+        "started_at_utc",
+        "ended_at_utc",
+        "time_basis",
+        "source_timezone",
+        "started_utc_offset_minutes",
+        "ended_utc_offset_minutes",
+        "timestamp_position",
+    }.issubset(SmartFuelPassRelace.__table__.c.keys())
 
 
 def _sample_sync_dataframe() -> pd.DataFrame:
@@ -75,6 +97,17 @@ def test_build_charge_sessions_sync_rows_extracts_requested_fields():
         "suma": 532.47,
         "started_at": datetime.datetime(2026, 5, 1, 16, 43),
         "ended_at": datetime.datetime(2026, 5, 1, 17, 5),
+        "source_started_at": datetime.datetime(2026, 5, 1, 16, 43),
+        "source_ended_at": datetime.datetime(2026, 5, 1, 17, 5),
+        "started_at_utc": datetime.datetime(2026, 5, 1, 14, 43, tzinfo=datetime.timezone.utc),
+        "ended_at_utc": datetime.datetime(2026, 5, 1, 15, 5, tzinfo=datetime.timezone.utc),
+        "time_basis": TIME_BASIS_EUROPE_PRAGUE_CIVIL,
+        "source_timezone": SOURCE_TIMEZONE_EUROPE_PRAGUE,
+        "started_utc_offset_minutes": 120,
+        "ended_utc_offset_minutes": 120,
+        "started_time_fold": None,
+        "ended_time_fold": None,
+        "timestamp_position": TIMESTAMP_POSITION_INTERVAL,
         "lokace": "Armex - Budova E",
         "rychlost_nabijeni": 96.813,
     }
@@ -86,6 +119,17 @@ def test_build_charge_sessions_sync_rows_extracts_requested_fields():
         "suma": 217.78,
         "started_at": datetime.datetime(2026, 4, 29, 12, 17),
         "ended_at": datetime.datetime(2026, 4, 29, 12, 32),
+        "source_started_at": datetime.datetime(2026, 4, 29, 12, 17),
+        "source_ended_at": datetime.datetime(2026, 4, 29, 12, 32),
+        "started_at_utc": datetime.datetime(2026, 4, 29, 10, 17, tzinfo=datetime.timezone.utc),
+        "ended_at_utc": datetime.datetime(2026, 4, 29, 10, 32, tzinfo=datetime.timezone.utc),
+        "time_basis": TIME_BASIS_EUROPE_PRAGUE_CIVIL,
+        "source_timezone": SOURCE_TIMEZONE_EUROPE_PRAGUE,
+        "started_utc_offset_minutes": 120,
+        "ended_utc_offset_minutes": 120,
+        "started_time_fold": None,
+        "ended_time_fold": None,
+        "timestamp_position": TIMESTAMP_POSITION_INTERVAL,
         "lokace": "Armex - Budova E",
         "rychlost_nabijeni": 63.82,
     }

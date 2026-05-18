@@ -8,6 +8,70 @@ import pytest
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from moduly.mereni.vodomery.database import vodomery_db_vse
+from moduly.mereni.vodomery.database.models import Mereni_vodomery
+from moduly.mereni.time_semantics import (
+    SOURCE_TIMEZONE_EUROPE_PRAGUE,
+    TIME_BASIS_EUROPE_PRAGUE_CIVIL,
+    TIMESTAMP_POSITION_INSTANT,
+)
+
+
+def test_vodomery_vse_model_has_time_semantics_columns():
+    assert Mereni_vodomery.__tablename__ == "Mereni_vodomery_vse"
+    assert Mereni_vodomery.__table__.schema == "monitoring"
+    assert {"source_date", "time_utc", "time_basis", "source_timezone"}.issubset(
+        Mereni_vodomery.__table__.c.keys()
+    )
+
+
+def test_prepare_rows_distributes_gap_delta_without_losing_terminal_delta(monkeypatch):
+    last_valid = SimpleNamespace(
+        objem=100.0,
+        date=datetime.datetime(2026, 4, 10, 10, 0, 0),
+        seriove_cislo="S1",
+    )
+
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "get_last_measurements",
+        lambda session, affected_idents, *, only_valid=False: {"A": last_valid},
+    )
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "get_recent_delta_stats",
+        lambda session, affected_idents, *, reference_time=None: {},
+    )
+
+    rows = vodomery_db_vse.prepare_rows(
+        session=None,
+        new_rows=[
+            {
+                "recid": 1,
+                "identifikace": "A",
+                "seriove_cislo": "S1",
+                "date": datetime.datetime(2026, 4, 10, 11, 0, 0),
+                "objem": 104.0,
+                "interval_minutes": 15,
+                "reset_detected": False,
+            }
+        ],
+        source_name="AREAL",
+    )
+
+    assert [row["date"] for row in rows] == [
+        datetime.datetime(2026, 4, 10, 10, 15, 0),
+        datetime.datetime(2026, 4, 10, 10, 30, 0),
+        datetime.datetime(2026, 4, 10, 10, 45, 0),
+        datetime.datetime(2026, 4, 10, 11, 0, 0),
+    ]
+    assert [row["synthetic"] for row in rows] == [True, True, True, False]
+    assert [row["delta"] for row in rows] == [1.0, 1.0, 1.0, 1.0]
+    assert rows[-1]["gap_detected"] is True
+    assert sum(row["delta"] for row in rows if row["delta"] is not None) == pytest.approx(4.0)
+    assert rows[-1]["time_basis"] == TIME_BASIS_EUROPE_PRAGUE_CIVIL
+    assert rows[-1]["source_timezone"] == SOURCE_TIMEZONE_EUROPE_PRAGUE
+    assert rows[-1]["source_utc_offset_minutes"] == 120
+    assert rows[-1]["timestamp_position"] == TIMESTAMP_POSITION_INSTANT
 
 
 class _FakeScalarResult:

@@ -34,6 +34,15 @@ from moduly.mereni.elektromery.database.models import (
 
 
 MAX_IDENT_OPTIONS = 500
+TIME_SEMANTICS_COLUMNS = (
+    "source_date",
+    "time_utc",
+    "time_basis",
+    "source_timezone",
+    "source_utc_offset_minutes",
+    "time_fold",
+    "timestamp_position",
+)
 
 
 def get_elektromery_access_context() -> tuple[bool, tuple[str, ...]]:
@@ -93,6 +102,13 @@ def load_measurement_series(
                 Mereni_elektromery.synthetic,
                 Mereni_elektromery.gap_detected,
                 Mereni_elektromery.reset_detected,
+                Mereni_elektromery.source_date,
+                Mereni_elektromery.time_utc,
+                Mereni_elektromery.time_basis,
+                Mereni_elektromery.source_timezone,
+                Mereni_elektromery.source_utc_offset_minutes,
+                Mereni_elektromery.time_fold,
+                Mereni_elektromery.timestamp_position,
             )
             .filter(
                 Mereni_elektromery.identifikace == identifikace,
@@ -118,6 +134,13 @@ def load_measurement_series(
                     "synthetic": row.synthetic,
                     "gap_detected": row.gap_detected,
                     "reset_detected": row.reset_detected,
+                    "source_date": row.source_date,
+                    "time_utc": row.time_utc,
+                    "time_basis": row.time_basis,
+                    "source_timezone": row.source_timezone,
+                    "source_utc_offset_minutes": row.source_utc_offset_minutes,
+                    "time_fold": row.time_fold,
+                    "timestamp_position": row.timestamp_position,
                 }
                 for row in rows
             ],
@@ -242,15 +265,21 @@ def prepare_measurements(df: pd.DataFrame) -> pd.DataFrame:
         "synthetic",
         "gap_detected",
         "reset_detected",
+        *TIME_SEMANTICS_COLUMNS,
     ):
         if column not in prepared.columns:
             prepared[column] = pd.NA
 
     prepared["date"] = pd.to_datetime(prepared["date"], errors="coerce")
+    prepared["source_date"] = pd.to_datetime(prepared["source_date"], errors="coerce")
+    utc_time = pd.to_datetime(prepared["time_utc"], utc=True, errors="coerce")
+    prepared["time_utc"] = utc_time
+    prepared["chart_time"] = utc_time.dt.tz_convert("Europe/Prague").dt.tz_localize(None)
+    prepared.loc[prepared["chart_time"].isna(), "chart_time"] = prepared.loc[prepared["chart_time"].isna(), "date"]
     for column in ("vt", "nt", "total", "delta"):
         prepared[column] = pd.to_numeric(prepared[column], errors="coerce")
     prepared["seriove_cislo"] = prepared["seriove_cislo"].astype("string")
-    prepared = prepared.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+    prepared = prepared.dropna(subset=["date"]).sort_values("chart_time").reset_index(drop=True)
 
     if prepared.empty:
         return prepared
@@ -337,11 +366,21 @@ def build_change_table(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_daily_history(history_df: pd.DataFrame, days: int) -> pd.DataFrame:
+    time_axis_column = (
+        "chart_time"
+        if "chart_time" in history_df.columns and history_df["chart_time"].notna().any()
+        else "date"
+    )
+    working_df = history_df.dropna(subset=[time_axis_column]).copy()
+    if working_df.empty:
+        return pd.DataFrame()
+
     daily_history = (
-        history_df.set_index("date")
+        working_df.set_index(time_axis_column)
         .resample("D")
         .agg(spotreba=("spotreba", "sum"))
         .reset_index()
+        .rename(columns={time_axis_column: "date"})
     )
     daily_history = daily_history[daily_history["spotreba"].notna()].copy()
     if daily_history.empty:
@@ -357,11 +396,21 @@ def build_average_consumption_summary(history_df: pd.DataFrame) -> dict[str, obj
     if history_df.empty:
         return {"monthly": None, "weekly": None, "weekday": {}}
 
+    time_axis_column = (
+        "chart_time"
+        if "chart_time" in history_df.columns and history_df["chart_time"].notna().any()
+        else "date"
+    )
+    working_df = history_df.dropna(subset=[time_axis_column]).copy()
+    if working_df.empty:
+        return {"monthly": None, "weekly": None, "weekday": {}}
+
     daily_totals = (
-        history_df.set_index("date")
+        working_df.set_index(time_axis_column)
         .resample("D")
         .agg(spotreba=("spotreba", "sum"))
         .reset_index()
+        .rename(columns={time_axis_column: "date"})
     )
     daily_totals = daily_totals[daily_totals["spotreba"].notna()].copy()
     if daily_totals.empty:

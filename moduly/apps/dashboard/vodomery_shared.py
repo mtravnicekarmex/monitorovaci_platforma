@@ -42,6 +42,15 @@ FILTER_SOURCE_KEY = "vodomery_source_filter"
 FILTER_DEVICE_KEY = "vodomery_identifikace"
 FILTER_DATE_RANGE_KEY = "vodomery_date_range"
 MIN_VISIBLE_EVENT_DURATION_MINUTES = 120
+TIME_SEMANTICS_COLUMNS = (
+    "source_date",
+    "time_utc",
+    "time_basis",
+    "source_timezone",
+    "source_utc_offset_minutes",
+    "time_fold",
+    "timestamp_position",
+)
 DEFAULT_CONSUMPTION_COLUMNS = (
     "objem",
     "delta",
@@ -244,6 +253,7 @@ def load_measurement_series(
             "nocni_odber",
             "gap_detected",
             "reset_detected",
+            *TIME_SEMANTICS_COLUMNS,
         ],
     )
 

@@ -39,9 +39,9 @@ from moduly.apps.dashboard.vodomery_shared import (
 )
 from moduly.apps.smartfuelpass.database.models import SmartFuelPassRelace
 from moduly.mereni.elektromery.database.models import Mereni_elektromery
-from moduly.mereni.kalorimetry.database.models import Kalorimetr_areal_Mereni
-from moduly.mereni.manometry.database.models import Mereni_manometry
-from moduly.mereni.plynomery.database.models import Plynomer_areal_Mereni
+from moduly.mereni.kalorimetry.database.models import Mereni_kalorimetry
+from moduly.mereni.manometry.database.models import Mereni_manometry_vse
+from moduly.mereni.plynomery.database.models import Mereni_plynomery
 from moduly.mereni.vodomery.database.models import Mereni_vodomery
 
 
@@ -359,28 +359,28 @@ def _load_manometry_chart_series(allowed_devices: tuple[str, ...], user_is_admin
     now = prague_now_naive()
     cutoff = now - datetime.timedelta(hours=MANOMETRY_CHART_LOOKBACK_HOURS)
 
-    session = get_session_ms()
+    session = get_session_pg()
     try:
         latest_devices_query = session.query(
-            Mereni_manometry.identifikace,
-            func.max(Mereni_manometry.date).label("last_measurement_at"),
+            Mereni_manometry_vse.identifikace,
+            func.max(Mereni_manometry_vse.date).label("last_measurement_at"),
         ).filter(
-            Mereni_manometry.identifikace.is_not(None),
-            Mereni_manometry.date.is_not(None),
-            Mereni_manometry.hodnota.is_not(None),
-            Mereni_manometry.date >= cutoff,
-            Mereni_manometry.date <= now,
+            Mereni_manometry_vse.identifikace.is_not(None),
+            Mereni_manometry_vse.date.is_not(None),
+            Mereni_manometry_vse.hodnota.is_not(None),
+            Mereni_manometry_vse.date >= cutoff,
+            Mereni_manometry_vse.date <= now,
         )
         latest_devices_query = _apply_device_scope(
             latest_devices_query,
-            Mereni_manometry.identifikace,
+            Mereni_manometry_vse.identifikace,
             allowed_devices,
             user_is_admin,
         )
         latest_devices = (
             latest_devices_query
-            .group_by(Mereni_manometry.identifikace)
-            .order_by(func.max(Mereni_manometry.date).desc(), Mereni_manometry.identifikace.asc())
+            .group_by(Mereni_manometry_vse.identifikace)
+            .order_by(func.max(Mereni_manometry_vse.date).desc(), Mereni_manometry_vse.identifikace.asc())
             .limit(MANOMETRY_CHART_DEVICE_LIMIT)
             .all()
         )
@@ -390,19 +390,19 @@ def _load_manometry_chart_series(allowed_devices: tuple[str, ...], user_is_admin
         selected_idents = [str(row.identifikace) for row in latest_devices if row.identifikace]
         selected_ident_set = set(selected_idents)
         rows = session.query(
-            Mereni_manometry.identifikace,
-            Mereni_manometry.date,
-            Mereni_manometry.hodnota,
-            Mereni_manometry.platne,
+            Mereni_manometry_vse.identifikace,
+            Mereni_manometry_vse.date,
+            Mereni_manometry_vse.hodnota,
+            Mereni_manometry_vse.platne,
         ).filter(
-            Mereni_manometry.identifikace.in_(selected_idents),
-            Mereni_manometry.date.is_not(None),
-            Mereni_manometry.hodnota.is_not(None),
-            Mereni_manometry.date >= cutoff,
-            Mereni_manometry.date <= now,
+            Mereni_manometry_vse.identifikace.in_(selected_idents),
+            Mereni_manometry_vse.date.is_not(None),
+            Mereni_manometry_vse.hodnota.is_not(None),
+            Mereni_manometry_vse.date >= cutoff,
+            Mereni_manometry_vse.date <= now,
         ).order_by(
-            Mereni_manometry.identifikace.asc(),
-            Mereni_manometry.date.asc(),
+            Mereni_manometry_vse.identifikace.asc(),
+            Mereni_manometry_vse.date.asc(),
         ).all()
 
         rows_by_ident: dict[str, list[dict[str, object]]] = {ident: [] for ident in selected_idents}
@@ -441,14 +441,74 @@ def _load_manometry_chart_series(allowed_devices: tuple[str, ...], user_is_admin
 
 
 def _load_manometry_card(allowed_devices: tuple[str, ...], user_is_admin: bool) -> dict[str, object]:
-    metrics = _load_ms_measurement_metrics(
-        measurement_model=Mereni_manometry,
-        ident_column=Mereni_manometry.identifikace,
-        date_column=Mereni_manometry.date,
-        allowed_devices=allowed_devices,
-        user_is_admin=user_is_admin,
-        valid_column=Mereni_manometry.platne,
-    )
+    now = prague_now_naive()
+    recent_cutoff = now - datetime.timedelta(days=RECENT_WINDOW_DAYS)
+
+    session = get_session_pg()
+    try:
+        total_devices_query = session.query(func.count(func.distinct(Mereni_manometry_vse.identifikace))).filter(
+            Mereni_manometry_vse.identifikace.is_not(None),
+            Mereni_manometry_vse.platne.is_(True),
+        )
+        recent_devices_query = session.query(func.count(func.distinct(Mereni_manometry_vse.identifikace))).filter(
+            Mereni_manometry_vse.identifikace.is_not(None),
+            Mereni_manometry_vse.date.is_not(None),
+            Mereni_manometry_vse.date >= recent_cutoff,
+            Mereni_manometry_vse.date <= now,
+            Mereni_manometry_vse.platne.is_(True),
+        )
+        last_measurement_query = session.query(func.max(Mereni_manometry_vse.date)).filter(
+            Mereni_manometry_vse.identifikace.is_not(None),
+            Mereni_manometry_vse.date.is_not(None),
+            Mereni_manometry_vse.platne.is_(True),
+        )
+        recent_measurements_query = session.query(Mereni_manometry_vse).filter(
+            Mereni_manometry_vse.identifikace.is_not(None),
+            Mereni_manometry_vse.date.is_not(None),
+            Mereni_manometry_vse.date >= recent_cutoff,
+            Mereni_manometry_vse.date <= now,
+        )
+
+        total_devices_query = _apply_device_scope(
+            total_devices_query,
+            Mereni_manometry_vse.identifikace,
+            allowed_devices,
+            user_is_admin,
+        )
+        recent_devices_query = _apply_device_scope(
+            recent_devices_query,
+            Mereni_manometry_vse.identifikace,
+            allowed_devices,
+            user_is_admin,
+        )
+        last_measurement_query = _apply_device_scope(
+            last_measurement_query,
+            Mereni_manometry_vse.identifikace,
+            allowed_devices,
+            user_is_admin,
+        )
+        recent_measurements_query = _apply_device_scope(
+            recent_measurements_query,
+            Mereni_manometry_vse.identifikace,
+            allowed_devices,
+            user_is_admin,
+        )
+
+        recent_measurements = int(recent_measurements_query.count())
+        valid_recent_measurements = int(recent_measurements_query.filter(Mereni_manometry_vse.platne.is_(True)).count())
+        invalid_recent_measurements = max(recent_measurements - valid_recent_measurements, 0)
+        metrics = {
+            "total_devices": int(total_devices_query.scalar() or 0),
+            "recent_devices": int(recent_devices_query.scalar() or 0),
+            "recent_measurements": recent_measurements,
+            "last_measurement_at": last_measurement_query.scalar(),
+            "badges": [
+                {"label": "Platná měření", "value": f"{valid_recent_measurements:,}".replace(",", " ")},
+                {"label": "Neplatná měření", "value": f"{invalid_recent_measurements:,}".replace(",", " ")},
+            ],
+        }
+    finally:
+        session.close()
 
     card = _build_empty_card(
         "manometry",
@@ -462,14 +522,71 @@ def _load_manometry_card(allowed_devices: tuple[str, ...], user_is_admin: bool) 
 
 
 def _load_plynomery_card(allowed_devices: tuple[str, ...], user_is_admin: bool) -> dict[str, object]:
-    metrics = _load_ms_measurement_metrics(
-        measurement_model=Plynomer_areal_Mereni,
-        ident_column=Plynomer_areal_Mereni.identifikace,
-        date_column=Plynomer_areal_Mereni.date,
-        allowed_devices=allowed_devices,
-        user_is_admin=user_is_admin,
-        valid_column=Plynomer_areal_Mereni.platne,
-    )
+    now = prague_now_naive()
+    recent_cutoff = now - datetime.timedelta(days=RECENT_WINDOW_DAYS)
+
+    session = get_session_pg()
+    try:
+        total_devices_query = session.query(func.count(func.distinct(Mereni_plynomery.identifikace))).filter(
+            Mereni_plynomery.identifikace.is_not(None),
+            Mereni_plynomery.platne.is_(True),
+        )
+        recent_devices_query = session.query(func.count(func.distinct(Mereni_plynomery.identifikace))).filter(
+            Mereni_plynomery.identifikace.is_not(None),
+            Mereni_plynomery.date.is_not(None),
+            Mereni_plynomery.date >= recent_cutoff,
+            Mereni_plynomery.date <= now,
+            Mereni_plynomery.platne.is_(True),
+        )
+        last_measurement_query = session.query(func.max(Mereni_plynomery.date)).filter(
+            Mereni_plynomery.date.is_not(None),
+            Mereni_plynomery.platne.is_(True),
+        )
+        recent_measurements_query = session.query(Mereni_plynomery).filter(
+            Mereni_plynomery.date >= recent_cutoff,
+            Mereni_plynomery.date <= now,
+        )
+
+        total_devices_query = _apply_device_scope(
+            total_devices_query,
+            Mereni_plynomery.identifikace,
+            allowed_devices,
+            user_is_admin,
+        )
+        recent_devices_query = _apply_device_scope(
+            recent_devices_query,
+            Mereni_plynomery.identifikace,
+            allowed_devices,
+            user_is_admin,
+        )
+        last_measurement_query = _apply_device_scope(
+            last_measurement_query,
+            Mereni_plynomery.identifikace,
+            allowed_devices,
+            user_is_admin,
+        )
+        recent_measurements_query = _apply_device_scope(
+            recent_measurements_query,
+            Mereni_plynomery.identifikace,
+            allowed_devices,
+            user_is_admin,
+        )
+
+        recent_measurements = int(recent_measurements_query.count())
+        valid_recent_measurements = int(recent_measurements_query.filter(Mereni_plynomery.platne.is_(True)).count())
+        invalid_recent_measurements = max(recent_measurements - valid_recent_measurements, 0)
+        metrics = {
+            "total_devices": int(total_devices_query.scalar() or 0),
+            "recent_devices": int(recent_devices_query.scalar() or 0),
+            "recent_measurements": recent_measurements,
+            "last_measurement_at": last_measurement_query.scalar(),
+            "badges": [
+                {"label": "Platná měření", "value": f"{valid_recent_measurements:,}".replace(",", " ")},
+                {"label": "Neplatná měření", "value": f"{invalid_recent_measurements:,}".replace(",", " ")},
+            ],
+        }
+    finally:
+        session.close()
 
     card = _build_empty_card(
         "plynomery",
@@ -619,14 +736,74 @@ def _load_nabijecky_card(allowed_devices: tuple[str, ...], user_is_admin: bool) 
 
 
 def _load_kalorimetry_card(allowed_devices: tuple[str, ...], user_is_admin: bool) -> dict[str, object]:
-    metrics = _load_ms_measurement_metrics(
-        measurement_model=Kalorimetr_areal_Mereni,
-        ident_column=Kalorimetr_areal_Mereni.identifikace,
-        date_column=Kalorimetr_areal_Mereni.date,
-        allowed_devices=allowed_devices,
-        user_is_admin=user_is_admin,
-        valid_column=Kalorimetr_areal_Mereni.platne,
-    )
+    now = prague_now_naive()
+    recent_cutoff = now - datetime.timedelta(days=RECENT_WINDOW_DAYS)
+
+    session = get_session_pg()
+    try:
+        total_devices_query = session.query(func.count(func.distinct(Mereni_kalorimetry.identifikace))).filter(
+            Mereni_kalorimetry.identifikace.is_not(None),
+            Mereni_kalorimetry.platne.is_(True),
+        )
+        recent_devices_query = session.query(func.count(func.distinct(Mereni_kalorimetry.identifikace))).filter(
+            Mereni_kalorimetry.identifikace.is_not(None),
+            Mereni_kalorimetry.date.is_not(None),
+            Mereni_kalorimetry.date >= recent_cutoff,
+            Mereni_kalorimetry.date <= now,
+            Mereni_kalorimetry.platne.is_(True),
+        )
+        last_measurement_query = session.query(func.max(Mereni_kalorimetry.date)).filter(
+            Mereni_kalorimetry.identifikace.is_not(None),
+            Mereni_kalorimetry.date.is_not(None),
+            Mereni_kalorimetry.platne.is_(True),
+        )
+        recent_measurements_query = session.query(Mereni_kalorimetry).filter(
+            Mereni_kalorimetry.identifikace.is_not(None),
+            Mereni_kalorimetry.date.is_not(None),
+            Mereni_kalorimetry.date >= recent_cutoff,
+            Mereni_kalorimetry.date <= now,
+        )
+
+        total_devices_query = _apply_device_scope(
+            total_devices_query,
+            Mereni_kalorimetry.identifikace,
+            allowed_devices,
+            user_is_admin,
+        )
+        recent_devices_query = _apply_device_scope(
+            recent_devices_query,
+            Mereni_kalorimetry.identifikace,
+            allowed_devices,
+            user_is_admin,
+        )
+        last_measurement_query = _apply_device_scope(
+            last_measurement_query,
+            Mereni_kalorimetry.identifikace,
+            allowed_devices,
+            user_is_admin,
+        )
+        recent_measurements_query = _apply_device_scope(
+            recent_measurements_query,
+            Mereni_kalorimetry.identifikace,
+            allowed_devices,
+            user_is_admin,
+        )
+
+        recent_measurements = int(recent_measurements_query.count())
+        valid_recent_measurements = int(recent_measurements_query.filter(Mereni_kalorimetry.platne.is_(True)).count())
+        invalid_recent_measurements = max(recent_measurements - valid_recent_measurements, 0)
+        metrics = {
+            "total_devices": int(total_devices_query.scalar() or 0),
+            "recent_devices": int(recent_devices_query.scalar() or 0),
+            "recent_measurements": recent_measurements,
+            "last_measurement_at": last_measurement_query.scalar(),
+            "badges": [
+                {"label": "Platná měření", "value": f"{valid_recent_measurements:,}".replace(",", " ")},
+                {"label": "Neplatná měření", "value": f"{invalid_recent_measurements:,}".replace(",", " ")},
+            ],
+        }
+    finally:
+        session.close()
 
     card = _build_empty_card(
         "kalorimetry",

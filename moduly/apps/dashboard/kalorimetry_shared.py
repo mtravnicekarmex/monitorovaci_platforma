@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.db.connect import get_session_ms
+from core.db.connect import get_session_ms, get_session_pg
 from moduly.apps.dashboard.auth import get_allowed_devices, is_admin
 from moduly.apps.dashboard.device_photo import (
     build_photo_data_uri,
@@ -27,13 +27,24 @@ from moduly.apps.dashboard.vodomery_shared import (
     render_page_styles,
     round_consumption_columns,
 )
+from moduly.mereni.time_semantics import build_time_columns
 from moduly.mereni.kalorimetry.database.models import (
-    Kalorimetr_areal_Mereni,
     Kalorimetr_areal_Zarizeni,
+    Mereni_kalorimetry,
 )
 
 
 MAX_IDENT_OPTIONS = 500
+KALORIMETRY_SOURCE_NAME = "KALORIMETRY"
+TIME_SEMANTICS_COLUMNS = (
+    "source_date",
+    "time_utc",
+    "time_basis",
+    "source_timezone",
+    "source_utc_offset_minutes",
+    "time_fold",
+    "timestamp_position",
+)
 
 
 def get_kalorimetry_access_context() -> tuple[bool, tuple[str, ...]]:
@@ -47,12 +58,17 @@ def get_kalorimetry_access_context() -> tuple[bool, tuple[str, ...]]:
 
 @st.cache_data(ttl=60)
 def load_ident_options(allowed_devices: tuple[str, ...], user_is_admin: bool) -> list[str]:
-    session = get_session_ms()
+    session = get_session_pg()
     try:
-        query = session.query(Kalorimetr_areal_Mereni.identifikace).distinct()
+        query = (
+            session.query(Mereni_kalorimetry.identifikace)
+            .filter(Mereni_kalorimetry.identifikace.is_not(None))
+            .filter(Mereni_kalorimetry.platne.is_(True))
+            .distinct()
+        )
         if not user_is_admin:
-            query = query.filter(Kalorimetr_areal_Mereni.identifikace.in_(allowed_devices))
-        rows = query.order_by(Kalorimetr_areal_Mereni.identifikace).limit(MAX_IDENT_OPTIONS).all()
+            query = query.filter(Mereni_kalorimetry.identifikace.in_(allowed_devices))
+        rows = query.order_by(Mereni_kalorimetry.identifikace).limit(MAX_IDENT_OPTIONS).all()
         return [row[0] for row in rows if row[0]]
     finally:
         session.close()
@@ -62,6 +78,35 @@ def build_datetime_range(start_date: datetime.date, end_date: datetime.date) -> 
     start_dt = datetime.datetime.combine(start_date, datetime.time.min)
     end_dt = datetime.datetime.combine(end_date, datetime.time.max)
     return start_dt, end_dt
+
+
+def _empty_time_columns() -> dict[str, object]:
+    return {column: None for column in TIME_SEMANTICS_COLUMNS}
+
+
+def add_time_semantics_columns(df: pd.DataFrame, *, date_column: str = "date") -> pd.DataFrame:
+    prepared = df.copy()
+    for column in TIME_SEMANTICS_COLUMNS:
+        if column not in prepared.columns:
+            prepared[column] = pd.NA
+
+    if prepared.empty or date_column not in prepared.columns:
+        return prepared
+
+    timestamps = pd.to_datetime(prepared[date_column], errors="coerce")
+    time_records = []
+    for timestamp in timestamps:
+        if pd.isna(timestamp):
+            time_records.append(_empty_time_columns())
+            continue
+        source_date = timestamp.to_pydatetime() if hasattr(timestamp, "to_pydatetime") else timestamp
+        time_records.append(build_time_columns(source_date, KALORIMETRY_SOURCE_NAME))
+
+    time_df = pd.DataFrame(time_records, index=prepared.index)
+    for column in TIME_SEMANTICS_COLUMNS:
+        prepared[column] = prepared[column].where(prepared[column].notna(), time_df[column])
+    prepared["time_utc"] = pd.to_datetime(prepared["time_utc"], utc=True, errors="coerce")
+    return prepared
 
 
 @st.cache_data(ttl=60)
@@ -75,30 +120,62 @@ def load_measurement_series(
     if not user_is_admin and identifikace not in allowed_devices:
         return pd.DataFrame()
 
-    session = get_session_ms()
+    session = get_session_pg()
     try:
         start_dt, end_dt = build_datetime_range(start_date, end_date)
         rows = (
             session.query(
-                Kalorimetr_areal_Mereni.date,
-                Kalorimetr_areal_Mereni.identifikace,
-                Kalorimetr_areal_Mereni.seriove_cislo,
-                Kalorimetr_areal_Mereni.spotreba_energie,
-                Kalorimetr_areal_Mereni.objem,
-                Kalorimetr_areal_Mereni.platne,
+                Mereni_kalorimetry.date,
+                Mereni_kalorimetry.identifikace,
+                Mereni_kalorimetry.seriove_cislo,
+                Mereni_kalorimetry.spotreba_energie,
+                Mereni_kalorimetry.objem,
+                Mereni_kalorimetry.platne,
+                Mereni_kalorimetry.delta,
+                Mereni_kalorimetry.gap_detected,
+                Mereni_kalorimetry.synthetic,
+                Mereni_kalorimetry.reset_detected,
+                Mereni_kalorimetry.zdroj,
+                Mereni_kalorimetry.source_date,
+                Mereni_kalorimetry.time_utc,
+                Mereni_kalorimetry.time_basis,
+                Mereni_kalorimetry.source_timezone,
+                Mereni_kalorimetry.source_utc_offset_minutes,
+                Mereni_kalorimetry.time_fold,
+                Mereni_kalorimetry.timestamp_position,
             )
             .filter(
-                Kalorimetr_areal_Mereni.identifikace == identifikace,
-                Kalorimetr_areal_Mereni.date >= start_dt,
-                Kalorimetr_areal_Mereni.date <= end_dt,
+                Mereni_kalorimetry.identifikace == identifikace,
+                Mereni_kalorimetry.date >= start_dt,
+                Mereni_kalorimetry.date <= end_dt,
             )
-            .order_by(Kalorimetr_areal_Mereni.date.asc())
+            .order_by(Mereni_kalorimetry.date.asc())
             .all()
         )
-        return pd.DataFrame(
+        measurements = pd.DataFrame(
             rows,
-            columns=["date", "identifikace", "seriove_cislo", "spotreba_energie", "objem", "platne"],
+            columns=[
+                "date",
+                "identifikace",
+                "seriove_cislo",
+                "spotreba_energie",
+                "objem",
+                "platne",
+                "delta",
+                "gap_detected",
+                "synthetic",
+                "reset_detected",
+                "zdroj",
+                "source_date",
+                "time_utc",
+                "time_basis",
+                "source_timezone",
+                "source_utc_offset_minutes",
+                "time_fold",
+                "timestamp_position",
+            ],
         )
+        return add_time_semantics_columns(measurements)
     finally:
         session.close()
 

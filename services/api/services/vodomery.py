@@ -695,6 +695,13 @@ def load_measurement_series(
             Mereni_vodomery.nocni_odber,
             Mereni_vodomery.gap_detected,
             Mereni_vodomery.reset_detected,
+            Mereni_vodomery.source_date,
+            Mereni_vodomery.time_utc,
+            Mereni_vodomery.time_basis,
+            Mereni_vodomery.source_timezone,
+            Mereni_vodomery.source_utc_offset_minutes,
+            Mereni_vodomery.time_fold,
+            Mereni_vodomery.timestamp_position,
         ).filter(
             Mereni_vodomery.identifikace == identifikace,
             Mereni_vodomery.date >= start_dt,
@@ -721,6 +728,13 @@ def load_measurement_series(
                 "nocni_odber": bool(row.nocni_odber),
                 "gap_detected": bool(row.gap_detected),
                 "reset_detected": bool(row.reset_detected),
+                "source_date": row.source_date,
+                "time_utc": row.time_utc,
+                "time_basis": row.time_basis,
+                "source_timezone": row.source_timezone,
+                "source_utc_offset_minutes": row.source_utc_offset_minutes,
+                "time_fold": row.time_fold,
+                "timestamp_position": row.timestamp_position,
             }
             for row in rows
         ]

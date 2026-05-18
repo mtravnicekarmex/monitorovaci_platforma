@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.db.connect import get_session_ms
+from core.db.connect import get_session_ms, get_session_pg
 from moduly.apps.dashboard.auth import get_allowed_devices, is_admin
 from moduly.apps.dashboard.device_photo import (
     build_photo_data_uri,
@@ -32,12 +32,21 @@ from moduly.apps.dashboard.vodomery_shared import (
     round_consumption_columns,
 )
 from moduly.mereni.plynomery.database.models import (
-    Plynomer_areal_Mereni,
+    Mereni_plynomery,
     Plynomer_areal_Zarizeni,
 )
 
 
 MAX_IDENT_OPTIONS = 500
+TIME_SEMANTICS_COLUMNS = (
+    "source_date",
+    "time_utc",
+    "time_basis",
+    "source_timezone",
+    "source_utc_offset_minutes",
+    "time_fold",
+    "timestamp_position",
+)
 
 
 def get_plynomery_access_context() -> tuple[bool, tuple[str, ...]]:
@@ -51,12 +60,17 @@ def get_plynomery_access_context() -> tuple[bool, tuple[str, ...]]:
 
 @st.cache_data(ttl=60)
 def load_ident_options(allowed_devices: tuple[str, ...], user_is_admin: bool) -> list[str]:
-    session = get_session_ms()
+    session = get_session_pg()
     try:
-        query = session.query(Plynomer_areal_Mereni.identifikace).distinct()
+        query = (
+            session.query(Mereni_plynomery.identifikace)
+            .filter(Mereni_plynomery.identifikace.is_not(None))
+            .filter(Mereni_plynomery.platne.is_(True))
+            .distinct()
+        )
         if not user_is_admin:
-            query = query.filter(Plynomer_areal_Mereni.identifikace.in_(allowed_devices))
-        rows = query.order_by(Plynomer_areal_Mereni.identifikace).limit(MAX_IDENT_OPTIONS).all()
+            query = query.filter(Mereni_plynomery.identifikace.in_(allowed_devices))
+        rows = query.order_by(Mereni_plynomery.identifikace).limit(MAX_IDENT_OPTIONS).all()
         return [row[0] for row in rows if row[0]]
     finally:
         session.close()
@@ -79,28 +93,60 @@ def load_measurement_series(
     if not user_is_admin and identifikace not in allowed_devices:
         return pd.DataFrame()
 
-    session = get_session_ms()
+    session = get_session_pg()
     try:
         start_dt, end_dt = build_datetime_range(start_date, end_date)
         rows = (
             session.query(
-                Plynomer_areal_Mereni.date,
-                Plynomer_areal_Mereni.identifikace,
-                Plynomer_areal_Mereni.seriove_cislo,
-                Plynomer_areal_Mereni.objem,
-                Plynomer_areal_Mereni.platne,
+                Mereni_plynomery.date,
+                Mereni_plynomery.identifikace,
+                Mereni_plynomery.seriove_cislo,
+                Mereni_plynomery.objem,
+                Mereni_plynomery.delta,
+                Mereni_plynomery.zdroj,
+                Mereni_plynomery.platne,
+                Mereni_plynomery.interval_minutes,
+                Mereni_plynomery.day_of_week,
+                Mereni_plynomery.slot,
+                Mereni_plynomery.nocni_odber,
+                Mereni_plynomery.gap_detected,
+                Mereni_plynomery.synthetic,
+                Mereni_plynomery.reset_detected,
+                Mereni_plynomery.source_date,
+                Mereni_plynomery.time_utc,
+                Mereni_plynomery.time_basis,
+                Mereni_plynomery.source_timezone,
+                Mereni_plynomery.source_utc_offset_minutes,
+                Mereni_plynomery.time_fold,
+                Mereni_plynomery.timestamp_position,
             )
             .filter(
-                Plynomer_areal_Mereni.identifikace == identifikace,
-                Plynomer_areal_Mereni.date >= start_dt,
-                Plynomer_areal_Mereni.date <= end_dt,
+                Mereni_plynomery.identifikace == identifikace,
+                Mereni_plynomery.date >= start_dt,
+                Mereni_plynomery.date <= end_dt,
             )
-            .order_by(Plynomer_areal_Mereni.date.asc())
+            .order_by(Mereni_plynomery.date.asc(), Mereni_plynomery.id.asc())
             .all()
         )
         return pd.DataFrame(
             rows,
-            columns=["date", "identifikace", "seriove_cislo", "objem", "platne"],
+            columns=[
+                "date",
+                "identifikace",
+                "seriove_cislo",
+                "objem",
+                "delta",
+                "zdroj",
+                "platne",
+                "interval_minutes",
+                "day_of_week",
+                "slot",
+                "nocni_odber",
+                "gap_detected",
+                "synthetic",
+                "reset_detected",
+                *TIME_SEMANTICS_COLUMNS,
+            ],
         )
     finally:
         session.close()

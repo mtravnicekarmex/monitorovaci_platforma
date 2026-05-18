@@ -66,20 +66,48 @@ def render_detail_sidebar(user_is_admin: bool, allowed_devices: tuple[str, ...])
 
 def prepare_consumption_history(df: pd.DataFrame) -> pd.DataFrame:
     history_df = df.copy()
+    for column in (
+        "date",
+        "objem",
+        "delta",
+        "identifikace",
+        "seriove_cislo",
+        "zdroj",
+        "platne",
+        "gap_detected",
+        "synthetic",
+        "reset_detected",
+        "source_date",
+        "time_utc",
+        "time_basis",
+        "source_timezone",
+        "source_utc_offset_minutes",
+        "time_fold",
+        "timestamp_position",
+    ):
+        if column not in history_df.columns:
+            history_df[column] = pd.NA
+
     history_df["date"] = pd.to_datetime(history_df["date"], errors="coerce")
+    history_df["source_date"] = pd.to_datetime(history_df["source_date"], errors="coerce")
+    history_df["time_utc"] = pd.to_datetime(history_df["time_utc"], utc=True, errors="coerce")
     history_df["objem"] = pd.to_numeric(history_df["objem"], errors="coerce")
-    history_df["seriove_cislo"] = history_df["seriove_cislo"].astype(str)
+    history_df["delta"] = pd.to_numeric(history_df["delta"], errors="coerce")
+    history_df["seriove_cislo"] = history_df["seriove_cislo"].astype("string")
     history_df["platne"] = history_df["platne"].fillna(True).astype(bool)
     history_df = history_df.dropna(subset=["date", "objem"]).sort_values("date").reset_index(drop=True)
     if history_df.empty:
         return history_df
 
-    diff_from_volume = history_df["objem"].diff().fillna(0.0)
+    diff_from_volume = history_df["objem"].diff()
     serial_changed = history_df["seriove_cislo"].ne(history_df["seriove_cislo"].shift()).fillna(False)
-    history_df["reset_detected"] = diff_from_volume.lt(0) | serial_changed
-    history_df["spotreba"] = diff_from_volume
+    stored_reset = history_df["reset_detected"].map(lambda value: bool(value) if pd.notna(value) else False)
+    history_df["reset_detected"] = diff_from_volume.lt(0).fillna(False) | serial_changed | stored_reset
+    source_delta_available = history_df["delta"].notna()
+    history_df["spotreba"] = diff_from_volume.fillna(0.0)
+    history_df.loc[source_delta_available, "spotreba"] = history_df.loc[source_delta_available, "delta"]
     history_df.loc[history_df["spotreba"] < 0, "spotreba"] = 0.0
-    history_df.loc[history_df["reset_detected"], "spotreba"] = 0.0
+    history_df.loc[history_df["reset_detected"] & ~source_delta_available, "spotreba"] = 0.0
     history_df.loc[~history_df["platne"], "spotreba"] = 0.0
     history_df["spotreba"] = history_df["spotreba"].round(3)
     return history_df

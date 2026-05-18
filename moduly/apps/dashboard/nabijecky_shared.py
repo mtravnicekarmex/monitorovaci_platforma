@@ -84,6 +84,14 @@ def load_charge_sessions(
             SmartFuelPassRelace.suma,
             SmartFuelPassRelace.started_at,
             SmartFuelPassRelace.ended_at,
+            SmartFuelPassRelace.source_started_at,
+            SmartFuelPassRelace.source_ended_at,
+            SmartFuelPassRelace.started_at_utc,
+            SmartFuelPassRelace.ended_at_utc,
+            SmartFuelPassRelace.time_basis,
+            SmartFuelPassRelace.source_timezone,
+            SmartFuelPassRelace.started_utc_offset_minutes,
+            SmartFuelPassRelace.ended_utc_offset_minutes,
             SmartFuelPassRelace.lokace,
             SmartFuelPassRelace.rychlost_nabijeni,
             SmartFuelPassRelace.imported_at,
@@ -109,6 +117,14 @@ def load_charge_sessions(
                     "suma": row.suma,
                     "started_at": row.started_at,
                     "ended_at": row.ended_at,
+                    "source_started_at": row.source_started_at,
+                    "source_ended_at": row.source_ended_at,
+                    "started_at_utc": row.started_at_utc,
+                    "ended_at_utc": row.ended_at_utc,
+                    "time_basis": row.time_basis,
+                    "source_timezone": row.source_timezone,
+                    "started_utc_offset_minutes": row.started_utc_offset_minutes,
+                    "ended_utc_offset_minutes": row.ended_utc_offset_minutes,
                     "lokace": row.lokace,
                     "rychlost_nabijeni": row.rychlost_nabijeni,
                     "imported_at": row.imported_at,
@@ -130,6 +146,14 @@ def prepare_charge_sessions(df: pd.DataFrame) -> pd.DataFrame:
         "suma",
         "started_at",
         "ended_at",
+        "source_started_at",
+        "source_ended_at",
+        "started_at_utc",
+        "ended_at_utc",
+        "time_basis",
+        "source_timezone",
+        "started_utc_offset_minutes",
+        "ended_utc_offset_minutes",
         "lokace",
         "rychlost_nabijeni",
         "imported_at",
@@ -137,7 +161,7 @@ def prepare_charge_sessions(df: pd.DataFrame) -> pd.DataFrame:
         if column not in prepared.columns:
             prepared[column] = pd.NA
 
-    for column in ("started_at", "ended_at", "imported_at"):
+    for column in ("started_at", "ended_at", "source_started_at", "source_ended_at", "started_at_utc", "ended_at_utc", "imported_at"):
         prepared[column] = pd.to_datetime(prepared[column], errors="coerce")
     for column in ("kwh", "battery_status", "suma", "rychlost_nabijeni"):
         prepared[column] = pd.to_numeric(prepared[column], errors="coerce")

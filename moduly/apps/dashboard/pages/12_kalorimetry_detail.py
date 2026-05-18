@@ -76,8 +76,16 @@ def prepare_consumption_history(df: pd.DataFrame) -> pd.DataFrame:
 
     diff_from_state = history_df["spotreba_energie"].diff().fillna(0.0)
     serial_changed = history_df["seriove_cislo"].ne(history_df["seriove_cislo"].shift()).fillna(False)
-    history_df["reset_detected"] = diff_from_state.lt(0) | serial_changed
-    history_df["spotreba"] = diff_from_state
+    computed_reset_detected = diff_from_state.lt(0) | serial_changed
+    if "reset_detected" in history_df.columns:
+        history_df["reset_detected"] = history_df["reset_detected"].fillna(False).astype(bool) | computed_reset_detected
+    else:
+        history_df["reset_detected"] = computed_reset_detected
+
+    if "delta" in history_df.columns:
+        history_df["spotreba"] = pd.to_numeric(history_df["delta"], errors="coerce").fillna(0.0)
+    else:
+        history_df["spotreba"] = diff_from_state
     history_df.loc[history_df["spotreba"] < 0, "spotreba"] = 0.0
     history_df.loc[history_df["reset_detected"], "spotreba"] = 0.0
     history_df.loc[~history_df["platne"], "spotreba"] = 0.0

@@ -124,8 +124,13 @@ def build_detail_table(df: pd.DataFrame, detail_level: str) -> pd.DataFrame:
         "Denně": "D",
         "Hodinově": "h",
     }
+    time_axis_column = "chart_time" if "chart_time" in df.columns and df["chart_time"].notna().any() else "date"
+    working_df = df.dropna(subset=[time_axis_column]).copy()
+    if working_df.empty:
+        return pd.DataFrame()
+
     resampled = (
-        df.set_index("date")
+        working_df.set_index(time_axis_column)
         .resample(freq_map[detail_level])
         .agg(
             vt=("vt", "last"),
@@ -144,6 +149,7 @@ def build_detail_table(df: pd.DataFrame, detail_level: str) -> pd.DataFrame:
             pocet_zaznamu=("spotreba", "count"),
         )
         .reset_index()
+        .rename(columns={time_axis_column: "date"})
     )
     resampled = resampled.rename(columns={"reset_detected": "pocet_resetu"})
     resampled = resampled[resampled["pocet_zaznamu"] > 0].drop(columns=["pocet_zaznamu"]).copy()
@@ -225,14 +231,15 @@ def build_line_chart(
     color: str,
 ) -> alt.Chart:
     chart_source = chart_df.dropna(subset=[value_column]).copy()
+    x_column = "chart_time" if "chart_time" in chart_source.columns and chart_source["chart_time"].notna().any() else "date"
     return (
         alt.Chart(chart_source)
         .mark_line(color=color, strokeWidth=2.5)
         .encode(
-            x=alt.X("date:T", title=None),
+            x=alt.X(f"{x_column}:T", title=None),
             y=alt.Y(f"{value_column}:Q", title=title),
             tooltip=[
-                alt.Tooltip("date:T", title="Datum"),
+                alt.Tooltip(f"{x_column}:T", title="Čas"),
                 alt.Tooltip(f"{value_column}:Q", title=title, format=".3f"),
             ],
         )
@@ -248,14 +255,15 @@ def build_bar_chart(
     color: str,
 ) -> alt.Chart:
     chart_source = chart_df.dropna(subset=[value_column]).copy()
+    x_column = "chart_time" if "chart_time" in chart_source.columns and chart_source["chart_time"].notna().any() else "date"
     return (
         alt.Chart(chart_source)
         .mark_bar(color=color)
         .encode(
-            x=alt.X("date:T", title=None),
+            x=alt.X(f"{x_column}:T", title=None),
             y=alt.Y(f"{value_column}:Q", title=title),
             tooltip=[
-                alt.Tooltip("date:T", title="Datum"),
+                alt.Tooltip(f"{x_column}:T", title="Čas"),
                 alt.Tooltip(f"{value_column}:Q", title=title, format=".3f"),
             ],
         )

@@ -13,6 +13,7 @@ from moduly.mereni.elektromery.database.models import (
     Elektromer_areal_Mereni,
     Mereni_elektromery,
 )
+from moduly.mereni.elektromery.database.time_semantics import build_time_columns
 
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,23 @@ def ensure_destination_table() -> None:
 
     if expected_table not in monitoring_tables:
         Mereni_elektromery.__table__.create(bind=engine, checkfirst=True)
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_ele_vse_time_utc
+                    ON monitoring."Mereni_elektromery_vse" (time_utc)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_ele_vse_ident_time_utc
+                    ON monitoring."Mereni_elektromery_vse" (identifikace, time_utc)
+                    """
+                )
+            )
         logger.info('Created missing table monitoring."%s"', expected_table)
         return
 
@@ -65,6 +83,38 @@ def ensure_destination_table() -> None:
         with engine.begin() as conn:
             conn.execute(text('ALTER TABLE monitoring."Mereni_elektromery_vse" ALTER COLUMN objem DROP NOT NULL'))
         logger.info('Relaxed NOT NULL on monitoring."%s".objem for OTE delta-only rows', expected_table)
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                ALTER TABLE monitoring."Mereni_elektromery_vse"
+                    ADD COLUMN IF NOT EXISTS source_date TIMESTAMP WITHOUT TIME ZONE,
+                    ADD COLUMN IF NOT EXISTS time_utc TIMESTAMP WITH TIME ZONE,
+                    ADD COLUMN IF NOT EXISTS time_basis VARCHAR(40),
+                    ADD COLUMN IF NOT EXISTS source_timezone VARCHAR(64),
+                    ADD COLUMN IF NOT EXISTS source_utc_offset_minutes INTEGER,
+                    ADD COLUMN IF NOT EXISTS time_fold INTEGER,
+                    ADD COLUMN IF NOT EXISTS timestamp_position VARCHAR(20)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_ele_vse_time_utc
+                ON monitoring."Mereni_elektromery_vse" (time_utc)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_ele_vse_ident_time_utc
+                ON monitoring."Mereni_elektromery_vse" (identifikace, time_utc)
+                """
+            )
+        )
 
 
 def ensure_elektromery_vse_table() -> None:
@@ -354,17 +404,17 @@ def resolve_gap(
     current_objem: float,
     interval: int,
     source_name: str,
-) -> list[dict[str, object]]:
+) -> tuple[list[dict[str, object]], float | None]:
     previous_dt = previous["date"]
     previous_objem = previous["objem"]
     total_minutes = int((current_dt - previous_dt).total_seconds() // 60)
     slot_count = total_minutes // interval
     if slot_count <= 1:
-        return []
+        return [], None
 
     total_delta = current_objem - previous_objem
     if total_delta <= 0:
-        return []
+        return [], None
 
     mean_delta = round(total_delta / slot_count, 6)
     rows: list[dict[str, object]] = []
@@ -376,6 +426,7 @@ def resolve_gap(
                 "identifikace": ident,
                 "seriove_cislo": previous.get("seriove_cislo"),
                 "date": slot_time,
+                **build_time_columns(slot_time, source_name),
                 "objem": round(previous_objem + mean_delta * index, 6),
                 "delta": mean_delta,
                 "interval_minutes": interval,
@@ -389,7 +440,7 @@ def resolve_gap(
                 "reset_detected": False,
             }
         )
-    return rows
+    return rows, mean_delta
 
 
 def prepare_state_rows(session: Session, new_rows: list[dict[str, object]], source_name: str) -> list[dict[str, object]]:
@@ -431,12 +482,13 @@ def prepare_state_rows(session: Session, new_rows: list[dict[str, object]], sour
             expected_interval = timedelta(minutes=interval)
             actual_diff = dt - previous["date"]
             if actual_diff > expected_interval * MAX_GAP_MULTIPLIER and objem >= previous["objem"]:
-                synthetic_rows = resolve_gap(ident, previous, dt, objem, interval, source_name)
+                synthetic_rows, gap_delta = resolve_gap(ident, previous, dt, objem, interval, source_name)
                 if synthetic_rows:
                     rows_to_insert.extend(synthetic_rows)
                     gap_detected = True
+                    delta = gap_delta
 
-            if objem >= previous["objem"]:
+            if delta is None and objem >= previous["objem"]:
                 delta = round(objem - previous["objem"], 6)
 
         if reset_detected:
@@ -448,6 +500,7 @@ def prepare_state_rows(session: Session, new_rows: list[dict[str, object]], sour
                 "identifikace": ident,
                 "seriove_cislo": row.get("seriove_cislo"),
                 "date": dt,
+                **build_time_columns(dt, source_name, row),
                 "objem": objem,
                 "delta": delta,
                 "interval_minutes": interval,
@@ -512,6 +565,7 @@ def prepare_delta_rows(session: Session, new_rows: list[dict[str, object]], sour
                 "identifikace": ident,
                 "seriove_cislo": row.get("seriove_cislo"),
                 "date": dt,
+                **build_time_columns(dt, source_name, row),
                 "objem": None,
                 "delta": delta,
                 "interval_minutes": interval,

@@ -9,6 +9,7 @@ from services.api.core.config import get_api_settings
 from services.api.routes.admin import router as admin_router
 from services.api.routes.auth import router as auth_router
 from services.api.routes.health import router as health_router
+from services.api.routes.kalorimetry import router as kalorimetry_router
 from services.api.routes.manometry import router as manometry_router
 from services.api.routes.plynomery import router as plynomery_router
 from services.api.routes.scheduler_health import router as scheduler_health_router
@@ -38,6 +39,7 @@ app.include_router(health_router)
 app.include_router(scheduler_health_router)
 app.include_router(auth_router)
 app.include_router(admin_router)
+app.include_router(kalorimetry_router)
 app.include_router(manometry_router)
 app.include_router(plynomery_router)
 app.include_router(vodomery_router)

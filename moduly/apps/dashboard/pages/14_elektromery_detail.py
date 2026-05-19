@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from moduly.apps.dashboard.auth import require_page_access
+from moduly.apps.dashboard.time_semantics import time_axis_column
 from moduly.apps.dashboard.elektromery_shared import (
     build_average_consumption_summary,
     build_change_table,
@@ -176,7 +177,8 @@ def render_dashboard() -> None:
     latest_total_state = "-"
     latest_tariffs = "-"
     if not history_df.empty:
-        first_measurement = pd.to_datetime(history_df["date"], errors="coerce").dropna().min()
+        axis_column = time_axis_column(history_df)
+        first_measurement = pd.to_datetime(history_df[axis_column], errors="coerce").dropna().min()
         latest_row = history_df.iloc[-1]
         if pd.notna(first_measurement):
             first_measurement_date = first_measurement.strftime("%d.%m.%Y")
@@ -246,18 +248,14 @@ def render_dashboard() -> None:
             if history_df.empty:
                 st.info("Pro vybrany elektromer nejsou v danem obdobi zadna mereni.")
             else:
-                time_axis_column = (
-                    "chart_time"
-                    if "chart_time" in history_df.columns and history_df["chart_time"].notna().any()
-                    else "date"
-                )
+                axis_column = time_axis_column(history_df)
                 monthly_history = (
-                    history_df.dropna(subset=[time_axis_column])
-                    .set_index(time_axis_column)
+                    history_df.dropna(subset=[axis_column])
+                    .set_index(axis_column)
                     .resample("ME")
                     .agg(spotreba=("spotreba", "sum"))
                     .reset_index()
-                    .rename(columns={time_axis_column: "date"})
+                    .rename(columns={axis_column: "date"})
                 )
                 monthly_history = monthly_history[monthly_history["spotreba"].notna()].copy()
                 average_monthly_consumption = float(monthly_history["spotreba"].mean()) if not monthly_history.empty else 0.0
@@ -333,7 +331,8 @@ def render_dashboard() -> None:
             if history_df.empty:
                 st.info("Pro tento elektromer nejsou zadna mereni.")
             else:
-                recent_measurements = history_df.sort_values("date", ascending=False).head(50).copy()
+                axis_column = time_axis_column(history_df)
+                recent_measurements = history_df.sort_values(axis_column, ascending=False).head(50).copy()
                 recent_measurements = recent_measurements.rename(
                     columns={
                         "date": "Datum",

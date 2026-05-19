@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.db.connect import get_session_pg
+from moduly.apps.dashboard.time_semantics import DASHBOARD_TIMEZONE_NAME, local_date_range_to_utc
 from moduly.apps.dashboard.vodomery_shared import (
     format_consumption_with_unit,
     format_value,
@@ -75,7 +76,7 @@ def load_charge_sessions(
 ) -> pd.DataFrame:
     session = get_session_pg()
     try:
-        start_dt, end_dt = build_datetime_range(start_date, end_date)
+        start_utc, end_utc = local_date_range_to_utc(start_date, end_date)
         query = session.query(
             SmartFuelPassRelace.id_relace,
             SmartFuelPassRelace.kwh,
@@ -96,15 +97,15 @@ def load_charge_sessions(
             SmartFuelPassRelace.rychlost_nabijeni,
             SmartFuelPassRelace.imported_at,
         ).filter(
-            SmartFuelPassRelace.started_at >= start_dt,
-            SmartFuelPassRelace.started_at <= end_dt,
+            SmartFuelPassRelace.started_at_utc >= start_utc,
+            SmartFuelPassRelace.started_at_utc < end_utc,
         )
         if lokace:
             query = query.filter(SmartFuelPassRelace.lokace == lokace)
         if tarif:
             query = query.filter(SmartFuelPassRelace.tarif == tarif)
         rows = query.order_by(
-            SmartFuelPassRelace.started_at.asc(),
+            SmartFuelPassRelace.started_at_utc.asc(),
             SmartFuelPassRelace.id_relace.asc(),
         ).all()
         return pd.DataFrame(
@@ -161,21 +162,32 @@ def prepare_charge_sessions(df: pd.DataFrame) -> pd.DataFrame:
         if column not in prepared.columns:
             prepared[column] = pd.NA
 
-    for column in ("started_at", "ended_at", "source_started_at", "source_ended_at", "started_at_utc", "ended_at_utc", "imported_at"):
+    for column in ("started_at", "ended_at", "source_started_at", "source_ended_at", "imported_at"):
         prepared[column] = pd.to_datetime(prepared[column], errors="coerce")
+    for column in ("started_at_utc", "ended_at_utc"):
+        prepared[column] = pd.to_datetime(prepared[column], utc=True, errors="coerce")
     for column in ("kwh", "battery_status", "suma", "rychlost_nabijeni"):
         prepared[column] = pd.to_numeric(prepared[column], errors="coerce")
+
+    prepared["started_chart_time"] = prepared["started_at_utc"].dt.tz_convert(DASHBOARD_TIMEZONE_NAME).dt.tz_localize(None)
+    prepared["ended_chart_time"] = prepared["ended_at_utc"].dt.tz_convert(DASHBOARD_TIMEZONE_NAME).dt.tz_localize(None)
+    prepared.loc[prepared["started_chart_time"].isna(), "started_chart_time"] = prepared["started_at"]
+    prepared.loc[prepared["ended_chart_time"].isna(), "ended_chart_time"] = prepared["ended_at"]
 
     prepared["id_relace"] = prepared["id_relace"].astype("string")
     prepared["lokace"] = prepared["lokace"].astype("string")
     prepared["tarif"] = prepared["tarif"].astype("string")
-    prepared = prepared.dropna(subset=["started_at", "ended_at", "id_relace"]).sort_values("started_at").reset_index(drop=True)
+    prepared = (
+        prepared.dropna(subset=["started_chart_time", "ended_chart_time", "id_relace"])
+        .sort_values(["started_chart_time", "ended_chart_time", "id_relace"])
+        .reset_index(drop=True)
+    )
     if prepared.empty:
         return prepared
 
-    duration_minutes = (
-        (prepared["ended_at"] - prepared["started_at"]).dt.total_seconds().div(60)
-    )
+    duration_minutes = (prepared["ended_at_utc"] - prepared["started_at_utc"]).dt.total_seconds().div(60)
+    legacy_duration_minutes = (prepared["ended_at"] - prepared["started_at"]).dt.total_seconds().div(60)
+    duration_minutes = duration_minutes.fillna(legacy_duration_minutes)
     prepared["duration_minutes"] = duration_minutes.clip(lower=0).round(1)
     return prepared
 
@@ -203,7 +215,7 @@ def build_daily_summary(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=["date", "session_count", "kwh", "suma"])
 
     summary = (
-        df.assign(date=df["started_at"].dt.floor("D"))
+        df.assign(date=df["started_chart_time"].dt.floor("D"))
         .groupby("date", as_index=False)
         .agg(
             session_count=("id_relace", "count"),
@@ -250,7 +262,19 @@ def format_charge_sessions_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df.copy()
 
-    formatted = df.rename(
+    display_df = df.copy()
+    if "started_chart_time" in display_df.columns:
+        display_df["started_at"] = display_df["started_chart_time"].where(
+            display_df["started_chart_time"].notna(),
+            display_df["started_at"],
+        )
+    if "ended_chart_time" in display_df.columns:
+        display_df["ended_at"] = display_df["ended_chart_time"].where(
+            display_df["ended_chart_time"].notna(),
+            display_df["ended_at"],
+        )
+
+    formatted = display_df.rename(
         columns={
             "started_at": "Začátek",
             "ended_at": "Konec",

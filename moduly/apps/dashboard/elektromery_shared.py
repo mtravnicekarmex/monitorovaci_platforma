@@ -19,6 +19,12 @@ from moduly.apps.dashboard.device_photo import (
     render_clickable_device_photo,
     resolve_photo_path,
 )
+from moduly.apps.dashboard.time_semantics import (
+    TIME_SEMANTICS_COLUMNS,
+    add_chart_time,
+    local_date_range_to_utc,
+    time_axis_column,
+)
 from moduly.apps.dashboard.vodomery_shared import (
     format_consumption_dataframe,
     format_consumption_with_unit,
@@ -34,15 +40,6 @@ from moduly.mereni.elektromery.database.models import (
 
 
 MAX_IDENT_OPTIONS = 500
-TIME_SEMANTICS_COLUMNS = (
-    "source_date",
-    "time_utc",
-    "time_basis",
-    "source_timezone",
-    "source_utc_offset_minutes",
-    "time_fold",
-    "timestamp_position",
-)
 
 
 def get_elektromery_access_context() -> tuple[bool, tuple[str, ...]]:
@@ -89,7 +86,7 @@ def load_measurement_series(
 
     session = get_session_pg()
     try:
-        start_dt, end_dt = build_datetime_range(start_date, end_date)
+        start_utc, end_utc = local_date_range_to_utc(start_date, end_date)
         rows = (
             session.query(
                 Mereni_elektromery.date,
@@ -112,11 +109,11 @@ def load_measurement_series(
             )
             .filter(
                 Mereni_elektromery.identifikace == identifikace,
-                Mereni_elektromery.date >= start_dt,
-                Mereni_elektromery.date <= end_dt,
+                Mereni_elektromery.time_utc >= start_utc,
+                Mereni_elektromery.time_utc < end_utc,
                 Mereni_elektromery.platne.is_(True),
             )
-            .order_by(Mereni_elektromery.date.asc(), Mereni_elektromery.zdroj.asc())
+            .order_by(Mereni_elektromery.time_utc.asc(), Mereni_elektromery.zdroj.asc())
             .all()
         )
         return pd.DataFrame(
@@ -272,14 +269,11 @@ def prepare_measurements(df: pd.DataFrame) -> pd.DataFrame:
 
     prepared["date"] = pd.to_datetime(prepared["date"], errors="coerce")
     prepared["source_date"] = pd.to_datetime(prepared["source_date"], errors="coerce")
-    utc_time = pd.to_datetime(prepared["time_utc"], utc=True, errors="coerce")
-    prepared["time_utc"] = utc_time
-    prepared["chart_time"] = utc_time.dt.tz_convert("Europe/Prague").dt.tz_localize(None)
-    prepared.loc[prepared["chart_time"].isna(), "chart_time"] = prepared.loc[prepared["chart_time"].isna(), "date"]
+    prepared = add_chart_time(prepared)
     for column in ("vt", "nt", "total", "delta"):
         prepared[column] = pd.to_numeric(prepared[column], errors="coerce")
     prepared["seriove_cislo"] = prepared["seriove_cislo"].astype("string")
-    prepared = prepared.dropna(subset=["date"]).sort_values("chart_time").reset_index(drop=True)
+    prepared = prepared.dropna(subset=["chart_time"]).sort_values("chart_time").reset_index(drop=True)
 
     if prepared.empty:
         return prepared
@@ -366,21 +360,17 @@ def build_change_table(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_daily_history(history_df: pd.DataFrame, days: int) -> pd.DataFrame:
-    time_axis_column = (
-        "chart_time"
-        if "chart_time" in history_df.columns and history_df["chart_time"].notna().any()
-        else "date"
-    )
-    working_df = history_df.dropna(subset=[time_axis_column]).copy()
+    axis_column = time_axis_column(history_df)
+    working_df = history_df.dropna(subset=[axis_column]).copy()
     if working_df.empty:
         return pd.DataFrame()
 
     daily_history = (
-        working_df.set_index(time_axis_column)
+        working_df.set_index(axis_column)
         .resample("D")
         .agg(spotreba=("spotreba", "sum"))
         .reset_index()
-        .rename(columns={time_axis_column: "date"})
+        .rename(columns={axis_column: "date"})
     )
     daily_history = daily_history[daily_history["spotreba"].notna()].copy()
     if daily_history.empty:
@@ -396,21 +386,17 @@ def build_average_consumption_summary(history_df: pd.DataFrame) -> dict[str, obj
     if history_df.empty:
         return {"monthly": None, "weekly": None, "weekday": {}}
 
-    time_axis_column = (
-        "chart_time"
-        if "chart_time" in history_df.columns and history_df["chart_time"].notna().any()
-        else "date"
-    )
-    working_df = history_df.dropna(subset=[time_axis_column]).copy()
+    axis_column = time_axis_column(history_df)
+    working_df = history_df.dropna(subset=[axis_column]).copy()
     if working_df.empty:
         return {"monthly": None, "weekly": None, "weekday": {}}
 
     daily_totals = (
-        working_df.set_index(time_axis_column)
+        working_df.set_index(axis_column)
         .resample("D")
         .agg(spotreba=("spotreba", "sum"))
         .reset_index()
-        .rename(columns={time_axis_column: "date"})
+        .rename(columns={axis_column: "date"})
     )
     daily_totals = daily_totals[daily_totals["spotreba"].notna()].copy()
     if daily_totals.empty:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, time
 
 from core.db.connect import get_session_ms, get_session_pg
+from moduly.apps.dashboard.time_semantics import local_date_range_to_utc, to_prague_naive
 from moduly.mereni.manometry.database.models import (
     Manometr_areal_Zarizeni,
     Mereni_manometry_vse,
@@ -53,9 +54,17 @@ def _serialize_device_detail(
         "first_measurement_at": first_measurement_at,
         "last_measurement_at": last_measurement_at,
         "min_pressure": float(min_measurement.hodnota) if min_measurement is not None and min_measurement.hodnota is not None else None,
-        "min_pressure_at": min_measurement.date if min_measurement is not None else None,
+        "min_pressure_at": (
+            to_prague_naive(min_measurement.time_utc) or min_measurement.date
+            if min_measurement is not None
+            else None
+        ),
         "max_pressure": float(max_measurement.hodnota) if max_measurement is not None and max_measurement.hodnota is not None else None,
-        "max_pressure_at": max_measurement.date if max_measurement is not None else None,
+        "max_pressure_at": (
+            to_prague_naive(max_measurement.time_utc) or max_measurement.date
+            if max_measurement is not None
+            else None
+        ),
     }
 
 
@@ -113,7 +122,7 @@ def load_measurement_series(
 ) -> list[dict[str, object]]:
     require_section_access(user_context, "manometry")
     require_device_access(user_context, identifikace)
-    start_dt, end_dt = _build_datetime_range(start_date, end_date)
+    start_utc, end_utc = local_date_range_to_utc(start_date, end_date)
 
     session = get_session_pg()
     try:
@@ -135,12 +144,11 @@ def load_measurement_series(
             )
             .filter(
                 Mereni_manometry_vse.identifikace == identifikace,
-                Mereni_manometry_vse.date >= start_dt,
-                Mereni_manometry_vse.date <= end_dt,
-                Mereni_manometry_vse.date.is_not(None),
+                Mereni_manometry_vse.time_utc >= start_utc,
+                Mereni_manometry_vse.time_utc < end_utc,
                 Mereni_manometry_vse.hodnota.is_not(None),
             )
-            .order_by(Mereni_manometry_vse.date.asc())
+            .order_by(Mereni_manometry_vse.time_utc.asc())
             .all()
         )
         return [
@@ -160,7 +168,7 @@ def load_measurement_series(
                 "timestamp_position": row.timestamp_position,
             }
             for row in rows
-            if row.date is not None and row.identifikace is not None and row.hodnota is not None
+            if row.identifikace is not None and row.hodnota is not None
         ]
     finally:
         session.close()
@@ -185,7 +193,7 @@ def load_device_detail(
 
         base_query = session_pg.query(Mereni_manometry_vse).filter(Mereni_manometry_vse.identifikace == identifikace)
         stats_base_query = base_query.filter(
-            Mereni_manometry_vse.date.is_not(None),
+            Mereni_manometry_vse.time_utc.is_not(None),
             Mereni_manometry_vse.hodnota.is_not(None),
         )
         valid_query = stats_base_query.filter(Mereni_manometry_vse.platne.is_(True))
@@ -195,20 +203,34 @@ def load_device_detail(
         if measurement_count == 0 and device is None:
             return None
 
-        first_measurement = stats_base_query.order_by(Mereni_manometry_vse.date.asc()).first()
-        last_measurement = stats_base_query.order_by(Mereni_manometry_vse.date.desc()).first()
+        first_measurement = stats_base_query.order_by(Mereni_manometry_vse.time_utc.asc()).first()
+        last_measurement = stats_base_query.order_by(Mereni_manometry_vse.time_utc.desc()).first()
 
         stats_query = valid_query if valid_measurement_count > 0 else stats_base_query
-        min_measurement = stats_query.order_by(Mereni_manometry_vse.hodnota.asc(), Mereni_manometry_vse.date.asc()).first()
-        max_measurement = stats_query.order_by(Mereni_manometry_vse.hodnota.desc(), Mereni_manometry_vse.date.asc()).first()
+        min_measurement = stats_query.order_by(
+            Mereni_manometry_vse.hodnota.asc(),
+            Mereni_manometry_vse.time_utc.asc(),
+        ).first()
+        max_measurement = stats_query.order_by(
+            Mereni_manometry_vse.hodnota.desc(),
+            Mereni_manometry_vse.time_utc.asc(),
+        ).first()
 
         return _serialize_device_detail(
             identifikace=identifikace,
             device=device,
             measurement_count=measurement_count,
             valid_measurement_count=valid_measurement_count,
-            first_measurement_at=first_measurement.date if first_measurement is not None else None,
-            last_measurement_at=last_measurement.date if last_measurement is not None else None,
+            first_measurement_at=(
+                to_prague_naive(first_measurement.time_utc) or first_measurement.date
+                if first_measurement is not None
+                else None
+            ),
+            last_measurement_at=(
+                to_prague_naive(last_measurement.time_utc) or last_measurement.date
+                if last_measurement is not None
+                else None
+            ),
             min_measurement=min_measurement,
             max_measurement=max_measurement,
         )

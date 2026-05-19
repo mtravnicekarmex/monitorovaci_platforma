@@ -19,6 +19,7 @@ from moduly.apps.dashboard.device_photo import (
     render_clickable_device_photo,
     resolve_photo_path,
 )
+from moduly.apps.dashboard.time_semantics import TIME_SEMANTICS_COLUMNS, local_date_range_to_utc
 from moduly.apps.dashboard.vodomery_shared import (
     filter_min_duration_events,
     format_consumption_dataframe,
@@ -38,15 +39,6 @@ from moduly.mereni.plynomery.database.models import (
 
 
 MAX_IDENT_OPTIONS = 500
-TIME_SEMANTICS_COLUMNS = (
-    "source_date",
-    "time_utc",
-    "time_basis",
-    "source_timezone",
-    "source_utc_offset_minutes",
-    "time_fold",
-    "timestamp_position",
-)
 
 
 def get_plynomery_access_context() -> tuple[bool, tuple[str, ...]]:
@@ -95,7 +87,7 @@ def load_measurement_series(
 
     session = get_session_pg()
     try:
-        start_dt, end_dt = build_datetime_range(start_date, end_date)
+        start_utc, end_utc = local_date_range_to_utc(start_date, end_date)
         rows = (
             session.query(
                 Mereni_plynomery.date,
@@ -122,10 +114,10 @@ def load_measurement_series(
             )
             .filter(
                 Mereni_plynomery.identifikace == identifikace,
-                Mereni_plynomery.date >= start_dt,
-                Mereni_plynomery.date <= end_dt,
+                Mereni_plynomery.time_utc >= start_utc,
+                Mereni_plynomery.time_utc < end_utc,
             )
-            .order_by(Mereni_plynomery.date.asc(), Mereni_plynomery.id.asc())
+            .order_by(Mereni_plynomery.time_utc.asc(), Mereni_plynomery.id.asc())
             .all()
         )
         return pd.DataFrame(

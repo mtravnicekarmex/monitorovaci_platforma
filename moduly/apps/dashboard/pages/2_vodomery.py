@@ -19,6 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from moduly.apps.dashboard.api_client import DashboardApiError
 from moduly.apps.dashboard.auth import require_page_access
+from moduly.apps.dashboard.time_semantics import add_chart_time, time_axis_column
 from moduly.apps.dashboard.vodomery_shared import (
     format_consumption_dataframe,
     format_consumption_with_unit,
@@ -102,7 +103,8 @@ def render_overview_sidebar(
 def prepare_measurements(df: pd.DataFrame) -> pd.DataFrame:
     prepared = df.copy()
     prepared["date"] = pd.to_datetime(prepared["date"], errors="coerce")
-    prepared = prepared.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+    prepared = add_chart_time(prepared)
+    prepared = prepared.dropna(subset=["chart_time"]).sort_values("chart_time").reset_index(drop=True)
 
     if prepared.empty:
         return prepared
@@ -278,7 +280,14 @@ def build_detail_table(df: pd.DataFrame, detail_level: str) -> pd.DataFrame:
     if "ocekavana_kumulovana_spotreba" in df.columns:
         aggregation_map["ocekavana_kumulovana_spotreba"] = "last"
 
-    resampled = df.set_index("date").resample(freq_map[detail_level]).agg(aggregation_map).reset_index()
+    axis_column = time_axis_column(df)
+    resampled = (
+        df.set_index(axis_column)
+        .resample(freq_map[detail_level])
+        .agg(aggregation_map)
+        .reset_index()
+        .rename(columns={axis_column: "date"})
+    )
     resampled = resampled.rename(
         columns={
             "synthetic": "synteticka_data",
@@ -377,13 +386,14 @@ def render_graphs(
 ) -> None:
     if detail_level == "Ne" or detail_df.empty:
         chart_source_df = round_consumption_columns(df, columns=("objem", "spotreba"))
+        axis_column = time_axis_column(chart_source_df)
         chart_cols = st.columns(2)
         with chart_cols[0]:
             st.subheader("Objem")
-            st.line_chart(chart_source_df.set_index("date")[["objem"]], height=320)
+            st.line_chart(chart_source_df.set_index(axis_column)[["objem"]], height=320)
         with chart_cols[1]:
             st.subheader("Spotřeba")
-            st.bar_chart(chart_source_df.set_index("date")[["spotreba"]], height=320)
+            st.bar_chart(chart_source_df.set_index(axis_column)[["spotreba"]], height=320)
         return
 
     use_line_chart = detail_level == "Hodinově"
@@ -572,9 +582,10 @@ def render_dashboard() -> None:
     detail_df = build_detail_table(measurements_df, detail_level)
     boundary_table = build_boundary_table(measurements_df)
     change_table = build_change_table(measurements_df)
+    axis_column = time_axis_column(measurements_df)
 
     st.title(f"Spotřeba vody - {selected_ident}")
-    actual_range = f"{format_value(measurements_df['date'].min())} - {format_value(measurements_df['date'].max())}"
+    actual_range = f"{format_value(measurements_df[axis_column].min())} - {format_value(measurements_df[axis_column].max())}"
     st.caption(f"Realně načtený rozsah dat: {actual_range}")
 
     render_summary_metrics(measurements_df, change_table)

@@ -120,7 +120,6 @@ def render_page() -> None:
     st.caption(
         "Spolecna admin auditni fronta pro rucni rozhodnuti, zda invalidni skok byl skutecny outlier nebo legitimni odber."
     )
-    st.info("Stranka je pripravena jako spolecny prehled pro vice modulu. Zatim nacita vodomery a plynomery.")
 
     device_options = load_all_device_options()
     source_options = get_outlier_review_source_options()
@@ -230,8 +229,8 @@ def render_page() -> None:
                             f"**Detekce:** {DETECTION_KIND_LABELS.get(str(row['detection_kind']), str(row['detection_kind']))}",
                             f"**Seriove cislo:** {row.get('seriove_cislo') or '-'}",
                             f"**Interval [min]:** {row.get('interval_minutes') or '-'}",
-                            f"**Objem na radku:** {format_outlier_review_number(row['current_objem'])}",
-                            f"**Predchozi baseline objem:** {format_outlier_review_number(row['baseline_objem'])}",
+                            f"**Hodnota na radku:** {format_outlier_review_number(row['current_objem'])}",
+                            f"**Predchozi baseline hodnota:** {format_outlier_review_number(row['baseline_objem'])}",
                             f"**Predchozi baseline datum:** {format_outlier_review_timestamp(row['baseline_date'])}",
                             f"**Kandidat delta:** {format_outlier_review_number(row['candidate_delta'])}",
                             f"**Threshold:** {format_outlier_review_number(row['threshold_delta'])}",

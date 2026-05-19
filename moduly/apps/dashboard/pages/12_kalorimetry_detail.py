@@ -28,6 +28,7 @@ from moduly.apps.dashboard.kalorimetry_shared import (
     render_device_photo,
     round_consumption_columns,
 )
+from moduly.apps.dashboard.time_semantics import add_chart_time, time_axis_column
 
 
 ENERGY_CONSUMPTION_COLOR = "#dc2626"
@@ -67,10 +68,11 @@ def render_detail_sidebar(user_is_admin: bool, allowed_devices: tuple[str, ...])
 def prepare_consumption_history(df: pd.DataFrame) -> pd.DataFrame:
     history_df = df.copy()
     history_df["date"] = pd.to_datetime(history_df["date"], errors="coerce")
+    history_df = add_chart_time(history_df)
     history_df["spotreba_energie"] = pd.to_numeric(history_df["spotreba_energie"], errors="coerce")
     history_df["seriove_cislo"] = history_df["seriove_cislo"].astype(str)
     history_df["platne"] = history_df["platne"].fillna(True).astype(bool)
-    history_df = history_df.dropna(subset=["date", "spotreba_energie"]).sort_values("date").reset_index(drop=True)
+    history_df = history_df.dropna(subset=["chart_time", "spotreba_energie"]).sort_values("chart_time").reset_index(drop=True)
     if history_df.empty:
         return history_df
 
@@ -94,11 +96,14 @@ def prepare_consumption_history(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_daily_history(history_df: pd.DataFrame, days: int) -> pd.DataFrame:
+    axis_column = time_axis_column(history_df)
+    working_df = history_df.dropna(subset=[axis_column]).copy()
     daily_history = (
-        history_df.set_index("date")
+        working_df.set_index(axis_column)
         .resample("D")
         .agg(spotreba=("spotreba", "sum"))
         .reset_index()
+        .rename(columns={axis_column: "date"})
     )
     daily_history = daily_history[daily_history["spotreba"].notna()].copy()
     if daily_history.empty:
@@ -114,11 +119,14 @@ def build_average_consumption_summary(history_df: pd.DataFrame) -> dict[str, obj
     if history_df.empty:
         return {"monthly": None, "weekly": None, "weekday": {}}
 
+    axis_column = time_axis_column(history_df)
+    working_df = history_df.dropna(subset=[axis_column]).copy()
     daily_totals = (
-        history_df.set_index("date")
+        working_df.set_index(axis_column)
         .resample("D")
         .agg(spotreba=("spotreba", "sum"))
         .reset_index()
+        .rename(columns={axis_column: "date"})
     )
     daily_totals = daily_totals[daily_totals["spotreba"].notna()].copy()
     if daily_totals.empty:
@@ -277,7 +285,8 @@ def render_dashboard() -> None:
     latest_state = "-"
     invalid_measurements = 0
     if not history_df.empty:
-        first_measurement = pd.to_datetime(history_df["date"], errors="coerce").dropna().min()
+        axis_column = time_axis_column(history_df)
+        first_measurement = pd.to_datetime(history_df[axis_column], errors="coerce").dropna().min()
         latest_row = history_df.iloc[-1]
         if pd.notna(first_measurement):
             first_measurement_date = first_measurement.strftime("%d.%m.%Y")
@@ -340,11 +349,14 @@ def render_dashboard() -> None:
             if history_df.empty:
                 st.info("Pro vybrany kalorimetr nejsou v danem obdobi zadna mereni.")
             else:
+                axis_column = time_axis_column(history_df)
                 monthly_history = (
-                    history_df.set_index("date")
+                    history_df.dropna(subset=[axis_column])
+                    .set_index(axis_column)
                     .resample("ME")
                     .agg(spotreba=("spotreba", "sum"))
                     .reset_index()
+                    .rename(columns={axis_column: "date"})
                 )
                 monthly_history = monthly_history[monthly_history["spotreba"].notna()].copy()
                 average_monthly_consumption = float(monthly_history["spotreba"].mean()) if not monthly_history.empty else 0.0
@@ -420,7 +432,8 @@ def render_dashboard() -> None:
             if history_df.empty:
                 st.info("Pro tento kalorimetr nejsou zadna mereni.")
             else:
-                recent_measurements = history_df.sort_values("date", ascending=False).head(50).copy()
+                axis_column = time_axis_column(history_df)
+                recent_measurements = history_df.sort_values(axis_column, ascending=False).head(50).copy()
                 recent_measurements = recent_measurements.rename(
                     columns={
                         "date": "Datum",

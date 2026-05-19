@@ -31,6 +31,7 @@ from moduly.apps.dashboard.navigation_config import SECTIONS, get_section_defini
 from moduly.apps.dashboard.plynomery_shared import (
     load_ident_options as load_plynomery_ident_options,
 )
+from moduly.apps.dashboard.time_semantics import prague_now_utc, to_prague_naive
 from moduly.apps.dashboard.vodomery_shared import (
     load_all_open_events as load_vodomery_open_events,
     load_branch_day_overview as load_vodomery_branch_day_overview,
@@ -92,6 +93,7 @@ def format_overview_timestamp(value: object) -> str:
     if value is None:
         return "Bez dat"
     if isinstance(value, datetime.datetime):
+        value = to_prague_naive(value) or value
         return value.strftime("%d.%m.%Y %H:%M")
     if isinstance(value, datetime.date):
         return value.strftime("%d.%m.%Y")
@@ -104,7 +106,7 @@ def format_overview_timestamp(value: object) -> str:
         except ValueError:
             return normalized
         if parsed.tzinfo is not None:
-            parsed = parsed.astimezone().replace(tzinfo=None)
+            parsed = to_prague_naive(parsed) or parsed.replace(tzinfo=None)
         return parsed.strftime("%d.%m.%Y %H:%M")
     return str(value)
 
@@ -201,7 +203,7 @@ def _load_ms_measurement_metrics(
             "total_devices": int(total_devices_query.scalar() or 0),
             "recent_devices": int(recent_devices_query.scalar() or 0),
             "recent_measurements": recent_measurements,
-            "last_measurement_at": last_measurement_query.scalar(),
+            "last_measurement_at": to_prague_naive(last_measurement_query.scalar()),
             "badges": [],
         }
 
@@ -227,9 +229,9 @@ def _load_vodomery_card(allowed_devices: tuple[str, ...], user_is_admin: bool) -
 
     session = get_session_pg()
     try:
-        last_measurement_query = session.query(func.max(Mereni_vodomery.date)).filter(
+        last_measurement_query = session.query(func.max(Mereni_vodomery.time_utc)).filter(
             Mereni_vodomery.identifikace.is_not(None),
-            Mereni_vodomery.date.is_not(None),
+            Mereni_vodomery.time_utc.is_not(None),
         )
         last_measurement_query = _apply_device_scope(
             last_measurement_query,
@@ -237,7 +239,7 @@ def _load_vodomery_card(allowed_devices: tuple[str, ...], user_is_admin: bool) -
             allowed_devices,
             user_is_admin,
         )
-        last_measurement_at = last_measurement_query.scalar()
+        last_measurement_at = to_prague_naive(last_measurement_query.scalar())
     finally:
         session.close()
 
@@ -356,20 +358,20 @@ def _load_vodomery_alarm_card(allowed_devices: tuple[str, ...], user_is_admin: b
 
 
 def _load_manometry_chart_series(allowed_devices: tuple[str, ...], user_is_admin: bool) -> list[dict[str, object]]:
-    now = prague_now_naive()
+    now = prague_now_utc()
     cutoff = now - datetime.timedelta(hours=MANOMETRY_CHART_LOOKBACK_HOURS)
 
     session = get_session_pg()
     try:
         latest_devices_query = session.query(
             Mereni_manometry_vse.identifikace,
-            func.max(Mereni_manometry_vse.date).label("last_measurement_at"),
+            func.max(Mereni_manometry_vse.time_utc).label("last_measurement_at"),
         ).filter(
             Mereni_manometry_vse.identifikace.is_not(None),
-            Mereni_manometry_vse.date.is_not(None),
+            Mereni_manometry_vse.time_utc.is_not(None),
             Mereni_manometry_vse.hodnota.is_not(None),
-            Mereni_manometry_vse.date >= cutoff,
-            Mereni_manometry_vse.date <= now,
+            Mereni_manometry_vse.time_utc >= cutoff,
+            Mereni_manometry_vse.time_utc <= now,
         )
         latest_devices_query = _apply_device_scope(
             latest_devices_query,
@@ -380,7 +382,7 @@ def _load_manometry_chart_series(allowed_devices: tuple[str, ...], user_is_admin
         latest_devices = (
             latest_devices_query
             .group_by(Mereni_manometry_vse.identifikace)
-            .order_by(func.max(Mereni_manometry_vse.date).desc(), Mereni_manometry_vse.identifikace.asc())
+            .order_by(func.max(Mereni_manometry_vse.time_utc).desc(), Mereni_manometry_vse.identifikace.asc())
             .limit(MANOMETRY_CHART_DEVICE_LIMIT)
             .all()
         )
@@ -392,17 +394,18 @@ def _load_manometry_chart_series(allowed_devices: tuple[str, ...], user_is_admin
         rows = session.query(
             Mereni_manometry_vse.identifikace,
             Mereni_manometry_vse.date,
+            Mereni_manometry_vse.time_utc,
             Mereni_manometry_vse.hodnota,
             Mereni_manometry_vse.platne,
         ).filter(
             Mereni_manometry_vse.identifikace.in_(selected_idents),
-            Mereni_manometry_vse.date.is_not(None),
+            Mereni_manometry_vse.time_utc.is_not(None),
             Mereni_manometry_vse.hodnota.is_not(None),
-            Mereni_manometry_vse.date >= cutoff,
-            Mereni_manometry_vse.date <= now,
+            Mereni_manometry_vse.time_utc >= cutoff,
+            Mereni_manometry_vse.time_utc <= now,
         ).order_by(
             Mereni_manometry_vse.identifikace.asc(),
-            Mereni_manometry_vse.date.asc(),
+            Mereni_manometry_vse.time_utc.asc(),
         ).all()
 
         rows_by_ident: dict[str, list[dict[str, object]]] = {ident: [] for ident in selected_idents}
@@ -412,7 +415,7 @@ def _load_manometry_chart_series(allowed_devices: tuple[str, ...], user_is_admin
                 continue
             rows_by_ident.setdefault(ident, []).append(
                 {
-                    "date": row.date,
+                    "date": to_prague_naive(row.time_utc) or row.date,
                     "hodnota_bar": convert_pressure_value_to_bar(row.hodnota),
                     "platne": bool(row.platne) if row.platne is not None else None,
                 }
@@ -426,7 +429,7 @@ def _load_manometry_chart_series(allowed_devices: tuple[str, ...], user_is_admin
             chart_series.append(
                 {
                     "identifikace": ident,
-                    "last_measurement_at": latest_row.last_measurement_at,
+                    "last_measurement_at": to_prague_naive(latest_row.last_measurement_at),
                     "max_value_bar": device_detail.get("max_pressure"),
                     "max_value_at": device_detail.get("max_pressure_at"),
                     "min_value_bar": device_detail.get("min_pressure"),
@@ -441,7 +444,7 @@ def _load_manometry_chart_series(allowed_devices: tuple[str, ...], user_is_admin
 
 
 def _load_manometry_card(allowed_devices: tuple[str, ...], user_is_admin: bool) -> dict[str, object]:
-    now = prague_now_naive()
+    now = prague_now_utc()
     recent_cutoff = now - datetime.timedelta(days=RECENT_WINDOW_DAYS)
 
     session = get_session_pg()
@@ -452,21 +455,21 @@ def _load_manometry_card(allowed_devices: tuple[str, ...], user_is_admin: bool) 
         )
         recent_devices_query = session.query(func.count(func.distinct(Mereni_manometry_vse.identifikace))).filter(
             Mereni_manometry_vse.identifikace.is_not(None),
-            Mereni_manometry_vse.date.is_not(None),
-            Mereni_manometry_vse.date >= recent_cutoff,
-            Mereni_manometry_vse.date <= now,
+            Mereni_manometry_vse.time_utc.is_not(None),
+            Mereni_manometry_vse.time_utc >= recent_cutoff,
+            Mereni_manometry_vse.time_utc <= now,
             Mereni_manometry_vse.platne.is_(True),
         )
-        last_measurement_query = session.query(func.max(Mereni_manometry_vse.date)).filter(
+        last_measurement_query = session.query(func.max(Mereni_manometry_vse.time_utc)).filter(
             Mereni_manometry_vse.identifikace.is_not(None),
-            Mereni_manometry_vse.date.is_not(None),
+            Mereni_manometry_vse.time_utc.is_not(None),
             Mereni_manometry_vse.platne.is_(True),
         )
         recent_measurements_query = session.query(Mereni_manometry_vse).filter(
             Mereni_manometry_vse.identifikace.is_not(None),
-            Mereni_manometry_vse.date.is_not(None),
-            Mereni_manometry_vse.date >= recent_cutoff,
-            Mereni_manometry_vse.date <= now,
+            Mereni_manometry_vse.time_utc.is_not(None),
+            Mereni_manometry_vse.time_utc >= recent_cutoff,
+            Mereni_manometry_vse.time_utc <= now,
         )
 
         total_devices_query = _apply_device_scope(
@@ -501,7 +504,7 @@ def _load_manometry_card(allowed_devices: tuple[str, ...], user_is_admin: bool) 
             "total_devices": int(total_devices_query.scalar() or 0),
             "recent_devices": int(recent_devices_query.scalar() or 0),
             "recent_measurements": recent_measurements,
-            "last_measurement_at": last_measurement_query.scalar(),
+            "last_measurement_at": to_prague_naive(last_measurement_query.scalar()),
             "badges": [
                 {"label": "Platná měření", "value": f"{valid_recent_measurements:,}".replace(",", " ")},
                 {"label": "Neplatná měření", "value": f"{invalid_recent_measurements:,}".replace(",", " ")},
@@ -522,7 +525,7 @@ def _load_manometry_card(allowed_devices: tuple[str, ...], user_is_admin: bool) 
 
 
 def _load_plynomery_card(allowed_devices: tuple[str, ...], user_is_admin: bool) -> dict[str, object]:
-    now = prague_now_naive()
+    now = prague_now_utc()
     recent_cutoff = now - datetime.timedelta(days=RECENT_WINDOW_DAYS)
 
     session = get_session_pg()
@@ -533,18 +536,18 @@ def _load_plynomery_card(allowed_devices: tuple[str, ...], user_is_admin: bool) 
         )
         recent_devices_query = session.query(func.count(func.distinct(Mereni_plynomery.identifikace))).filter(
             Mereni_plynomery.identifikace.is_not(None),
-            Mereni_plynomery.date.is_not(None),
-            Mereni_plynomery.date >= recent_cutoff,
-            Mereni_plynomery.date <= now,
+            Mereni_plynomery.time_utc.is_not(None),
+            Mereni_plynomery.time_utc >= recent_cutoff,
+            Mereni_plynomery.time_utc <= now,
             Mereni_plynomery.platne.is_(True),
         )
-        last_measurement_query = session.query(func.max(Mereni_plynomery.date)).filter(
-            Mereni_plynomery.date.is_not(None),
+        last_measurement_query = session.query(func.max(Mereni_plynomery.time_utc)).filter(
+            Mereni_plynomery.time_utc.is_not(None),
             Mereni_plynomery.platne.is_(True),
         )
         recent_measurements_query = session.query(Mereni_plynomery).filter(
-            Mereni_plynomery.date >= recent_cutoff,
-            Mereni_plynomery.date <= now,
+            Mereni_plynomery.time_utc >= recent_cutoff,
+            Mereni_plynomery.time_utc <= now,
         )
 
         total_devices_query = _apply_device_scope(
@@ -579,7 +582,7 @@ def _load_plynomery_card(allowed_devices: tuple[str, ...], user_is_admin: bool) 
             "total_devices": int(total_devices_query.scalar() or 0),
             "recent_devices": int(recent_devices_query.scalar() or 0),
             "recent_measurements": recent_measurements,
-            "last_measurement_at": last_measurement_query.scalar(),
+            "last_measurement_at": to_prague_naive(last_measurement_query.scalar()),
             "badges": [
                 {"label": "Platná měření", "value": f"{valid_recent_measurements:,}".replace(",", " ")},
                 {"label": "Neplatná měření", "value": f"{invalid_recent_measurements:,}".replace(",", " ")},
@@ -599,7 +602,7 @@ def _load_plynomery_card(allowed_devices: tuple[str, ...], user_is_admin: bool) 
 
 
 def _load_elektromery_card(allowed_devices: tuple[str, ...], user_is_admin: bool) -> dict[str, object]:
-    now = prague_now_naive()
+    now = prague_now_utc()
     recent_cutoff = now - datetime.timedelta(days=RECENT_WINDOW_DAYS)
 
     session = get_session_pg()
@@ -610,21 +613,21 @@ def _load_elektromery_card(allowed_devices: tuple[str, ...], user_is_admin: bool
         )
         recent_devices_query = session.query(func.count(func.distinct(Mereni_elektromery.identifikace))).filter(
             Mereni_elektromery.identifikace.is_not(None),
-            Mereni_elektromery.date.is_not(None),
-            Mereni_elektromery.date >= recent_cutoff,
-            Mereni_elektromery.date <= now,
+            Mereni_elektromery.time_utc.is_not(None),
+            Mereni_elektromery.time_utc >= recent_cutoff,
+            Mereni_elektromery.time_utc <= now,
             Mereni_elektromery.platne.is_(True),
         )
-        last_measurement_query = session.query(func.max(Mereni_elektromery.date)).filter(
+        last_measurement_query = session.query(func.max(Mereni_elektromery.time_utc)).filter(
             Mereni_elektromery.identifikace.is_not(None),
-            Mereni_elektromery.date.is_not(None),
+            Mereni_elektromery.time_utc.is_not(None),
             Mereni_elektromery.platne.is_(True),
         )
         recent_measurements_query = session.query(Mereni_elektromery).filter(
             Mereni_elektromery.identifikace.is_not(None),
-            Mereni_elektromery.date.is_not(None),
-            Mereni_elektromery.date >= recent_cutoff,
-            Mereni_elektromery.date <= now,
+            Mereni_elektromery.time_utc.is_not(None),
+            Mereni_elektromery.time_utc >= recent_cutoff,
+            Mereni_elektromery.time_utc <= now,
             Mereni_elektromery.platne.is_(True),
         )
 
@@ -658,7 +661,7 @@ def _load_elektromery_card(allowed_devices: tuple[str, ...], user_is_admin: bool
             "total_devices": int(total_devices_query.scalar() or 0),
             "recent_devices": int(recent_devices_query.scalar() or 0),
             "recent_measurements": recent_measurements,
-            "last_measurement_at": last_measurement_query.scalar(),
+            "last_measurement_at": to_prague_naive(last_measurement_query.scalar()),
             "badges": [],
         }
     finally:
@@ -680,7 +683,7 @@ def _load_elektromery_card(allowed_devices: tuple[str, ...], user_is_admin: bool
 
 def _load_nabijecky_card(allowed_devices: tuple[str, ...], user_is_admin: bool) -> dict[str, object]:
     del allowed_devices, user_is_admin
-    now = prague_now_naive()
+    now = prague_now_utc()
     recent_cutoff = now - datetime.timedelta(days=RECENT_WINDOW_DAYS)
 
     session = get_session_pg()
@@ -690,27 +693,27 @@ def _load_nabijecky_card(allowed_devices: tuple[str, ...], user_is_admin: bool) 
         )
         recent_locations_query = session.query(func.count(func.distinct(SmartFuelPassRelace.lokace))).filter(
             SmartFuelPassRelace.lokace.is_not(None),
-            SmartFuelPassRelace.ended_at.is_not(None),
-            SmartFuelPassRelace.ended_at >= recent_cutoff,
-            SmartFuelPassRelace.ended_at <= now,
+            SmartFuelPassRelace.ended_at_utc.is_not(None),
+            SmartFuelPassRelace.ended_at_utc >= recent_cutoff,
+            SmartFuelPassRelace.ended_at_utc <= now,
         )
         recent_sessions_query = session.query(SmartFuelPassRelace).filter(
-            SmartFuelPassRelace.ended_at.is_not(None),
-            SmartFuelPassRelace.ended_at >= recent_cutoff,
-            SmartFuelPassRelace.ended_at <= now,
+            SmartFuelPassRelace.ended_at_utc.is_not(None),
+            SmartFuelPassRelace.ended_at_utc >= recent_cutoff,
+            SmartFuelPassRelace.ended_at_utc <= now,
         )
-        last_session_query = session.query(func.max(SmartFuelPassRelace.ended_at)).filter(
-            SmartFuelPassRelace.ended_at.is_not(None),
+        last_session_query = session.query(func.max(SmartFuelPassRelace.ended_at_utc)).filter(
+            SmartFuelPassRelace.ended_at_utc.is_not(None),
         )
         recent_kwh_query = session.query(func.coalesce(func.sum(SmartFuelPassRelace.kwh), 0)).filter(
-            SmartFuelPassRelace.ended_at.is_not(None),
-            SmartFuelPassRelace.ended_at >= recent_cutoff,
-            SmartFuelPassRelace.ended_at <= now,
+            SmartFuelPassRelace.ended_at_utc.is_not(None),
+            SmartFuelPassRelace.ended_at_utc >= recent_cutoff,
+            SmartFuelPassRelace.ended_at_utc <= now,
         )
         recent_suma_query = session.query(func.coalesce(func.sum(SmartFuelPassRelace.suma), 0)).filter(
-            SmartFuelPassRelace.ended_at.is_not(None),
-            SmartFuelPassRelace.ended_at >= recent_cutoff,
-            SmartFuelPassRelace.ended_at <= now,
+            SmartFuelPassRelace.ended_at_utc.is_not(None),
+            SmartFuelPassRelace.ended_at_utc >= recent_cutoff,
+            SmartFuelPassRelace.ended_at_utc <= now,
         )
 
         card = _build_empty_card(
@@ -723,7 +726,7 @@ def _load_nabijecky_card(allowed_devices: tuple[str, ...], user_is_admin: bool) 
                 "total_devices": int(total_locations_query.scalar() or 0),
                 "recent_devices": int(recent_locations_query.scalar() or 0),
                 "recent_measurements": int(recent_sessions_query.count()),
-                "last_measurement_at": last_session_query.scalar(),
+                "last_measurement_at": to_prague_naive(last_session_query.scalar()),
                 "badges": [
                     {"label": "Energie / 7 dní", "value": f"{float(recent_kwh_query.scalar() or 0):.3f} kWh"},
                     {"label": "Suma / 7 dní", "value": f"{float(recent_suma_query.scalar() or 0):.2f} Kč"},
@@ -736,7 +739,7 @@ def _load_nabijecky_card(allowed_devices: tuple[str, ...], user_is_admin: bool) 
 
 
 def _load_kalorimetry_card(allowed_devices: tuple[str, ...], user_is_admin: bool) -> dict[str, object]:
-    now = prague_now_naive()
+    now = prague_now_utc()
     recent_cutoff = now - datetime.timedelta(days=RECENT_WINDOW_DAYS)
 
     session = get_session_pg()
@@ -747,21 +750,21 @@ def _load_kalorimetry_card(allowed_devices: tuple[str, ...], user_is_admin: bool
         )
         recent_devices_query = session.query(func.count(func.distinct(Mereni_kalorimetry.identifikace))).filter(
             Mereni_kalorimetry.identifikace.is_not(None),
-            Mereni_kalorimetry.date.is_not(None),
-            Mereni_kalorimetry.date >= recent_cutoff,
-            Mereni_kalorimetry.date <= now,
+            Mereni_kalorimetry.time_utc.is_not(None),
+            Mereni_kalorimetry.time_utc >= recent_cutoff,
+            Mereni_kalorimetry.time_utc <= now,
             Mereni_kalorimetry.platne.is_(True),
         )
-        last_measurement_query = session.query(func.max(Mereni_kalorimetry.date)).filter(
+        last_measurement_query = session.query(func.max(Mereni_kalorimetry.time_utc)).filter(
             Mereni_kalorimetry.identifikace.is_not(None),
-            Mereni_kalorimetry.date.is_not(None),
+            Mereni_kalorimetry.time_utc.is_not(None),
             Mereni_kalorimetry.platne.is_(True),
         )
         recent_measurements_query = session.query(Mereni_kalorimetry).filter(
             Mereni_kalorimetry.identifikace.is_not(None),
-            Mereni_kalorimetry.date.is_not(None),
-            Mereni_kalorimetry.date >= recent_cutoff,
-            Mereni_kalorimetry.date <= now,
+            Mereni_kalorimetry.time_utc.is_not(None),
+            Mereni_kalorimetry.time_utc >= recent_cutoff,
+            Mereni_kalorimetry.time_utc <= now,
         )
 
         total_devices_query = _apply_device_scope(
@@ -796,7 +799,7 @@ def _load_kalorimetry_card(allowed_devices: tuple[str, ...], user_is_admin: bool
             "total_devices": int(total_devices_query.scalar() or 0),
             "recent_devices": int(recent_devices_query.scalar() or 0),
             "recent_measurements": recent_measurements,
-            "last_measurement_at": last_measurement_query.scalar(),
+            "last_measurement_at": to_prague_naive(last_measurement_query.scalar()),
             "badges": [
                 {"label": "Platná měření", "value": f"{valid_recent_measurements:,}".replace(",", " ")},
                 {"label": "Neplatná měření", "value": f"{invalid_recent_measurements:,}".replace(",", " ")},

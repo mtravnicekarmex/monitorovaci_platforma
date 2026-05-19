@@ -74,6 +74,56 @@ def test_prepare_rows_distributes_gap_delta_without_losing_terminal_delta(monkey
     assert rows[-1]["timestamp_position"] == TIMESTAMP_POSITION_INSTANT
 
 
+def test_prepare_rows_uses_terminal_residual_when_existing_rows_block_synthetic(monkeypatch):
+    last_valid = SimpleNamespace(
+        objem=100.0,
+        date=datetime.datetime(2026, 4, 10, 10, 0, 0),
+        seriove_cislo="S1",
+    )
+    occupied_dates = {
+        datetime.datetime(2026, 4, 10, 10, 15, 0),
+        datetime.datetime(2026, 4, 10, 10, 30, 0),
+        datetime.datetime(2026, 4, 10, 10, 45, 0),
+    }
+
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "get_last_measurements",
+        lambda session, affected_idents, *, only_valid=False: {"A": last_valid},
+    )
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "get_recent_delta_stats",
+        lambda session, affected_idents, *, reference_time=None: {},
+    )
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "get_existing_measurement_dates",
+        lambda session, affected_idents, source_name, *, min_date, max_date: {"A": occupied_dates},
+    )
+
+    rows = vodomery_db_vse.prepare_rows(
+        session=object(),
+        new_rows=[
+            {
+                "recid": 1,
+                "identifikace": "A",
+                "seriove_cislo": "S1",
+                "date": datetime.datetime(2026, 4, 10, 11, 0, 0),
+                "objem": 104.0,
+                "interval_minutes": 15,
+                "reset_detected": False,
+            }
+        ],
+        source_name="AREAL",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["synthetic"] is False
+    assert rows[0]["gap_detected"] is True
+    assert rows[0]["delta"] == pytest.approx(4.0)
+
+
 class _FakeScalarResult:
     def __init__(self, values):
         self._values = values

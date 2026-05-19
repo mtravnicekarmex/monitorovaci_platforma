@@ -171,6 +171,8 @@ def build_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     for column in (
         "started_at",
         "ended_at",
+        "started_chart_time",
+        "ended_chart_time",
         "duration_minutes",
         "id_relace",
         "lokace",
@@ -183,6 +185,14 @@ def build_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     ):
         if column not in export_df.columns:
             export_df[column] = pd.NA
+    export_df["started_at"] = export_df["started_chart_time"].where(
+        export_df["started_chart_time"].notna(),
+        export_df["started_at"],
+    )
+    export_df["ended_at"] = export_df["ended_chart_time"].where(
+        export_df["ended_chart_time"].notna(),
+        export_df["ended_at"],
+    )
     return export_df.rename(
         columns={
             "started_at": "zacatek",
@@ -250,7 +260,8 @@ def render_graphs(daily_summary_df: pd.DataFrame) -> None:
 
 
 def render_data_table(df: pd.DataFrame) -> None:
-    table_df = df.sort_values("started_at", ascending=False).reset_index(drop=True)
+    sort_column = "started_chart_time" if "started_chart_time" in df.columns else "started_at"
+    table_df = df.sort_values(sort_column, ascending=False).reset_index(drop=True)
     st.dataframe(
         format_charge_sessions_dataframe(table_df),
         width="stretch",
@@ -286,7 +297,10 @@ def render_dashboard() -> None:
     daily_summary_df = build_daily_summary(sessions_df)
 
     st.title("Nabíjecí relace")
-    actual_range = f"{format_value(sessions_df['started_at'].min())} - {format_value(sessions_df['ended_at'].max())}"
+    actual_range = (
+        f"{format_value(sessions_df['started_chart_time'].min())} - "
+        f"{format_value(sessions_df['ended_chart_time'].max())}"
+    )
     st.caption(f"Reálně načtený rozsah dat: {actual_range}")
 
     render_summary_metrics(summary)

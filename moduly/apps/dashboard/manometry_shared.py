@@ -20,20 +20,12 @@ from moduly.apps.dashboard.api_client import (
     get_manometry_measurement_series as api_get_manometry_measurement_series,
 )
 from moduly.apps.dashboard.auth import get_allowed_devices, get_auth_token, is_admin
+from moduly.apps.dashboard.time_semantics import TIME_SEMANTICS_COLUMNS, add_chart_time
 from moduly.apps.dashboard.vodomery_shared import format_value, normalize_date_range, render_page_styles
 
 
 MAX_IDENT_OPTIONS = 500
 KPA_PER_BAR = 100.0
-TIME_SEMANTICS_COLUMNS = (
-    "source_date",
-    "time_utc",
-    "time_basis",
-    "source_timezone",
-    "source_utc_offset_minutes",
-    "time_fold",
-    "timestamp_position",
-)
 DEFAULT_PRESSURE_COLUMNS = (
     "hodnota",
     "tlak_min",
@@ -125,7 +117,8 @@ def load_measurement_series(
             *TIME_SEMANTICS_COLUMNS,
         ],
     )
-    return convert_pressure_columns_to_bar(df, columns=("hodnota",))
+    df = convert_pressure_columns_to_bar(df, columns=("hodnota",))
+    return add_chart_time(df)
 
 
 @st.cache_data(ttl=60)

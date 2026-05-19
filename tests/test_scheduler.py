@@ -257,6 +257,152 @@ def test_daily_web_monitor_job_aggregates_failed_targets(monkeypatch):
     assert session.closed is True
 
 
+def test_check_database_availability_raises_for_unavailable_database(monkeypatch):
+    fake_logger = FakeLogger()
+    executed_queries = []
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return None
+
+        def execute(self, query):
+            executed_queries.append(query)
+
+    class FakeEngine:
+        def connect(self):
+            return FakeConnection()
+
+    class FailingEngine:
+        def connect(self):
+            raise RuntimeError("login timeout")
+
+    monkeypatch.setattr(scheduler, "logger", fake_logger)
+    monkeypatch.setattr(
+        scheduler,
+        "DATABASE_AVAILABILITY_CHECKS",
+        (
+            ("postgres", "PostgreSQL", FakeEngine()),
+            ("mssql", "MS SQL", FailingEngine()),
+        ),
+    )
+
+    with pytest.raises(scheduler.DatabaseAvailabilityError) as exc_info:
+        scheduler.check_database_availability()
+
+    assert executed_queries == [scheduler.DATABASE_AVAILABILITY_QUERY]
+    assert [(failure.key, failure.label, failure.reason) for failure in exc_info.value.failures] == [
+        ("mssql", "MS SQL", "login timeout")
+    ]
+    assert exc_info.value.alert_targets == ("MS SQL",)
+    assert exc_info.value.alert_reason == "MS SQL: login timeout"
+    assert any(
+        "DATABASE CHECK FAILED | db=mssql | reason=login timeout" in message
+        for level, message in fake_logger.records
+        if level == "error"
+    )
+
+
+def test_database_availability_alert_uses_database_error_recipients(monkeypatch):
+    sent_messages = []
+    failures = (
+        scheduler.DatabaseCheckFailure(
+            key="postgres",
+            label="PostgreSQL",
+            reason="connection refused",
+        ),
+    )
+
+    values = {
+        "DATABASE_ERROR_RECIPIENTS": "first@armex.cz, second@armex.cz",
+        "O_EMAIL_ALARM": "alarm@armex.cz",
+    }
+
+    monkeypatch.setattr(scheduler, "config", lambda key, default="": values.get(key, default))
+    monkeypatch.setattr(
+        scheduler,
+        "send_email_outlook",
+        lambda **kwargs: sent_messages.append(kwargs),
+    )
+
+    scheduler._send_database_availability_alert(failures, job_id="quarter_hour_job")
+
+    assert [message["email_receiver"] for message in sent_messages] == [
+        "first@armex.cz",
+        "second@armex.cz",
+    ]
+    assert all(message["sender_alias"] == "alarm@armex.cz" for message in sent_messages)
+    assert sent_messages[0]["subject"] == "[ALERT] Databaze | quarter_hour_job | NEDOSTUPNA"
+    assert "Preflight kontrola databazi" in sent_messages[0]["body"]
+    assert "PostgreSQL: connection refused" in sent_messages[0]["body"]
+
+
+def test_quarter_hour_job_skips_and_alerts_when_database_unavailable(monkeypatch):
+    calls = []
+    delivered_alerts = []
+    failures = (
+        scheduler.DatabaseCheckFailure(
+            key="mssql",
+            label="MS SQL",
+            reason="login timeout",
+        ),
+    )
+    database_error = scheduler.DatabaseAvailabilityError(failures)
+
+    def fake_check_database_availability():
+        return None
+
+    def fake_safe_call(fn, *args, **kwargs):
+        calls.append(fn.__name__)
+        if fn is fake_check_database_availability:
+            raise database_error
+        raise AssertionError(f"Unexpected quarter-hour step: {fn.__name__}")
+
+    monkeypatch.setattr(scheduler, "check_database_availability", fake_check_database_availability)
+    monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
+    monkeypatch.setattr(
+        scheduler,
+        "_deliver_database_availability_alert",
+        lambda failures_arg, *, job_id: delivered_alerts.append((failures_arg, job_id)),
+    )
+
+    result = scheduler.quarter_hour_job()
+
+    assert calls == ["fake_check_database_availability"]
+    assert isinstance(result, scheduler.SkippedJobResult)
+    assert result.reason == "database_unavailable"
+    assert result.lock_names == ("quarter_hour_job",)
+    assert delivered_alerts == [(failures, "quarter_hour_job")]
+
+
+@pytest.mark.parametrize("job_id", [job_spec.id for job_spec in get_scheduler_job_specs()])
+def test_scheduled_db_jobs_skip_before_work_when_database_preflight_fails(monkeypatch, job_id):
+    preflight_calls = []
+    skipped_result = scheduler.SkippedJobResult(
+        reason="database_unavailable",
+        lock_names=(job_id,),
+    )
+
+    def fake_preflight(actual_job_id):
+        preflight_calls.append(actual_job_id)
+        return skipped_result
+
+    monkeypatch.setattr(scheduler, "_run_database_preflight_or_skip", fake_preflight)
+    monkeypatch.setattr(
+        scheduler,
+        "safe_call",
+        lambda *args, **kwargs: pytest.fail("job work should not start after a failed database preflight"),
+    )
+
+    job_fn = scheduler._get_job_functions()[job_id]
+    result = job_fn.__scheduler_unlocked_fn__()
+
+    assert result is skipped_result
+    assert preflight_calls == [job_id]
+
+
 def test_monthly_job_calls_all_monthly_reports(monkeypatch):
     calls = []
 
@@ -280,6 +426,7 @@ def test_monthly_job_calls_all_monthly_reports(monkeypatch):
     monkeypatch.setattr(scheduler, "send_monthly_vodomery_billing_summary_report", fake_monthly_billing_summary_report)
     monkeypatch.setattr(scheduler, "send_monthly_b1_consumption_report", fake_b1_report)
     monkeypatch.setattr(scheduler, "send_monthly_elektromery_branch_report", fake_monthly_elektromery_report)
+    monkeypatch.setattr(scheduler, "_run_database_preflight_or_skip", lambda job_id: None)
     monkeypatch.setattr(
         scheduler,
         "safe_call",
@@ -310,6 +457,7 @@ def test_daily_vodomery_branch_report_job_sends_email_report(monkeypatch):
     def fake_send_daily_vodomery_billing_summary_report():
         return {"recipient_count": 1}
 
+    monkeypatch.setattr(scheduler, "_run_database_preflight_or_skip", lambda job_id: None)
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "send_daily_vodomery_branch_report", fake_send_daily_vodomery_branch_report)
     monkeypatch.setattr(
@@ -334,6 +482,9 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
     def fake_safe_call(fn, *args, **kwargs):
         calls.append((fn.__name__, args, kwargs))
         return fn(*args, **kwargs)
+
+    def fake_check_database_availability():
+        return None
 
     def fake_import():
         return None
@@ -380,6 +531,7 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
         return None
 
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
+    monkeypatch.setattr(scheduler, "check_database_availability", fake_check_database_availability)
     monkeypatch.setattr(scheduler, "vodomery_db_import", fake_import)
     monkeypatch.setattr(scheduler, "get_runtime_model_version", fake_get_runtime_model_version)
     monkeypatch.setattr(scheduler, "get_candidate_model_versions", lambda: (1, 2))
@@ -396,6 +548,7 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
     scheduler.quarter_hour_job()
 
     assert [name for name, _, _ in calls] == [
+        "fake_check_database_availability",
         "fake_import",
         "fake_get_runtime_model_version",
         "fake_score_new_measurements",
@@ -426,15 +579,20 @@ def test_daily_job_runs_elektromery_vse_import_after_softlink(monkeypatch):
     def fake_elektromery_import():
         return {"inserted_softlink": 1, "inserted_ote": 2}
 
+    def fake_binary_import():
+        return {"processed_sources": 0}
+
     def fake_meteo_sync():
         return None
 
     def fake_sync_charge_sessions_to_db():
         return {"upserted_count": 2}
 
+    monkeypatch.setattr(scheduler, "_run_database_preflight_or_skip", lambda job_id: None)
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "SOFTLINK_save_to_database_all", fake_softlink_import)
     monkeypatch.setattr(scheduler, "elektromery_db_import", fake_elektromery_import)
+    monkeypatch.setattr(scheduler, "sync_changed_binary_meter_sources", fake_binary_import)
     monkeypatch.setattr(scheduler, "meteo_sync", fake_meteo_sync)
     monkeypatch.setattr(scheduler, "sync_charge_sessions_to_db", fake_sync_charge_sessions_to_db)
 
@@ -443,6 +601,7 @@ def test_daily_job_runs_elektromery_vse_import_after_softlink(monkeypatch):
     assert calls == [
         "fake_softlink_import",
         "fake_elektromery_import",
+        "fake_binary_import",
         "fake_meteo_sync",
         "fake_sync_charge_sessions_to_db",
     ]
@@ -498,6 +657,7 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
     def fake_send_weekly_new_elektromery_report():
         return {"recipient_count": 1, "new_device_count": 2}
 
+    monkeypatch.setattr(scheduler, "_run_database_preflight_or_skip", lambda job_id: None)
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "rebuild_profiles", fake_rebuild_profiles)
     monkeypatch.setattr(scheduler, "rebuild_plynomery_profiles", fake_rebuild_plynomery_profiles)
@@ -536,6 +696,7 @@ def test_smartfuelpass_weekly_report_job_sends_email_report(monkeypatch):
     def fake_send_charge_sessions_report_email():
         return {"recipient_count": 1}
 
+    monkeypatch.setattr(scheduler, "_run_database_preflight_or_skip", lambda job_id: None)
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "send_charge_sessions_report_email", fake_send_charge_sessions_report_email)
 

@@ -29,6 +29,7 @@ from moduly.apps.dashboard.plynomery_shared import (
     render_page_styles,
     round_consumption_columns,
 )
+from moduly.apps.dashboard.time_semantics import add_chart_time, time_axis_column
 
 
 DEVICE_KEY = "plynomery_overview_identifikace"
@@ -121,12 +122,12 @@ def prepare_measurements(df: pd.DataFrame) -> pd.DataFrame:
 
     prepared["date"] = pd.to_datetime(prepared["date"], errors="coerce")
     prepared["source_date"] = pd.to_datetime(prepared["source_date"], errors="coerce")
-    prepared["time_utc"] = pd.to_datetime(prepared["time_utc"], utc=True, errors="coerce")
+    prepared = add_chart_time(prepared)
     prepared["objem"] = pd.to_numeric(prepared["objem"], errors="coerce")
     prepared["delta"] = pd.to_numeric(prepared["delta"], errors="coerce")
     prepared["seriove_cislo"] = prepared["seriove_cislo"].astype("string")
     prepared["platne"] = prepared["platne"].fillna(True).astype(bool)
-    prepared = prepared.dropna(subset=["date", "objem"]).sort_values("date").reset_index(drop=True)
+    prepared = prepared.dropna(subset=["chart_time", "objem"]).sort_values("chart_time").reset_index(drop=True)
 
     if prepared.empty:
         return prepared
@@ -204,8 +205,9 @@ def build_detail_table(df: pd.DataFrame, detail_level: str) -> pd.DataFrame:
         "Denně": "D",
         "Hodinově": "h",
     }
+    axis_column = time_axis_column(df)
     resampled = (
-        df.set_index("date")
+        df.set_index(axis_column)
         .resample(freq_map[detail_level])
         .agg(
             objem=("objem", "last"),
@@ -217,6 +219,7 @@ def build_detail_table(df: pd.DataFrame, detail_level: str) -> pd.DataFrame:
             reset_detected=("reset_detected", "sum"),
         )
         .reset_index()
+        .rename(columns={axis_column: "date"})
     )
     resampled = resampled.rename(
         columns={
@@ -292,14 +295,15 @@ def build_line_chart(
     color: str,
 ) -> alt.Chart:
     chart_source = chart_df.dropna(subset=[value_column]).copy()
+    x_column = time_axis_column(chart_source)
     return (
         alt.Chart(chart_source)
         .mark_line(color=color, strokeWidth=2.5)
         .encode(
-            x=alt.X("date:T", title=None),
+            x=alt.X(f"{x_column}:T", title=None),
             y=alt.Y(f"{value_column}:Q", title=title),
             tooltip=[
-                alt.Tooltip("date:T", title="Datum"),
+                alt.Tooltip(f"{x_column}:T", title="Datum"),
                 alt.Tooltip(f"{value_column}:Q", title=title, format=".3f"),
             ],
         )
@@ -315,14 +319,15 @@ def build_bar_chart(
     color: str,
 ) -> alt.Chart:
     chart_source = chart_df.dropna(subset=[value_column]).copy()
+    x_column = time_axis_column(chart_source)
     return (
         alt.Chart(chart_source)
         .mark_bar(color=color)
         .encode(
-            x=alt.X("date:T", title=None),
+            x=alt.X(f"{x_column}:T", title=None),
             y=alt.Y(f"{value_column}:Q", title=title),
             tooltip=[
-                alt.Tooltip("date:T", title="Datum"),
+                alt.Tooltip(f"{x_column}:T", title="Datum"),
                 alt.Tooltip(f"{value_column}:Q", title=title, format=".3f"),
             ],
         )
@@ -469,9 +474,10 @@ def render_dashboard() -> None:
     detail_df = build_detail_table(measurements_df, detail_level)
     boundary_table = build_boundary_table(measurements_df)
     change_table = build_change_table(measurements_df)
+    axis_column = time_axis_column(measurements_df)
 
     st.title(f"Spotřeba plynu - {selected_ident}")
-    actual_range = f"{format_value(measurements_df['date'].min())} - {format_value(measurements_df['date'].max())}"
+    actual_range = f"{format_value(measurements_df[axis_column].min())} - {format_value(measurements_df[axis_column].max())}"
     st.caption(f"Reálně načtený rozsah dat: {actual_range}")
 
     render_summary_metrics(measurements_df)

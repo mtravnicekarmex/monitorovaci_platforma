@@ -14,7 +14,7 @@ from functools import wraps
 from moduly.mereni.vodomery.SCVK.SCVK_to_database import SCVK_save_to_database_all
 from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_to_database import SOFTLINK_to_database_mereni
 from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_data_z_dotazu import SOFTLINK_dotaz
-from core.db.connect import get_session_pg
+from core.db.connect import ENGINE_MS, ENGINE_PG, get_session_pg
 from moduly.apps.web_search.service import hledat_nove_vyskyt, notify_new_results_for_monitor
 from moduly.apps.web_search.database.models import *
 import json
@@ -25,6 +25,7 @@ from pathlib import Path
 from logging.handlers import TimedRotatingFileHandler
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
+from sqlalchemy import text
 from app.channels.email import send_email_outlook
 from app.time_utils import utc_now_naive
 from core.scheduler.job_schedule import SCHEDULER_TIMEZONE_NAME, get_scheduler_job_specs
@@ -51,6 +52,7 @@ from moduly.mereni.vodomery.reporting import (
     send_vodomery_model_rebuild_report,
     send_monthly_vodomery_consumption_report,
 )
+from moduly.mereni.vodomery.reporting._email_config import filter_placeholder_recipients
 from moduly.mereni.elektromery.reporting import (
     send_monthly_elektromery_branch_report,
     send_weekly_elektromery_branch_report,
@@ -85,6 +87,12 @@ SCHEDULER_LOGS_DIR = SCHEDULER_DIR / "logs"
 SCHEDULER_LOCKS_DIR = SCHEDULER_DIR / "locks"
 SCHEDULER_LOG_PATH = SCHEDULER_LOGS_DIR / "scheduler.log"
 SCHEDULER_MISFIRE_GRACE_SECONDS = config("SCHEDULER_MISFIRE_GRACE_SECONDS", default=900, cast=int)
+DATABASE_ERROR_RECIPIENTS_ENV_KEY = "DATABASE_ERROR_RECIPIENTS"
+DATABASE_AVAILABILITY_CHECKS = (
+    ("postgres", "PostgreSQL", ENGINE_PG),
+    ("mssql", "MS SQL", ENGINE_MS),
+)
+DATABASE_AVAILABILITY_QUERY = text("SELECT 1")
 
 
 def setup_logging(*, enable_file: bool = False):
@@ -161,6 +169,13 @@ class ManualRunnableSpec:
     lock_names: tuple[str, ...]
     is_scheduled: bool
     kind: str
+
+
+@dataclass(frozen=True)
+class DatabaseCheckFailure:
+    key: str
+    label: str
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -249,6 +264,52 @@ def _format_monitor_failures(failures, *, max_items: int = 5) -> str:
         parts.append(f"... a dalsich {remaining}")
 
     return "; ".join(parts)
+
+
+def _format_database_availability_failures(failures: tuple[DatabaseCheckFailure, ...]) -> str:
+    if not failures:
+        return "-"
+    return "; ".join(
+        f"{failure.label}: {failure.reason}"
+        for failure in failures
+    )
+
+
+class DatabaseAvailabilityError(SchedulerContextError):
+    def __init__(self, failures: tuple[DatabaseCheckFailure, ...]) -> None:
+        self.failures = tuple(failures)
+        failure_summary = _format_database_availability_failures(self.failures)
+        super().__init__(
+            f"Nedostupne databaze: {failure_summary}",
+            alert_targets=tuple(failure.label for failure in self.failures),
+            alert_reason=failure_summary,
+        )
+
+
+def check_database_availability() -> None:
+    failures: list[DatabaseCheckFailure] = []
+
+    for key, label, engine in DATABASE_AVAILABILITY_CHECKS:
+        try:
+            with engine.connect() as connection:
+                connection.execute(DATABASE_AVAILABILITY_QUERY)
+        except Exception as exc:
+            reason = _format_scheduler_reason(exc) or type(exc).__name__
+            failures.append(DatabaseCheckFailure(key=key, label=label, reason=reason))
+            logger.error(
+                "DATABASE CHECK FAILED | db=%s | reason=%s",
+                key,
+                reason,
+                exc_info=True,
+            )
+
+    if failures:
+        raise DatabaseAvailabilityError(tuple(failures))
+
+    logger.info(
+        "DATABASE CHECK OK | targets=%s",
+        ",".join(label for _, label, _ in DATABASE_AVAILABILITY_CHECKS),
+    )
 
 
 def _build_scheduler_alert_body(
@@ -343,6 +404,66 @@ def _send_scheduler_alert(
         body=body,
         is_html=True,
     )
+
+
+def _load_database_error_recipients() -> tuple[str, ...]:
+    raw_recipients = str(config(DATABASE_ERROR_RECIPIENTS_ENV_KEY, default="") or "").strip()
+    if not raw_recipients:
+        return ()
+    return filter_placeholder_recipients(
+        _normalize_alert_targets(raw_recipients.split(",")),
+        context_label=DATABASE_ERROR_RECIPIENTS_ENV_KEY,
+    )
+
+
+def _send_database_availability_alert(
+    failures: tuple[DatabaseCheckFailure, ...],
+    *,
+    job_id: str,
+) -> None:
+    recipients = _load_database_error_recipients()
+    if not recipients:
+        logger.warning(
+            "DATABASE ALERT SKIPPED | id=%s | env=%s not configured",
+            job_id,
+            DATABASE_ERROR_RECIPIENTS_ENV_KEY,
+        )
+        return
+
+    failure_summary = _format_database_availability_failures(failures)
+    body = _build_scheduler_alert_body(
+        job_id=job_id,
+        status_text="Databaze NEDOSTUPNA",
+        description="Preflight kontrola databazi pred spustenim jobu selhala. Job nebyl spusten.",
+        scheduled_time=None,
+        reason=failure_summary,
+        targets=tuple(failure.label for failure in failures),
+    )
+
+    for recipient in recipients:
+        send_email_outlook(
+            email_receiver=recipient,
+            sender_alias=config("O_EMAIL_ALARM", default=None),
+            subject=f"[ALERT] Databaze | {job_id} | NEDOSTUPNA",
+            body=body,
+            is_html=True,
+        )
+
+
+def _deliver_database_availability_alert(
+    failures: tuple[DatabaseCheckFailure, ...],
+    *,
+    job_id: str,
+) -> None:
+    try:
+        _send_database_availability_alert(failures, job_id=job_id)
+    except Exception as alert_error:
+        logger.error(
+            "DATABASE ALERT FAILED | id=%s | reason=%s",
+            job_id,
+            _format_scheduler_reason(alert_error),
+            exc_info=True,
+        )
 
 
 def _deliver_scheduler_alert(**kwargs) -> None:
@@ -567,6 +688,21 @@ def locked_job(*decorator_args):
     return lambda fn: _build_locked_job(fn, decorator_args)
 
 
+def _run_database_preflight_or_skip(job_id: str) -> SkippedJobResult | None:
+    try:
+        safe_call(check_database_availability)
+    except DatabaseAvailabilityError as exc:
+        _deliver_database_availability_alert(exc.failures, job_id=job_id)
+        logger.warning(
+            "JOB SKIPPED | id=%s | reason=database_unavailable | failures=%s",
+            job_id,
+            _format_database_availability_failures(exc.failures),
+        )
+        return SkippedJobResult(reason="database_unavailable", lock_names=(job_id,))
+
+    return None
+
+
 
 
 
@@ -581,6 +717,10 @@ def locked_job(*decorator_args):
 # Import vodomeru, scoring, eventy a alerting.
 @locked_job
 def quarter_hour_job():
+    preflight_result = _run_database_preflight_or_skip("quarter_hour_job")
+    if preflight_result is not None:
+        return preflight_result
+
     safe_call(vodomery_db_import)
     active_model_version = safe_call(get_runtime_model_version)
     active_event_result = {
@@ -636,18 +776,30 @@ def quarter_hour_job():
 # Hodinový import SCVK vodoměrů.
 @locked_job
 def hourly_job():
+    preflight_result = _run_database_preflight_or_skip("hourly_job")
+    if preflight_result is not None:
+        return preflight_result
+
     safe_call(SCVK_save_to_database_all)
 
 
 # Denní web monitoring.
 @locked_job
 def daily_seven_and_two_job():
+    preflight_result = _run_database_preflight_or_skip("daily_seven_and_two_job")
+    if preflight_result is not None:
+        return preflight_result
+
     safe_call(daily_web_monitor_job)
 
 
 # Nocni SOFTLINK import, elektromery import, synchronizace meteo dat a SmartFuelPass relaci.
 @locked_job
 def daily_job():
+    preflight_result = _run_database_preflight_or_skip("daily_job")
+    if preflight_result is not None:
+        return preflight_result
+
     safe_call(SOFTLINK_save_to_database_all)
     safe_call(elektromery_db_import)
     safe_call(sync_changed_binary_meter_sources)
@@ -658,6 +810,10 @@ def daily_job():
 # Denní email report větví vodoměrů.
 @locked_job
 def daily_vodomery_branch_report_job():
+    preflight_result = _run_database_preflight_or_skip("daily_vodomery_branch_report_job")
+    if preflight_result is not None:
+        return preflight_result
+
     safe_call(send_daily_vodomery_branch_report)
     safe_call(send_daily_vodomery_billing_summary_report)
 
@@ -665,6 +821,10 @@ def daily_vodomery_branch_report_job():
 # Týdenní rebuild profilů vodoměrů i plynoměrů a report větví vodoměrů.
 @locked_job
 def weekly_job():
+    preflight_result = _run_database_preflight_or_skip("weekly_job")
+    if preflight_result is not None:
+        return preflight_result
+
     rebuild_result = safe_call(rebuild_profiles)
     plynomery_rebuild_result = safe_call(rebuild_plynomery_profiles)
     safe_call(send_vodomery_model_rebuild_report, rebuild_result)
@@ -678,12 +838,20 @@ def weekly_job():
 # Týdenní email report SmartFuelPass.
 @locked_job
 def smartfuelpass_weekly_report_job():
+    preflight_result = _run_database_preflight_or_skip("smartfuelpass_weekly_report_job")
+    if preflight_result is not None:
+        return preflight_result
+
     safe_call(send_charge_sessions_report_email)
 
 
 # Měsíční reporty spotřeb.
 @locked_job
 def monthly_job():
+    preflight_result = _run_database_preflight_or_skip("monthly_job")
+    if preflight_result is not None:
+        return preflight_result
+
     safe_call(send_monthly_vodomery_consumption_report)
     safe_call(send_monthly_vodomery_branch_report)
     safe_call(send_monthly_vodomery_billing_summary_report)
@@ -795,6 +963,15 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
         )
 
     internal_step_specs = (
+        ManualRunnableSpec(
+            id="check_database_availability",
+            label="Kontrola dostupnosti databazi",
+            description="Preflight kontrola dostupnosti PostgreSQL a MS SQL.",
+            run_fn=check_database_availability,
+            lock_names=("quarter_hour_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
         ManualRunnableSpec(
             id="vodomery_db_import",
             label="Import vodomeru",

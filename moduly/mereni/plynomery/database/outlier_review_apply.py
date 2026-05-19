@@ -18,6 +18,7 @@ from moduly.mereni.plynomery.database.models import (
     PlynomeryExpectedZero,
     PlynomeryOutlierReview,
     PlynomeryProfilesAnomaly,
+    PlynomeryWeatherModelProfile,
 )
 from moduly.mereni.plynomery.database.outlier_reviews import (
     ensure_plynomery_outlier_review_table,
@@ -32,8 +33,16 @@ from moduly.mereni.plynomery.database.plynomery_db_vse import (
     is_night_time,
     prepare_rows,
 )
+from moduly.mereni.plynomery.plynomery_anomaly import (
+    MIN_STD,
+    _build_score_row,
+    _load_hdd_24h_by_measurement_id,
+)
 from moduly.mereni.plynomery.plynomery_events import EVENT_CONFIG, _compute_severity
-from moduly.mereni.plynomery.plynomery_prediction import get_candidate_model_versions
+from moduly.mereni.plynomery.plynomery_prediction import (
+    MODEL_VERSION_WEATHER_ADJUSTED,
+    get_candidate_model_versions,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -289,6 +298,14 @@ def _rebuild_scores_for_ident(
         )
     )
 
+    if model_version == MODEL_VERSION_WEATHER_ADJUSTED:
+        return _rebuild_weather_adjusted_scores_for_ident(
+            session,
+            identifikace=identifikace,
+            model_version=model_version,
+            start_date=start_date,
+        )
+
     profiles = session.execute(
         select(PlynomeryProfilesAnomaly).where(
             PlynomeryProfilesAnomaly.model_version == model_version,
@@ -382,6 +399,115 @@ def _rebuild_scores_for_ident(
         "model_version": model_version,
         "inserted_scores": len(rows_to_insert),
     }
+
+
+def _rebuild_weather_adjusted_scores_for_ident(
+    session: Session,
+    *,
+    identifikace: str,
+    model_version: int,
+    start_date,
+) -> dict[str, object]:
+    profiles = session.execute(
+        select(PlynomeryWeatherModelProfile).where(
+            PlynomeryWeatherModelProfile.model_version == model_version,
+            PlynomeryWeatherModelProfile.identifikace == identifikace,
+        )
+    ).scalars().all()
+    if not profiles:
+        return {
+            "model_version": model_version,
+            "inserted_scores": 0,
+        }
+
+    profile_cache = {
+        (
+            profile.identifikace,
+            profile.interval_minutes,
+            profile.day_of_week,
+            profile.slot,
+        ): profile
+        for profile in profiles
+    }
+
+    measurements = _load_measurements_for_score_rebuild(
+        session,
+        identifikace=identifikace,
+        start_date=start_date,
+    )
+    hdd_24h_by_measurement_id = _load_hdd_24h_by_measurement_id(session, measurements)
+    rows_to_insert = _build_weather_adjusted_score_rows(
+        measurements=measurements,
+        profile_cache=profile_cache,
+        hdd_24h_by_measurement_id=hdd_24h_by_measurement_id,
+        model_version=model_version,
+    )
+
+    if rows_to_insert:
+        session.execute(insert(PlynomeryAnomalyScore), rows_to_insert)
+
+    return {
+        "model_version": model_version,
+        "inserted_scores": len(rows_to_insert),
+    }
+
+
+def _load_measurements_for_score_rebuild(
+    session: Session,
+    *,
+    identifikace: str,
+    start_date,
+) -> list[Mereni_plynomery]:
+    return session.execute(
+        select(Mereni_plynomery)
+        .where(
+            Mereni_plynomery.identifikace == identifikace,
+            Mereni_plynomery.date >= start_date,
+            Mereni_plynomery.synthetic.is_(False),
+            Mereni_plynomery.platne.is_(True),
+            Mereni_plynomery.reset_detected.is_(False),
+            Mereni_plynomery.delta.is_not(None),
+        )
+        .order_by(Mereni_plynomery.id.asc())
+    ).scalars().all()
+
+
+def _build_weather_adjusted_score_rows(
+    *,
+    measurements: list[Mereni_plynomery],
+    profile_cache: dict[tuple[str, int, int, int], PlynomeryWeatherModelProfile],
+    hdd_24h_by_measurement_id: dict[int, float],
+    model_version: int,
+) -> list[dict[str, object]]:
+    rows_to_insert = []
+    for measurement in measurements:
+        profile = profile_cache.get(
+            (
+                measurement.identifikace,
+                measurement.interval_minutes,
+                measurement.day_of_week,
+                measurement.slot,
+            )
+        )
+        hdd_24h = hdd_24h_by_measurement_id.get(int(measurement.id))
+        if profile is None or hdd_24h is None:
+            continue
+
+        expected_mean = float(profile.base_mean) + float(profile.hdd_slope) * hdd_24h
+        row = _build_score_row(
+            measurement=measurement,
+            actual_value=float(measurement.delta),
+            expected_mean=expected_mean,
+            expected_std=max(float(profile.residual_std), MIN_STD),
+            expected_median=expected_mean + float(profile.residual_median),
+            expected_p10=expected_mean + float(profile.residual_p10),
+            expected_p90=expected_mean + float(profile.residual_p90),
+            model_version=model_version,
+        )
+        row["processed"] = False
+        rows_to_insert.append(row)
+
+    return rows_to_insert
 
 
 def _rebuild_events_for_ident(

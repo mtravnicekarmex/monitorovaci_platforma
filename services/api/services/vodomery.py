@@ -10,6 +10,7 @@ from sqlalchemy import bindparam, func, text
 from app.metrics_utils import calculate_percentage_deviation
 from app.time_utils import utc_now_naive
 from core.db.connect import ENGINE_PG, get_session_ms, get_session_pg
+from moduly.apps.dashboard.time_semantics import local_date_range_to_utc, local_datetime_range_to_utc
 from moduly.mereni.vodomery.SCVK.SCVK_data_z_dotazu import paths as SCVK_PATHS
 from moduly.mereni.vodomery.SCVK.historie_vetve import (
     INTERVALY_vetev_L,
@@ -290,6 +291,7 @@ def _load_last_valid_measurements_at_or_before(
     unique_identifiers = list(dict.fromkeys(str(identifier) for identifier in identifiers if identifier))
     if not unique_identifiers:
         return {}
+    cutoff_utc, _ = local_datetime_range_to_utc(cutoff, cutoff)
 
     statement = text(
         """
@@ -299,11 +301,11 @@ def _load_last_valid_measurements_at_or_before(
                 objem,
                 ROW_NUMBER() OVER (
                     PARTITION BY identifikace
-                    ORDER BY date DESC, id DESC
+                    ORDER BY time_utc DESC, id DESC
                 ) AS row_num
             FROM monitoring."Mereni_vodomery_vse"
             WHERE identifikace IN :identifiers
-              AND date <= :cutoff
+              AND time_utc <= :cutoff_utc
               AND platne = TRUE
               AND objem IS NOT NULL
         )
@@ -317,7 +319,7 @@ def _load_last_valid_measurements_at_or_before(
         statement,
         {
             "identifiers": unique_identifiers,
-            "cutoff": cutoff,
+            "cutoff_utc": cutoff_utc,
         },
     ).all()
     return {str(identifikace): _to_rounded_float(objem) for identifikace, objem in rows}
@@ -601,14 +603,15 @@ def load_overview_metrics(
     require_section_access(user_context, "vodomery")
     source_filter = _normalize_source_filter(source_filter)
     start_dt, end_dt = _build_datetime_range(start_date, end_date)
+    measurement_start_utc, measurement_end_utc = local_date_range_to_utc(start_date, end_date)
     expected_zero_idents = set(get_expected_zero_device_set())
 
     session = get_session_pg()
     try:
         active_model_version = _get_active_model_version(session)
         base_measurements = session.query(Mereni_vodomery).filter(
-            Mereni_vodomery.date >= start_dt,
-            Mereni_vodomery.date <= end_dt,
+            Mereni_vodomery.time_utc >= measurement_start_utc,
+            Mereni_vodomery.time_utc < measurement_end_utc,
         )
         base_scores = session.query(VodomeryAnomalyScore).filter(
             VodomeryAnomalyScore.model_version == active_model_version,
@@ -676,7 +679,7 @@ def load_measurement_series(
     require_section_access(user_context, "vodomery")
     require_device_access(user_context, identifikace)
     source_filter = _normalize_source_filter(source_filter)
-    start_dt, end_dt = _build_datetime_range(start_date, end_date)
+    start_utc, end_utc = local_date_range_to_utc(start_date, end_date)
 
     session = get_session_pg()
     try:
@@ -704,14 +707,14 @@ def load_measurement_series(
             Mereni_vodomery.timestamp_position,
         ).filter(
             Mereni_vodomery.identifikace == identifikace,
-            Mereni_vodomery.date >= start_dt,
-            Mereni_vodomery.date <= end_dt,
+            Mereni_vodomery.time_utc >= start_utc,
+            Mereni_vodomery.time_utc < end_utc,
         )
 
         if source_filter != "VSE":
             query = query.filter(Mereni_vodomery.zdroj == source_filter)
 
-        rows = query.order_by(Mereni_vodomery.date.asc()).all()
+        rows = query.order_by(Mereni_vodomery.time_utc.asc(), Mereni_vodomery.id.asc()).all()
         return [
             {
                 "date": row.date,
@@ -1063,17 +1066,18 @@ def load_branch_day_overview(
 
     day_start = datetime.combine(target_date, time.min)
     day_end = day_start + timedelta(days=1)
+    day_start_utc, day_end_utc = local_datetime_range_to_utc(day_start, day_end)
     hour_boundaries = [day_start + timedelta(hours=hour) for hour in range(25)]
     allowed_set = set(user_context.allowed_devices)
 
     measurement_statement = text(
         """
-        SELECT date, identifikace, objem, delta, platne, reset_detected
+        SELECT time_utc AT TIME ZONE 'Europe/Prague' AS date, identifikace, objem, delta, platne, reset_detected
         FROM monitoring."Mereni_vodomery_vse"
         WHERE identifikace IN :identifiers
-          AND date >= :day_start
-          AND date < :day_end
-        ORDER BY identifikace ASC, date ASC
+          AND time_utc >= :day_start_utc
+          AND time_utc < :day_end_utc
+        ORDER BY identifikace ASC, time_utc ASC
         """
     ).bindparams(bindparam("identifiers", expanding=True))
     prediction_statement = text(
@@ -1115,8 +1119,8 @@ def load_branch_day_overview(
                     measurement_statement,
                     {
                         "identifiers": list(measurement_identifiers),
-                        "day_start": day_start,
-                        "day_end": day_end,
+                        "day_start_utc": day_start_utc,
+                        "day_end_utc": day_end_utc,
                     },
                 ).all()
                 if measurement_identifiers

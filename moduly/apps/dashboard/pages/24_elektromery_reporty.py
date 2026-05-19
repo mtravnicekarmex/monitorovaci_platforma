@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from moduly.apps.dashboard.auth import require_page_access
+from moduly.apps.dashboard.time_semantics import local_datetime_range_to_utc, to_prague_naive
 from moduly.apps.dashboard.elektromery_reports import (
     ELECTROMERY_REPORT_DATA_SOURCE_LABEL,
     ElektromeryDashboardReportError,
@@ -88,28 +89,31 @@ def format_energy(value: object, unit: str = "kWh") -> str:
 def load_charge_session_overlay_rows(period_start, period_end) -> pd.DataFrame:
     session = get_session_pg()
     try:
+        period_start_utc, period_end_utc = local_datetime_range_to_utc(period_start, period_end)
         rows = (
             session.query(
                 SmartFuelPassRelace.id_relace,
                 SmartFuelPassRelace.started_at,
                 SmartFuelPassRelace.ended_at,
+                SmartFuelPassRelace.started_at_utc,
+                SmartFuelPassRelace.ended_at_utc,
                 SmartFuelPassRelace.lokace,
                 SmartFuelPassRelace.kwh,
                 SmartFuelPassRelace.rychlost_nabijeni,
             )
             .filter(
-                SmartFuelPassRelace.started_at < period_end,
-                SmartFuelPassRelace.ended_at > period_start,
+                SmartFuelPassRelace.started_at_utc < period_end_utc,
+                SmartFuelPassRelace.ended_at_utc > period_start_utc,
             )
-            .order_by(SmartFuelPassRelace.started_at.asc(), SmartFuelPassRelace.id_relace.asc())
+            .order_by(SmartFuelPassRelace.started_at_utc.asc(), SmartFuelPassRelace.id_relace.asc())
             .all()
         )
         return pd.DataFrame(
             [
                 {
                     "id_relace": row.id_relace,
-                    "started_at": row.started_at,
-                    "ended_at": row.ended_at,
+                    "started_at": to_prague_naive(row.started_at_utc) or row.started_at,
+                    "ended_at": to_prague_naive(row.ended_at_utc) or row.ended_at,
                     "lokace": row.lokace,
                     "kwh": row.kwh,
                     "rychlost_nabijeni": row.rychlost_nabijeni,
@@ -129,13 +133,13 @@ def load_ote_data_bounds() -> dict[str, object]:
             text(
                 """
                 SELECT
-                    MIN(date) AS date_min,
-                    MAX(date) AS date_max,
+                    MIN(time_utc) AS date_min,
+                    MAX(time_utc) AS date_max,
                     COUNT(id) AS measurement_count,
                     COUNT(DISTINCT identifikace) AS device_count
                 FROM monitoring."Mereni_elektromery_vse"
                 WHERE
-                    date IS NOT NULL
+                    time_utc IS NOT NULL
                     AND identifikace IS NOT NULL
                     AND delta IS NOT NULL
                     AND platne IS TRUE
@@ -143,8 +147,8 @@ def load_ote_data_bounds() -> dict[str, object]:
             )
         ).mappings().one()
         return {
-            "date_min": row["date_min"],
-            "date_max": row["date_max"],
+            "date_min": to_prague_naive(row["date_min"]),
+            "date_max": to_prague_naive(row["date_max"]),
             "measurement_count": int(row["measurement_count"] or 0),
             "device_count": int(row["device_count"] or 0),
         }
@@ -187,9 +191,10 @@ def load_ote_measurements(period_start, period_end, selected_identifications: tu
 
     session = get_session_pg()
     try:
+        period_start_utc, period_end_utc = local_datetime_range_to_utc(period_start, period_end)
         query_text = """
             SELECT
-                date,
+                time_utc AT TIME ZONE 'Europe/Prague' AS date,
                 identifikace,
                 seriove_cislo,
                 delta AS spotreba_kwh,
@@ -197,20 +202,20 @@ def load_ote_measurements(period_start, period_end, selected_identifications: tu
                 zdroj AS source_file
             FROM monitoring."Mereni_elektromery_vse"
             WHERE
-                date >= :period_start
-                AND date < :period_end
+                time_utc >= :period_start_utc
+                AND time_utc < :period_end_utc
                 AND identifikace IS NOT NULL
                 AND delta IS NOT NULL
                 AND platne IS TRUE
         """
         params = {
-            "period_start": period_start,
-            "period_end": period_end,
+            "period_start_utc": period_start_utc,
+            "period_end_utc": period_end_utc,
         }
         if selected_identifications:
             query_text += " AND identifikace IN :selected_identifications"
             params["selected_identifications"] = tuple(selected_identifications)
-        query_text += " ORDER BY date ASC, identifikace ASC"
+        query_text += " ORDER BY time_utc ASC, identifikace ASC"
 
         statement = text(query_text)
         if selected_identifications:

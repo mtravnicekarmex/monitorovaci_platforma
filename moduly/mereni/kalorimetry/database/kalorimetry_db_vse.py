@@ -8,11 +8,17 @@ from sqlalchemy import func, inspect, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.time_utils import utc_now_naive
 from core.db.connect import ENGINE_MS, ENGINE_PG
 from moduly.mereni.kalorimetry.database.models import (
     Kalorimetr_areal_Mereni,
     Kalorimetr_areal_Zarizeni,
     Mereni_kalorimetry,
+)
+from moduly.mereni.kalorimetry.database.outlier_reviews import (
+    build_outlier_review_key,
+    load_outlier_review_ids_by_keys,
+    upsert_outlier_review_candidates,
 )
 from moduly.mereni.time_semantics import build_time_columns
 
@@ -27,6 +33,12 @@ DEFAULT_INTERVAL_MINUTES = 15
 MAX_GAP_MULTIPLIER = 2
 MIN_NIGHT_DELTA = 0.01
 SOURCE_NAME = "AREAL"
+OUTLIER_LOOKBACK_DAYS = 90
+OUTLIER_MIN_HISTORY = 48
+OUTLIER_ABSOLUTE_MIN_DELTA = 10.0
+OUTLIER_P90_SPREAD_MULTIPLIER = 25.0
+OUTLIER_STD_MULTIPLIER = 12.0
+OUTLIER_P99_MULTIPLIER = 8.0
 
 
 def chunked(items, size: int = CHUNK_SIZE):
@@ -276,7 +288,7 @@ def get_last_measurements(
     *,
     only_valid: bool = False,
 ) -> dict[str, Mereni_kalorimetry]:
-    if not affected_idents:
+    if session is None or not affected_idents:
         return {}
 
     rows_by_ident: dict[str, Mereni_kalorimetry] = {}
@@ -335,6 +347,136 @@ def get_existing_measurement_dates(
             dates_by_ident.setdefault(str(ident), set()).add(measurement_date)
 
     return dates_by_ident
+
+
+def get_recent_delta_stats(
+    session: Session,
+    affected_idents: set[str],
+    *,
+    reference_time: datetime | None = None,
+) -> dict[str, dict[str, float | int]]:
+    if session is None or not hasattr(session, "execute") or not affected_idents:
+        return {}
+
+    resolved_reference_time = reference_time or utc_now_naive()
+    cutoff = resolved_reference_time - timedelta(days=OUTLIER_LOOKBACK_DAYS)
+    stats_by_ident: dict[str, dict[str, float | int]] = {}
+
+    for ident_chunk in chunked(list(affected_idents)):
+        query = (
+            select(
+                Mereni_kalorimetry.identifikace,
+                func.count(Mereni_kalorimetry.id).label("sample_size"),
+                func.percentile_cont(0.5).within_group(Mereni_kalorimetry.delta).label("median"),
+                func.percentile_cont(0.9).within_group(Mereni_kalorimetry.delta).label("p90"),
+                func.percentile_cont(0.99).within_group(Mereni_kalorimetry.delta).label("p99"),
+                func.greatest(
+                    func.coalesce(func.stddev_samp(Mereni_kalorimetry.delta), 0.0),
+                    0.0001,
+                ).label("std"),
+            )
+            .where(
+                Mereni_kalorimetry.identifikace.in_(ident_chunk),
+                Mereni_kalorimetry.date >= cutoff,
+                Mereni_kalorimetry.synthetic.is_(False),
+                Mereni_kalorimetry.platne.is_(True),
+                Mereni_kalorimetry.reset_detected.is_(False),
+                Mereni_kalorimetry.delta.is_not(None),
+            )
+            .group_by(Mereni_kalorimetry.identifikace)
+        )
+
+        for row in session.execute(query).all():
+            stats_by_ident[str(row.identifikace)] = {
+                "sample_size": int(row.sample_size or 0),
+                "median": float(row.median or 0.0),
+                "p90": float(row.p90 or 0.0),
+                "p99": float(row.p99 or 0.0),
+                "std": float(row.std or 0.0),
+            }
+
+    return stats_by_ident
+
+
+def compute_outlier_delta_threshold(stats: dict[str, float | int] | None) -> float | None:
+    if not stats:
+        return None
+
+    sample_size = int(stats.get("sample_size") or 0)
+    if sample_size < OUTLIER_MIN_HISTORY:
+        return None
+
+    median = float(stats.get("median") or 0.0)
+    p90 = float(stats.get("p90") or median)
+    p99 = float(stats.get("p99") or p90)
+    std = max(float(stats.get("std") or 0.0), 0.0001)
+    spread = max(p90 - median, 0.0)
+
+    return max(
+        OUTLIER_ABSOLUTE_MIN_DELTA,
+        median + spread * OUTLIER_P90_SPREAD_MULTIPLIER,
+        median + std * OUTLIER_STD_MULTIPLIER,
+        p99 * OUTLIER_P99_MULTIPLIER,
+    )
+
+
+def is_delta_outlier(delta: float | None, stats: dict[str, float | int] | None) -> bool:
+    if delta is None or delta <= 0:
+        return False
+
+    threshold = compute_outlier_delta_threshold(stats)
+    if threshold is None:
+        return False
+
+    return delta > threshold
+
+
+def format_ident_count_summary(counts: dict[str, int], *, limit: int = 10) -> str:
+    if not counts:
+        return ""
+
+    ordered_counts = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    summary = ", ".join(
+        f"{ident}:{count}"
+        for ident, count in ordered_counts[:limit]
+    )
+
+    if len(ordered_counts) > limit:
+        summary += ", ..."
+
+    return summary
+
+
+def build_outlier_review_payload(
+    *,
+    source_name: str,
+    row: dict[str, object],
+    prev: dict[str, object] | None,
+    interval: int,
+    candidate_delta: float,
+    stats: dict[str, float | int] | None,
+    detection_kind: str,
+) -> dict[str, object]:
+    threshold = compute_outlier_delta_threshold(stats)
+    return {
+        "identifikace": row["identifikace"],
+        "date": row["date"],
+        "zdroj": source_name,
+        "source_recid": row.get("recid"),
+        "seriove_cislo": str(row.get("seriove_cislo") or ""),
+        "interval_minutes": interval,
+        "detection_kind": detection_kind,
+        "current_objem": float(row["spotreba_energie"]),
+        "baseline_objem": None if not prev else float(prev["spotreba_energie"]),
+        "baseline_date": None if not prev else prev["date"],
+        "candidate_delta": float(candidate_delta),
+        "threshold_delta": None if threshold is None else float(threshold),
+        "sample_size": None if not stats else int(stats.get("sample_size") or 0),
+        "median_delta": None if not stats else float(stats.get("median") or 0.0),
+        "p90_delta": None if not stats else float(stats.get("p90") or 0.0),
+        "p99_delta": None if not stats else float(stats.get("p99") or 0.0),
+        "std_delta": None if not stats else float(stats.get("std") or 0.0),
+    }
 
 
 def build_occupied_dates(
@@ -543,12 +685,24 @@ def prepare_rows(
     session: Session,
     new_rows: list[dict[str, object]],
     source_name: str,
-) -> list[dict[str, object]]:
+    *,
+    include_outlier_reviews: bool = False,
+    review_overrides: dict[tuple[str, object, str], str] | None = None,
+):
     if not new_rows:
-        return []
+        return ([], []) if include_outlier_reviews else []
 
     affected_idents = {row["identifikace"] for row in new_rows}
     last_existing = get_last_measurements(session, affected_idents, only_valid=True)
+    reference_time = max(
+        (row["date"] for row in new_rows if isinstance(row.get("date"), datetime)),
+        default=utc_now_naive(),
+    )
+    recent_delta_stats = get_recent_delta_stats(
+        session,
+        affected_idents,
+        reference_time=reference_time,
+    )
     previous_map: dict[str, dict[str, object] | None] = {}
 
     for ident in affected_idents:
@@ -564,6 +718,10 @@ def prepare_rows(
 
     occupied_dates = build_occupied_dates(session, new_rows, previous_map, source_name)
     rows_to_insert: list[dict[str, object]] = []
+    outlier_reviews: list[dict[str, object]] = []
+    outlier_count = 0
+    outlier_by_ident: dict[str, int] = {}
+    overrides_by_key = review_overrides or {}
 
     for row in sorted(new_rows, key=lambda item: (item["identifikace"], item["date"])):
         ident = row["identifikace"]
@@ -573,6 +731,8 @@ def prepare_rows(
         objem = row.get("objem")
         objem = None if objem is None else float(objem)
         prev = previous_map.get(ident)
+        ident_stats = recent_delta_stats.get(ident)
+        review_override = overrides_by_key.get((ident, dt, source_name))
 
         delta = None
         gap_detected = False
@@ -594,12 +754,67 @@ def prepare_rows(
                     source_name,
                     occupied_dates.get(ident),
                 )
-                rows_to_insert.extend(synthetic_rows)
-                if mean_gap_delta is not None:
-                    gap_detected = True
-                    delta = terminal_gap_delta
+                is_gap_outlier = (
+                    mean_gap_delta is not None
+                    and (
+                        review_override == "CONFIRMED_OUTLIER"
+                        or is_delta_outlier(mean_gap_delta, ident_stats)
+                    )
+                )
+                if is_gap_outlier:
+                    if review_override == "CONFIRMED_CONSUMPTION":
+                        rows_to_insert.extend(synthetic_rows)
+                        if mean_gap_delta is not None:
+                            gap_detected = True
+                            delta = terminal_gap_delta
+                    else:
+                        is_valid_row = False
+                        outlier_count += 1
+                        outlier_by_ident[ident] = outlier_by_ident.get(ident, 0) + 1
+                        if include_outlier_reviews and review_override != "CONFIRMED_OUTLIER" and mean_gap_delta is not None:
+                            outlier_reviews.append(
+                                build_outlier_review_payload(
+                                    source_name=source_name,
+                                    row=row,
+                                    prev=prev,
+                                    interval=interval,
+                                    candidate_delta=mean_gap_delta,
+                                    stats=ident_stats,
+                                    detection_kind="GAP_MEAN",
+                                )
+                            )
+                else:
+                    rows_to_insert.extend(synthetic_rows)
+                    if mean_gap_delta is not None:
+                        gap_detected = True
+                        delta = terminal_gap_delta
             elif spotreba_energie >= prev["spotreba_energie"]:
-                delta = spotreba_energie - float(prev["spotreba_energie"])
+                candidate_delta = spotreba_energie - float(prev["spotreba_energie"])
+                is_normal_outlier = (
+                    review_override == "CONFIRMED_OUTLIER"
+                    or is_delta_outlier(candidate_delta, ident_stats)
+                )
+                if is_normal_outlier:
+                    if review_override == "CONFIRMED_CONSUMPTION":
+                        delta = candidate_delta
+                    else:
+                        is_valid_row = False
+                        outlier_count += 1
+                        outlier_by_ident[ident] = outlier_by_ident.get(ident, 0) + 1
+                        if include_outlier_reviews and review_override != "CONFIRMED_OUTLIER":
+                            outlier_reviews.append(
+                                build_outlier_review_payload(
+                                    source_name=source_name,
+                                    row=row,
+                                    prev=prev,
+                                    interval=interval,
+                                    candidate_delta=candidate_delta,
+                                    stats=ident_stats,
+                                    detection_kind="NORMAL_DELTA",
+                                )
+                            )
+                else:
+                    delta = candidate_delta
 
         if delta is not None:
             delta = round(delta, 6)
@@ -645,30 +860,80 @@ def prepare_rows(
                 "seriove_cislo": row.get("seriove_cislo"),
             }
 
+    if outlier_count:
+        ident_summary = format_ident_count_summary(outlier_by_ident)
+        if ident_summary:
+            logger.warning(
+                "%s detected invalid outlier rows: %s (%s)",
+                source_name,
+                outlier_count,
+                ident_summary,
+            )
+        else:
+            logger.warning(
+                "%s detected invalid outlier rows: %s",
+                source_name,
+                outlier_count,
+            )
+
+    if include_outlier_reviews:
+        return rows_to_insert, outlier_reviews
+
     return rows_to_insert
 
 
 def import_measurements(session: Session, source_name: str, ms_rows: list[dict[str, object]]) -> dict[str, object]:
     if not ms_rows:
-        return {"rows": []}
+        return {
+            "rows": [],
+            "new_outlier_review_ids": [],
+        }
 
     new_rows = filter_valid_rows(session, ms_rows, source_name)
     if not new_rows:
         update_import_state(session, source_name, ms_rows)
-        return {"rows": []}
+        return {
+            "rows": [],
+            "new_outlier_review_ids": [],
+        }
 
-    rows_to_insert = prepare_rows(session, new_rows, source_name)
+    rows_to_insert, outlier_reviews = prepare_rows(
+        session,
+        new_rows,
+        source_name,
+        include_outlier_reviews=True,
+    )
     if not rows_to_insert:
         update_import_state(session, source_name, ms_rows)
-        return {"rows": []}
+        return {
+            "rows": [],
+            "new_outlier_review_ids": [],
+        }
 
     for batch in chunked(rows_to_insert):
         statement = insert(Mereni_kalorimetry).on_conflict_do_nothing()
         session.execute(statement, batch)
 
+    new_outlier_review_ids = []
+    if outlier_reviews:
+        review_keys = [build_outlier_review_key(row) for row in outlier_reviews]
+        existing_review_ids = load_outlier_review_ids_by_keys(review_keys, session=session)
+        upsert_outlier_review_candidates(outlier_reviews, session=session)
+        inserted_review_keys = [key for key in review_keys if key not in existing_review_ids]
+        if inserted_review_keys:
+            inserted_review_id_map = load_outlier_review_ids_by_keys(inserted_review_keys, session=session)
+            new_outlier_review_ids = [
+                inserted_review_id_map[key]
+                for key in inserted_review_keys
+                if key in inserted_review_id_map
+            ]
+
     update_import_state(session, source_name, ms_rows)
     logger.info("%s prepared for insert: %s", source_name, len(rows_to_insert))
-    return {"rows": rows_to_insert}
+    return {
+        "rows": rows_to_insert,
+        "new_outlier_review_ids": new_outlier_review_ids,
+    }
 
 
 def kalorimetry_db_import() -> dict[str, int]:

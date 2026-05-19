@@ -19,6 +19,11 @@ from moduly.apps.dashboard.device_photo import (
     render_clickable_device_photo,
     resolve_photo_path,
 )
+from moduly.apps.dashboard.time_semantics import (
+    TIME_SEMANTICS_COLUMNS,
+    add_chart_time,
+    local_date_range_to_utc,
+)
 from moduly.apps.dashboard.vodomery_shared import (
     format_consumption_dataframe,
     format_consumption_with_unit,
@@ -36,15 +41,6 @@ from moduly.mereni.kalorimetry.database.models import (
 
 MAX_IDENT_OPTIONS = 500
 KALORIMETRY_SOURCE_NAME = "KALORIMETRY"
-TIME_SEMANTICS_COLUMNS = (
-    "source_date",
-    "time_utc",
-    "time_basis",
-    "source_timezone",
-    "source_utc_offset_minutes",
-    "time_fold",
-    "timestamp_position",
-)
 
 
 def get_kalorimetry_access_context() -> tuple[bool, tuple[str, ...]]:
@@ -106,7 +102,7 @@ def add_time_semantics_columns(df: pd.DataFrame, *, date_column: str = "date") -
     for column in TIME_SEMANTICS_COLUMNS:
         prepared[column] = prepared[column].where(prepared[column].notna(), time_df[column])
     prepared["time_utc"] = pd.to_datetime(prepared["time_utc"], utc=True, errors="coerce")
-    return prepared
+    return add_chart_time(prepared)
 
 
 @st.cache_data(ttl=60)
@@ -122,7 +118,7 @@ def load_measurement_series(
 
     session = get_session_pg()
     try:
-        start_dt, end_dt = build_datetime_range(start_date, end_date)
+        start_utc, end_utc = local_date_range_to_utc(start_date, end_date)
         rows = (
             session.query(
                 Mereni_kalorimetry.date,
@@ -146,10 +142,10 @@ def load_measurement_series(
             )
             .filter(
                 Mereni_kalorimetry.identifikace == identifikace,
-                Mereni_kalorimetry.date >= start_dt,
-                Mereni_kalorimetry.date <= end_dt,
+                Mereni_kalorimetry.time_utc >= start_utc,
+                Mereni_kalorimetry.time_utc < end_utc,
             )
-            .order_by(Mereni_kalorimetry.date.asc())
+            .order_by(Mereni_kalorimetry.time_utc.asc())
             .all()
         )
         measurements = pd.DataFrame(

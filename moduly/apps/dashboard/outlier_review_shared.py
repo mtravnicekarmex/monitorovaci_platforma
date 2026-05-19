@@ -5,10 +5,13 @@ from datetime import datetime
 from typing import Callable, Iterable, Mapping
 
 from moduly.apps.dashboard.api_client import (
+    get_kalorimetry_devices,
     get_plynomery_devices,
     get_vodomery_devices,
+    list_kalorimetry_outlier_reviews,
     list_plynomery_outlier_reviews,
     list_vodomery_outlier_reviews,
+    update_kalorimetry_outlier_review,
     update_plynomery_outlier_review,
     update_vodomery_outlier_review,
 )
@@ -60,10 +63,6 @@ OUTLIER_REVIEW_MODULES: tuple[OutlierReviewModuleConfig, ...] = (
         load_device_options=lambda access_token: get_vodomery_devices(access_token, source_filter="VSE", limit=5000),
         list_reviews=list_vodomery_outlier_reviews,
         update_review=update_vodomery_outlier_review,
-        warning=(
-            "Potvrzeni odberu se v teto prvni verzi uklada jako review verdict. "
-            "Navazujici delta a scoring historie se zatim automaticky neprepocitavaji."
-        ),
     ),
     OutlierReviewModuleConfig(
         key="plynomery",
@@ -76,6 +75,18 @@ OUTLIER_REVIEW_MODULES: tuple[OutlierReviewModuleConfig, ...] = (
         load_device_options=lambda access_token: get_plynomery_devices(access_token, limit=5000),
         list_reviews=list_plynomery_outlier_reviews,
         update_review=update_plynomery_outlier_review,
+    ),
+    OutlierReviewModuleConfig(
+        key="kalorimetry",
+        label="Kalorimetry",
+        source_options=("VSE", "AREAL"),
+        source_labels={
+            "VSE": SOURCE_ALL_LABEL,
+            "AREAL": "AREAL",
+        },
+        load_device_options=lambda access_token: get_kalorimetry_devices(access_token, limit=5000),
+        list_reviews=list_kalorimetry_outlier_reviews,
+        update_review=update_kalorimetry_outlier_review,
     ),
 )
 OUTLIER_REVIEW_MODULE_MAP = {config.key: config for config in OUTLIER_REVIEW_MODULES}

@@ -19,7 +19,7 @@ def test_get_selected_outlier_review_module_keys_prefers_device_module():
 
 
 def test_get_outlier_review_source_options_returns_union_for_supported_modules():
-    source_options = get_outlier_review_source_options(("vodomery", "plynomery"))
+    source_options = get_outlier_review_source_options(("vodomery", "plynomery", "kalorimetry"))
 
     assert source_options == ("VSE", "AREAL", "SCVK")
 
@@ -65,6 +65,7 @@ def test_build_outlier_review_device_options_prefixes_devices_by_module():
         {
             "vodomery": ["VDM-02", "VDM-01"],
             "plynomery": ["PLY-01"],
+            "kalorimetry": ["KAL-01"],
         }
     )
 
@@ -73,4 +74,5 @@ def test_build_outlier_review_device_options_prefixes_devices_by_module():
         ("vodomery", "VDM-01"),
         ("vodomery", "VDM-02"),
         ("plynomery", "PLY-01"),
+        ("kalorimetry", "KAL-01"),
     ]

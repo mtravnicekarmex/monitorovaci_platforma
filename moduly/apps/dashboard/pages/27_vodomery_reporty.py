@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.db.connect import get_session_pg
 from moduly.apps.dashboard.auth import require_page_access
+from moduly.apps.dashboard.time_semantics import local_datetime_range_to_utc, to_prague_naive
 from moduly.apps.dashboard.vodomery_reports import (
     REPORT_PERIOD_OPTIONS,
     VodomeryDashboardReportError,
@@ -66,17 +67,20 @@ def load_vodomery_data_bounds() -> dict[str, object]:
     try:
         row = (
             session.query(
-                func.min(Mereni_vodomery.date).label("date_min"),
-                func.max(Mereni_vodomery.date).label("date_max"),
+                func.min(Mereni_vodomery.time_utc).label("date_min"),
+                func.max(Mereni_vodomery.time_utc).label("date_max"),
                 func.count(Mereni_vodomery.id).label("measurement_count"),
                 func.count(func.distinct(Mereni_vodomery.identifikace)).label("device_count"),
             )
-            .filter(Mereni_vodomery.identifikace.is_not(None))
+            .filter(
+                Mereni_vodomery.identifikace.is_not(None),
+                Mereni_vodomery.time_utc.is_not(None),
+            )
             .one()
         )
         return {
-            "date_min": row.date_min,
-            "date_max": row.date_max,
+            "date_min": to_prague_naive(row.date_min),
+            "date_max": to_prague_naive(row.date_max),
             "measurement_count": int(row.measurement_count or 0),
             "device_count": int(row.device_count or 0),
         }
@@ -125,9 +129,11 @@ def load_vodomery_measurements(
 
     session = get_session_pg()
     try:
+        period_start_utc, period_end_utc = local_datetime_range_to_utc(period_start, period_end)
+        local_time_expr = func.timezone("Europe/Prague", Mereni_vodomery.time_utc)
         current_period_query = (
             session.query(
-                Mereni_vodomery.date,
+                local_time_expr.label("date"),
                 Mereni_vodomery.identifikace,
                 Mereni_vodomery.seriove_cislo,
                 Mereni_vodomery.objem,
@@ -138,8 +144,8 @@ def load_vodomery_measurements(
                 Mereni_vodomery.zdroj,
             )
             .filter(
-                Mereni_vodomery.date >= period_start,
-                Mereni_vodomery.date < period_end,
+                Mereni_vodomery.time_utc >= period_start_utc,
+                Mereni_vodomery.time_utc < period_end_utc,
                 Mereni_vodomery.identifikace.is_not(None),
                 Mereni_vodomery.objem.is_not(None),
             )
@@ -149,7 +155,7 @@ def load_vodomery_measurements(
 
         ranked_previous_measurements = (
             session.query(
-                Mereni_vodomery.date.label("date"),
+                local_time_expr.label("date"),
                 Mereni_vodomery.identifikace.label("identifikace"),
                 Mereni_vodomery.seriove_cislo.label("seriove_cislo"),
                 Mereni_vodomery.objem.label("objem"),
@@ -160,11 +166,11 @@ def load_vodomery_measurements(
                 Mereni_vodomery.zdroj.label("zdroj"),
                 func.row_number().over(
                     partition_by=Mereni_vodomery.identifikace,
-                    order_by=Mereni_vodomery.date.desc(),
+                    order_by=Mereni_vodomery.time_utc.desc(),
                 ).label("row_num"),
             )
             .filter(
-                Mereni_vodomery.date < period_start,
+                Mereni_vodomery.time_utc < period_start_utc,
                 Mereni_vodomery.identifikace.is_not(None),
                 Mereni_vodomery.objem.is_not(None),
                 Mereni_vodomery.platne.is_(True),
@@ -196,7 +202,7 @@ def load_vodomery_measurements(
         )
         current_rows = (
             current_period_query
-            .order_by(Mereni_vodomery.identifikace.asc(), Mereni_vodomery.date.asc())
+            .order_by(Mereni_vodomery.identifikace.asc(), Mereni_vodomery.time_utc.asc())
             .all()
         )
         return vodomery_records_to_dataframe(

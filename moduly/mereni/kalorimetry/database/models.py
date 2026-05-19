@@ -130,3 +130,45 @@ class Mereni_kalorimetry(Base):
     zdroj: Mapped[str] = mapped_column(String(20), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=func.now(), nullable=False)
     reset_detected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class KalorimetryOutlierReview(Base):
+    __tablename__ = "kalorimetry_outlier_reviews"
+    __table_args__ = (
+        CheckConstraint(
+            "detection_kind IN ('NORMAL_DELTA','GAP_MEAN')",
+            name="ck_kalorimetry_outlier_review_detection_kind_valid",
+        ),
+        CheckConstraint(
+            "review_status IN ('PENDING','CONFIRMED_OUTLIER','CONFIRMED_CONSUMPTION')",
+            name="ck_kalorimetry_outlier_review_status_valid",
+        ),
+        UniqueConstraint("identifikace", "date", "zdroj", name="uq_kalorimetry_outlier_review_ident_date_source"),
+        Index("ix_kalorimetry_outlier_review_status_date", "review_status", "date"),
+        Index("ix_kalorimetry_outlier_review_ident_date", "identifikace", "date"),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
+    date: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    zdroj: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_recid: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    seriove_cislo: Mapped[str] = mapped_column(String(100), nullable=False)
+    interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    detection_kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    current_objem: Mapped[float] = mapped_column(Float, nullable=False)
+    baseline_objem: Mapped[float | None] = mapped_column(Float, nullable=True)
+    baseline_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    candidate_delta: Mapped[float] = mapped_column(Float, nullable=False)
+    threshold_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sample_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    median_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p90_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p99_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    std_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    review_status: Mapped[str] = mapped_column(String(30), nullable=False, server_default=text("'PENDING'"))
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=text("now()"), nullable=False)

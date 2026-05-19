@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from moduly.apps.dashboard.auth import require_page_access
+from moduly.apps.dashboard.time_semantics import time_axis_column
 from moduly.apps.dashboard.elektromery_shared import (
     build_change_table,
     build_delta_consumption_summary,
@@ -124,13 +125,13 @@ def build_detail_table(df: pd.DataFrame, detail_level: str) -> pd.DataFrame:
         "Denně": "D",
         "Hodinově": "h",
     }
-    time_axis_column = "chart_time" if "chart_time" in df.columns and df["chart_time"].notna().any() else "date"
-    working_df = df.dropna(subset=[time_axis_column]).copy()
+    axis_column = time_axis_column(df)
+    working_df = df.dropna(subset=[axis_column]).copy()
     if working_df.empty:
         return pd.DataFrame()
 
     resampled = (
-        working_df.set_index(time_axis_column)
+        working_df.set_index(axis_column)
         .resample(freq_map[detail_level])
         .agg(
             vt=("vt", "last"),
@@ -149,7 +150,7 @@ def build_detail_table(df: pd.DataFrame, detail_level: str) -> pd.DataFrame:
             pocet_zaznamu=("spotreba", "count"),
         )
         .reset_index()
-        .rename(columns={time_axis_column: "date"})
+        .rename(columns={axis_column: "date"})
     )
     resampled = resampled.rename(columns={"reset_detected": "pocet_resetu"})
     resampled = resampled[resampled["pocet_zaznamu"] > 0].drop(columns=["pocet_zaznamu"]).copy()
@@ -231,7 +232,7 @@ def build_line_chart(
     color: str,
 ) -> alt.Chart:
     chart_source = chart_df.dropna(subset=[value_column]).copy()
-    x_column = "chart_time" if "chart_time" in chart_source.columns and chart_source["chart_time"].notna().any() else "date"
+    x_column = time_axis_column(chart_source)
     return (
         alt.Chart(chart_source)
         .mark_line(color=color, strokeWidth=2.5)
@@ -255,7 +256,7 @@ def build_bar_chart(
     color: str,
 ) -> alt.Chart:
     chart_source = chart_df.dropna(subset=[value_column]).copy()
-    x_column = "chart_time" if "chart_time" in chart_source.columns and chart_source["chart_time"].notna().any() else "date"
+    x_column = time_axis_column(chart_source)
     return (
         alt.Chart(chart_source)
         .mark_bar(color=color)
@@ -482,9 +483,10 @@ def render_dashboard() -> None:
     detail_df = build_detail_table(measurements_df, detail_level)
     boundary_table = build_boundary_table(measurements_df)
     change_table = build_change_table(measurements_df)
+    axis_column = time_axis_column(measurements_df)
 
     st.title(f"Spotřeba elektřiny - {selected_ident}")
-    actual_range = f"{format_value(measurements_df['date'].min())} - {format_value(measurements_df['date'].max())}"
+    actual_range = f"{format_value(measurements_df[axis_column].min())} - {format_value(measurements_df[axis_column].max())}"
     st.caption(f"Reálně načtený rozsah dat: {actual_range}")
 
     render_summary_metrics(measurements_df)

@@ -30,6 +30,7 @@ from moduly.apps.dashboard.manometry_shared import (
     render_page_styles,
     round_pressure_columns,
 )
+from moduly.apps.dashboard.time_semantics import add_chart_time, time_axis_column
 
 
 DEVICE_KEY = "manometry_overview_identifikace"
@@ -112,9 +113,10 @@ def render_overview_sidebar(
 def prepare_measurements(df: pd.DataFrame) -> pd.DataFrame:
     prepared = df.copy()
     prepared["date"] = pd.to_datetime(prepared["date"], errors="coerce")
+    prepared = add_chart_time(prepared)
     prepared["hodnota"] = pd.to_numeric(prepared["hodnota"], errors="coerce")
     prepared["platne"] = prepared["platne"].fillna(True).astype(bool)
-    prepared = prepared.dropna(subset=["date", "hodnota"]).sort_values("date").reset_index(drop=True)
+    prepared = prepared.dropna(subset=["chart_time", "hodnota"]).sort_values("chart_time").reset_index(drop=True)
     return prepared
 
 
@@ -128,9 +130,10 @@ def build_detail_table(df: pd.DataFrame, detail_level: str) -> pd.DataFrame:
         "Hodinově": "h",
     }
     working_df = df.copy()
+    axis_column = time_axis_column(working_df)
     working_df["hodnota_valid"] = working_df["hodnota"].where(working_df["platne"], pd.NA)
     resampled = (
-        working_df.set_index("date")
+        working_df.set_index(axis_column)
         .resample(freq_map[detail_level])
         .agg(
             identifikace=("identifikace", "first"),
@@ -143,6 +146,7 @@ def build_detail_table(df: pd.DataFrame, detail_level: str) -> pd.DataFrame:
             platna_mereni=("platne", "sum"),
         )
         .reset_index()
+        .rename(columns={axis_column: "date"})
     )
     resampled = resampled[resampled["pocet_mereni"] > 0].copy()
     if resampled.empty:
@@ -271,15 +275,16 @@ def build_raw_chart(df: pd.DataFrame) -> alt.Chart | None:
     valid_df = df[df["platne"]].copy()
     if valid_df.empty:
         valid_df = df.copy()
+    x_column = time_axis_column(df)
 
     line_chart = (
         alt.Chart(valid_df)
         .mark_line(color=PRESSURE_LINE_COLOR, strokeWidth=2.5)
         .encode(
-            x=alt.X("date:T", title=None),
+            x=alt.X(f"{x_column}:T", title=None),
             y=alt.Y("hodnota:Q", title="Tlak [bar]"),
             tooltip=[
-                alt.Tooltip("date:T", title="Datum"),
+                alt.Tooltip(f"{x_column}:T", title="Datum"),
                 alt.Tooltip("hodnota:Q", title="Tlak [bar]", format=".3f"),
                 alt.Tooltip("seriove_cislo:N", title="Sériové číslo"),
                 alt.Tooltip("platne:N", title="Platné"),
@@ -294,10 +299,10 @@ def build_raw_chart(df: pd.DataFrame) -> alt.Chart | None:
         alt.Chart(invalid_df)
         .mark_circle(color=INVALID_POINT_COLOR, size=55)
         .encode(
-            x=alt.X("date:T", title=None),
+            x=alt.X(f"{x_column}:T", title=None),
             y=alt.Y("hodnota:Q", title="Tlak [bar]"),
             tooltip=[
-                alt.Tooltip("date:T", title="Datum"),
+                alt.Tooltip(f"{x_column}:T", title="Datum"),
                 alt.Tooltip("hodnota:Q", title="Tlak [bar]", format=".3f"),
                 alt.Tooltip("seriove_cislo:N", title="Sériové číslo"),
                 alt.Tooltip("platne:N", title="Platné"),
@@ -360,15 +365,16 @@ def build_detail_chart_with_format(detail_df: pd.DataFrame, detail_level: str) -
         detail_df,
         columns=("tlak_min", "tlak_max", "tlak_prumer", "tlak_posledni"),
     )
+    x_column = time_axis_column(chart_df)
     band_chart = (
         alt.Chart(chart_df)
         .mark_area(color=PRESSURE_BAND_COLOR, opacity=0.28)
         .encode(
-            x=alt.X("date:T", title=None),
+            x=alt.X(f"{x_column}:T", title=None),
             y=alt.Y("tlak_min:Q", title="Tlak [bar]"),
             y2=alt.Y2("tlak_max:Q"),
             tooltip=[
-                alt.Tooltip("date:T", title="Datum"),
+                alt.Tooltip(f"{x_column}:T", title="Datum"),
                 alt.Tooltip("tlak_min:Q", title="Tlak min [bar]", format=".3f"),
                 alt.Tooltip("tlak_max:Q", title="Tlak max [bar]", format=".3f"),
                 alt.Tooltip("tlak_prumer:Q", title="Tlak průměr [bar]", format=".3f"),
@@ -380,7 +386,7 @@ def build_detail_chart_with_format(detail_df: pd.DataFrame, detail_level: str) -
         alt.Chart(chart_df)
         .mark_line(color=PRESSURE_LINE_COLOR, strokeWidth=2.5)
         .encode(
-            x=alt.X("date:T", title=None),
+            x=alt.X(f"{x_column}:T", title=None),
             y=alt.Y("tlak_prumer:Q", title="Tlak [bar]"),
         )
     )
@@ -487,7 +493,8 @@ def render_dashboard() -> None:
         st.info("Pro zvolený filtr nejsou k dispozici žádná měření.")
         return
 
-    actual_range = f"{format_value(measurements_df['date'].min())} - {format_value(measurements_df['date'].max())}"
+    axis_column = time_axis_column(measurements_df)
+    actual_range = f"{format_value(measurements_df[axis_column].min())} - {format_value(measurements_df[axis_column].max())}"
     st.caption(f"Reálně načtený rozsah dat: {actual_range}")
 
     with st.container(border=True):

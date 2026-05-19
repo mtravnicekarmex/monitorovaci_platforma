@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from moduly.apps.dashboard.api_client import DashboardApiError
 from moduly.apps.dashboard.auth import require_page_access
+from moduly.apps.dashboard.time_semantics import add_chart_time, time_axis_column
 from moduly.apps.dashboard.vodomery_shared import (
     format_consumption_dataframe,
     format_consumption_with_unit,
@@ -68,7 +69,8 @@ def render_detail_sidebar(user_is_admin: bool, allowed_devices: tuple[str, ...])
 def prepare_consumption_history(df: pd.DataFrame) -> pd.DataFrame:
     history_df = df.copy()
     history_df["date"] = pd.to_datetime(history_df["date"], errors="coerce")
-    history_df = history_df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+    history_df = add_chart_time(history_df)
+    history_df = history_df.dropna(subset=["chart_time"]).sort_values("chart_time").reset_index(drop=True)
     history_df["spotreba"] = pd.to_numeric(history_df["delta"], errors="coerce")
     if history_df["spotreba"].isna().all():
         history_df["spotreba"] = pd.to_numeric(history_df["objem"], errors="coerce").diff()
@@ -100,15 +102,18 @@ def build_expected_daily_map(profiles_df: pd.DataFrame) -> dict[int, float]:
 
 def build_daily_history(history_df: pd.DataFrame, days: int) -> pd.DataFrame:
     working_df = history_df.copy()
+    axis_column = time_axis_column(working_df)
+    working_df = working_df.dropna(subset=[axis_column])
     working_df["nocni_spotreba"] = working_df["spotreba"].where(working_df["nocni_odber"], 0.0)
     daily_history = (
-        working_df.set_index("date")
+        working_df.set_index(axis_column)
         .resample("D")
         .agg(
             spotreba=("spotreba", "sum"),
             nocni_spotreba=("nocni_spotreba", "sum"),
         )
         .reset_index()
+        .rename(columns={axis_column: "date"})
     )
     daily_history = daily_history[daily_history["spotreba"].notna()].copy()
     if daily_history.empty:
@@ -126,11 +131,14 @@ def build_average_consumption_summary(history_df: pd.DataFrame) -> dict[str, obj
     if history_df.empty:
         return {"monthly": None, "weekly": None, "weekday": {}}
 
+    axis_column = time_axis_column(history_df)
+    working_df = history_df.dropna(subset=[axis_column]).copy()
     daily_totals = (
-        history_df.set_index("date")
+        working_df.set_index(axis_column)
         .resample("D")
         .agg(spotreba=("spotreba", "sum"))
         .reset_index()
+        .rename(columns={axis_column: "date"})
     )
     daily_totals = daily_totals[daily_totals["spotreba"].notna()].copy()
     if daily_totals.empty:
@@ -337,8 +345,9 @@ def render_dashboard() -> None:
     top_cols = st.columns(5, vertical_alignment="bottom")
     first_measurement_date = "-"
     latest_state = "-"
-    if not measurements_df.empty:
-        first_measurement = pd.to_datetime(measurements_df["date"], errors="coerce").dropna().min()
+    if not history_df.empty:
+        axis_column = time_axis_column(history_df)
+        first_measurement = pd.to_datetime(history_df[axis_column], errors="coerce").dropna().min()
         latest_measurement = history_df.iloc[-1] if not history_df.empty else None
         if pd.notna(first_measurement):
             first_measurement_date = first_measurement.strftime("%d.%m.%Y")
@@ -399,11 +408,14 @@ def render_dashboard() -> None:
             if measurements_df.empty:
                 st.info("Pro vybrany vodomer nejsou v danem obdobi zadna mereni.")
             else:
+                axis_column = time_axis_column(history_df)
                 monthly_history = (
-                    history_df.set_index("date")
+                    history_df.dropna(subset=[axis_column])
+                    .set_index(axis_column)
                     .resample("ME")
                     .agg(spotreba=("spotreba", "sum"))
                     .reset_index()
+                    .rename(columns={axis_column: "date"})
                 )
                 monthly_history = monthly_history[monthly_history["spotreba"].notna()].copy()
                 average_monthly_consumption = float(monthly_history["spotreba"].mean()) if not monthly_history.empty else 0.0

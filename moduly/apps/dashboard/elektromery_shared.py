@@ -33,6 +33,11 @@ from moduly.apps.dashboard.vodomery_shared import (
     render_page_styles,
     round_consumption_columns,
 )
+from moduly.mereni.reset_detection import (
+    RESET_NEGATIVE_DIFF_ROUND_DECIMALS,
+    RESET_NEGATIVE_DIFF_THRESHOLD,
+    has_significant_negative_diff,
+)
 from moduly.mereni.elektromery.database.models import (
     Elektromer_areal_Zarizeni,
     Mereni_elektromery,
@@ -211,7 +216,7 @@ def format_energy_metric(value: object, unit: str = "kWh", signed: bool = False)
     return format_consumption_with_unit(value, unit=unit, signed=signed)
 
 
-def uses_ote_delta_source(df: pd.DataFrame) -> bool:
+def uses_delta_measurements(df: pd.DataFrame) -> bool:
     if df.empty or "zdroj" not in df.columns:
         return False
 
@@ -220,7 +225,7 @@ def uses_ote_delta_source(df: pd.DataFrame) -> bool:
         for value in df["zdroj"]
         if pd.notna(value) and str(value).strip()
     }
-    return sources == {"OTE"}
+    return bool(sources) and all(source.startswith("BINARY_") for source in sources)
 
 
 def build_delta_consumption_summary(df: pd.DataFrame) -> pd.DataFrame:
@@ -237,7 +242,7 @@ def build_delta_consumption_summary(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
-                "Zdroj": "OTE" if uses_ote_delta_source(prepared) else "Delta",
+                "Zdroj": "Delta",
                 "První měření": date_series.min(),
                 "Poslední měření": date_series.max(),
                 "Počet měření": int(date_series.notna().sum()),
@@ -286,16 +291,13 @@ def prepare_measurements(df: pd.DataFrame) -> pd.DataFrame:
     prepared.loc[prepared["stav_celkem"].isna(), "stav_celkem"] = prepared["vt"]
 
     diff_from_total = prepared["stav_celkem"].diff()
-    serial_changed = prepared["seriove_cislo"].ne(prepared["seriove_cislo"].shift())
-    if not serial_changed.empty:
-        serial_changed.iloc[0] = False
     state_reset = (
-        diff_from_total.lt(0).fillna(False)
+        diff_from_total.round(RESET_NEGATIVE_DIFF_ROUND_DECIMALS).lt(-RESET_NEGATIVE_DIFF_THRESHOLD).fillna(False)
         & prepared["stav_celkem"].notna()
         & prepared["stav_celkem"].shift().notna()
     )
     stored_reset = prepared["reset_detected"].map(lambda value: bool(value) if pd.notna(value) else False)
-    reset_detected = state_reset | serial_changed.fillna(False) | stored_reset
+    reset_detected = state_reset | stored_reset
     prepared["reset_detected"] = reset_detected
 
     source_delta_available = prepared["delta"].notna()
@@ -324,21 +326,11 @@ def build_change_table(df: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     previous_row = df.iloc[0]
     for _, row in df.iloc[1:].iterrows():
-        current_serial = row["seriove_cislo"]
-        previous_serial = previous_row["seriove_cislo"]
-        serial_changed = (
-            pd.notna(current_serial)
-            and pd.notna(previous_serial)
-            and current_serial != previous_serial
-        )
         current_state = row["stav_celkem"]
         previous_state = previous_row["stav_celkem"]
-        total_reset = (
-            pd.notna(current_state)
-            and pd.notna(previous_state)
-            and current_state < previous_state
-        )
-        if serial_changed or total_reset:
+        total_reset = has_significant_negative_diff(current_state, previous_state)
+        reset_flag = bool(row.get("reset_detected", False))
+        if total_reset or reset_flag:
             rows.append(
                 {
                     "Datum": previous_row["date"],

@@ -41,7 +41,7 @@ def test_prepare_measurements_uses_pg_delta_when_available():
     assert prepared["kumulovana_spotreba"].tolist() == [0.0, 25.5]
 
 
-def test_prepare_measurements_keeps_ote_delta_only_rows():
+def test_prepare_measurements_keeps_binary_delta_only_rows():
     measurements = pd.DataFrame(
         [
             {
@@ -50,7 +50,7 @@ def test_prepare_measurements_keeps_ote_delta_only_rows():
                 "seriove_cislo": 859182400409180513,
                 "total": None,
                 "delta": 1.25,
-                "zdroj": "OTE",
+                "zdroj": "BINARY_19891",
                 "reset_detected": False,
             },
             {
@@ -59,7 +59,7 @@ def test_prepare_measurements_keeps_ote_delta_only_rows():
                 "seriove_cislo": 859182400409180513,
                 "total": None,
                 "delta": 2.0,
-                "zdroj": "OTE",
+                "zdroj": "BINARY_19891",
                 "reset_detected": False,
             },
         ]
@@ -74,17 +74,46 @@ def test_prepare_measurements_keeps_ote_delta_only_rows():
     assert elektromery_shared.build_change_table(prepared).empty
 
 
-def test_delta_consumption_summary_is_used_for_ote_source():
+def test_prepare_measurements_ignores_small_drop_and_serial_change_without_reset():
     measurements = pd.DataFrame(
         [
             {
                 "date": datetime.datetime(2026, 2, 1, 0, 15),
-                "zdroj": "OTE",
+                "identifikace": "TS2",
+                "seriove_cislo": 1,
+                "total": 28.420,
+                "delta": None,
+                "reset_detected": False,
+            },
+            {
+                "date": datetime.datetime(2026, 2, 1, 0, 30),
+                "identifikace": "TS2",
+                "seriove_cislo": 2,
+                "total": 28.419,
+                "delta": None,
+                "reset_detected": False,
+            },
+        ]
+    )
+
+    prepared = elektromery_shared.prepare_measurements(measurements)
+
+    assert prepared["reset_detected"].tolist() == [False, False]
+    assert prepared["spotreba"].tolist() == [0.0, 0.0]
+    assert elektromery_shared.build_change_table(prepared).empty
+
+
+def test_delta_consumption_summary_is_used_for_binary_source():
+    measurements = pd.DataFrame(
+        [
+            {
+                "date": datetime.datetime(2026, 2, 1, 0, 15),
+                "zdroj": "BINARY_19891",
                 "spotreba": 1.25,
             },
             {
                 "date": datetime.datetime(2026, 2, 1, 0, 30),
-                "zdroj": "OTE",
+                "zdroj": "BINARY_19891",
                 "spotreba": 2.0,
             },
         ]
@@ -92,10 +121,10 @@ def test_delta_consumption_summary_is_used_for_ote_source():
 
     summary = elektromery_shared.build_delta_consumption_summary(measurements)
 
-    assert elektromery_shared.uses_ote_delta_source(measurements) is True
+    assert elektromery_shared.uses_delta_measurements(measurements) is True
     assert summary.to_dict(orient="records") == [
         {
-            "Zdroj": "OTE",
+            "Zdroj": "Delta",
             "První měření": pd.Timestamp("2026-02-01 00:15:00"),
             "Poslední měření": pd.Timestamp("2026-02-01 00:30:00"),
             "Počet měření": 2,

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.time_utils import utc_now_naive
 from core.db.connect import ENGINE_MS, ENGINE_PG
+from moduly.mereni.reset_detection import has_significant_negative_diff
 from moduly.mereni.kalorimetry.database.models import (
     Kalorimetr_areal_Mereni,
     Kalorimetr_areal_Zarizeni,
@@ -653,14 +654,10 @@ def filter_valid_rows(session: Session, rows: list[dict[str, object]], source_na
         for row in sorted(filtered, key=lambda item: (item["identifikace"], item["date"])):
             ident = row["identifikace"]
             previous = previous_by_ident.get(ident)
-            serial_changed = (
-                previous is not None
-                and previous.get("seriove_cislo") is not None
-                and row.get("seriove_cislo") is not None
-                and row["seriove_cislo"] != previous["seriove_cislo"]
-            )
-            state_reset = previous is not None and row["spotreba_energie"] < previous["spotreba_energie"]
-            if serial_changed or state_reset:
+            if previous is not None and has_significant_negative_diff(
+                row["spotreba_energie"],
+                previous["spotreba_energie"],
+            ):
                 row["reset_detected"] = True
 
             if row["platne"]:

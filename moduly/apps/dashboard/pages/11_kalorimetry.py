@@ -30,6 +30,11 @@ from moduly.apps.dashboard.kalorimetry_shared import (
     round_consumption_columns,
 )
 from moduly.apps.dashboard.time_semantics import add_chart_time, time_axis_column
+from moduly.mereni.reset_detection import (
+    RESET_NEGATIVE_DIFF_ROUND_DECIMALS,
+    RESET_NEGATIVE_DIFF_THRESHOLD,
+    has_significant_negative_diff,
+)
 
 
 DEVICE_KEY = "kalorimetry_overview_identifikace"
@@ -108,8 +113,9 @@ def prepare_measurements(df: pd.DataFrame) -> pd.DataFrame:
         return prepared
 
     diff_from_state = prepared["spotreba_energie"].diff()
-    serial_changed = prepared["seriove_cislo"].ne(prepared["seriove_cislo"].shift())
-    computed_reset_detected = diff_from_state.lt(0).fillna(False) | serial_changed.fillna(False)
+    computed_reset_detected = diff_from_state.round(RESET_NEGATIVE_DIFF_ROUND_DECIMALS).lt(
+        -RESET_NEGATIVE_DIFF_THRESHOLD
+    ).fillna(False)
     if "reset_detected" in prepared.columns:
         prepared["reset_detected"] = prepared["reset_detected"].fillna(False).astype(bool) | computed_reset_detected
     else:
@@ -150,10 +156,10 @@ def build_change_table(df: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     previous_row = df.iloc[0]
     for _, row in df.iloc[1:].iterrows():
-        serial_changed = row["seriove_cislo"] != previous_row["seriove_cislo"]
-        state_reset = row["spotreba_energie"] < previous_row["spotreba_energie"]
+        state_reset = has_significant_negative_diff(row["spotreba_energie"], previous_row["spotreba_energie"])
+        reset_flag = bool(row.get("reset_detected", False))
 
-        if serial_changed or state_reset:
+        if state_reset or reset_flag:
             rows.append(
                 {
                     "Datum": previous_row["date"],

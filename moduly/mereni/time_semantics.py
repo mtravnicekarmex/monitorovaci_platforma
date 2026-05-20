@@ -34,13 +34,6 @@ BINARY_TIME_SEMANTICS = MeasurementTimeSemantics(
     timestamp_position=TIMESTAMP_POSITION_START,
 )
 
-OTE_TIME_SEMANTICS = MeasurementTimeSemantics(
-    time_basis=TIME_BASIS_EUROPE_PRAGUE_CIVIL,
-    source_timezone=SOURCE_TIMEZONE_EUROPE_PRAGUE,
-    source_utc_offset_minutes=None,
-    timestamp_position=TIMESTAMP_POSITION_START,
-)
-
 SOFTLINK_TIME_SEMANTICS = MeasurementTimeSemantics(
     time_basis=TIME_BASIS_EUROPE_PRAGUE_CIVIL,
     source_timezone=SOURCE_TIMEZONE_EUROPE_PRAGUE,
@@ -76,8 +69,6 @@ SMARTFUELPASS_TIME_SEMANTICS = MeasurementTimeSemantics(
 def get_default_time_semantics(source_name: str) -> MeasurementTimeSemantics:
     if source_name.startswith("BINARY_"):
         return BINARY_TIME_SEMANTICS
-    if source_name == "OTE":
-        return OTE_TIME_SEMANTICS
     if source_name == "SOFTLINK":
         return SOFTLINK_TIME_SEMANTICS
     if source_name == "SMARTFUELPASS":

@@ -321,6 +321,52 @@ def test_filter_valid_rows_marks_only_first_row_after_reset(monkeypatch):
     assert [row["reset_detected"] for row in rows] == [True, False, False]
 
 
+def test_filter_valid_rows_ignores_small_drop_even_when_serial_changes(monkeypatch):
+    last_valid = SimpleNamespace(
+        spotreba_energie=28.420,
+        date=datetime.datetime(2026, 4, 10, 10, 0, 0),
+        seriove_cislo=1,
+    )
+
+    monkeypatch.setattr(
+        kalorimetry_db_vse,
+        "get_last_measurements",
+        lambda session, affected_idents, *, only_valid=False: {"K1": last_valid},
+    )
+    monkeypatch.setattr(
+        kalorimetry_db_vse,
+        "Session",
+        lambda *_args, **_kwargs: _FakeSession(["K1"]),
+    )
+
+    rows = kalorimetry_db_vse.filter_valid_rows(
+        session=_FakeSession(["K1"]),
+        rows=[
+            {
+                "recid": 1,
+                "identifikace": "K1",
+                "seriove_cislo": 2,
+                "date": datetime.datetime(2026, 4, 10, 10, 15, 0),
+                "spotreba_energie": 28.419,
+                "objem": 1.0,
+                "interval_minutes": 15,
+            },
+            {
+                "recid": 2,
+                "identifikace": "K1",
+                "seriove_cislo": 2,
+                "date": datetime.datetime(2026, 4, 10, 10, 30, 0),
+                "spotreba_energie": 28.500,
+                "objem": 1.1,
+                "interval_minutes": 15,
+            },
+        ],
+        source_name="AREAL",
+    )
+
+    assert [row["reset_detected"] for row in rows] == [False, False]
+
+
 def test_import_measurements_returns_new_outlier_review_ids(monkeypatch):
     prepared_rows = [
         {

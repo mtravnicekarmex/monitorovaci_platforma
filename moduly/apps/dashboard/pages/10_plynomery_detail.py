@@ -29,6 +29,11 @@ from moduly.apps.dashboard.plynomery_shared import (
     round_consumption_columns,
 )
 from moduly.apps.dashboard.time_semantics import add_chart_time, time_axis_column
+from moduly.mereni.reset_detection import (
+    RESET_NEGATIVE_DIFF_ROUND_DECIMALS,
+    RESET_NEGATIVE_DIFF_THRESHOLD,
+    has_significant_negative_diff,
+)
 
 
 GAS_CONSUMPTION_COLOR = "#eab308"
@@ -101,9 +106,10 @@ def prepare_consumption_history(df: pd.DataFrame) -> pd.DataFrame:
         return history_df
 
     diff_from_volume = history_df["objem"].diff()
-    serial_changed = history_df["seriove_cislo"].ne(history_df["seriove_cislo"].shift()).fillna(False)
     stored_reset = history_df["reset_detected"].map(lambda value: bool(value) if pd.notna(value) else False)
-    history_df["reset_detected"] = diff_from_volume.lt(0).fillna(False) | serial_changed | stored_reset
+    history_df["reset_detected"] = diff_from_volume.round(RESET_NEGATIVE_DIFF_ROUND_DECIMALS).lt(
+        -RESET_NEGATIVE_DIFF_THRESHOLD
+    ).fillna(False) | stored_reset
     source_delta_available = history_df["delta"].notna()
     history_df["spotreba"] = diff_from_volume.fillna(0.0)
     history_df.loc[source_delta_available, "spotreba"] = history_df.loc[source_delta_available, "delta"]
@@ -257,9 +263,9 @@ def build_change_table(df: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     previous_row = df.iloc[0]
     for _, row in df.iloc[1:].iterrows():
-        serial_changed = row["seriove_cislo"] != previous_row["seriove_cislo"]
-        volume_reset = row["objem"] < previous_row["objem"]
-        if serial_changed or volume_reset:
+        volume_reset = has_significant_negative_diff(row["objem"], previous_row["objem"])
+        reset_flag = bool(row.get("reset_detected", False))
+        if volume_reset or reset_flag:
             rows.append(
                 {
                     "Datum": previous_row["date"],

@@ -77,34 +77,6 @@ class Elektromer_areal_Mereni(Base):
         return f"{self.date} - {self.identifikace} - {self.total}"
 
 
-class Elektromer_OTE_Mereni(Base):
-    __tablename__ = "Mereni_elektromery_OTE"
-    __table_args__ = (
-        UniqueConstraint("identifikace", "date", name="uq_ele_ote_ident_date"),
-        Index("ix_ele_ote_ident_date", "identifikace", "date"),
-        Index("ix_ele_ote_date", "date"),
-        {"schema": "dbo"},
-    )
-
-    recid: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, nullable=False)
-    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
-    seriove_cislo: Mapped[int] = mapped_column(BigInteger, nullable=True)
-    objem: Mapped[float] = mapped_column(Float, nullable=False)
-    date: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
-    source_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
-    time_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    time_basis: Mapped[str | None] = mapped_column(String(40), nullable=True)
-    source_timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    source_utc_offset_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    time_fold: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    timestamp_position: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    source_file: Mapped[str] = mapped_column(String(255), nullable=True)
-    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=func.now(), nullable=False)
-
-    def __repr__(self) -> str:
-        return f"{self.date} - {self.identifikace} - {self.objem}"
-
-
 class Mereni_elektromery(Base):
     __tablename__ = "Mereni_elektromery_vse"
     __table_args__ = (

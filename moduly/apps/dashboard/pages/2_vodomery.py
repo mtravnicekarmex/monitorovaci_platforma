@@ -32,6 +32,7 @@ from moduly.apps.dashboard.vodomery_shared import (
     round_consumption_columns,
     render_page_styles,
 )
+from moduly.mereni.reset_detection import has_significant_negative_diff
 
 
 SOURCE_FILTER_KEY = "vodomery_overview_source_filter"
@@ -226,11 +227,10 @@ def build_change_table(df: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     previous_row = df.iloc[0]
     for _, row in df.iloc[1:].iterrows():
-        serial_changed = row["seriove_cislo"] != previous_row["seriove_cislo"]
-        volume_reset = row["objem"] < previous_row["objem"]
+        volume_reset = has_significant_negative_diff(row["objem"], previous_row["objem"])
         reset_flag = bool(row["reset_detected"])
 
-        if serial_changed or volume_reset or reset_flag:
+        if volume_reset or reset_flag:
             rows.append(
                 {
                     "Datum": previous_row["date"],

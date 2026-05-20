@@ -412,6 +412,50 @@ def test_filter_valid_rows_marks_only_first_row_after_reset(monkeypatch):
     assert [row["reset_detected"] for row in rows] == [True, False, False]
 
 
+def test_filter_valid_rows_ignores_single_resolution_step_drop(monkeypatch):
+    last_valid = SimpleNamespace(
+        objem=28.420,
+        date=datetime.datetime(2026, 4, 10, 10, 0, 0),
+        seriove_cislo="S1",
+    )
+
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "get_last_measurements",
+        lambda session, affected_idents, *, only_valid=False: {"A": last_valid},
+    )
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "Session",
+        lambda *_args, **_kwargs: _FakeSession(["A"]),
+    )
+
+    rows = vodomery_db_vse.filter_valid_rows(
+        session=_FakeSession(["A"]),
+        rows=[
+            {
+                "recid": 1,
+                "identifikace": "A",
+                "seriove_cislo": "S1",
+                "date": datetime.datetime(2026, 4, 10, 10, 15, 0),
+                "objem": 28.419,
+                "interval_minutes": 15,
+            },
+            {
+                "recid": 2,
+                "identifikace": "A",
+                "seriove_cislo": "S1",
+                "date": datetime.datetime(2026, 4, 10, 10, 30, 0),
+                "objem": 28.500,
+                "interval_minutes": 15,
+            },
+        ],
+        source_name="AREAL",
+    )
+
+    assert [row["reset_detected"] for row in rows] == [False, False]
+
+
 def test_import_measurements_returns_new_outlier_review_ids(monkeypatch):
     prepared_rows = [
         {

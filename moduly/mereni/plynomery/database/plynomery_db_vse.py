@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.time_utils import utc_now_naive
 from core.db.connect import ENGINE_MS, ENGINE_PG
+from moduly.mereni.reset_detection import has_significant_negative_diff
 from moduly.mereni.time_semantics import build_time_columns
 from moduly.mereni.plynomery.alerting.outlier_notifications import process_new_outlier_review_notifications
 from moduly.mereni.plynomery.database.models import (
@@ -534,14 +535,7 @@ def filter_valid_rows(session: Session, rows: list[dict[str, object]], source_na
         for row in sorted(filtered, key=lambda item: (item["identifikace"], item["date"])):
             ident = row["identifikace"]
             previous = previous_by_ident.get(ident)
-            serial_changed = (
-                previous is not None
-                and previous.get("seriove_cislo") is not None
-                and row.get("seriove_cislo") is not None
-                and row["seriove_cislo"] != previous["seriove_cislo"]
-            )
-            volume_reset = previous is not None and row["objem"] < previous["objem"]
-            if serial_changed or volume_reset:
+            if previous is not None and has_significant_negative_diff(row["objem"], previous["objem"]):
                 row["reset_detected"] = True
 
             if row["platne"]:

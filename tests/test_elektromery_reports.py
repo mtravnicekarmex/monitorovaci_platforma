@@ -11,6 +11,27 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from moduly.apps.dashboard import elektromery_reports
 
 
+def test_choose_report_measurement_source_prefers_binary_over_softlink():
+    assert elektromery_reports.choose_report_measurement_source(3, 10) == elektromery_reports.REPORT_SOURCE_BINARY
+
+
+def test_choose_report_measurement_source_falls_back_to_softlink_when_binary_is_missing():
+    assert elektromery_reports.choose_report_measurement_source(0, 10) == elektromery_reports.REPORT_SOURCE_SOFTLINK
+    assert elektromery_reports.choose_report_measurement_source(0, 0) is None
+
+
+def test_choose_report_measurement_source_for_coverage_requires_full_binary_coverage():
+    assert (
+        elektromery_reports.choose_report_measurement_source_for_coverage(2, 3, 3)
+        == elektromery_reports.REPORT_SOURCE_SOFTLINK
+    )
+    assert (
+        elektromery_reports.choose_report_measurement_source_for_coverage(3, 3, 3)
+        == elektromery_reports.REPORT_SOURCE_BINARY
+    )
+    assert elektromery_reports.choose_report_measurement_source_for_coverage(2, 2, 3) is None
+
+
 def _measurement(
     identifikace: str,
     dt: datetime.datetime,
@@ -518,12 +539,14 @@ def test_build_curve_layer_assigns_label_color_and_peak_timestamp():
         index=1,
         curve_df=curve_df,
         selected_identifications=("TS3",),
+        measurement_source=elektromery_reports.REPORT_SOURCE_SOFTLINK,
     )
 
     assert layer.label == "Vrstva 1"
     assert layer.color == "#059669"
     assert layer.fill_color == "#d1fae5"
     assert layer.selected_identifications == ("TS3",)
+    assert layer.measurement_source == elektromery_reports.REPORT_SOURCE_SOFTLINK
     assert layer.curve_rows[0].peak_at == datetime.datetime(2026, 2, 1, 0, 15)
     assert elektromery_reports.curve_layer_legend_label(layer) == "TS3"
 

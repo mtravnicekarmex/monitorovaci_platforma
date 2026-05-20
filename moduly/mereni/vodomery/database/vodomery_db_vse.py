@@ -17,6 +17,7 @@ from moduly.mereni.vodomery.database.outlier_reviews import (
     upsert_outlier_review_candidates,
 )
 from moduly.mereni.vodomery.database.runtime_schema import drop_legacy_identifikace_fk
+from moduly.mereni.reset_detection import has_significant_negative_diff
 from moduly.mereni.time_semantics import build_time_columns
 from core.db.connect import ENGINE_MS, ENGINE_PG
 from app.time_utils import utc_now_naive
@@ -963,7 +964,7 @@ def filter_valid_rows(session, rows, source_name):
             ident = r["identifikace"]
             last = previous_by_ident.get(ident)
 
-            if last and r["objem"] < last["objem"]:
+            if last and has_significant_negative_diff(r["objem"], last["objem"]):
                 r["reset_detected"] = True
 
             previous_by_ident[ident] = {

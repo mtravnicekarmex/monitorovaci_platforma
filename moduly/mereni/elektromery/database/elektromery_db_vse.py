@@ -9,10 +9,10 @@ from sqlalchemy.orm import Session
 
 from core.db.connect import ENGINE_MS, ENGINE_PG
 from moduly.mereni.elektromery.database.models import (
-    Elektromer_OTE_Mereni,
     Elektromer_areal_Mereni,
     Mereni_elektromery,
 )
+from moduly.mereni.reset_detection import has_significant_negative_diff
 from moduly.mereni.elektromery.database.time_semantics import build_time_columns
 
 
@@ -23,7 +23,7 @@ engine_ms = ENGINE_MS
 
 CHUNK_SIZE = 5000
 SOFTLINK_INTERVAL_MINUTES = 1440
-OTE_INTERVAL_MINUTES = 15
+DEFAULT_DELTA_INTERVAL_MINUTES = 15
 MAX_GAP_MULTIPLIER = 2
 MIN_NIGHT_DELTA = 0.01
 
@@ -82,7 +82,7 @@ def ensure_destination_table() -> None:
     if objem_column is not None and not objem_column.get("nullable", True):
         with engine.begin() as conn:
             conn.execute(text('ALTER TABLE monitoring."Mereni_elektromery_vse" ALTER COLUMN objem DROP NOT NULL'))
-        logger.info('Relaxed NOT NULL on monitoring."%s".objem for OTE delta-only rows', expected_table)
+        logger.info('Relaxed NOT NULL on monitoring."%s".objem for delta-only rows', expected_table)
 
     with engine.begin() as conn:
         conn.execute(
@@ -160,45 +160,6 @@ def fetch_from_ms_softlink() -> list[dict[str, object]]:
             "objem": row.total,
             "interval_minutes": SOFTLINK_INTERVAL_MINUTES,
             "platne": True,
-        }
-        for row in rows
-    ]
-
-
-def fetch_from_pg_ote() -> list[dict[str, object]]:
-    with Session(engine) as pg_session:
-        last_recid = get_last_imported_recid(pg_session, "OTE")
-        query = (
-            select(
-                Elektromer_OTE_Mereni.recid,
-                Elektromer_OTE_Mereni.identifikace,
-                Elektromer_OTE_Mereni.seriove_cislo,
-                Elektromer_OTE_Mereni.date,
-                Elektromer_OTE_Mereni.objem,
-            )
-            .where(
-                Elektromer_OTE_Mereni.identifikace.is_not(None),
-                Elektromer_OTE_Mereni.date.is_not(None),
-                Elektromer_OTE_Mereni.objem.is_not(None),
-            )
-            .order_by(Elektromer_OTE_Mereni.recid)
-        )
-        if last_recid is not None:
-            query = query.where(Elektromer_OTE_Mereni.recid > last_recid)
-
-        rows = pg_session.execute(query).all()
-
-    return [
-        {
-            "recid": row.recid,
-            "identifikace": row.identifikace,
-            "seriove_cislo": row.seriove_cislo,
-            "date": row.date,
-            "objem": None,
-            "delta": row.objem,
-            "interval_minutes": OTE_INTERVAL_MINUTES,
-            "platne": True,
-            "delta_source": True,
         }
         for row in rows
     ]
@@ -301,7 +262,7 @@ def filter_valid_rows(session: Session, rows: list[dict[str, object]], source_na
     for row in rows:
         ident = str(row.get("identifikace") or "").strip()
         dt = _to_naive_datetime(row.get("date"))
-        interval = int(row.get("interval_minutes") or OTE_INTERVAL_MINUTES)
+        interval = int(row.get("interval_minutes") or DEFAULT_DELTA_INTERVAL_MINUTES)
         serial = row.get("seriove_cislo")
 
         if not ident or dt is None or interval <= 0:
@@ -369,14 +330,7 @@ def filter_valid_rows(session: Session, rows: list[dict[str, object]], source_na
         for row in sorted((item for item in sanitized if not item.get("delta_source")), key=lambda item: (item["identifikace"], item["date"])):
             ident = row["identifikace"]
             previous = previous_by_ident.get(ident)
-            serial_changed = (
-                previous is not None
-                and previous.get("seriove_cislo") is not None
-                and row.get("seriove_cislo") is not None
-                and row["seriove_cislo"] != previous["seriove_cislo"]
-            )
-            volume_reset = previous is not None and row["objem"] < previous["objem"]
-            if serial_changed or volume_reset:
+            if previous is not None and has_significant_negative_diff(row["objem"], previous["objem"]):
                 row["reset_detected"] = True
 
             if row["platne"]:
@@ -621,11 +575,6 @@ def elektromery_db_import() -> dict[str, object]:
             inserted_softlink = import_measurements(session, "SOFTLINK", rows_softlink)
             logger.info("SOFTLINK inserted into elektromery_vse: %s", len(inserted_softlink["rows"]))
 
-            rows_ote = fetch_from_pg_ote()
-            inserted_ote = import_measurements(session, "OTE", rows_ote)
-            logger.info("OTE inserted into elektromery_vse: %s", len(inserted_ote["rows"]))
-
         return {
             "inserted_softlink": len(inserted_softlink["rows"]),
-            "inserted_ote": len(inserted_ote["rows"]),
         }

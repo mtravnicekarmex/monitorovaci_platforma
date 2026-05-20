@@ -21,6 +21,8 @@ from moduly.apps.dashboard.elektromery_reports import (
     ElektromeryDashboardReportError,
     OteCurveLayer,
     REPORT_PERIOD_OPTIONS,
+    REPORT_SOURCE_BINARY,
+    REPORT_SOURCE_SOFTLINK,
     build_axis_label_format,
     build_axis_tick_times,
     build_charge_session_stripe_dataframe,
@@ -32,6 +34,7 @@ from moduly.apps.dashboard.elektromery_reports import (
     build_ote_pdf_report,
     build_ote_report_pdf_filename,
     build_threshold_exceedance,
+    choose_report_measurement_source_for_coverage,
     curve_layer_color,
     curve_layer_legend_label,
     coerce_curve_layers,
@@ -54,6 +57,8 @@ SHOW_CHARGING_OVERLAY_KEY = "elektromery_reports_show_charging_overlay"
 REPORT_LAYER_COUNT_KEY = "elektromery_reports_layer_count"
 REPORT_LAYER_SELECTION_KEY_PREFIX = "elektromery_reports_layer_selection_"
 REPORT_LAYER_COLOR_KEY_PREFIX = "elektromery_reports_layer_color_"
+REPORT_BINARY_SOURCE_PATTERN = "BINARY_%"
+REPORT_FALLBACK_SOURCE = "SOFTLINK"
 
 
 st.set_page_config(
@@ -83,6 +88,41 @@ def format_energy(value: object, unit: str = "kWh") -> str:
     if abs(numeric_value) < 0.0005:
         numeric_value = 0.0
     return f"{numeric_value:.3f} {unit}"
+
+
+def report_source_label(source: str | None) -> str:
+    if source == REPORT_SOURCE_BINARY:
+        return "BINARY_"
+    if source == REPORT_SOURCE_SOFTLINK:
+        return REPORT_FALLBACK_SOURCE
+    return "-"
+
+
+def _report_source_params() -> dict[str, object]:
+    return {
+        "binary_source_pattern": REPORT_BINARY_SOURCE_PATTERN,
+        "fallback_source": REPORT_FALLBACK_SOURCE,
+    }
+
+
+def _report_allowed_sources_condition() -> str:
+    return "(zdroj LIKE :binary_source_pattern OR zdroj = :fallback_source)"
+
+
+def _report_selected_source_condition(report_source: str) -> str:
+    if report_source == REPORT_SOURCE_BINARY:
+        return (
+            "zdroj LIKE :binary_source_pattern "
+            "AND time_utc >= :period_start_utc "
+            "AND time_utc < :period_end_utc"
+        )
+    if report_source == REPORT_SOURCE_SOFTLINK:
+        return (
+            "zdroj = :fallback_source "
+            "AND time_utc > :period_start_utc "
+            "AND time_utc - make_interval(mins => COALESCE(interval_minutes, 1440)) < :period_end_utc"
+        )
+    raise ValueError(f"Neznamy zdroj reportu: {report_source}")
 
 
 @st.cache_data(ttl=60)
@@ -126,12 +166,12 @@ def load_charge_session_overlay_rows(period_start, period_end) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=60)
-def load_ote_data_bounds() -> dict[str, object]:
+def load_report_data_bounds() -> dict[str, object]:
     session = get_session_pg()
     try:
         row = session.execute(
             text(
-                """
+                f"""
                 SELECT
                     MIN(time_utc) AS date_min,
                     MAX(time_utc) AS date_max,
@@ -143,8 +183,10 @@ def load_ote_data_bounds() -> dict[str, object]:
                     AND identifikace IS NOT NULL
                     AND delta IS NOT NULL
                     AND platne IS TRUE
+                    AND {_report_allowed_sources_condition()}
                 """
-            )
+            ),
+            _report_source_params(),
         ).mappings().one()
         return {
             "date_min": to_prague_naive(row["date_min"]),
@@ -157,21 +199,23 @@ def load_ote_data_bounds() -> dict[str, object]:
 
 
 @st.cache_data(ttl=60)
-def load_ote_identifikace_options() -> tuple[str, ...]:
+def load_report_identifikace_options() -> tuple[str, ...]:
     session = get_session_pg()
     try:
         rows = session.execute(
             text(
-                """
+                f"""
                 SELECT DISTINCT identifikace
                 FROM monitoring."Mereni_elektromery_vse"
                 WHERE
                     identifikace IS NOT NULL
                     AND delta IS NOT NULL
                     AND platne IS TRUE
+                    AND {_report_allowed_sources_condition()}
                 ORDER BY identifikace ASC
                 """
-            )
+            ),
+            _report_source_params(),
         ).mappings().all()
         return tuple(
             str(row["identifikace"]).strip()
@@ -183,8 +227,72 @@ def load_ote_identifikace_options() -> tuple[str, ...]:
 
 
 @st.cache_data(ttl=60)
-def load_ote_measurements(period_start, period_end, selected_identifications: tuple[str, ...] | None = None) -> pd.DataFrame:
+def resolve_report_measurement_source(
+    period_start,
+    period_end,
+    selected_identifications: tuple[str, ...],
+) -> str | None:
+    normalized_identifications = tuple(
+        dict.fromkeys(str(item).strip() for item in selected_identifications if str(item).strip())
+    )
+    if not normalized_identifications:
+        return None
+
+    session = get_session_pg()
+    try:
+        period_start_utc, period_end_utc = local_datetime_range_to_utc(period_start, period_end)
+        statement = text(
+            """
+            SELECT
+                COUNT(DISTINCT identifikace) FILTER (
+                    WHERE
+                        zdroj LIKE :binary_source_pattern
+                        AND time_utc >= :period_start_utc
+                        AND time_utc < :period_end_utc
+                ) AS binary_identification_count,
+                COUNT(DISTINCT identifikace) FILTER (
+                    WHERE
+                        zdroj = :fallback_source
+                        AND time_utc > :period_start_utc
+                        AND time_utc - make_interval(mins => COALESCE(interval_minutes, 1440)) < :period_end_utc
+                ) AS softlink_identification_count
+            FROM monitoring."Mereni_elektromery_vse"
+            WHERE
+                identifikace IS NOT NULL
+                AND delta IS NOT NULL
+                AND platne IS TRUE
+                AND identifikace IN :selected_identifications
+                AND (zdroj LIKE :binary_source_pattern OR zdroj = :fallback_source)
+            """
+        ).bindparams(bindparam("selected_identifications", expanding=True))
+        params = {
+            "period_start_utc": period_start_utc,
+            "period_end_utc": period_end_utc,
+            "selected_identifications": normalized_identifications,
+            **_report_source_params(),
+        }
+        row = session.execute(statement, params).mappings().one()
+        return choose_report_measurement_source_for_coverage(
+            row["binary_identification_count"],
+            row["softlink_identification_count"],
+            len(normalized_identifications),
+        )
+    finally:
+        session.close()
+
+
+@st.cache_data(ttl=60)
+def load_report_measurements(
+    period_start,
+    period_end,
+    selected_identifications: tuple[str, ...] | None = None,
+    report_source: str | None = None,
+) -> pd.DataFrame:
     if selected_identifications is not None and len(selected_identifications) == 0:
+        return pd.DataFrame(
+            columns=["date", "identifikace", "seriove_cislo", "spotreba_kwh", "interval_minutes", "source_file"]
+        )
+    if report_source is None:
         return pd.DataFrame(
             columns=["date", "identifikace", "seriove_cislo", "spotreba_kwh", "interval_minutes", "source_file"]
         )
@@ -192,7 +300,8 @@ def load_ote_measurements(period_start, period_end, selected_identifications: tu
     session = get_session_pg()
     try:
         period_start_utc, period_end_utc = local_datetime_range_to_utc(period_start, period_end)
-        query_text = """
+        source_condition = _report_selected_source_condition(report_source)
+        query_text = f"""
             SELECT
                 time_utc AT TIME ZONE 'Europe/Prague' AS date,
                 identifikace,
@@ -202,15 +311,15 @@ def load_ote_measurements(period_start, period_end, selected_identifications: tu
                 zdroj AS source_file
             FROM monitoring."Mereni_elektromery_vse"
             WHERE
-                time_utc >= :period_start_utc
-                AND time_utc < :period_end_utc
-                AND identifikace IS NOT NULL
+                identifikace IS NOT NULL
                 AND delta IS NOT NULL
                 AND platne IS TRUE
+                AND {source_condition}
         """
         params = {
             "period_start_utc": period_start_utc,
             "period_end_utc": period_end_utc,
+            **_report_source_params(),
         }
         if selected_identifications:
             query_text += " AND identifikace IN :selected_identifications"
@@ -252,6 +361,7 @@ def _curve_layers_to_dataframe(curve_layers: tuple[OteCurveLayer, ...]) -> pd.Da
                     "layer_key": layer.key,
                     "layer_label": layer.label,
                     "layer_legend_label": curve_layer_legend_label(layer),
+                    "layer_source": report_source_label(getattr(layer, "measurement_source", None)),
                     "layer_color": layer.color,
                     "date": row.date,
                     "peak_at": row.peak_at if row.peak_at is not None else row.date,
@@ -266,6 +376,7 @@ def _curve_layers_to_dataframe(curve_layers: tuple[OteCurveLayer, ...]) -> pd.Da
             "layer_key",
             "layer_label",
             "layer_legend_label",
+            "layer_source",
             "layer_color",
             "date",
             "peak_at",
@@ -292,6 +403,7 @@ def build_curve_chart(
     peak_tooltip_needed = False
     tooltip_items = [
         alt.Tooltip("layer_legend_label:N", title="Vrstva"),
+        alt.Tooltip("layer_source:N", title="Zdroj"),
         alt.Tooltip("date:T", title="Interval"),
         alt.Tooltip("spotreba_kwh:Q", title="Spotřeba [kWh]", format=".3f"),
         alt.Tooltip("odber_kw:Q", title="Odběr [kW]", format=".3f"),
@@ -458,6 +570,7 @@ def render_report_result(
     selected_identifications: tuple[str, ...] = (),
     available_identification_count: int = 0,
     measurement_interval_label: str | None = None,
+    report_source: str | None = None,
 ) -> None:
     del interval_curve_df, pdf_bytes, pdf_filename, pdf_error, pdf_variants
     curve_layers = coerce_curve_layers(curve_layers)
@@ -472,6 +585,13 @@ def render_report_result(
     )
     if measurement_interval_label:
         st.caption(f"Intervaly měření: {measurement_interval_label}")
+    layer_source_descriptions = [
+        f"{layer.label}: {report_source_label(getattr(layer, 'measurement_source', None))}"
+        for layer in curve_layers
+        if report_source_label(getattr(layer, "measurement_source", None)) != "-"
+    ]
+    if layer_source_descriptions:
+        st.caption(f"Zdroje vrstev: {', '.join(layer_source_descriptions)}")
     for layer in curve_layers[1:]:
         st.caption(
             f"{layer.label}: {describe_selected_identifications(layer.selected_identifications, total_available_count=available_identification_count, collapse_full_selection=False)}"
@@ -554,6 +674,7 @@ def _build_report_result(
     reserved_power_kw: float | None,
     selected_identifications: tuple[str, ...],
     available_identification_count: int,
+    report_source: str | None,
 ) -> dict[str, object]:
     summary = summarize_report(period_df, curve_df, peak_curve_df=interval_curve_df)
     exceedance_df = build_threshold_exceedance(interval_curve_df, reserved_power_kw)
@@ -606,6 +727,7 @@ def _build_report_result(
         "reserved_power_kw": reserved_power_kw,
         "selected_identifications": selected_identifications,
         "available_identification_count": available_identification_count,
+        "report_source": report_source,
         "measurement_interval_label": measurement_interval_label,
         "summary": summary,
         "exceedance_df": exceedance_df,
@@ -698,12 +820,12 @@ def render_dashboard() -> None:
     st.title("Reporty elektroměrů")
     st.caption(f"Manuální vytvoření reportu z PostgreSQL tabulky `{ELECTROMERY_REPORT_DATA_SOURCE_LABEL}`.")
 
-    bounds = load_ote_data_bounds()
+    bounds = load_report_data_bounds()
     if not bounds["measurement_count"] or bounds["date_min"] is None or bounds["date_max"] is None:
         st.info(f"V tabulce `{ELECTROMERY_REPORT_DATA_SOURCE_LABEL}` zatím nejsou žádná data pro report.")
         return
 
-    identifikace_options = load_ote_identifikace_options()
+    identifikace_options = load_report_identifikace_options()
     if not identifikace_options:
         st.info(f"V tabulce `{ELECTROMERY_REPORT_DATA_SOURCE_LABEL}` nejsou dostupné žádné identifikace odběrných míst.")
         return
@@ -788,11 +910,50 @@ def render_dashboard() -> None:
 
         period_kind = label_to_kind[selected_period_label]
         report_period = resolve_report_period(period_kind, selected_date)
+        additional_layers: list[tuple[int, tuple[str, ...], str]] = []
+        for layer_number in range(1, additional_layer_count + 1):
+            layer_identifications = _normalize_identification_selection(
+                st.session_state.get(_layer_selection_key(layer_number), ())
+            )
+            layer_color = str(st.session_state.get(_layer_color_key(layer_number), curve_layer_color(layer_number)))
+            if not layer_identifications:
+                continue
+            additional_layers.append((layer_number, layer_identifications, layer_color))
         with st.spinner("Vytvářím report a připravuji PDF..."):
-            period_df = load_ote_measurements(
+            report_source = resolve_report_measurement_source(
                 report_period.period_start,
                 report_period.period_end,
                 selected_identifications_tuple,
+            )
+            resolved_additional_layers: list[tuple[int, tuple[str, ...], str, str]] = []
+            skipped_layers: list[str] = []
+            for layer_number, layer_identifications, layer_color in additional_layers:
+                layer_source = resolve_report_measurement_source(
+                    report_period.period_start,
+                    report_period.period_end,
+                    layer_identifications,
+                )
+                if layer_source is None:
+                    skipped_layers.append(curve_layer_label(layer_number))
+                    continue
+                resolved_additional_layers.append((layer_number, layer_identifications, layer_color, layer_source))
+
+            if report_source is None and not resolved_additional_layers:
+                st.session_state.pop(REPORT_RESULT_KEY, None)
+                warning_parts = [
+                    "Pro zvolene obdobi a vybery nejsou dostupna data v jednom zdroji na urovni zadne vrstvy.",
+                    "Kazda vrstva se nacita bud cela z BINARY_, nebo cela ze SOFTLINK.",
+                ]
+                st.warning(" ".join(warning_parts))
+                return
+            if skipped_layers:
+                st.warning(f"Bez dat pro zvolene obdobi: {', '.join(skipped_layers)}.")
+
+            period_df = load_report_measurements(
+                report_period.period_start,
+                report_period.period_end,
+                selected_identifications_tuple,
+                report_source,
             )
             measurement_interval_label = describe_measurement_intervals(period_df)
             interval_curve_df = build_interval_consumption_curve(period_df, report_period)
@@ -804,19 +965,15 @@ def render_dashboard() -> None:
                     curve_df=curve_df,
                     selected_identifications=selected_identifications_tuple,
                     color=main_layer_color,
+                    measurement_source=report_source,
                 )
             ]
-            for layer_number in range(1, additional_layer_count + 1):
-                layer_identifications = _normalize_identification_selection(
-                    st.session_state.get(_layer_selection_key(layer_number), ())
-                )
-                layer_color = str(st.session_state.get(_layer_color_key(layer_number), curve_layer_color(layer_number)))
-                if not layer_identifications:
-                    continue
-                layer_period_df = load_ote_measurements(
+            for layer_number, layer_identifications, layer_color, layer_source in resolved_additional_layers:
+                layer_period_df = load_report_measurements(
                     report_period.period_start,
                     report_period.period_end,
                     layer_identifications,
+                    layer_source,
                 )
                 layer_curve_df = build_consumption_curve(layer_period_df, report_period)
                 curve_layers.append(
@@ -825,11 +982,23 @@ def render_dashboard() -> None:
                         curve_df=layer_curve_df,
                         selected_identifications=layer_identifications,
                         color=layer_color,
+                        measurement_source=layer_source,
                     )
                 )
             period_label = (
                 f"{report_period.label} report | {report_period.date_range_label} | interval měření {measurement_interval_label}"
             )
+            layer_source_labels = tuple(
+                dict.fromkeys(
+                    report_source_label(getattr(layer, "measurement_source", None))
+                    for layer in curve_layers
+                    if report_source_label(getattr(layer, "measurement_source", None)) != "-"
+                )
+            )
+            if len(layer_source_labels) == 1:
+                period_label = f"{period_label} | zdroj {layer_source_labels[0]}"
+            elif layer_source_labels:
+                period_label = f"{period_label} | zdroje vrstev {', '.join(layer_source_labels)}"
             st.session_state[REPORT_RESULT_KEY] = _build_report_result(
                 report_period=report_period,
                 period_label=period_label,
@@ -841,6 +1010,7 @@ def render_dashboard() -> None:
                 reserved_power_kw=reserved_power_kw,
                 selected_identifications=selected_identifications_tuple,
                 available_identification_count=len(identifikace_options),
+                report_source=report_source,
             )
 
     report_result = st.session_state.get(REPORT_RESULT_KEY)

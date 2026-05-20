@@ -24,9 +24,11 @@ REPORT_PERIOD_OPTIONS: dict[str, str] = {
     "year": "Roční",
 }
 ELECTROMERY_REPORT_DATA_SOURCE_LABEL = "monitoring.Mereni_elektromery_vse"
+REPORT_SOURCE_BINARY = "BINARY"
+REPORT_SOURCE_SOFTLINK = "SOFTLINK"
 DEFAULT_MEASUREMENT_INTERVAL_MINUTES = 15
 CANONICAL_CURVE_INTERVAL_MINUTES = DEFAULT_MEASUREMENT_INTERVAL_MINUTES
-OTE_INTERVAL_HOURS = DEFAULT_MEASUREMENT_INTERVAL_MINUTES / 60
+CANONICAL_INTERVAL_HOURS = DEFAULT_MEASUREMENT_INTERVAL_MINUTES / 60
 END_ANCHORED_MEASUREMENT_SOURCES = frozenset({"SOFTLINK"})
 
 _CURVE_COLOR = "#dc2626"
@@ -48,11 +50,55 @@ _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 class ElektromeryDashboardReportError(RuntimeError):
-    """Raised when the dashboard OTE report cannot be rendered."""
+    """Raised when the dashboard elektromery report cannot be rendered."""
+
+
+def choose_report_measurement_source(binary_count: object, softlink_count: object) -> str | None:
+    try:
+        resolved_binary_count = int(binary_count or 0)
+    except (TypeError, ValueError):
+        resolved_binary_count = 0
+    try:
+        resolved_softlink_count = int(softlink_count or 0)
+    except (TypeError, ValueError):
+        resolved_softlink_count = 0
+
+    if resolved_binary_count > 0:
+        return REPORT_SOURCE_BINARY
+    if resolved_softlink_count > 0:
+        return REPORT_SOURCE_SOFTLINK
+    return None
+
+
+def choose_report_measurement_source_for_coverage(
+    binary_identification_count: object,
+    softlink_identification_count: object,
+    required_identification_count: object,
+) -> str | None:
+    try:
+        required_count = int(required_identification_count or 0)
+    except (TypeError, ValueError):
+        required_count = 0
+    if required_count <= 0:
+        return None
+
+    try:
+        resolved_binary_count = int(binary_identification_count or 0)
+    except (TypeError, ValueError):
+        resolved_binary_count = 0
+    try:
+        resolved_softlink_count = int(softlink_identification_count or 0)
+    except (TypeError, ValueError):
+        resolved_softlink_count = 0
+
+    return choose_report_measurement_source(
+        resolved_binary_count if resolved_binary_count >= required_count else 0,
+        resolved_softlink_count if resolved_softlink_count >= required_count else 0,
+    )
 
 
 @dataclass(frozen=True)
-class OteReportPeriod:
+class ElektromeryReportPeriod:
     kind: str
     label: str
     period_start: datetime.datetime
@@ -69,7 +115,7 @@ class OteReportPeriod:
 
 
 @dataclass(frozen=True)
-class OteCurveRow:
+class ElektromeryCurveRow:
     date: datetime.datetime
     spotreba_kwh: float
     odber_kw: float
@@ -78,17 +124,18 @@ class OteCurveRow:
 
 
 @dataclass(frozen=True)
-class OteCurveLayer:
+class ElektromeryCurveLayer:
     key: str
     label: str
     color: str
     fill_color: str
-    curve_rows: tuple[OteCurveRow, ...]
+    curve_rows: tuple[ElektromeryCurveRow, ...]
     selected_identifications: tuple[str, ...] = ()
+    measurement_source: str | None = None
 
 
 @dataclass(frozen=True)
-class OteDeviceSummaryRow:
+class ElektromeryDeviceSummaryRow:
     identifikace: str
     spotreba_kwh: float
     pocet_mereni: int
@@ -96,14 +143,14 @@ class OteDeviceSummaryRow:
 
 
 @dataclass(frozen=True)
-class OteExceedanceRow:
+class ElektromeryExceedanceRow:
     date: datetime.datetime
     odber_kw: float
     prekroceni_kw: float
 
 
 @dataclass(frozen=True)
-class OteChargeOverlayRow:
+class ElektromeryChargeOverlayRow:
     id_relace: str
     overlay_start: datetime.datetime
     overlay_end: datetime.datetime
@@ -115,9 +162,9 @@ class OteChargeOverlayRow:
 
 
 @dataclass(frozen=True)
-class OtePdfReport:
+class ElektromeryPdfReport:
     generated_at: datetime.datetime
-    period: OteReportPeriod
+    period: ElektromeryReportPeriod
     period_label: str
     reserved_power_kw: float | None
     total_consumption_kwh: float
@@ -126,14 +173,23 @@ class OtePdfReport:
     max_power_kw: float | None
     max_power_at: datetime.datetime | None
     exceedance_count: int
-    curve_rows: tuple[OteCurveRow, ...]
-    device_rows: tuple[OteDeviceSummaryRow, ...]
-    exceedance_rows: tuple[OteExceedanceRow, ...]
-    curve_layers: tuple[OteCurveLayer, ...] = ()
-    charge_overlay_rows: tuple[OteChargeOverlayRow, ...] = ()
+    curve_rows: tuple[ElektromeryCurveRow, ...]
+    device_rows: tuple[ElektromeryDeviceSummaryRow, ...]
+    exceedance_rows: tuple[ElektromeryExceedanceRow, ...]
+    curve_layers: tuple[ElektromeryCurveLayer, ...] = ()
+    charge_overlay_rows: tuple[ElektromeryChargeOverlayRow, ...] = ()
     selected_identifications: tuple[str, ...] = ()
     available_identification_count: int | None = None
     measurement_interval_label: str | None = None
+
+
+OteReportPeriod = ElektromeryReportPeriod
+OteCurveRow = ElektromeryCurveRow
+OteCurveLayer = ElektromeryCurveLayer
+OteDeviceSummaryRow = ElektromeryDeviceSummaryRow
+OteExceedanceRow = ElektromeryExceedanceRow
+OteChargeOverlayRow = ElektromeryChargeOverlayRow
+OtePdfReport = ElektromeryPdfReport
 
 
 def _format_charge_overlay_value(value: object, *, unit: str = "", digits: int = 3) -> str:
@@ -165,7 +221,7 @@ def _record_value(record: object, key: str) -> object:
     return getattr(record, key, None)
 
 
-def ote_records_to_dataframe(records: Iterable[object]) -> pd.DataFrame:
+def report_records_to_dataframe(records: Iterable[object]) -> pd.DataFrame:
     def consumption_value(record: object) -> object:
         value = _record_value(record, "spotreba_kwh")
         return _record_value(record, "objem") if value is None else value
@@ -197,6 +253,9 @@ def ote_records_to_dataframe(records: Iterable[object]) -> pd.DataFrame:
     df["source_file"] = df["source_file"].astype("string")
     df = df.sort_values(["date", "identifikace"]).reset_index(drop=True)
     return df
+
+
+ote_records_to_dataframe = report_records_to_dataframe
 
 
 def format_measurement_interval(minutes: object) -> str:
@@ -308,7 +367,7 @@ def filter_measurements_for_period(df: pd.DataFrame, period: OteReportPeriod) ->
 
 def _bucket_hours(period: OteReportPeriod) -> float:
     if period.bucket_frequency == "15min":
-        return OTE_INTERVAL_HOURS
+        return CANONICAL_INTERVAL_HOURS
     if period.bucket_frequency == "h":
         return 1.0
     if period.bucket_frequency == "D":
@@ -903,6 +962,7 @@ def build_curve_layer(
     key: str | None = None,
     label: str | None = None,
     color: str | None = None,
+    measurement_source: str | None = None,
 ) -> OteCurveLayer:
     layer_index = max(int(index), 0)
     resolved_color = _normalize_curve_color(color, fallback=curve_layer_color(layer_index))
@@ -913,6 +973,7 @@ def build_curve_layer(
         fill_color=curve_layer_fill_color(layer_index, resolved_color if color is not None else None),
         curve_rows=_build_curve_rows(curve_df),
         selected_identifications=_normalize_selected_identifications(selected_identifications),
+        measurement_source=measurement_source,
     )
 
 
@@ -934,6 +995,7 @@ def coerce_curve_layers(curve_layers: Iterable[object] | None) -> tuple[OteCurve
                 selected_identifications=_normalize_selected_identifications(
                     getattr(layer, "selected_identifications", ())
                 ),
+                measurement_source=getattr(layer, "measurement_source", None),
             )
         )
     return tuple(normalized_layers)
@@ -954,22 +1016,22 @@ def _resolve_report_curve_layers(report: OtePdfReport) -> tuple[OteCurveLayer, .
     )
 
 
-def build_ote_pdf_report(
+def build_report_pdf(
     *,
-    period: OteReportPeriod,
+    period: ElektromeryReportPeriod,
     period_label: str,
     period_df: pd.DataFrame,
     curve_df: pd.DataFrame,
     device_summary_df: pd.DataFrame,
     reserved_power_kw: float | None,
-    curve_layers: Iterable[OteCurveLayer] | None = None,
+    curve_layers: Iterable[ElektromeryCurveLayer] | None = None,
     peak_curve_df: pd.DataFrame | None = None,
     exceedance_curve_df: pd.DataFrame | None = None,
     charge_overlay_df: pd.DataFrame | None = None,
     generated_at: datetime.datetime | None = None,
     selected_identifications: Iterable[str] | None = None,
     available_identification_count: int | None = None,
-) -> OtePdfReport:
+) -> ElektromeryPdfReport:
     summary = summarize_report(period_df, curve_df, peak_curve_df=peak_curve_df)
     exceedance_df = build_threshold_exceedance(
         curve_df if exceedance_curve_df is None else exceedance_curve_df,
@@ -993,7 +1055,7 @@ def build_ote_pdf_report(
         resolved_curve_layers,
     )
     device_rows = tuple(
-        OteDeviceSummaryRow(
+        ElektromeryDeviceSummaryRow(
             identifikace=str(row.identifikace),
             spotreba_kwh=round(float(row.spotreba_kwh), 3),
             pocet_mereni=int(row.pocet_mereni),
@@ -1002,7 +1064,7 @@ def build_ote_pdf_report(
         for row in report_device_summary_df.itertuples(index=False)
     )
     exceedance_rows = tuple(
-        OteExceedanceRow(
+        ElektromeryExceedanceRow(
             date=pd.to_datetime(row.date).to_pydatetime(),
             odber_kw=round(float(row.odber_kw), 3),
             prekroceni_kw=round(float(row.prekroceni_kw), 3),
@@ -1010,7 +1072,7 @@ def build_ote_pdf_report(
         for row in exceedance_df.itertuples(index=False)
     )
     overlay_rows = tuple(
-        OteChargeOverlayRow(
+        ElektromeryChargeOverlayRow(
             id_relace=str(row.id_relace),
             overlay_start=pd.to_datetime(row.overlay_start).to_pydatetime(),
             overlay_end=pd.to_datetime(row.overlay_end).to_pydatetime(),
@@ -1023,7 +1085,7 @@ def build_ote_pdf_report(
         for row in (charge_overlay_df if charge_overlay_df is not None else pd.DataFrame()).itertuples(index=False)
     )
 
-    return OtePdfReport(
+    return ElektromeryPdfReport(
         generated_at=generated_at or datetime.datetime.now(),
         period=period,
         period_label=period_label,
@@ -1045,7 +1107,10 @@ def build_ote_pdf_report(
     )
 
 
-def build_ote_report_pdf_filename(report: OtePdfReport) -> str:
+build_ote_pdf_report = build_report_pdf
+
+
+def build_report_pdf_filename(report: ElektromeryPdfReport) -> str:
     prefix_by_kind = {
         "day": "Denni",
         "week": "Tydenni",
@@ -1054,6 +1119,9 @@ def build_ote_report_pdf_filename(report: OtePdfReport) -> str:
     }
     prefix = prefix_by_kind.get(report.period.kind, "Report")
     return f"{prefix} report elektromeru - {report.period.date_range_label}.pdf"
+
+
+build_ote_report_pdf_filename = build_report_pdf_filename
 
 
 def _load_playwright_api():
@@ -1480,7 +1548,7 @@ def _build_exceedance_table_html(report: OtePdfReport) -> str:
     )
 
 
-def build_ote_report_html(report: OtePdfReport) -> str:
+def build_report_html(report: ElektromeryPdfReport) -> str:
     armex_logo_data_uri = _load_image_data_uri(_armex_logo_path())
     chart_svg = _build_curve_svg(report)
     reserved_value = (
@@ -1800,6 +1868,9 @@ def build_ote_report_html(report: OtePdfReport) -> str:
 </html>"""
 
 
+build_ote_report_html = build_report_html
+
+
 def _render_pdf_from_html(html: str) -> bytes:
     sync_playwright = _load_playwright_api()
 
@@ -1831,8 +1902,8 @@ def _render_pdf_from_html_windows_worker(html: str) -> bytes:
             asyncio.set_event_loop_policy(original_policy)
 
 
-def render_ote_report_pdf(report: OtePdfReport) -> bytes:
-    html = build_ote_report_html(report)
+def render_report_pdf(report: ElektromeryPdfReport) -> bytes:
+    html = build_report_html(report)
     try:
         if sys.platform == "win32":
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -1848,3 +1919,6 @@ def render_ote_report_pdf(report: OtePdfReport) -> bytes:
         raise ElektromeryDashboardReportError(
             f"PDF report se nepodařilo vytvořit: {exc.__class__.__name__}."
         ) from exc
+
+
+render_ote_report_pdf = render_report_pdf

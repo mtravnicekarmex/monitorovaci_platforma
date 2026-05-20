@@ -14,7 +14,6 @@ from moduly.mereni.plynomery.database.expected_zero import ensure_expected_zero_
 from moduly.mereni.plynomery.database.outlier_reviews import ensure_plynomery_outlier_review_table
 from moduly.mereni.plynomery.alerting.outlier_notifications import ensure_plynomery_outlier_email_delivery_table
 from moduly.mereni.kalorimetry.database.outlier_reviews import ensure_kalorimetry_outlier_review_table
-from moduly.mereni.elektromery.database.hlavni_xlsx_import import ensure_elektromery_ote_table
 from moduly.mereni.elektromery.database.elektromery_db_vse import ensure_elektromery_vse_table
 from moduly.apps.smartfuelpass.database.db_init import ensure_smartfuelpass_tables
 
@@ -60,7 +59,6 @@ def ensure_dashboard_tables() -> None:
     ensure_plynomery_outlier_review_table()
     ensure_plynomery_outlier_email_delivery_table()
     ensure_kalorimetry_outlier_review_table()
-    ensure_elektromery_ote_table()
     ensure_elektromery_vse_table()
     ensure_smartfuelpass_tables()
 

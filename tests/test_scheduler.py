@@ -489,6 +489,9 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
     def fake_import():
         return None
 
+    def fake_binary_import():
+        return {"processed_sources": 0}
+
     def fake_get_runtime_model_version():
         return 2
 
@@ -532,6 +535,7 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
 
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "check_database_availability", fake_check_database_availability)
+    monkeypatch.setattr(scheduler, "sync_changed_binary_meter_sources", fake_binary_import)
     monkeypatch.setattr(scheduler, "vodomery_db_import", fake_import)
     monkeypatch.setattr(scheduler, "get_runtime_model_version", fake_get_runtime_model_version)
     monkeypatch.setattr(scheduler, "get_candidate_model_versions", lambda: (1, 2))
@@ -549,6 +553,7 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
 
     assert [name for name, _, _ in calls] == [
         "fake_check_database_availability",
+        "fake_binary_import",
         "fake_import",
         "fake_get_runtime_model_version",
         "fake_score_new_measurements",
@@ -566,7 +571,7 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
     assert plynomery_alert_payloads == [([101], [202])]
 
 
-def test_daily_job_runs_elektromery_vse_import_after_softlink(monkeypatch):
+def test_daily_job_runs_softlink_monitoring_import_after_softlink(monkeypatch):
     calls = []
 
     def fake_safe_call(fn, *args, **kwargs):
@@ -576,11 +581,8 @@ def test_daily_job_runs_elektromery_vse_import_after_softlink(monkeypatch):
     def fake_softlink_import():
         return None
 
-    def fake_elektromery_import():
-        return {"inserted_softlink": 1, "inserted_ote": 2}
-
-    def fake_binary_import():
-        return {"processed_sources": 0}
+    def fake_softlink_monitoring_import():
+        return {"inserted_softlink": 1}
 
     def fake_meteo_sync():
         return None
@@ -591,8 +593,7 @@ def test_daily_job_runs_elektromery_vse_import_after_softlink(monkeypatch):
     monkeypatch.setattr(scheduler, "_run_database_preflight_or_skip", lambda job_id: None)
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "SOFTLINK_save_to_database_all", fake_softlink_import)
-    monkeypatch.setattr(scheduler, "elektromery_db_import", fake_elektromery_import)
-    monkeypatch.setattr(scheduler, "sync_changed_binary_meter_sources", fake_binary_import)
+    monkeypatch.setattr(scheduler, "elektromery_softlink_monitoring_import", fake_softlink_monitoring_import)
     monkeypatch.setattr(scheduler, "meteo_sync", fake_meteo_sync)
     monkeypatch.setattr(scheduler, "sync_charge_sessions_to_db", fake_sync_charge_sessions_to_db)
 
@@ -600,8 +601,7 @@ def test_daily_job_runs_elektromery_vse_import_after_softlink(monkeypatch):
 
     assert calls == [
         "fake_softlink_import",
-        "fake_elektromery_import",
-        "fake_binary_import",
+        "fake_softlink_monitoring_import",
         "fake_meteo_sync",
         "fake_sync_charge_sessions_to_db",
     ]

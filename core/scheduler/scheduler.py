@@ -571,6 +571,10 @@ def SOFTLINK_save_to_database_all():
     SOFTLINK_to_database_mereni(SOFTLINK_dotaz())
 
 
+def elektromery_softlink_monitoring_import():
+    return elektromery_db_import()
+
+
 def daily_web_monitor_job():
     session = get_session_pg()
     failures = []
@@ -714,13 +718,14 @@ def _run_database_preflight_or_skip(job_id: str) -> SkippedJobResult | None:
 #
 # Přesné časy běhu jsou definované v `core.scheduler.job_schedule`.
 
-# Import vodomeru, scoring, eventy a alerting.
+# Import binarnich elektromeru, vodomeru, scoring, eventy a alerting.
 @locked_job
 def quarter_hour_job():
     preflight_result = _run_database_preflight_or_skip("quarter_hour_job")
     if preflight_result is not None:
         return preflight_result
 
+    safe_call(sync_changed_binary_meter_sources)
     safe_call(vodomery_db_import)
     active_model_version = safe_call(get_runtime_model_version)
     active_event_result = {
@@ -793,7 +798,7 @@ def daily_seven_and_two_job():
     safe_call(daily_web_monitor_job)
 
 
-# Nocni SOFTLINK import, elektromery import, synchronizace meteo dat a SmartFuelPass relaci.
+# Nocni SOFTLINK import, synchronizace meteo dat a SmartFuelPass relaci.
 @locked_job
 def daily_job():
     preflight_result = _run_database_preflight_or_skip("daily_job")
@@ -801,8 +806,7 @@ def daily_job():
         return preflight_result
 
     safe_call(SOFTLINK_save_to_database_all)
-    safe_call(elektromery_db_import)
-    safe_call(sync_changed_binary_meter_sources)
+    safe_call(elektromery_softlink_monitoring_import)
     safe_call(meteo_sync)
     safe_call(sync_charge_sessions_to_db)
 
@@ -1090,10 +1094,10 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             kind="internal_step",
         ),
         ManualRunnableSpec(
-            id="elektromery_db_import",
-            label="Import elektromeru vse",
-            description="Denní import SOFTLINK a OTE elektromernych dat do monitoring.Mereni_elektromery_vse.",
-            run_fn=elektromery_db_import,
+            id="elektromery_softlink_monitoring_import",
+            label="Import SOFTLINK elektromeru do monitoringu",
+            description="Denní import SOFTLINK elektromernych dat do monitoring.Mereni_elektromery_vse.",
+            run_fn=elektromery_softlink_monitoring_import,
             lock_names=("daily_job",),
             is_scheduled=False,
             kind="internal_step",
@@ -1103,7 +1107,7 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             label="Import binarnich elektromeru",
             description="Kontrola binarnich elektromernych souboru a import zmenenych zdroju do monitoring.Mereni_elektromery_vse.",
             run_fn=sync_changed_binary_meter_sources,
-            lock_names=("daily_job",),
+            lock_names=("quarter_hour_job",),
             is_scheduled=False,
             kind="internal_step",
         ),

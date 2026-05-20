@@ -32,7 +32,7 @@ from moduly.apps.dashboard.elektromery_shared import (
     prepare_measurements,
     render_page_styles,
     round_consumption_columns,
-    uses_ote_delta_source,
+    uses_delta_measurements,
 )
 
 
@@ -221,7 +221,7 @@ def build_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 def render_summary_metrics(df: pd.DataFrame) -> None:
     total_consumption = round(float(df["kumulovana_spotreba"].iloc[-1]), 3)
-    label = "Spotřeba za období (delta)" if uses_ote_delta_source(df) else "Spotřeba za období"
+    label = "Spotřeba za období (delta)" if uses_delta_measurements(df) else "Spotřeba za období"
     st.metric(label, format_energy_metric(total_consumption))
 
 
@@ -276,7 +276,7 @@ def build_bar_chart(
 def render_graphs(df: pd.DataFrame, detail_df: pd.DataFrame, detail_level: str) -> None:
     if detail_level == "Ne" or detail_df.empty:
         chart_source_df = round_consumption_columns(df, columns=("stav_celkem", "spotreba"))
-        if uses_ote_delta_source(df):
+        if uses_delta_measurements(df):
             chart_source_df = round_consumption_columns(df, columns=("spotreba", "kumulovana_spotreba"))
             chart_cols = st.columns(2)
             with chart_cols[0]:
@@ -346,7 +346,7 @@ def render_graphs(df: pd.DataFrame, detail_df: pd.DataFrame, detail_level: str) 
 
 
 def render_data_table(df: pd.DataFrame, detail_df: pd.DataFrame, detail_level: str) -> None:
-    if uses_ote_delta_source(df):
+    if uses_delta_measurements(df):
         source_df = df if detail_level == "Ne" or detail_df.empty else detail_df
         table_df = source_df.rename(
             columns={
@@ -492,7 +492,7 @@ def render_dashboard() -> None:
     render_summary_metrics(measurements_df)
 
     with st.container(border=True):
-        if uses_ote_delta_source(measurements_df):
+        if uses_delta_measurements(measurements_df):
             st.subheader("Spotřeba podle delta")
             delta_summary_df = build_delta_consumption_summary(measurements_df)
             delta_summary_df = format_consumption_dataframe(delta_summary_df, columns=("Spotřeba z delta",))

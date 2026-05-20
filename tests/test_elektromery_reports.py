@@ -32,6 +32,45 @@ def test_choose_report_measurement_source_for_coverage_requires_full_binary_cove
     assert elektromery_reports.choose_report_measurement_source_for_coverage(2, 2, 3) is None
 
 
+def test_choose_report_measurement_source_for_coverage_honors_preferred_source():
+    assert (
+        elektromery_reports.choose_report_measurement_source_for_coverage(
+            3,
+            3,
+            3,
+            preferred_source=elektromery_reports.REPORT_SOURCE_SOFTLINK,
+        )
+        == elektromery_reports.REPORT_SOURCE_SOFTLINK
+    )
+    assert (
+        elektromery_reports.choose_report_measurement_source_for_coverage(
+            3,
+            3,
+            3,
+            preferred_source=elektromery_reports.REPORT_SOURCE_BINARY,
+        )
+        == elektromery_reports.REPORT_SOURCE_BINARY
+    )
+    assert (
+        elektromery_reports.choose_report_measurement_source_for_coverage(
+            2,
+            3,
+            3,
+            preferred_source=elektromery_reports.REPORT_SOURCE_BINARY,
+        )
+        is None
+    )
+    assert (
+        elektromery_reports.choose_report_measurement_source_for_coverage(
+            3,
+            2,
+            3,
+            preferred_source=elektromery_reports.REPORT_SOURCE_SOFTLINK,
+        )
+        is None
+    )
+
+
 def _measurement(
     identifikace: str,
     dt: datetime.datetime,

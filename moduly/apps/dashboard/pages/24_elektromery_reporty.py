@@ -57,6 +57,9 @@ SHOW_CHARGING_OVERLAY_KEY = "elektromery_reports_show_charging_overlay"
 REPORT_LAYER_COUNT_KEY = "elektromery_reports_layer_count"
 REPORT_LAYER_SELECTION_KEY_PREFIX = "elektromery_reports_layer_selection_"
 REPORT_LAYER_COLOR_KEY_PREFIX = "elektromery_reports_layer_color_"
+REPORT_LAYER_SOURCE_KEY_PREFIX = "elektromery_reports_layer_source_"
+REPORT_SOURCE_AUTO = "AUTO"
+REPORT_SOURCE_OPTIONS = (REPORT_SOURCE_AUTO, REPORT_SOURCE_BINARY, REPORT_SOURCE_SOFTLINK)
 REPORT_BINARY_SOURCE_PATTERN = "BINARY_%"
 REPORT_FALLBACK_SOURCE = "SOFTLINK"
 
@@ -96,6 +99,18 @@ def report_source_label(source: str | None) -> str:
     if source == REPORT_SOURCE_SOFTLINK:
         return REPORT_FALLBACK_SOURCE
     return "-"
+
+
+def report_source_option_label(source: str) -> str:
+    if source == REPORT_SOURCE_AUTO:
+        return "Automaticky"
+    return report_source_label(source)
+
+
+def _normalize_report_source_preference(source: object) -> str | None:
+    if source in {REPORT_SOURCE_BINARY, REPORT_SOURCE_SOFTLINK}:
+        return str(source)
+    return None
 
 
 def _report_source_params() -> dict[str, object]:
@@ -231,6 +246,7 @@ def resolve_report_measurement_source(
     period_start,
     period_end,
     selected_identifications: tuple[str, ...],
+    preferred_source: str | None = None,
 ) -> str | None:
     normalized_identifications = tuple(
         dict.fromkeys(str(item).strip() for item in selected_identifications if str(item).strip())
@@ -276,6 +292,7 @@ def resolve_report_measurement_source(
             row["binary_identification_count"],
             row["softlink_identification_count"],
             len(normalized_identifications),
+            preferred_source=preferred_source,
         )
     finally:
         session.close()
@@ -344,6 +361,10 @@ def _layer_selection_key(layer_number: int) -> str:
 
 def _layer_color_key(layer_number: int) -> str:
     return f"{REPORT_LAYER_COLOR_KEY_PREFIX}{layer_number}"
+
+
+def _layer_source_key(layer_number: int) -> str:
+    return f"{REPORT_LAYER_SOURCE_KEY_PREFIX}{layer_number}"
 
 
 def _normalize_identification_selection(values: object) -> tuple[str, ...]:
@@ -858,7 +879,15 @@ def render_dashboard() -> None:
             default=list(identifikace_options),
             help=f"Hodnoty jsou načtené jako unikátní `identifikace` z PostgreSQL tabulky `{ELECTROMERY_REPORT_DATA_SOURCE_LABEL}`.",
         )
-    main_layer_meta_cols = st.columns((3.6, 1))
+    main_layer_meta_cols = st.columns((1.2, 1, 3.8))
+    with main_layer_meta_cols[0]:
+        main_layer_source_option = st.selectbox(
+            "Zdroj hlavní vrstvy",
+            options=list(REPORT_SOURCE_OPTIONS),
+            format_func=report_source_option_label,
+            key=_layer_source_key(0),
+            help="Automaticky preferuje BINARY_; pokud pro celou vrstvu není dostupný, použije SOFTLINK.",
+        )
     with main_layer_meta_cols[1]:
         main_layer_color = st.color_picker(
             "Barva hlavní vrstvy",
@@ -877,11 +906,12 @@ def render_dashboard() -> None:
         if st.button("Odebrat vrstvu", disabled=additional_layer_count <= 0, use_container_width=True):
             st.session_state.pop(_layer_selection_key(additional_layer_count), None)
             st.session_state.pop(_layer_color_key(additional_layer_count), None)
+            st.session_state.pop(_layer_source_key(additional_layer_count), None)
             st.session_state[REPORT_LAYER_COUNT_KEY] = max(additional_layer_count - 1, 0)
             st.rerun()
 
     for layer_number in range(1, additional_layer_count + 1):
-        layer_cols = st.columns((3.6, 1))
+        layer_cols = st.columns((2.5, 1.1, 1))
         with layer_cols[0]:
             st.multiselect(
                 curve_layer_label(layer_number),
@@ -891,6 +921,14 @@ def render_dashboard() -> None:
                 help="Další vrstva vykreslí samostatnou křivku ze součtu vybraných odběrných míst.",
             )
         with layer_cols[1]:
+            st.selectbox(
+                f"Zdroj vrstvy {layer_number}",
+                options=list(REPORT_SOURCE_OPTIONS),
+                format_func=report_source_option_label,
+                key=_layer_source_key(layer_number),
+                help="Automaticky preferuje BINARY_; pokud pro celou vrstvu není dostupný, použije SOFTLINK.",
+            )
+        with layer_cols[2]:
             st.color_picker(
                 f"Barva {curve_layer_label(layer_number).lower()}",
                 value=curve_layer_color(layer_number),
@@ -910,31 +948,42 @@ def render_dashboard() -> None:
 
         period_kind = label_to_kind[selected_period_label]
         report_period = resolve_report_period(period_kind, selected_date)
-        additional_layers: list[tuple[int, tuple[str, ...], str]] = []
+        main_layer_source_preference = _normalize_report_source_preference(main_layer_source_option)
+        additional_layers: list[tuple[int, tuple[str, ...], str, str | None]] = []
         for layer_number in range(1, additional_layer_count + 1):
             layer_identifications = _normalize_identification_selection(
                 st.session_state.get(_layer_selection_key(layer_number), ())
             )
             layer_color = str(st.session_state.get(_layer_color_key(layer_number), curve_layer_color(layer_number)))
+            layer_source_preference = _normalize_report_source_preference(
+                st.session_state.get(_layer_source_key(layer_number), REPORT_SOURCE_AUTO)
+            )
             if not layer_identifications:
                 continue
-            additional_layers.append((layer_number, layer_identifications, layer_color))
+            additional_layers.append((layer_number, layer_identifications, layer_color, layer_source_preference))
         with st.spinner("Vytvářím report a připravuji PDF..."):
             report_source = resolve_report_measurement_source(
                 report_period.period_start,
                 report_period.period_end,
                 selected_identifications_tuple,
+                preferred_source=main_layer_source_preference,
             )
             resolved_additional_layers: list[tuple[int, tuple[str, ...], str, str]] = []
             skipped_layers: list[str] = []
-            for layer_number, layer_identifications, layer_color in additional_layers:
+            if report_source is None and main_layer_source_preference is not None:
+                skipped_layers.append(f"Hlavní vrstva ({report_source_label(main_layer_source_preference)})")
+            for layer_number, layer_identifications, layer_color, layer_source_preference in additional_layers:
                 layer_source = resolve_report_measurement_source(
                     report_period.period_start,
                     report_period.period_end,
                     layer_identifications,
+                    preferred_source=layer_source_preference,
                 )
                 if layer_source is None:
-                    skipped_layers.append(curve_layer_label(layer_number))
+                    skipped_label = curve_layer_label(layer_number)
+                    if layer_source_preference is not None:
+                        skipped_label = f"{skipped_label} ({report_source_label(layer_source_preference)})"
+                    skipped_layers.append(skipped_label)
                     continue
                 resolved_additional_layers.append((layer_number, layer_identifications, layer_color, layer_source))
 

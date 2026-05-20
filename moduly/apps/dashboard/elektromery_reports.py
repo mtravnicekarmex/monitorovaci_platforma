@@ -74,6 +74,7 @@ def choose_report_measurement_source_for_coverage(
     binary_identification_count: object,
     softlink_identification_count: object,
     required_identification_count: object,
+    preferred_source: str | None = None,
 ) -> str | None:
     try:
         required_count = int(required_identification_count or 0)
@@ -91,9 +92,17 @@ def choose_report_measurement_source_for_coverage(
     except (TypeError, ValueError):
         resolved_softlink_count = 0
 
+    binary_has_full_coverage = resolved_binary_count >= required_count
+    softlink_has_full_coverage = resolved_softlink_count >= required_count
+
+    if preferred_source == REPORT_SOURCE_BINARY:
+        return REPORT_SOURCE_BINARY if binary_has_full_coverage else None
+    if preferred_source == REPORT_SOURCE_SOFTLINK:
+        return REPORT_SOURCE_SOFTLINK if softlink_has_full_coverage else None
+
     return choose_report_measurement_source(
-        resolved_binary_count if resolved_binary_count >= required_count else 0,
-        resolved_softlink_count if resolved_softlink_count >= required_count else 0,
+        resolved_binary_count if binary_has_full_coverage else 0,
+        resolved_softlink_count if softlink_has_full_coverage else 0,
     )
 
 

@@ -49,6 +49,17 @@ def test_manometry_section_and_page_are_configurable():
 
     assert "manometry" in section_keys
     assert "manometry_overview" in page_keys
+    assert "manometry_list" in page_keys
+
+
+def test_meter_list_pages_are_configurable():
+    page_keys = get_configurable_page_keys(("vodomery", "plynomery", "elektromery", "kalorimetry", "manometry"))
+
+    assert "vodomery_list" in page_keys
+    assert "plynomery_list" in page_keys
+    assert "elektromery_list" in page_keys
+    assert "kalorimetry_list" in page_keys
+    assert "manometry_list" in page_keys
 
 
 def test_nabijecky_section_and_page_are_configurable():
@@ -97,9 +108,21 @@ def test_dashboard_overview_is_first_main_page():
 def test_vodomery_billing_page_is_in_main_navigation_after_branch_overview():
     main_page_keys = [page.key for page in get_dashboard_pages("main")]
 
+    assert "vodomery_list" in main_page_keys
     assert "vodomery_branch_overview" in main_page_keys
     assert "vodomery_billing" in main_page_keys
+    assert main_page_keys.index("vodomery_overview") < main_page_keys.index("vodomery_list")
+    assert main_page_keys.index("vodomery_list") < main_page_keys.index("vodomery_branch_overview")
     assert main_page_keys.index("vodomery_branch_overview") < main_page_keys.index("vodomery_billing")
+
+
+def test_meter_list_pages_are_after_section_overviews():
+    main_page_keys = [page.key for page in get_dashboard_pages("main")]
+
+    assert main_page_keys.index("manometry_overview") < main_page_keys.index("manometry_list")
+    assert main_page_keys.index("plynomery_overview") < main_page_keys.index("plynomery_list")
+    assert main_page_keys.index("elektromery_overview") < main_page_keys.index("elektromery_list")
+    assert main_page_keys.index("kalorimetry_overview") < main_page_keys.index("kalorimetry_list")
 
 
 def test_vodomery_reports_page_is_after_billing():
@@ -116,9 +139,11 @@ def test_plynomery_anomalie_eventy_page_is_between_overview_and_detail():
     main_page_keys = [page.key for page in get_dashboard_pages("main")]
 
     assert "plynomery_overview" in main_page_keys
+    assert "plynomery_list" in main_page_keys
     assert "plynomery_anomalie_eventy" in main_page_keys
     assert "plynomery_detail" in main_page_keys
-    assert main_page_keys.index("plynomery_overview") < main_page_keys.index("plynomery_anomalie_eventy")
+    assert main_page_keys.index("plynomery_overview") < main_page_keys.index("plynomery_list")
+    assert main_page_keys.index("plynomery_list") < main_page_keys.index("plynomery_anomalie_eventy")
     assert main_page_keys.index("plynomery_anomalie_eventy") < main_page_keys.index("plynomery_detail")
 
 
@@ -126,8 +151,11 @@ def test_elektromery_reports_page_is_after_detail():
     main_page_keys = [page.key for page in get_dashboard_pages("main")]
 
     assert "elektromery_import" not in main_page_keys
+    assert "elektromery_list" in main_page_keys
     assert "elektromery_detail" in main_page_keys
     assert "elektromery_reports" in main_page_keys
+    assert main_page_keys.index("elektromery_overview") < main_page_keys.index("elektromery_list")
+    assert main_page_keys.index("elektromery_list") < main_page_keys.index("elektromery_detail")
     assert main_page_keys.index("elektromery_detail") < main_page_keys.index("elektromery_reports")
 
 
@@ -150,6 +178,9 @@ def test_nabijecky_page_is_after_elektromery_pages():
 def test_revize_page_is_after_kalorimetry_pages():
     main_page_keys = [page.key for page in get_dashboard_pages("main")]
 
+    assert "kalorimetry_list" in main_page_keys
     assert "kalorimetry_detail" in main_page_keys
     assert "revize_overview" in main_page_keys
+    assert main_page_keys.index("kalorimetry_overview") < main_page_keys.index("kalorimetry_list")
+    assert main_page_keys.index("kalorimetry_list") < main_page_keys.index("kalorimetry_detail")
     assert main_page_keys.index("kalorimetry_detail") < main_page_keys.index("revize_overview")

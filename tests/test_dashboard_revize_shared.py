@@ -17,6 +17,7 @@ from moduly.apps.dashboard.revize_shared import (
     build_link_uri,
     classify_revize_status,
     filter_revize_dataframe,
+    normalize_revize_payload,
     prepare_revize_dataframe,
 )
 
@@ -118,3 +119,26 @@ def test_build_revize_metrics_counts_statuses_and_missing_files():
 def test_build_link_uri_preserves_http_and_converts_file_paths():
     assert build_link_uri("https://example.test/file.pdf") == "https://example.test/file.pdf"
     assert build_link_uri(r"P:\Holding\Revize\file.pdf") == "file:///P:/Holding/Revize/file.pdf"
+
+
+def test_normalize_revize_payload_validates_required_fields_and_coerces_values():
+    payload = normalize_revize_payload(
+        budova=" F ",
+        datum="18.12.2025",
+        delka_platnosti="1,5",
+        datum_platnosti=datetime.date(2027, 6, 18),
+        typ_zarizeni=" Elektro ",
+        nazev_revize="Revize F",
+        dodavatel="Dodavatel",
+        servisni_smlouva="",
+        soubor=r"P:\revize.pdf",
+        poznamka="",
+    )
+
+    assert payload["budova"] == "F"
+    assert payload["datum"] == datetime.date(2025, 12, 18)
+    assert str(payload["delka_platnosti"]) == "1.5"
+    assert payload["datum_platnosti"] == datetime.date(2027, 6, 18)
+    assert payload["typ_zarizeni"] == "Elektro"
+    assert payload["servisni_smlouva"] is None
+    assert payload["poznamka"] is None

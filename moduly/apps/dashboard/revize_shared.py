@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 from collections.abc import Iterable
+from decimal import Decimal
 from pathlib import Path
 import sys
 
@@ -46,6 +47,94 @@ REVIZE_DISPLAY_COLUMNS = [
     "Servisní smlouva",
     "Poznámka",
 ]
+
+
+def _clean_optional_text(value: object, *, max_length: int | None = None) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if max_length is not None and len(text) > max_length:
+        raise ValueError(f"Hodnota muze mit nejvyse {max_length} znaku.")
+    return text
+
+
+def _clean_required_text(value: object, label: str, *, max_length: int | None = None) -> str:
+    text = _clean_optional_text(value, max_length=max_length)
+    if text is None:
+        raise ValueError(f"Pole {label} je povinne.")
+    return text
+
+
+def _coerce_date(value: object, label: str, *, required: bool = True) -> datetime.date | None:
+    if value in ("", None):
+        if required:
+            raise ValueError(f"Pole {label} je povinne.")
+        return None
+
+    if isinstance(value, datetime.datetime):
+        return value.date()
+    if isinstance(value, datetime.date):
+        return value
+
+    parsed = pd.to_datetime(value, dayfirst=True, errors="coerce")
+    if pd.isna(parsed):
+        if required:
+            raise ValueError(f"Pole {label} nema platny format data.")
+        return None
+    return parsed.date()
+
+
+def normalize_revize_payload(
+    *,
+    budova: object,
+    datum: object,
+    delka_platnosti: object,
+    datum_platnosti: object,
+    typ_zarizeni: object = None,
+    nazev_revize: object = None,
+    dodavatel: object = None,
+    servisni_smlouva: object = None,
+    soubor: object = None,
+    poznamka: object = None,
+) -> dict[str, object]:
+    try:
+        validity_years = Decimal(str(delka_platnosti).strip().replace(",", "."))
+    except Exception as exc:
+        raise ValueError("Pole Delka platnosti musi byt cislo.") from exc
+
+    if validity_years <= 0:
+        raise ValueError("Pole Delka platnosti musi byt kladne cislo.")
+    if validity_years > Decimal("99.99"):
+        raise ValueError("Pole Delka platnosti muze byt nejvyse 99.99.")
+
+    return {
+        "budova": _clean_required_text(budova, "Budova", max_length=50),
+        "datum": _coerce_date(datum, "Datum revize"),
+        "delka_platnosti": validity_years,
+        "datum_platnosti": _coerce_date(datum_platnosti, "Platna do", required=False),
+        "typ_zarizeni": _clean_optional_text(typ_zarizeni, max_length=100),
+        "nazev_revize": _clean_optional_text(nazev_revize, max_length=255),
+        "dodavatel": _clean_optional_text(dodavatel, max_length=200),
+        "servisni_smlouva": _clean_optional_text(servisni_smlouva, max_length=500),
+        "soubor": _clean_optional_text(soubor, max_length=500),
+        "poznamka": _clean_optional_text(poznamka),
+    }
+
+
+def _revize_to_dict(record: Revize) -> dict[str, object]:
+    return {
+        "id": record.id,
+        "budova": record.budova,
+        "datum": record.datum,
+        "delka_platnosti": float(record.delka_platnosti) if record.delka_platnosti is not None else None,
+        "datum_platnosti": record.datum_platnosti,
+        "typ_zarizeni": record.typ_zarizeni,
+        "nazev_revize": record.nazev_revize,
+        "dodavatel": record.dodavatel,
+        "servisni_smlouva": record.servisni_smlouva,
+        "soubor": record.soubor,
+        "poznamka": record.poznamka,
+    }
 
 
 def classify_revize_status(
@@ -234,6 +323,47 @@ def build_revize_metrics(df: pd.DataFrame) -> dict[str, int]:
         "valid": int((df["status"] == REVIZE_STATUS_VALID).sum()),
         "missing_file": int(df["soubor"].fillna("").astype(str).str.strip().eq("").sum()),
     }
+
+
+def load_revize_record_values(revize_id: int) -> dict[str, object] | None:
+    session = get_session_pg()
+    try:
+        record = session.get(Revize, int(revize_id))
+        if record is None:
+            return None
+        return _revize_to_dict(record)
+    finally:
+        session.close()
+
+
+def create_revize_record(payload: dict[str, object]) -> int:
+    session = get_session_pg()
+    try:
+        record = Revize(**payload)
+        session.add(record)
+        session.commit()
+        return int(record.id)
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def update_revize_record(revize_id: int, payload: dict[str, object]) -> None:
+    session = get_session_pg()
+    try:
+        record = session.get(Revize, int(revize_id))
+        if record is None:
+            raise ValueError(f"Revize s ID {revize_id} nebyla nalezena.")
+        for field, value in payload.items():
+            setattr(record, field, value)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 @st.cache_data(ttl=60)

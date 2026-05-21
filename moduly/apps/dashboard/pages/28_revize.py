@@ -9,6 +9,7 @@ import webbrowser
 
 import pandas as pd
 import streamlit as st
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.time_utils import prague_today
 
@@ -17,15 +18,20 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from moduly.apps.dashboard.auth import require_page_access
+from moduly.apps.dashboard.auth import is_admin, require_page_access
+from moduly.apps.dashboard.device_list_shared import _full_dataframe_height
 from moduly.apps.dashboard.revize_shared import (
     REVIZE_DISPLAY_COLUMNS,
     REVIZE_STATUS_ALL,
     REVIZE_STATUS_OPTIONS,
     build_revize_metrics,
+    create_revize_record,
     filter_revize_dataframe,
     load_revize_rows,
+    load_revize_record_values,
+    normalize_revize_payload,
     prepare_revize_dataframe,
+    update_revize_record,
 )
 from moduly.apps.dashboard.vodomery_shared import render_page_styles
 
@@ -45,6 +51,10 @@ DEVICE_TYPES_KEY = "revize_overview_device_types"
 STATUS_KEY = "revize_overview_status"
 SEARCH_KEY = "revize_overview_search"
 APPLIED_KEY = "revize_overview_applied"
+CREATE_OPEN_KEY = "revize_overview_create_open"
+EDIT_OPEN_KEY = "revize_overview_edit_open"
+EDIT_RECORD_ID_KEY = "revize_overview_edit_record_id"
+SUCCESS_KEY = "revize_overview_success"
 
 
 def render_revize_header() -> None:
@@ -278,8 +288,198 @@ def render_row_actions(filtered_df: pd.DataFrame, table_state: object) -> None:
                 st.error(message)
 
 
+def _as_date(value: object, fallback: datetime.date) -> datetime.date:
+    if isinstance(value, pd.Timestamp):
+        if pd.isna(value):
+            return fallback
+        return value.date()
+    if isinstance(value, datetime.datetime):
+        return value.date()
+    if isinstance(value, datetime.date):
+        return value
+    parsed = pd.to_datetime(value, dayfirst=True, errors="coerce")
+    if pd.isna(parsed):
+        return fallback
+    return parsed.date()
+
+
+def _as_text(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    return "" if text == "nan" else text
+
+
+def _default_valid_until(revision_date: datetime.date, validity_years: float) -> datetime.date:
+    return revision_date + datetime.timedelta(days=int(365 * float(validity_years)))
+
+
+def _build_revize_form_payload(
+    *,
+    budova: str,
+    datum: datetime.date,
+    delka_platnosti: float,
+    datum_platnosti: datetime.date,
+    typ_zarizeni: str,
+    nazev_revize: str,
+    dodavatel: str,
+    servisni_smlouva: str,
+    soubor: str,
+    poznamka: str,
+) -> dict[str, object]:
+    return normalize_revize_payload(
+        budova=budova,
+        datum=datum,
+        delka_platnosti=delka_platnosti,
+        datum_platnosti=datum_platnosti,
+        typ_zarizeni=typ_zarizeni,
+        nazev_revize=nazev_revize,
+        dodavatel=dodavatel,
+        servisni_smlouva=servisni_smlouva,
+        soubor=soubor,
+        poznamka=poznamka,
+    )
+
+
+def _clear_revize_cache_and_rerun(message: str) -> None:
+    load_revize_rows.clear()
+    st.session_state[SUCCESS_KEY] = message
+    st.session_state[CREATE_OPEN_KEY] = False
+    st.session_state[EDIT_OPEN_KEY] = False
+    st.session_state.pop(EDIT_RECORD_ID_KEY, None)
+    st.rerun()
+
+
+def _render_revize_form(*, mode: str, record_values: dict[str, object] | None = None) -> None:
+    is_edit = mode == "edit"
+    record_values = record_values or {}
+    today = prague_today()
+    revision_date = _as_date(record_values.get("datum"), today)
+    validity_years = float(record_values.get("delka_platnosti") or 1.0)
+    valid_until = _as_date(
+        record_values.get("datum_platnosti"),
+        _default_valid_until(revision_date, validity_years),
+    )
+
+    st.subheader("Upravit revizi" if is_edit else "Nová revize")
+    with st.form(f"revize_overview_{mode}_form"):
+        row_1 = st.columns(3)
+        with row_1[0]:
+            budova = st.text_input("Budova *", value=_as_text(record_values.get("budova")))
+        with row_1[1]:
+            datum = st.date_input("Datum revize *", value=revision_date)
+        with row_1[2]:
+            delka_platnosti = st.number_input(
+                "Délka platnosti [roky] *",
+                min_value=0.01,
+                max_value=99.99,
+                value=validity_years,
+                step=0.25,
+                format="%.2f",
+            )
+
+        row_2 = st.columns(3)
+        with row_2[0]:
+            datum_platnosti = st.date_input("Platná do", value=valid_until)
+        with row_2[1]:
+            typ_zarizeni = st.text_input("Typ zařízení", value=_as_text(record_values.get("typ_zarizeni")))
+        with row_2[2]:
+            dodavatel = st.text_input("Dodavatel", value=_as_text(record_values.get("dodavatel")))
+
+        nazev_revize = st.text_input("Název revize", value=_as_text(record_values.get("nazev_revize")))
+        soubor = st.text_input("Soubor", value=_as_text(record_values.get("soubor")))
+        servisni_smlouva = st.text_input("Servisní smlouva", value=_as_text(record_values.get("servisni_smlouva")))
+        poznamka = st.text_area("Poznámka", value=_as_text(record_values.get("poznamka")))
+
+        save_pressed = st.form_submit_button(
+            "Uložit změny" if is_edit else "Uložit do DB",
+            type="primary",
+            width="stretch",
+        )
+
+    if not save_pressed:
+        return
+
+    try:
+        payload = _build_revize_form_payload(
+            budova=budova,
+            datum=datum,
+            delka_platnosti=delka_platnosti,
+            datum_platnosti=datum_platnosti,
+            typ_zarizeni=typ_zarizeni,
+            nazev_revize=nazev_revize,
+            dodavatel=dodavatel,
+            servisni_smlouva=servisni_smlouva,
+            soubor=soubor,
+            poznamka=poznamka,
+        )
+        if is_edit:
+            update_revize_record(int(record_values["id"]), payload)
+            _clear_revize_cache_and_rerun("Revize byla upravena.")
+            return
+        create_revize_record(payload)
+        _clear_revize_cache_and_rerun("Nová revize byla uložena.")
+    except ValueError as exc:
+        st.warning(str(exc))
+    except SQLAlchemyError as exc:
+        st.error("Revizi se nepodarilo ulozit do PostgreSQL.")
+        st.exception(exc)
+
+
+def render_revize_edit_controls(filtered_df: pd.DataFrame, table_state: object) -> None:
+    user_is_admin = is_admin()
+    selected_row = resolve_selected_row(filtered_df, table_state)
+
+    create_col, edit_col, spacer_col = st.columns((1, 1, 4))
+    with create_col:
+        if st.button(
+            "Přidat nový",
+            type="primary",
+            width="stretch",
+            disabled=not user_is_admin,
+            help=None if user_is_admin else "Novou revizi může vytvořit pouze admin.",
+        ):
+            st.session_state[CREATE_OPEN_KEY] = True
+            st.session_state[EDIT_OPEN_KEY] = False
+            st.session_state.pop(EDIT_RECORD_ID_KEY, None)
+    with edit_col:
+        if st.button(
+            "Upravit",
+            width="stretch",
+            disabled=not user_is_admin or filtered_df.empty,
+            help=None if user_is_admin else "Revizi může upravit pouze admin.",
+        ):
+            if selected_row is None:
+                st.warning("Vyberte jeden řádek v tabulce pro úpravu.")
+            else:
+                st.session_state[EDIT_RECORD_ID_KEY] = int(selected_row["id"])
+                st.session_state[EDIT_OPEN_KEY] = True
+                st.session_state[CREATE_OPEN_KEY] = False
+    with spacer_col:
+        st.write("")
+
+    if st.session_state.get(CREATE_OPEN_KEY, False):
+        _render_revize_form(mode="create")
+
+    if st.session_state.get(EDIT_OPEN_KEY, False):
+        record_id = st.session_state.get(EDIT_RECORD_ID_KEY)
+        if record_id is None:
+            st.warning("Vyberte jeden řádek v tabulce pro úpravu.")
+            return
+        record_values = load_revize_record_values(int(record_id))
+        if record_values is None:
+            st.warning("Vybraná revize už není dostupná.")
+            st.session_state[EDIT_OPEN_KEY] = False
+            st.session_state.pop(EDIT_RECORD_ID_KEY, None)
+            return
+        _render_revize_form(mode="edit", record_values=record_values)
+
+
 def render_dashboard() -> None:
     render_revize_header()
+    success_message = st.session_state.pop(SUCCESS_KEY, None)
+    if success_message:
+        st.success(str(success_message))
 
     raw_df = load_revize_rows()
     prepared_df = prepare_revize_dataframe(raw_df, reference_date=prague_today())
@@ -327,10 +527,12 @@ def render_dashboard() -> None:
             display_df,
             width="stretch",
             hide_index=True,
+            height=_full_dataframe_height(len(display_df)),
             key="revize_overview_table",
             on_select="rerun",
             selection_mode="single-row",
         )
+        render_revize_edit_controls(filtered_df, table_state)
         render_row_actions(filtered_df, table_state)
 
 

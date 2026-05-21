@@ -38,6 +38,17 @@ SECTIONS: tuple[DashboardSection, ...] = (
 )
 
 
+SIDEBAR_SECTION_ORDER: tuple[str, ...] = (
+    "vodomery",
+    "elektromery",
+    "plynomery",
+    "kalorimetry",
+    "manometry",
+    "nabijecky",
+    "revize",
+)
+
+
 PAGES: tuple[DashboardPage, ...] = (
     DashboardPage(
         key="dashboard_overview",
@@ -173,6 +184,14 @@ PAGES: tuple[DashboardPage, ...] = (
         icon="🧭",
         section_key="elektromery",
         configurable=True,
+    ),
+    DashboardPage(
+        key="elektromery_import",
+        path="pages/23_elektromery_import.py",
+        title="Import",
+        icon="📥",
+        section_key="elektromery",
+        admin_only=True,
     ),
     DashboardPage(
         key="elektromery_reports",

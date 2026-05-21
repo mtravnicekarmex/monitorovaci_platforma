@@ -19,6 +19,7 @@ from moduly.apps.dashboard.api_client import (
 )
 from moduly.apps.dashboard.navigation_config import (
     SECTIONS,
+    SIDEBAR_SECTION_ORDER,
     DashboardPage,
     get_dashboard_pages,
     get_page_definition,
@@ -266,6 +267,18 @@ def render_sidebar_nav(pages: list[object], current_page: object) -> None:
             section_pages.setdefault(definition.section_key, []).append(page)
 
         rendered_any = False
+        sections_by_key = {section.key: section for section in SECTIONS}
+        ordered_sections = [
+            sections_by_key[section_key]
+            for section_key in SIDEBAR_SECTION_ORDER
+            if section_key in sections_by_key
+        ]
+        ordered_sections.extend(
+            section
+            for section in SECTIONS
+            if section.key not in SIDEBAR_SECTION_ORDER
+        )
+
         for page in general_pages:
             st.page_link(
                 page,
@@ -275,7 +288,7 @@ def render_sidebar_nav(pages: list[object], current_page: object) -> None:
             )
             rendered_any = True
 
-        for section in SECTIONS:
+        for section in ordered_sections:
             current_section_pages = section_pages.get(section.key, [])
             if not current_section_pages:
                 continue

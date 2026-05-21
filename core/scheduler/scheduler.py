@@ -33,7 +33,6 @@ from core.scheduler.metrics import SCHEDULER_HEARTBEAT_TTL_SECONDS, get_metrics_
 from decouple import config
 from moduly.mereni.vodomery.database.vodomery_db_vse import vodomery_db_import
 from moduly.mereni.elektromery.database.elektromery_db_vse import elektromery_db_import
-from moduly.mereni.elektromery.database.binary_ts_import import sync_changed_binary_meter_sources
 from moduly.mereni.vodomery.vodomery_prediction import (
     get_candidate_model_versions,
     get_runtime_model_version,
@@ -718,14 +717,13 @@ def _run_database_preflight_or_skip(job_id: str) -> SkippedJobResult | None:
 #
 # Přesné časy běhu jsou definované v `core.scheduler.job_schedule`.
 
-# Import binarnich elektromeru, vodomeru, scoring, eventy a alerting.
+# Import vodomeru, scoring, eventy a alerting.
 @locked_job
 def quarter_hour_job():
     preflight_result = _run_database_preflight_or_skip("quarter_hour_job")
     if preflight_result is not None:
         return preflight_result
 
-    safe_call(sync_changed_binary_meter_sources)
     safe_call(vodomery_db_import)
     active_model_version = safe_call(get_runtime_model_version)
     active_event_result = {
@@ -1099,15 +1097,6 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             description="Denní import SOFTLINK elektromernych dat do monitoring.Mereni_elektromery_vse.",
             run_fn=elektromery_softlink_monitoring_import,
             lock_names=("daily_job",),
-            is_scheduled=False,
-            kind="internal_step",
-        ),
-        ManualRunnableSpec(
-            id="elektromery_binary_import",
-            label="Import binarnich elektromeru",
-            description="Kontrola binarnich elektromernych souboru a import zmenenych zdroju do monitoring.Mereni_elektromery_vse.",
-            run_fn=sync_changed_binary_meter_sources,
-            lock_names=("quarter_hour_job",),
             is_scheduled=False,
             kind="internal_step",
         ),

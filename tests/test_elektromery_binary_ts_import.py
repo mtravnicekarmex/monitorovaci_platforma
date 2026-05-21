@@ -16,6 +16,7 @@ from moduly.mereni.elektromery.database.binary_ts_import import (
     build_delta_source_rows_from_raw_rows,
     parse_binary_meter_file,
     sample_index_to_timestamp,
+    source_key_from_binary_file_name,
     summarize_parsed_file,
 )
 from moduly.mereni.elektromery.database.time_semantics import (
@@ -37,6 +38,11 @@ BINARY_TIME_METADATA = {
 
 def _payload(values):
     return b"".join(struct.pack("<d", value) for value in values)
+
+
+def test_source_key_from_binary_file_name_uses_ts_file_stem():
+    assert source_key_from_binary_file_name("19891.ts") == "19891"
+    assert source_key_from_binary_file_name("data/BINARY_A.ts") == "BINARY_A"
 
 
 def test_parse_binary_meter_file_assigns_timestamps_and_skips_non_finite_values():

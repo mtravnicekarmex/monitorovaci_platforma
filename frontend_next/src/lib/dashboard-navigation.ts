@@ -31,15 +31,15 @@ export const DASHBOARD_SECTIONS: DashboardSectionDefinition[] = [
     requiresDevicePermissions: true,
   },
   {
-    key: "plynomery",
-    label: "Plynomery",
-    description: "Spotreba a detail plynomeru.",
-    requiresDevicePermissions: true,
-  },
-  {
     key: "elektromery",
     label: "Elektromery",
     description: "Spotreba a detail elektromeru.",
+    requiresDevicePermissions: true,
+  },
+  {
+    key: "plynomery",
+    label: "Plynomery",
+    description: "Spotreba a detail plynomeru.",
     requiresDevicePermissions: true,
   },
   {

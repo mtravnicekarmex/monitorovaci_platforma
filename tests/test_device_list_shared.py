@@ -56,3 +56,9 @@ def test_create_device_record_requires_admin():
 def test_update_device_record_requires_admin():
     with pytest.raises(PermissionError):
         device_list_shared.update_device_record("vodomery", "V-1", {}, user_is_admin=False)
+
+
+def test_full_dataframe_height_scales_with_visible_rows():
+    assert device_list_shared._full_dataframe_height(0) == device_list_shared.DATAFRAME_MIN_HEIGHT_PX
+    assert device_list_shared._full_dataframe_height(2) == device_list_shared.DATAFRAME_MIN_HEIGHT_PX
+    assert device_list_shared._full_dataframe_height(20) > device_list_shared.DATAFRAME_MIN_HEIGHT_PX

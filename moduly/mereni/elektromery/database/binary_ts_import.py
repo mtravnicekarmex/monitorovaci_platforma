@@ -88,6 +88,14 @@ class BinaryMeterSourceSyncResult:
 
 
 @dataclass(frozen=True)
+class BinaryMeterManualImportResult:
+    config: BinaryMeterFileConfig
+    import_result: BinaryMeterImportResult
+    backfill_result: BinaryMeterMonitoringBackfillResult | None
+    registered_new_source: bool
+
+
+@dataclass(frozen=True)
 class BinaryMeterMeasurement:
     sample_index: int
     date: datetime
@@ -201,6 +209,15 @@ def read_binary_source(source: bytes | bytearray | BinaryIO | Path | str) -> byt
 def chunked(items, size: int = BINARY_IMPORT_CHUNK_SIZE):
     for start in range(0, len(items), size):
         yield items[start:start + size]
+
+
+def source_key_from_binary_file_name(file_name: str) -> str:
+    source_key = Path(str(file_name or "")).stem.strip()
+    if not source_key:
+        raise ValueError("Binary source file name must contain a source key.")
+    if len(source_key) > 100:
+        raise ValueError("Binary source key must be at most 100 characters.")
+    return source_key
 
 
 def sample_index_to_timestamp(config: BinaryMeterFileConfig, sample_index: int) -> datetime:
@@ -607,6 +624,92 @@ def binary_meter_config_from_mapping(row) -> BinaryMeterFileConfig:
     )
 
 
+def load_binary_meter_config(source_key: str, *, enabled_only: bool = False) -> BinaryMeterFileConfig | None:
+    configs = load_binary_meter_configs(enabled_only=enabled_only)
+    return configs.get(source_key)
+
+
+def load_binary_import_state(source_key: str) -> dict[str, object] | None:
+    ensure_binary_import_tables()
+    with SessionLocalPG() as session:
+        state = _load_import_state(session, source_key)
+        return None if state is None else dict(state)
+
+
+def register_binary_meter_source(
+    config: BinaryMeterFileConfig,
+    *,
+    session: Session | None = None,
+    enabled: bool = True,
+    initial_last_sample_index: int = -1,
+) -> None:
+    ensure_binary_import_tables()
+    owns_session = session is None
+    db_session = session or SessionLocalPG()
+    try:
+        if owns_session:
+            with db_session.begin():
+                _upsert_binary_meter_source_config_in_transaction(db_session, config, enabled=enabled)
+                _initialize_import_state_in_transaction(
+                    db_session,
+                    config.key,
+                    initial_last_sample_index=initial_last_sample_index,
+                )
+            return
+
+        _upsert_binary_meter_source_config_in_transaction(db_session, config, enabled=enabled)
+        _initialize_import_state_in_transaction(
+            db_session,
+            config.key,
+            initial_last_sample_index=initial_last_sample_index,
+        )
+    finally:
+        if owns_session:
+            db_session.close()
+
+
+def manual_import_binary_meter_payload(
+    config: BinaryMeterFileConfig,
+    source: bytes | bytearray | BinaryIO,
+    *,
+    source_mtime: datetime | None = None,
+    register_new_source: bool = False,
+    write_to_monitoring: bool = True,
+) -> BinaryMeterManualImportResult:
+    ensure_binary_import_tables()
+    payload = read_binary_source(source)
+    effective_mtime = source_mtime or datetime.now()
+
+    with SessionLocalPG() as session:
+        with session.begin():
+            if register_new_source:
+                _upsert_binary_meter_source_config_in_transaction(session, config, enabled=True)
+                _initialize_import_state_in_transaction(
+                    session,
+                    config.key,
+                    initial_last_sample_index=-1,
+                )
+
+            import_result = _import_binary_meter_payload_in_transaction(
+                session,
+                config,
+                payload,
+                source_mtime=effective_mtime,
+                write_to_monitoring=write_to_monitoring,
+            )
+
+            backfill_result = None
+            if write_to_monitoring and _count_raw_rows(session, config.key) > _count_monitoring_rows(session, config.source_name):
+                backfill_result = _backfill_binary_source_to_monitoring_in_transaction(session, config)
+
+            return BinaryMeterManualImportResult(
+                config=config,
+                import_result=import_result,
+                backfill_result=backfill_result,
+                registered_new_source=register_new_source,
+            )
+
+
 def import_binary_meter_source(
     config: BinaryMeterFileConfig,
     *,
@@ -758,13 +861,31 @@ def _import_binary_meter_source_in_transaction(
     source_path = config.file_path
     source_stat = source_path.stat()
     source_mtime = datetime.fromtimestamp(source_stat.st_mtime)
+    payload = read_binary_source(source_path)
+    return _import_binary_meter_payload_in_transaction(
+        session,
+        config,
+        payload,
+        source_mtime=source_mtime,
+        write_to_monitoring=write_to_monitoring,
+    )
+
+
+def _import_binary_meter_payload_in_transaction(
+    session: Session,
+    config: BinaryMeterFileConfig,
+    payload: bytes,
+    *,
+    source_mtime: datetime,
+    write_to_monitoring: bool,
+) -> BinaryMeterImportResult:
     previous_last_sample_index = _load_last_sample_index(session, config.key)
     start_sample_index = previous_last_sample_index + 1
-    parsed = parse_binary_meter_file(config, start_sample_index=start_sample_index)
+    parsed = parse_binary_meter_file(config, payload, start_sample_index=start_sample_index)
     inserted_raw = _insert_raw_measurements(
         session,
         parsed,
-        source_byte_size=source_stat.st_size,
+        source_byte_size=len(payload),
         source_mtime=source_mtime,
     )
     monitoring_rows = 0
@@ -784,7 +905,7 @@ def _import_binary_meter_source_in_transaction(
         session,
         config=config,
         last_sample_index=new_last_sample_index,
-        source_byte_size=source_stat.st_size,
+        source_byte_size=len(payload),
         source_mtime=source_mtime,
         status="OK",
         error=None,
@@ -792,7 +913,7 @@ def _import_binary_meter_source_in_transaction(
 
     return BinaryMeterImportResult(
         config=config,
-        byte_size=source_stat.st_size,
+        byte_size=len(payload),
         previous_last_sample_index=previous_last_sample_index,
         new_last_sample_index=new_last_sample_index,
         parsed_sample_count=max(0, parsed.sample_count - start_sample_index),
@@ -858,6 +979,109 @@ def _config_to_db_params(config: BinaryMeterFileConfig) -> dict[str, object]:
         "timestamp_position": config.timestamp_position,
         "time_fold": config.time_fold,
     }
+
+
+def _upsert_binary_meter_source_config_in_transaction(
+    session: Session,
+    config: BinaryMeterFileConfig,
+    *,
+    enabled: bool,
+) -> None:
+    params = {
+        **_config_to_db_params(config),
+        "enabled": enabled,
+    }
+    session.execute(
+        text(
+            """
+            INSERT INTO dbo.elektromery_binary_source_configs (
+                source_key,
+                file_name,
+                identifikace,
+                seriove_cislo,
+                first_timestamp,
+                timestamp_offset_minutes,
+                interval_minutes,
+                source_name,
+                double_format,
+                time_basis,
+                source_timezone,
+                source_utc_offset_minutes,
+                timestamp_position,
+                time_fold,
+                enabled,
+                updated_at
+            )
+            VALUES (
+                :source_key,
+                :file_name,
+                :identifikace,
+                :seriove_cislo,
+                :first_timestamp,
+                :timestamp_offset_minutes,
+                :interval_minutes,
+                :source_name,
+                :double_format,
+                :time_basis,
+                :source_timezone,
+                :source_utc_offset_minutes,
+                :timestamp_position,
+                :time_fold,
+                :enabled,
+                now()
+            )
+            ON CONFLICT (source_key) DO UPDATE SET
+                file_name = EXCLUDED.file_name,
+                identifikace = EXCLUDED.identifikace,
+                seriove_cislo = EXCLUDED.seriove_cislo,
+                first_timestamp = EXCLUDED.first_timestamp,
+                timestamp_offset_minutes = EXCLUDED.timestamp_offset_minutes,
+                interval_minutes = EXCLUDED.interval_minutes,
+                source_name = EXCLUDED.source_name,
+                double_format = EXCLUDED.double_format,
+                time_basis = EXCLUDED.time_basis,
+                source_timezone = EXCLUDED.source_timezone,
+                source_utc_offset_minutes = EXCLUDED.source_utc_offset_minutes,
+                timestamp_position = EXCLUDED.timestamp_position,
+                time_fold = EXCLUDED.time_fold,
+                enabled = EXCLUDED.enabled,
+                updated_at = now()
+            """
+        ),
+        params,
+    )
+
+
+def _initialize_import_state_in_transaction(
+    session: Session,
+    source_key: str,
+    *,
+    initial_last_sample_index: int,
+) -> None:
+    session.execute(
+        text(
+            """
+            INSERT INTO dbo.elektromery_binary_import_state (
+                source_key,
+                last_sample_index,
+                last_status,
+                updated_at
+            )
+            VALUES (
+                :source_key,
+                :last_sample_index,
+                :last_status,
+                now()
+            )
+            ON CONFLICT (source_key) DO NOTHING
+            """
+        ),
+        {
+            "source_key": source_key,
+            "last_sample_index": initial_last_sample_index,
+            "last_status": "REGISTERED",
+        },
+    )
 
 
 def _load_last_sample_index(session: Session, source_key: str) -> int:

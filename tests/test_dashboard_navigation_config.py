@@ -4,12 +4,25 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from moduly.apps.dashboard.navigation_config import (
+    SIDEBAR_SECTION_ORDER,
     get_configurable_page_keys,
     get_configurable_section_keys,
     get_dashboard_pages,
     get_page_definition,
     normalize_page_keys,
 )
+
+
+def test_sidebar_section_order_matches_requested_dashboard_order():
+    assert SIDEBAR_SECTION_ORDER == (
+        "vodomery",
+        "elektromery",
+        "plynomery",
+        "kalorimetry",
+        "manometry",
+        "nabijecky",
+        "revize",
+    )
 
 
 def test_expected_zero_footer_page_was_merged_into_alerting():
@@ -150,13 +163,14 @@ def test_plynomery_anomalie_eventy_page_is_between_overview_and_detail():
 def test_elektromery_reports_page_is_after_detail():
     main_page_keys = [page.key for page in get_dashboard_pages("main")]
 
-    assert "elektromery_import" not in main_page_keys
+    assert "elektromery_import" in main_page_keys
     assert "elektromery_list" in main_page_keys
     assert "elektromery_detail" in main_page_keys
     assert "elektromery_reports" in main_page_keys
     assert main_page_keys.index("elektromery_overview") < main_page_keys.index("elektromery_list")
     assert main_page_keys.index("elektromery_list") < main_page_keys.index("elektromery_detail")
-    assert main_page_keys.index("elektromery_detail") < main_page_keys.index("elektromery_reports")
+    assert main_page_keys.index("elektromery_detail") < main_page_keys.index("elektromery_import")
+    assert main_page_keys.index("elektromery_import") < main_page_keys.index("elektromery_reports")
 
 
 def test_elektromery_new_devices_page_is_after_reports():

@@ -154,6 +154,12 @@ DEVICE_LIST_CONFIGS: dict[str, DeviceListConfig] = {
 }
 
 
+DATAFRAME_HEADER_HEIGHT_PX = 38
+DATAFRAME_ROW_HEIGHT_PX = 35
+DATAFRAME_VERTICAL_PADDING_PX = 6
+DATAFRAME_MIN_HEIGHT_PX = 120
+
+
 def _format_display_value(value: object) -> object:
     if value is None:
         return ""
@@ -282,6 +288,15 @@ def _filter_dataframe(df: pd.DataFrame, search_query: str) -> pd.DataFrame:
 
     haystack = df.astype(str).apply(lambda row: " ".join(row.values).lower(), axis=1)
     return df.loc[haystack.str.contains(normalized_query.lower(), regex=False, na=False)].copy()
+
+
+def _full_dataframe_height(row_count: int) -> int:
+    content_height = (
+        DATAFRAME_HEADER_HEIGHT_PX
+        + max(int(row_count), 1) * DATAFRAME_ROW_HEIGHT_PX
+        + DATAFRAME_VERTICAL_PADDING_PX
+    )
+    return max(DATAFRAME_MIN_HEIGHT_PX, content_height)
 
 
 @st.cache_data(ttl=60)
@@ -568,7 +583,12 @@ def render_device_list_page(meter_key: str) -> None:
     if visible_df.empty:
         st.info("Pro aktuální výběr nejsou v MS databázi žádná zařízení.")
     else:
-        st.dataframe(visible_df, width="stretch", hide_index=True)
+        st.dataframe(
+            visible_df,
+            width="stretch",
+            hide_index=True,
+            height=_full_dataframe_height(len(visible_df)),
+        )
 
     create_open_key = f"{meter_key}_device_list_create_open"
     edit_open_key = f"{meter_key}_device_list_edit_open"

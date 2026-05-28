@@ -25,6 +25,7 @@ from moduly.apps.dashboard.revize_shared import (
     REVIZE_STATUS_ALL,
     REVIZE_STATUS_OPTIONS,
     build_revize_metrics,
+    calculate_revize_valid_until,
     create_revize_record,
     filter_revize_dataframe,
     load_revize_rows,
@@ -303,6 +304,23 @@ def _as_date(value: object, fallback: datetime.date) -> datetime.date:
     return parsed.date()
 
 
+def _as_optional_date(value: object) -> datetime.date | None:
+    if value in ("", None):
+        return None
+    if isinstance(value, pd.Timestamp):
+        if pd.isna(value):
+            return None
+        return value.date()
+    if isinstance(value, datetime.datetime):
+        return value.date()
+    if isinstance(value, datetime.date):
+        return value
+    parsed = pd.to_datetime(value, dayfirst=True, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    return parsed.date()
+
+
 def _as_text(value: object) -> str:
     if value is None:
         return ""
@@ -310,16 +328,43 @@ def _as_text(value: object) -> str:
     return "" if text == "nan" else text
 
 
-def _default_valid_until(revision_date: datetime.date, validity_years: float) -> datetime.date:
-    return revision_date + datetime.timedelta(days=int(365 * float(validity_years)))
+def _infer_validity_months_from_dates(revision_date: datetime.date, valid_until: datetime.date) -> int | None:
+    if valid_until <= revision_date:
+        return None
+
+    approximate_months = (valid_until.year - revision_date.year) * 12 + valid_until.month - revision_date.month
+    candidates = range(max(1, approximate_months - 2), approximate_months + 3)
+    best_candidate = min(
+        candidates,
+        key=lambda months: abs((calculate_revize_valid_until(revision_date, months) - valid_until).days),
+    )
+    return int(best_candidate)
+
+
+def _resolve_validity_months(record_values: dict[str, object], revision_date: datetime.date) -> int:
+    valid_until = _as_optional_date(record_values.get("datum_platnosti"))
+    if valid_until is not None:
+        inferred_months = _infer_validity_months_from_dates(revision_date, valid_until)
+        if inferred_months is not None:
+            return inferred_months
+
+    raw_value = record_values.get("delka_platnosti")
+    if raw_value not in ("", None):
+        try:
+            fallback_months = int(round(float(raw_value)))
+        except (TypeError, ValueError):
+            fallback_months = 12
+        if fallback_months > 0:
+            return fallback_months
+
+    return 12
 
 
 def _build_revize_form_payload(
     *,
     budova: str,
     datum: datetime.date,
-    delka_platnosti: float,
-    datum_platnosti: datetime.date,
+    delka_platnosti: int,
     typ_zarizeni: str,
     nazev_revize: str,
     dodavatel: str,
@@ -331,7 +376,6 @@ def _build_revize_form_payload(
         budova=budova,
         datum=datum,
         delka_platnosti=delka_platnosti,
-        datum_platnosti=datum_platnosti,
         typ_zarizeni=typ_zarizeni,
         nazev_revize=nazev_revize,
         dodavatel=dodavatel,
@@ -355,11 +399,7 @@ def _render_revize_form(*, mode: str, record_values: dict[str, object] | None = 
     record_values = record_values or {}
     today = prague_today()
     revision_date = _as_date(record_values.get("datum"), today)
-    validity_years = float(record_values.get("delka_platnosti") or 1.0)
-    valid_until = _as_date(
-        record_values.get("datum_platnosti"),
-        _default_valid_until(revision_date, validity_years),
-    )
+    validity_months = _resolve_validity_months(record_values, revision_date)
 
     st.subheader("Upravit revizi" if is_edit else "Nová revize")
     with st.form(f"revize_overview_{mode}_form"):
@@ -370,17 +410,21 @@ def _render_revize_form(*, mode: str, record_values: dict[str, object] | None = 
             datum = st.date_input("Datum revize *", value=revision_date)
         with row_1[2]:
             delka_platnosti = st.number_input(
-                "Délka platnosti [roky] *",
-                min_value=0.01,
-                max_value=99.99,
-                value=validity_years,
-                step=0.25,
-                format="%.2f",
+                "Délka platnosti [měsíce] *",
+                min_value=1,
+                max_value=99,
+                value=validity_months,
+                step=1,
             )
 
         row_2 = st.columns(3)
         with row_2[0]:
-            datum_platnosti = st.date_input("Platná do", value=valid_until)
+            datum_platnosti = calculate_revize_valid_until(datum, int(delka_platnosti))
+            st.text_input(
+                "Platná do",
+                value=datum_platnosti.strftime("%d.%m.%Y"),
+                disabled=True,
+            )
         with row_2[1]:
             typ_zarizeni = st.text_input("Typ zařízení", value=_as_text(record_values.get("typ_zarizeni")))
         with row_2[2]:
@@ -404,8 +448,7 @@ def _render_revize_form(*, mode: str, record_values: dict[str, object] | None = 
         payload = _build_revize_form_payload(
             budova=budova,
             datum=datum,
-            delka_platnosti=delka_platnosti,
-            datum_platnosti=datum_platnosti,
+            delka_platnosti=int(delka_platnosti),
             typ_zarizeni=typ_zarizeni,
             nazev_revize=nazev_revize,
             dodavatel=dodavatel,

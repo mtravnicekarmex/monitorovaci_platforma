@@ -566,7 +566,7 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
     assert plynomery_alert_payloads == [([101], [202])]
 
 
-def test_daily_job_runs_softlink_monitoring_import_after_softlink(monkeypatch):
+def test_daily_job_runs_meteo_sync_as_last_step(monkeypatch):
     calls = []
 
     def fake_safe_call(fn, *args, **kwargs):
@@ -597,8 +597,8 @@ def test_daily_job_runs_softlink_monitoring_import_after_softlink(monkeypatch):
     assert calls == [
         "fake_softlink_import",
         "fake_softlink_monitoring_import",
-        "fake_meteo_sync",
         "fake_sync_charge_sessions_to_db",
+        "fake_meteo_sync",
     ]
 
 

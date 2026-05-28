@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import calendar
 from collections.abc import Iterable
 from decimal import Decimal
 from pathlib import Path
@@ -84,12 +85,36 @@ def _coerce_date(value: object, label: str, *, required: bool = True) -> datetim
     return parsed.date()
 
 
+def calculate_revize_valid_until(revision_date: datetime.date, validity_months: int) -> datetime.date:
+    target_month_index = revision_date.month - 1 + int(validity_months)
+    target_year = revision_date.year + target_month_index // 12
+    target_month = target_month_index % 12 + 1
+    target_day = min(revision_date.day, calendar.monthrange(target_year, target_month)[1])
+    return datetime.date(target_year, target_month, target_day)
+
+
+def _coerce_validity_months(value: object) -> Decimal:
+    try:
+        validity_months = Decimal(str(value).strip().replace(",", "."))
+    except Exception as exc:
+        raise ValueError("Pole Delka platnosti musi byt cislo v mesicich.") from exc
+
+    if validity_months <= 0:
+        raise ValueError("Pole Delka platnosti musi byt kladne cislo v mesicich.")
+    if validity_months != validity_months.to_integral_value():
+        raise ValueError("Pole Delka platnosti musi byt cele cislo v mesicich.")
+    if validity_months > Decimal("99"):
+        raise ValueError("Pole Delka platnosti muze byt nejvyse 99 mesicu.")
+
+    return validity_months
+
+
 def normalize_revize_payload(
     *,
     budova: object,
     datum: object,
     delka_platnosti: object,
-    datum_platnosti: object,
+    datum_platnosti: object = None,
     typ_zarizeni: object = None,
     nazev_revize: object = None,
     dodavatel: object = None,
@@ -97,21 +122,14 @@ def normalize_revize_payload(
     soubor: object = None,
     poznamka: object = None,
 ) -> dict[str, object]:
-    try:
-        validity_years = Decimal(str(delka_platnosti).strip().replace(",", "."))
-    except Exception as exc:
-        raise ValueError("Pole Delka platnosti musi byt cislo.") from exc
-
-    if validity_years <= 0:
-        raise ValueError("Pole Delka platnosti musi byt kladne cislo.")
-    if validity_years > Decimal("99.99"):
-        raise ValueError("Pole Delka platnosti muze byt nejvyse 99.99.")
+    normalized_revision_date = _coerce_date(datum, "Datum revize")
+    validity_months = _coerce_validity_months(delka_platnosti)
 
     return {
         "budova": _clean_required_text(budova, "Budova", max_length=50),
-        "datum": _coerce_date(datum, "Datum revize"),
-        "delka_platnosti": validity_years,
-        "datum_platnosti": _coerce_date(datum_platnosti, "Platna do", required=False),
+        "datum": normalized_revision_date,
+        "delka_platnosti": validity_months,
+        "datum_platnosti": calculate_revize_valid_until(normalized_revision_date, int(validity_months)),
         "typ_zarizeni": _clean_optional_text(typ_zarizeni, max_length=100),
         "nazev_revize": _clean_optional_text(nazev_revize, max_length=255),
         "dodavatel": _clean_optional_text(dodavatel, max_length=200),

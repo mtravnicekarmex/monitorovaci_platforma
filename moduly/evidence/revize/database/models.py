@@ -20,7 +20,7 @@ class Revize(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True) # Primární klíč
     budova: Mapped[str] = mapped_column(String(50), nullable=False)  # Budova / objekt, ze kterého soubor pochází
     datum: Mapped[Date] = mapped_column(Date, nullable=False)  # Datum provedení revize
-    delka_platnosti: Mapped[float] = mapped_column(Numeric(4, 2), nullable=False) # Délka platnosti v rocích
+    delka_platnosti: Mapped[float] = mapped_column(Numeric(4, 2), nullable=False) # Délka platnosti v měsících
     datum_platnosti: Mapped[Date] = mapped_column(Date, nullable=True) # Datum platnosti (datum + délka platnosti)
     typ_zarizeni: Mapped[str | None] = mapped_column(String(100), nullable=True) # Typ zařízení, kterého se revize týká
     nazev_revize: Mapped[str | None] = mapped_column(String(255), nullable=True) # Název revize odvozený z Excelu

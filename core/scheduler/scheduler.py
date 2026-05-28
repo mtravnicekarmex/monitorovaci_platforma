@@ -805,8 +805,8 @@ def daily_job():
 
     safe_call(SOFTLINK_save_to_database_all)
     safe_call(elektromery_softlink_monitoring_import)
-    safe_call(meteo_sync)
     safe_call(sync_charge_sessions_to_db)
+    safe_call(meteo_sync)
 
 
 # Denní email report větví vodoměrů.

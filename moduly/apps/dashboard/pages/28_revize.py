@@ -31,6 +31,7 @@ from moduly.apps.dashboard.revize_shared import (
     calculate_revize_valid_until,
     create_revize_record,
     filter_revize_dataframe,
+    load_evidence_device_type_options,
     load_revize_rows,
     load_revize_record_values,
     normalize_revize_payload,
@@ -580,6 +581,24 @@ def _format_linked_device_ids(value: object) -> str:
     return _as_text(value)
 
 
+def _resolve_form_device_type(record_values: dict[str, object], options: list[str]) -> str:
+    current_type = _as_text(record_values.get("typ_zarizeni")).strip()
+    if current_type in options:
+        return current_type
+
+    linked_type = _as_text(record_values.get("linked_device_type")).strip()
+    if linked_type in options:
+        return linked_type
+
+    linked_types = record_values.get("linked_device_types")
+    if isinstance(linked_types, (list, tuple, set)):
+        matching_types = [str(value).strip() for value in linked_types if str(value).strip() in options]
+        if len(matching_types) == 1:
+            return matching_types[0]
+
+    return current_type
+
+
 def _infer_validity_months_from_dates(revision_date: datetime.date, valid_until: datetime.date) -> int | None:
     if valid_until <= revision_date:
         return None
@@ -661,10 +680,8 @@ def _render_revize_form(
         [*REVIZE_BUILDING_OPTIONS, *_dataframe_option_values(prepared_df, "budova")],
         record_values.get("budova"),
     )
-    device_type_options = _build_select_options(
-        _dataframe_option_values(prepared_df, "typ_zarizeni"),
-        record_values.get("typ_zarizeni"),
-    )
+    device_type_options = _build_select_options(load_evidence_device_type_options())
+    selected_device_type = _resolve_form_device_type(record_values, device_type_options)
 
     st.subheader("Upravit revizi" if is_edit else "Nová revize")
     with st.form(f"revize_overview_{mode}_form"):
@@ -699,7 +716,7 @@ def _render_revize_form(
             typ_zarizeni = st.selectbox(
                 "Zařízení",
                 device_type_options,
-                index=_select_option_index(device_type_options, record_values.get("typ_zarizeni")),
+                index=_select_option_index(device_type_options, selected_device_type),
                 format_func=_format_select_option,
             )
         with row_2[2]:

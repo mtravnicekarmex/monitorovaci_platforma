@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 
 import pandas as pd
+import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -19,6 +20,7 @@ from moduly.apps.dashboard.revize_shared import (
     classify_revize_status,
     filter_revize_dataframe,
     normalize_revize_payload,
+    parse_revize_linked_device_ids,
     prepare_revize_dataframe,
 )
 
@@ -148,3 +150,14 @@ def test_normalize_revize_payload_validates_required_fields_and_coerces_values()
     assert payload["typ_zarizeni"] == "Elektro"
     assert payload["servisni_smlouva"] is None
     assert payload["poznamka"] is None
+
+
+def test_parse_revize_linked_device_ids_accepts_single_number_and_lists():
+    assert parse_revize_linked_device_ids("123") == [123]
+    assert parse_revize_linked_device_ids("123, 124\n125;123 126") == [123, 124, 125, 126]
+    assert parse_revize_linked_device_ids("") == []
+
+
+def test_parse_revize_linked_device_ids_rejects_non_numeric_values():
+    with pytest.raises(ValueError, match="Navazane zarizeni"):
+        parse_revize_linked_device_ids("123, abc")

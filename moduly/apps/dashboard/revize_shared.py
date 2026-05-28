@@ -5,6 +5,7 @@ import calendar
 from collections.abc import Iterable
 from decimal import Decimal
 from pathlib import Path
+import re
 import sys
 
 import pandas as pd
@@ -33,6 +34,8 @@ REVIZE_STATUS_OPTIONS = (
     REVIZE_STATUS_VALID,
     REVIZE_STATUS_NO_DATE,
 )
+
+REVIZE_BUILDING_OPTIONS = ("F", "G")
 
 REVIZE_DISPLAY_COLUMNS = [
     "Budova",
@@ -137,6 +140,62 @@ def normalize_revize_payload(
         "soubor": _clean_optional_text(soubor, max_length=500),
         "poznamka": _clean_optional_text(poznamka),
     }
+
+
+def parse_revize_linked_device_ids(value: object) -> list[int]:
+    if value is None:
+        return []
+
+    text = str(value).strip()
+    if not text:
+        return []
+
+    tokens = [token for token in re.split(r"[\s,;]+", text) if token]
+    linked_device_ids: list[int] = []
+    seen: set[int] = set()
+    invalid_tokens: list[str] = []
+
+    for token in tokens:
+        if not token.isdecimal():
+            invalid_tokens.append(token)
+            continue
+
+        device_id = int(token)
+        if device_id <= 0:
+            invalid_tokens.append(token)
+            continue
+        if device_id in seen:
+            continue
+
+        seen.add(device_id)
+        linked_device_ids.append(device_id)
+
+    if invalid_tokens:
+        raise ValueError(
+            "Pole Navazane zarizeni muze obsahovat pouze kladna cela cisla "
+            "oddelena carkou, mezerou nebo novym radkem."
+        )
+
+    return linked_device_ids
+
+
+def _normalize_linked_device_ids(linked_device_ids: Iterable[int] | None) -> list[int]:
+    normalized_ids: list[int] = []
+    seen: set[int] = set()
+
+    for raw_value in linked_device_ids or ():
+        try:
+            device_id = int(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Navazane zarizeni musi byt kladne cele cislo.") from exc
+        if device_id <= 0:
+            raise ValueError("Navazane zarizeni musi byt kladne cele cislo.")
+        if device_id in seen:
+            continue
+        seen.add(device_id)
+        normalized_ids.append(device_id)
+
+    return normalized_ids
 
 
 def _revize_to_dict(record: Revize) -> dict[str, object]:
@@ -349,16 +408,62 @@ def load_revize_record_values(revize_id: int) -> dict[str, object] | None:
         record = session.get(Revize, int(revize_id))
         if record is None:
             return None
-        return _revize_to_dict(record)
+        values = _revize_to_dict(record)
+        values["linked_device_ids"] = [
+            row.zarizeni_id
+            for row in (
+                session.query(Revize_zarizeni)
+                .filter(Revize_zarizeni.revize_id == int(revize_id))
+                .order_by(Revize_zarizeni.zarizeni_id.asc())
+                .all()
+            )
+        ]
+        return values
     finally:
         session.close()
 
 
-def create_revize_record(payload: dict[str, object]) -> int:
+def _replace_revize_device_links(
+    session,
+    *,
+    revize_id: int,
+    typ_zarizeni: object,
+    linked_device_ids: Iterable[int] | None,
+) -> None:
+    normalized_device_ids = _normalize_linked_device_ids(linked_device_ids)
+    normalized_type = _clean_optional_text(typ_zarizeni, max_length=100)
+
+    if normalized_device_ids and normalized_type is None:
+        raise ValueError("Pole Zarizeni je povinne pri zadani navazaneho zarizeni.")
+
+    session.query(Revize_zarizeni).filter(Revize_zarizeni.revize_id == int(revize_id)).delete(
+        synchronize_session=False
+    )
+    if not normalized_device_ids:
+        return
+
+    session.add_all(
+        Revize_zarizeni(
+            revize_id=int(revize_id),
+            typ_zarizeni=normalized_type,
+            zarizeni_id=device_id,
+        )
+        for device_id in normalized_device_ids
+    )
+
+
+def create_revize_record(payload: dict[str, object], linked_device_ids: Iterable[int] | None = None) -> int:
     session = get_session_pg()
     try:
         record = Revize(**payload)
         session.add(record)
+        session.flush()
+        _replace_revize_device_links(
+            session,
+            revize_id=int(record.id),
+            typ_zarizeni=payload.get("typ_zarizeni"),
+            linked_device_ids=linked_device_ids,
+        )
         session.commit()
         return int(record.id)
     except Exception:
@@ -368,7 +473,11 @@ def create_revize_record(payload: dict[str, object]) -> int:
         session.close()
 
 
-def update_revize_record(revize_id: int, payload: dict[str, object]) -> None:
+def update_revize_record(
+    revize_id: int,
+    payload: dict[str, object],
+    linked_device_ids: Iterable[int] | None = None,
+) -> None:
     session = get_session_pg()
     try:
         record = session.get(Revize, int(revize_id))
@@ -376,6 +485,13 @@ def update_revize_record(revize_id: int, payload: dict[str, object]) -> None:
             raise ValueError(f"Revize s ID {revize_id} nebyla nalezena.")
         for field, value in payload.items():
             setattr(record, field, value)
+        if linked_device_ids is not None:
+            _replace_revize_device_links(
+                session,
+                revize_id=int(revize_id),
+                typ_zarizeni=payload.get("typ_zarizeni"),
+                linked_device_ids=linked_device_ids,
+            )
         session.commit()
     except Exception:
         session.rollback()

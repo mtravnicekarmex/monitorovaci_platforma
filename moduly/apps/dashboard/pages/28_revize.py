@@ -1,20 +1,16 @@
 from __future__ import annotations
 
-import base64
 import datetime
-from html import escape
 import io
-import json
 import os
 from pathlib import Path
 import sys
 from urllib.parse import unquote, urlparse
-from urllib.request import url2pathname
+from urllib.request import url2pathname, urlopen
 import webbrowser
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.time_utils import prague_today
@@ -67,8 +63,10 @@ SUCCESS_KEY = "revize_overview_success"
 PDF_PREVIEW_TARGET_KEY = "revize_overview_pdf_preview_target"
 PDF_PREVIEW_NAME_KEY = "revize_overview_pdf_preview_name"
 PDF_PREVIEW_RECORD_ID_KEY = "revize_overview_pdf_preview_record_id"
+PDF_PREVIEW_PAGE_KEY = "revize_overview_pdf_preview_page"
 PDF_PREVIEW_MAX_BYTES = 50 * 1024 * 1024
-PDF_PREVIEW_HEIGHT = 760
+PDF_PREVIEW_FETCH_TIMEOUT_SECONDS = 20
+PDF_PREVIEW_RENDER_SCALE = 1.6
 PATH_PREFIX_FALLBACKS: tuple[tuple[str, str], ...] = (
     ("P:\\", "\\\\SERVER1A\\Company\\"),
 )
@@ -307,90 +305,120 @@ def is_pdf_preview_target(target: object) -> bool:
     return _pdf_target_suffix(normalized_target) == ".pdf"
 
 
-def build_pdf_preview_source(target: str) -> tuple[str | None, str | None, str | None]:
+def load_pdf_preview_bytes(target: str) -> tuple[bytes | None, str | None]:
     normalized_target = target.strip()
     if not normalized_target:
-        return None, None, "PDF soubor není k dispozici."
+        return None, "PDF soubor není k dispozici."
 
     if not is_pdf_preview_target(normalized_target):
-        return None, None, "Náhled je dostupný pouze pro PDF soubory."
+        return None, "Náhled je dostupný pouze pro PDF soubory."
 
     if _is_http_url(normalized_target):
-        return "url", normalized_target, None
+        try:
+            with urlopen(normalized_target, timeout=PDF_PREVIEW_FETCH_TIMEOUT_SECONDS) as response:
+                content_length = response.headers.get("Content-Length")
+                if content_length and int(content_length) > PDF_PREVIEW_MAX_BYTES:
+                    max_mb = PDF_PREVIEW_MAX_BYTES // (1024 * 1024)
+                    return None, f"PDF je příliš velké pro náhled v prohlížeči. Limit je {max_mb} MB."
+                pdf_bytes = response.read(PDF_PREVIEW_MAX_BYTES + 1)
+        except (OSError, ValueError) as exc:
+            return None, f"Nepodařilo se načíst PDF soubor: {exc}"
+
+        if len(pdf_bytes) > PDF_PREVIEW_MAX_BYTES:
+            max_mb = PDF_PREVIEW_MAX_BYTES // (1024 * 1024)
+            return None, f"PDF je příliš velké pro náhled v prohlížeči. Limit je {max_mb} MB."
+        return pdf_bytes, None
 
     pdf_path = _resolve_existing_local_path(normalized_target)
     if pdf_path is None:
-        return None, None, _format_missing_path_message(normalized_target)
+        return None, _format_missing_path_message(normalized_target)
     if not pdf_path.is_file():
-        return None, None, f"Cíl není soubor: {normalized_target}"
+        return None, f"Cíl není soubor: {normalized_target}"
 
     file_size = pdf_path.stat().st_size
     if file_size > PDF_PREVIEW_MAX_BYTES:
         max_mb = PDF_PREVIEW_MAX_BYTES // (1024 * 1024)
-        return None, None, f"PDF je příliš velké pro náhled v prohlížeči. Limit je {max_mb} MB."
+        return None, f"PDF je příliš velké pro náhled v prohlížeči. Limit je {max_mb} MB."
 
-    encoded_pdf = base64.b64encode(pdf_path.read_bytes()).decode("ascii")
-    return "base64", encoded_pdf, None
+    try:
+        return pdf_path.read_bytes(), None
+    except OSError as exc:
+        return None, f"Nepodařilo se načíst PDF soubor: {exc}"
 
 
-def render_pdf_preview(target: str, title: str) -> None:
-    source_kind, source, error_message = build_pdf_preview_source(target)
+def _load_pdfium():
+    try:
+        import pypdfium2 as pdfium
+    except ImportError as exc:
+        raise RuntimeError(
+            "Pro náhled PDF chybí knihovna pypdfium2. Nainstalujte ji přes requirements-api.txt."
+        ) from exc
+    return pdfium
+
+
+@st.cache_data(show_spinner=False, max_entries=20)
+def _pdf_page_count(pdf_bytes: bytes) -> int:
+    pdfium = _load_pdfium()
+    document = pdfium.PdfDocument(pdf_bytes)
+    try:
+        return len(document)
+    finally:
+        document.close()
+
+
+@st.cache_data(show_spinner=False, max_entries=30)
+def _render_pdf_page_png(pdf_bytes: bytes, page_number: int, scale: float) -> bytes:
+    pdfium = _load_pdfium()
+    document = pdfium.PdfDocument(pdf_bytes)
+    page = None
+    try:
+        page = document[page_number - 1]
+        image = page.render(scale=scale).to_pil()
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        return output.getvalue()
+    finally:
+        if page is not None:
+            page.close()
+        document.close()
+
+
+def render_pdf_preview(target: str, _title: str) -> None:
+    pdf_bytes, error_message = load_pdf_preview_bytes(target)
     if error_message:
         st.error(error_message)
         return
-    if source_kind is None or source is None:
+    if pdf_bytes is None:
         return
 
-    safe_title = escape(title or "PDF náhled")
-    if source_kind == "url":
-        safe_source = escape(source, quote=True)
-        components.html(
-            f"""
-            <iframe
-                title="{safe_title}"
-                src="{safe_source}"
-                width="100%"
-                height="{PDF_PREVIEW_HEIGHT}"
-                style="border: 1px solid #d8dee4; border-radius: 6px;"
-            ></iframe>
-            """,
-            height=PDF_PREVIEW_HEIGHT + 24,
-        )
+    try:
+        page_count = _pdf_page_count(pdf_bytes)
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Nepodařilo se připravit PDF náhled: {exc}")
         return
 
-    frame_id = f"revize-pdf-preview-{abs(hash(source))}"
-    source_json = json.dumps(source)
-    title_json = json.dumps(title or "PDF náhled")
-    components.html(
-        f"""
-        <iframe
-            id="{frame_id}"
-            title="{safe_title}"
-            width="100%"
-            height="{PDF_PREVIEW_HEIGHT}"
-            style="border: 1px solid #d8dee4; border-radius: 6px;"
-        ></iframe>
-        <script>
-        (function() {{
-            const base64 = {source_json};
-            const binary = atob(base64);
-            const bytes = new Uint8Array(binary.length);
-            for (let index = 0; index < binary.length; index += 1) {{
-                bytes[index] = binary.charCodeAt(index);
-            }}
-            const blob = new Blob([bytes], {{ type: "application/pdf" }});
-            const url = URL.createObjectURL(blob);
-            const frame = document.getElementById({json.dumps(frame_id)});
-            frame.title = {title_json};
-            frame.src = url;
-            window.addEventListener("beforeunload", function() {{
-                URL.revokeObjectURL(url);
-            }});
-        }})();
-        </script>
-        """,
-        height=PDF_PREVIEW_HEIGHT + 24,
-    )
+    if page_count < 1:
+        st.error("PDF neobsahuje žádnou stránku.")
+        return
+
+    current_page = int(st.session_state.get(PDF_PREVIEW_PAGE_KEY, 1))
+    if current_page < 1 or current_page > page_count:
+        st.session_state[PDF_PREVIEW_PAGE_KEY] = 1
+
+    if page_count > 1:
+        st.slider("Strana PDF", min_value=1, max_value=page_count, step=1, key=PDF_PREVIEW_PAGE_KEY)
+    else:
+        st.session_state[PDF_PREVIEW_PAGE_KEY] = 1
+
+    page_number = int(st.session_state.get(PDF_PREVIEW_PAGE_KEY, 1))
+    try:
+        with st.spinner("Vykresluji náhled PDF..."):
+            image_bytes = _render_pdf_page_png(pdf_bytes, page_number, PDF_PREVIEW_RENDER_SCALE)
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Nepodařilo se vykreslit stránku PDF: {exc}")
+        return
+
+    st.image(image_bytes, caption=f"Strana {page_number} z {page_count}", use_container_width=True)
 
 
 def resolve_selected_row(df: pd.DataFrame, table_state: object) -> pd.Series | None:
@@ -440,6 +468,7 @@ def render_row_actions(filtered_df: pd.DataFrame, table_state: object) -> None:
             st.session_state[PDF_PREVIEW_TARGET_KEY] = selected_file
             st.session_state[PDF_PREVIEW_NAME_KEY] = selected_name
             st.session_state[PDF_PREVIEW_RECORD_ID_KEY] = selected_record_id
+            st.session_state[PDF_PREVIEW_PAGE_KEY] = 1
 
     with file_col:
         if st.button(

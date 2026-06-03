@@ -530,6 +530,9 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
         plynomery_alert_payloads.append((active_event_ids, resolved_event_ids))
         return None
 
+    def fake_manometry_import():
+        return None
+
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "check_database_availability", fake_check_database_availability)
     monkeypatch.setattr(scheduler, "vodomery_db_import", fake_import)
@@ -544,6 +547,7 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
     monkeypatch.setattr(scheduler, "score_new_plynomery_measurements", fake_score_new_plynomery_measurements)
     monkeypatch.setattr(scheduler, "detect_plynomery_events_from_scores", fake_detect_plynomery_events_from_scores)
     monkeypatch.setattr(scheduler, "process_plynomery_alerts", fake_process_plynomery_alerts)
+    monkeypatch.setattr(scheduler, "manometry_db_import", fake_manometry_import)
 
     scheduler.quarter_hour_job()
 
@@ -561,6 +565,7 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
         "fake_score_new_plynomery_measurements",
         "fake_detect_plynomery_events_from_scores",
         "fake_process_plynomery_alerts",
+        "fake_manometry_import",
     ]
     assert alert_payloads == [([2], [20])]
     assert plynomery_alert_payloads == [([101], [202])]
@@ -710,6 +715,15 @@ def test_daily_job_schedule_description_mentions_smartfuelpass_sync():
     daily_job_spec = next(job_spec for job_spec in get_scheduler_job_specs() if job_spec.id == "daily_job")
 
     assert "SmartFuelPass" in daily_job_spec.description
+
+
+def test_quarter_hour_schedule_and_manual_specs_include_manometry_import():
+    quarter_hour_spec = next(job_spec for job_spec in get_scheduler_job_specs() if job_spec.id == "quarter_hour_job")
+    manual_specs = scheduler.get_manual_run_specs()
+
+    assert "manometru" in quarter_hour_spec.description
+    assert manual_specs["manometry_db_import"].run_fn is scheduler.manometry_db_import
+    assert manual_specs["manometry_db_import"].lock_names == ("quarter_hour_job",)
 
 
 def test_main_scheduler_registers_monthly_and_daily_report_jobs(monkeypatch, fake_metrics_store):

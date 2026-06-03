@@ -33,6 +33,7 @@ from core.scheduler.metrics import SCHEDULER_HEARTBEAT_TTL_SECONDS, get_metrics_
 from decouple import config
 from moduly.mereni.vodomery.database.vodomery_db_vse import vodomery_db_import
 from moduly.mereni.elektromery.database.elektromery_db_vse import elektromery_db_import
+from moduly.mereni.manometry.database.manometry_db_vse import manometry_db_import
 from moduly.mereni.vodomery.vodomery_prediction import (
     get_candidate_model_versions,
     get_runtime_model_version,
@@ -774,6 +775,7 @@ def quarter_hour_job():
         active_event_ids=active_plynomery_event_result.get("active_event_ids", []),
         resolved_event_ids=active_plynomery_event_result.get("resolved_event_ids", []),
     )
+    safe_call(manometry_db_import)
 
 
 # Hodinový import SCVK vodoměrů.
@@ -1060,6 +1062,15 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             label="Zpracovani alertu plynomeru",
             description="Zpracovani plynomernych alertu pro aktivni model vcetne potrebneho score a event detection.",
             run_fn=_run_plynomery_alerting_step,
+            lock_names=("quarter_hour_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="manometry_db_import",
+            label="Import manometru",
+            description="Import aktualnich tlakovych mereni manometru do monitoring.Mereni_manometry_vse.",
+            run_fn=manometry_db_import,
             lock_names=("quarter_hour_job",),
             is_scheduled=False,
             kind="internal_step",

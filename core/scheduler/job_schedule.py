@@ -36,7 +36,7 @@ SCHEDULER_JOB_SPECS: tuple[SchedulerJobSpec, ...] = (
     SchedulerJobSpec(
         id="quarter_hour_job",
         label="Quarter hour",
-        description="Import binarnich elektromeru, import vodomeru, scoring, eventy a alerting.",
+        description="Import vodomeru, plynomeru a manometru, scoring, eventy a alerting.",
         trigger_kwargs={"minute": "5,16,35,47", "second": 5},
     ),
     SchedulerJobSpec(

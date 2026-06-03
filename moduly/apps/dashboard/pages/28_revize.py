@@ -66,6 +66,7 @@ PDF_PREVIEW_NAME_KEY = "revize_overview_pdf_preview_name"
 PDF_PREVIEW_RECORD_ID_KEY = "revize_overview_pdf_preview_record_id"
 PDF_PREVIEW_PAGE_KEY = "revize_overview_pdf_preview_page"
 PDF_PREVIEW_MAX_BYTES = 50 * 1024 * 1024
+PDF_DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024
 PDF_PREVIEW_FETCH_TIMEOUT_SECONDS = 20
 PDF_PREVIEW_RENDER_SCALE = 1.6
 PATH_PREFIX_FALLBACKS: tuple[tuple[str, str], ...] = (
@@ -347,6 +348,64 @@ def load_pdf_preview_bytes(target: str) -> tuple[bytes | None, str | None]:
         return None, f"Nepodařilo se načíst PDF soubor: {exc}"
 
 
+def _file_name_from_target(target: str, resolved_path: Path | None = None) -> str:
+    if resolved_path is not None:
+        file_name = resolved_path.name
+    elif _is_http_url(target) or _is_file_uri(target):
+        file_name = Path(unquote(urlparse(target).path)).name
+    else:
+        file_name = Path(target).name
+
+    if not file_name:
+        return "revize.pdf"
+    if Path(file_name).suffix.casefold() != ".pdf":
+        return f"{file_name}.pdf"
+    return file_name
+
+
+def load_pdf_download_data(target: str) -> tuple[bytes | None, str, str | None]:
+    normalized_target = target.strip()
+    if not normalized_target:
+        return None, "revize.pdf", "PDF soubor není k dispozici."
+
+    if not is_pdf_preview_target(normalized_target):
+        return None, "revize.pdf", "Uložit lze pouze PDF soubor ze sloupce Soubor."
+
+    if _is_http_url(normalized_target):
+        file_name = _file_name_from_target(normalized_target)
+        try:
+            with urlopen(normalized_target, timeout=PDF_PREVIEW_FETCH_TIMEOUT_SECONDS) as response:
+                content_length = response.headers.get("Content-Length")
+                if content_length and int(content_length) > PDF_DOWNLOAD_MAX_BYTES:
+                    max_mb = PDF_DOWNLOAD_MAX_BYTES // (1024 * 1024)
+                    return None, file_name, f"PDF je příliš velké pro stažení přes dashboard. Limit je {max_mb} MB."
+                pdf_bytes = response.read(PDF_DOWNLOAD_MAX_BYTES + 1)
+        except (OSError, ValueError) as exc:
+            return None, file_name, f"Nepodařilo se načíst PDF soubor: {exc}"
+
+        if len(pdf_bytes) > PDF_DOWNLOAD_MAX_BYTES:
+            max_mb = PDF_DOWNLOAD_MAX_BYTES // (1024 * 1024)
+            return None, file_name, f"PDF je příliš velké pro stažení přes dashboard. Limit je {max_mb} MB."
+        return pdf_bytes, file_name, None
+
+    pdf_path = _resolve_existing_local_path(normalized_target)
+    file_name = _file_name_from_target(normalized_target, pdf_path)
+    if pdf_path is None:
+        return None, file_name, _format_missing_path_message(normalized_target)
+    if not pdf_path.is_file():
+        return None, file_name, f"Cíl není soubor: {normalized_target}"
+
+    file_size = pdf_path.stat().st_size
+    if file_size > PDF_DOWNLOAD_MAX_BYTES:
+        max_mb = PDF_DOWNLOAD_MAX_BYTES // (1024 * 1024)
+        return None, file_name, f"PDF je příliš velké pro stažení přes dashboard. Limit je {max_mb} MB."
+
+    try:
+        return pdf_path.read_bytes(), file_name, None
+    except OSError as exc:
+        return None, file_name, f"Nepodařilo se načíst PDF soubor: {exc}"
+
+
 def _load_pdfium():
     try:
         import pypdfium2 as pdfium
@@ -403,11 +462,41 @@ def render_pdf_preview(target: str, _title: str) -> None:
         return
 
     current_page = int(st.session_state.get(PDF_PREVIEW_PAGE_KEY, 1))
-    if current_page < 1 or current_page > page_count:
-        st.session_state[PDF_PREVIEW_PAGE_KEY] = 1
+    if current_page < 1:
+        current_page = 1
+    if current_page > page_count:
+        current_page = page_count
+    st.session_state[PDF_PREVIEW_PAGE_KEY] = current_page
 
     if page_count > 1:
-        st.slider("Strana PDF", min_value=1, max_value=page_count, step=1, key=PDF_PREVIEW_PAGE_KEY)
+        prev_col, page_col, next_col, spacer_col = st.columns([1, 2, 1, 8], vertical_alignment="center")
+        with prev_col:
+            previous_clicked = st.button(
+                "-",
+                key="revize_pdf_page_previous",
+                width="stretch",
+                disabled=current_page <= 1,
+                help="Předchozí strana",
+            )
+        with next_col:
+            next_clicked = st.button(
+                "+",
+                key="revize_pdf_page_next",
+                width="stretch",
+                disabled=current_page >= page_count,
+                help="Další strana",
+            )
+
+        if previous_clicked:
+            current_page -= 1
+        elif next_clicked:
+            current_page += 1
+        st.session_state[PDF_PREVIEW_PAGE_KEY] = current_page
+
+        with page_col:
+            st.markdown(f"**Strana {current_page} z {page_count}**")
+        with spacer_col:
+            st.write("")
     else:
         st.session_state[PDF_PREVIEW_PAGE_KEY] = 1
 
@@ -443,59 +532,16 @@ def resolve_selected_row(df: pd.DataFrame, table_state: object) -> pd.Series | N
 def render_row_actions(filtered_df: pd.DataFrame, table_state: object) -> None:
     selected_row = resolve_selected_row(filtered_df, table_state)
     if selected_row is None:
-        st.caption("Vyberte jeden řádek v tabulce pro otevření souboru nebo servisní smlouvy.")
+        st.caption("Vyberte jeden řádek v tabulce pro akce nad revizí.")
         return
 
     selected_name = str(selected_row.get("Název revize") or selected_row.get("nazev_revize") or "-")
     selected_file = normalize_open_target(selected_row.get("soubor"))
-    selected_contract = normalize_open_target(selected_row.get("servisni_smlouva"))
     selected_record_id = str(selected_row.get("id") or "")
-    can_preview_pdf = selected_file is not None and is_pdf_preview_target(selected_file)
 
-    info_col, preview_col, file_col, contract_col = st.columns([3, 1, 1, 1], vertical_alignment="bottom")
-    with info_col:
-        st.markdown(f"**Vybraná revize:** {selected_name}")
-        if selected_file:
-            st.caption(selected_file)
-
-    with preview_col:
-        if st.button(
-            "Zobrazit PDF",
-            key=f"revize_preview_pdf_{selected_row.get('id')}",
-            width="stretch",
-            disabled=not can_preview_pdf,
-            help=None if can_preview_pdf else "Náhled je dostupný pouze pro PDF ze sloupce Soubor.",
-        ):
-            st.session_state[PDF_PREVIEW_TARGET_KEY] = selected_file
-            st.session_state[PDF_PREVIEW_NAME_KEY] = selected_name
-            st.session_state[PDF_PREVIEW_RECORD_ID_KEY] = selected_record_id
-            st.session_state[PDF_PREVIEW_PAGE_KEY] = 1
-
-    with file_col:
-        if st.button(
-            "Otevřít soubor",
-            key=f"revize_open_file_{selected_row.get('id')}",
-            width="stretch",
-            disabled=selected_file is None,
-        ):
-            success, message = open_external_target(selected_file)
-            if success:
-                st.success(message)
-            else:
-                st.error(message)
-
-    with contract_col:
-        if st.button(
-            "Otevřít smlouvu",
-            key=f"revize_open_contract_{selected_row.get('id')}",
-            width="stretch",
-            disabled=selected_contract is None,
-        ):
-            success, message = open_external_target(selected_contract)
-            if success:
-                st.success(message)
-            else:
-                st.error(message)
+    st.markdown(f"**Vybraná revize:** {selected_name}")
+    if selected_file:
+        st.caption(selected_file)
 
     preview_target = st.session_state.get(PDF_PREVIEW_TARGET_KEY)
     preview_record_id = st.session_state.get(PDF_PREVIEW_RECORD_ID_KEY)
@@ -774,8 +820,78 @@ def render_revize_edit_controls(
 ) -> None:
     user_is_admin = is_admin()
     selected_row = resolve_selected_row(filtered_df, table_state)
+    selected_file = normalize_open_target(selected_row.get("soubor")) if selected_row is not None else None
+    selected_contract = (
+        normalize_open_target(selected_row.get("servisni_smlouva")) if selected_row is not None else None
+    )
+    selected_name = (
+        str(selected_row.get("Název revize") or selected_row.get("nazev_revize") or "-")
+        if selected_row is not None
+        else "-"
+    )
+    selected_record_id = str(selected_row.get("id") or "") if selected_row is not None else ""
+    can_preview_pdf = selected_file is not None and is_pdf_preview_target(selected_file)
+    can_download_pdf = can_preview_pdf
+    download_data: bytes | None = None
+    download_file_name = "revize.pdf"
+    download_error: str | None = None
 
-    create_col, edit_col, spacer_col = st.columns((1, 1, 4))
+    if can_download_pdf and selected_file is not None:
+        download_data, download_file_name, download_error = load_pdf_download_data(selected_file)
+
+    if selected_row is None:
+        preview_help = "Vyberte jeden řádek v tabulce."
+    elif not can_preview_pdf:
+        preview_help = "Náhled je dostupný pouze pro PDF ze sloupce Soubor."
+    else:
+        preview_help = None
+
+    if selected_file is None:
+        download_help = "Vybraný řádek nemá vyplněný PDF soubor."
+    elif not can_download_pdf:
+        download_help = "Uložit lze pouze PDF ze sloupce Soubor."
+    else:
+        download_help = download_error
+
+    contract_help = "Vybraný řádek nemá vyplněnou servisní smlouvu." if selected_contract is None else None
+
+    preview_col, save_col, contract_col, create_col, edit_col, spacer_col = st.columns((1, 1, 1, 1, 1, 2))
+    with preview_col:
+        if st.button(
+            "Zobrazit PDF",
+            key=f"revize_preview_pdf_{selected_record_id or 'none'}",
+            width="stretch",
+            disabled=not can_preview_pdf,
+            help=preview_help,
+        ):
+            st.session_state[PDF_PREVIEW_TARGET_KEY] = selected_file
+            st.session_state[PDF_PREVIEW_NAME_KEY] = selected_name
+            st.session_state[PDF_PREVIEW_RECORD_ID_KEY] = selected_record_id
+            st.session_state[PDF_PREVIEW_PAGE_KEY] = 1
+    with save_col:
+        st.download_button(
+            "Uložit PDF",
+            data=download_data if download_data is not None else b"",
+            file_name=download_file_name,
+            mime="application/pdf",
+            key=f"revize_save_pdf_{selected_record_id or 'none'}",
+            width="stretch",
+            disabled=download_data is None,
+            help=download_help,
+        )
+    with contract_col:
+        if st.button(
+            "Zobrazit smlouvu",
+            key=f"revize_open_contract_{selected_record_id or 'none'}",
+            width="stretch",
+            disabled=selected_contract is None,
+            help=contract_help,
+        ) and selected_contract is not None:
+            success, message = open_external_target(selected_contract)
+            if success:
+                st.success(message)
+            else:
+                st.error(message)
     with create_col:
         if st.button(
             "Přidat nový",
@@ -802,6 +918,9 @@ def render_revize_edit_controls(
                 st.session_state[CREATE_OPEN_KEY] = False
     with spacer_col:
         st.write("")
+
+    if download_error:
+        st.error(download_error)
 
     if st.session_state.get(CREATE_OPEN_KEY, False):
         _render_revize_form(mode="create", prepared_df=prepared_df)

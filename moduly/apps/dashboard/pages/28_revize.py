@@ -60,6 +60,8 @@ APPLIED_KEY = "revize_overview_applied"
 CREATE_OPEN_KEY = "revize_overview_create_open"
 EDIT_OPEN_KEY = "revize_overview_edit_open"
 EDIT_RECORD_ID_KEY = "revize_overview_edit_record_id"
+RENEW_OPEN_KEY = "revize_overview_renew_open"
+RENEW_RECORD_ID_KEY = "revize_overview_renew_record_id"
 SUCCESS_KEY = "revize_overview_success"
 PDF_PREVIEW_TARGET_KEY = "revize_overview_pdf_preview_target"
 PDF_PREVIEW_NAME_KEY = "revize_overview_pdf_preview_name"
@@ -707,8 +709,18 @@ def _clear_revize_cache_and_rerun(message: str) -> None:
     st.session_state[SUCCESS_KEY] = message
     st.session_state[CREATE_OPEN_KEY] = False
     st.session_state[EDIT_OPEN_KEY] = False
+    st.session_state[RENEW_OPEN_KEY] = False
     st.session_state.pop(EDIT_RECORD_ID_KEY, None)
+    st.session_state.pop(RENEW_RECORD_ID_KEY, None)
     st.rerun()
+
+
+def _build_renew_record_values(record_values: dict[str, object]) -> dict[str, object]:
+    renewed_values = dict(record_values)
+    renewed_values["datum"] = prague_today()
+    renewed_values["datum_platnosti"] = None
+    renewed_values["soubor"] = ""
+    return renewed_values
 
 
 def _render_revize_form(
@@ -718,6 +730,7 @@ def _render_revize_form(
     record_values: dict[str, object] | None = None,
 ) -> None:
     is_edit = mode == "edit"
+    is_renew = mode == "renew"
     record_values = record_values or {}
     today = prague_today()
     revision_date = _as_date(record_values.get("datum"), today)
@@ -729,7 +742,14 @@ def _render_revize_form(
     device_type_options = _build_select_options(load_evidence_device_type_options())
     selected_device_type = _resolve_form_device_type(record_values, device_type_options)
 
-    st.subheader("Upravit revizi" if is_edit else "Nová revize")
+    if is_edit:
+        form_title = "Upravit revizi"
+    elif is_renew:
+        form_title = "Obnovit revizi"
+    else:
+        form_title = "Nová revize"
+
+    st.subheader(form_title)
     with st.form(f"revize_overview_{mode}_form"):
         row_1 = st.columns(3)
         with row_1[0]:
@@ -779,7 +799,7 @@ def _render_revize_form(
         poznamka = st.text_area("Poznámka", value=_as_text(record_values.get("poznamka")))
 
         save_pressed = st.form_submit_button(
-            "Uložit změny" if is_edit else "Uložit do DB",
+            "Uložit změny" if is_edit else "Uložit revizi",
             type="primary",
             width="stretch",
         )
@@ -805,7 +825,7 @@ def _render_revize_form(
             _clear_revize_cache_and_rerun("Revize byla upravena.")
             return
         create_revize_record(payload, linked_device_ids=linked_device_ids)
-        _clear_revize_cache_and_rerun("Nová revize byla uložena.")
+        _clear_revize_cache_and_rerun("Revize byla obnovena." if is_renew else "Nová revize byla uložena.")
     except ValueError as exc:
         st.warning(str(exc))
     except SQLAlchemyError as exc:
@@ -854,11 +874,18 @@ def render_revize_edit_controls(
         download_help = download_error
 
     contract_help = "Vybraný řádek nemá vyplněnou servisní smlouvu." if selected_contract is None else None
+    renew_help = None
+    if not user_is_admin:
+        renew_help = "Revizi může obnovit pouze admin."
+    elif selected_row is None:
+        renew_help = "Vyberte jeden řádek v tabulce pro obnovu."
 
-    preview_col, save_col, contract_col, create_col, edit_col, spacer_col = st.columns((1, 1, 1, 1, 1, 2))
+    preview_col, save_col, contract_col, create_col, renew_col, edit_col = st.columns(
+        (1.15, 1.1, 1.2, 1.1, 1.2, 1.2)
+    )
     with preview_col:
         if st.button(
-            "Zobrazit PDF",
+            "Zobrazit revizi",
             key=f"revize_preview_pdf_{selected_record_id or 'none'}",
             width="stretch",
             disabled=not can_preview_pdf,
@@ -870,7 +897,7 @@ def render_revize_edit_controls(
             st.session_state[PDF_PREVIEW_PAGE_KEY] = 1
     with save_col:
         st.download_button(
-            "Uložit PDF",
+            "Uložit revizi",
             data=download_data if download_data is not None else b"",
             file_name=download_file_name,
             mime="application/pdf",
@@ -894,7 +921,7 @@ def render_revize_edit_controls(
                 st.error(message)
     with create_col:
         if st.button(
-            "Přidat nový",
+            "Nová revize",
             type="primary",
             width="stretch",
             disabled=not user_is_admin,
@@ -902,10 +929,24 @@ def render_revize_edit_controls(
         ):
             st.session_state[CREATE_OPEN_KEY] = True
             st.session_state[EDIT_OPEN_KEY] = False
+            st.session_state[RENEW_OPEN_KEY] = False
+            st.session_state.pop(EDIT_RECORD_ID_KEY, None)
+            st.session_state.pop(RENEW_RECORD_ID_KEY, None)
+    with renew_col:
+        if st.button(
+            "Obnovit revizi",
+            width="stretch",
+            disabled=not user_is_admin or selected_row is None,
+            help=renew_help,
+        ):
+            st.session_state[RENEW_RECORD_ID_KEY] = int(selected_row["id"])
+            st.session_state[RENEW_OPEN_KEY] = True
+            st.session_state[CREATE_OPEN_KEY] = False
+            st.session_state[EDIT_OPEN_KEY] = False
             st.session_state.pop(EDIT_RECORD_ID_KEY, None)
     with edit_col:
         if st.button(
-            "Upravit",
+            "Upravit revizi",
             width="stretch",
             disabled=not user_is_admin or filtered_df.empty,
             help=None if user_is_admin else "Revizi může upravit pouze admin.",
@@ -916,14 +957,30 @@ def render_revize_edit_controls(
                 st.session_state[EDIT_RECORD_ID_KEY] = int(selected_row["id"])
                 st.session_state[EDIT_OPEN_KEY] = True
                 st.session_state[CREATE_OPEN_KEY] = False
-    with spacer_col:
-        st.write("")
-
+                st.session_state[RENEW_OPEN_KEY] = False
+                st.session_state.pop(RENEW_RECORD_ID_KEY, None)
     if download_error:
         st.error(download_error)
 
     if st.session_state.get(CREATE_OPEN_KEY, False):
         _render_revize_form(mode="create", prepared_df=prepared_df)
+
+    if st.session_state.get(RENEW_OPEN_KEY, False):
+        record_id = st.session_state.get(RENEW_RECORD_ID_KEY)
+        if record_id is None:
+            st.warning("Vyberte jeden řádek v tabulce pro obnovu.")
+            return
+        record_values = load_revize_record_values(int(record_id))
+        if record_values is None:
+            st.warning("Vybraná revize už není dostupná.")
+            st.session_state[RENEW_OPEN_KEY] = False
+            st.session_state.pop(RENEW_RECORD_ID_KEY, None)
+            return
+        _render_revize_form(
+            mode="renew",
+            prepared_df=prepared_df,
+            record_values=_build_renew_record_values(record_values),
+        )
 
     if st.session_state.get(EDIT_OPEN_KEY, False):
         record_id = st.session_state.get(EDIT_RECORD_ID_KEY)

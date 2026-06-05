@@ -1,0 +1,37 @@
+/* Výška plátna pod navbar */
+#map {
+  position: absolute;
+  inset: 0;
+}
+
+/* Sidebar šířka + responzivita */
+#sidebar {
+  width: 320px;
+  min-height: calc(100vh - 56px); /* 56px = default výška Bootstrap navbaru */
+}
+@media (max-width: 992px) {
+  #sidebar {
+    width: 260px;
+  }
+}
+
+/* Legend box v mapě */
+#legend {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  background: #fff;
+  border-radius: .5rem;
+}
+
+/* Collapsed sidebar stav */
+#appLayout.sidebar-collapsed #sidebar { display: none; }
+
+.brand {
+  font: 700 24px/1.1 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+  letter-spacing: .5px;
+  margin: 0;
+}
+
+.brand-arm { color: #E10600; }  /* červená */
+.brand-ex  { color: #0070F3; }  /* modrá  */

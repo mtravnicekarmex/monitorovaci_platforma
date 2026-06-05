@@ -1,0 +1,31 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id_budovy": "B1",
+        "nazev": "Administrativní budova",
+        "urceni": "administrativa",
+        "typ": "administrativa"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[14.23535,50.77757],[14.23565,50.77757],[14.23565,50.77773],[14.23535,50.77773],[14.23535,50.77757]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id_budovy": "B2",
+        "nazev": "Hlavní sklad",
+        "urceni": "sklad",
+        "typ": "sklad"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[14.23595,50.77748],[14.23625,50.77748],[14.23625,50.77762],[14.23595,50.77762],[14.23595,50.77748]]]
+      }
+    }
+  ]
+}

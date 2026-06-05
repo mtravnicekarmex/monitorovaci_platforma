@@ -1,0 +1,75 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id_mistnosti": "B1-101",
+        "budova_id": "B1",
+        "patro": 0,
+        "vyuziti": "kancelar",
+        "typ": "kancelar"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[14.23537,50.77759],[14.23550,50.77759],[14.23550,50.77767],[14.23537,50.77767],[14.23537,50.77759]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id_mistnosti": "B1-102",
+        "budova_id": "B1",
+        "patro": 0,
+        "vyuziti": "zasedacka",
+        "typ": "zasedacka"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[14.23552,50.77759],[14.23563,50.77759],[14.23563,50.77767],[14.23552,50.77767],[14.23552,50.77759]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id_mistnosti": "B1-201",
+        "budova_id": "B1",
+        "patro": 1,
+        "vyuziti": "serverovna",
+        "typ": "serverovna"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[14.23545,50.77769],[14.23560,50.77769],[14.23560,50.77772],[14.23545,50.77772],[14.23545,50.77769]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id_mistnosti": "B2-B01",
+        "budova_id": "B2",
+        "patro": -1,
+        "vyuziti": "sklad",
+        "typ": "sklad"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[14.23598,50.77750],[14.23612,50.77750],[14.23612,50.77758],[14.23598,50.77758],[14.23598,50.77750]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id_mistnosti": "B2-001",
+        "budova_id": "B2",
+        "patro": 0,
+        "vyuziti": "expedice",
+        "typ": "expedice"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[14.23614,50.77750],[14.23623,50.77750],[14.23623,50.77758],[14.23614,50.77758],[14.23614,50.77750]]]
+      }
+    }
+  ]
+}

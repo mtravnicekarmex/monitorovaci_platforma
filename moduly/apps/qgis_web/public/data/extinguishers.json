@@ -1,0 +1,60 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "E-001",
+        "budova_id": "B1",
+        "mistnost_id": "B1-101",
+        "patro": 0,
+        "revize_exp": "2026-03-31"
+      },
+      "geometry": {"type": "Point", "coordinates": [14.23543,50.77763]}
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "E-002",
+        "budova_id": "B1",
+        "mistnost_id": "B1-102",
+        "patro": 0,
+        "revize_exp": "2025-12-31"
+      },
+      "geometry": {"type": "Point", "coordinates": [14.23558,50.77763]}
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "E-003",
+        "budova_id": "B1",
+        "mistnost_id": "B1-201",
+        "patro": 1,
+        "revize_exp": "2026-06-30"
+      },
+      "geometry": {"type": "Point", "coordinates": [14.23552,50.77771]}
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "E-101",
+        "budova_id": "B2",
+        "mistnost_id": "B2-B01",
+        "patro": -1,
+        "revize_exp": "2025-11-30"
+      },
+      "geometry": {"type": "Point", "coordinates": [14.23605,50.77754]}
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "E-102",
+        "budova_id": "B2",
+        "mistnost_id": "B2-001",
+        "patro": 0,
+        "revize_exp": "2026-01-31"
+      },
+      "geometry": {"type": "Point", "coordinates": [14.23619,50.77754]}
+    }
+  ]
+}

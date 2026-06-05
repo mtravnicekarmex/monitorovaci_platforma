@@ -1,0 +1,70 @@
+{
+    "settings": {
+        "app_base": "\/armex\/public",
+        "db": {
+            "driver": "pgsql",
+            "host": "SERVER2A",
+            "port": 5432,
+            "dbname": "ARMEX",
+            "user": "qgis",
+            "pass": "Siga486"
+        }
+    },
+    "basemaps": [
+        {
+            "id": "osm",
+            "title": "OpenStreetMap",
+            "url": "https:\/\/{s}.tile.openstreetmap.org\/{z}\/{x}\/{y}.png",
+            "attribution": "&copy; OpenStreetMap contributors",
+            "maxZoom": 22
+        },
+        {
+            "id": "ga",
+            "title": "Google letecká",
+            "url": "http:\/\/mt0.google.com\/vt\/lyrs=s&hl=en&x={x}&y={y}&z={z}",
+            "attribution": "Google",
+            "maxZoom": 22
+        }
+    ],
+    "layers": [
+        {
+            "id": "db-tabulka",
+            "title": "Hasící přístroje (z DB)",
+            "geomType": "Point",
+            "source": "sql",
+            "color": "#ff622e",
+            "priority": 10,
+            "specificFilters": [],
+            "sql": "SELECT t.*, ST_AsGeoJSON(ST_TRANSFORM(t.geometry,4326)) AS geom FROM \"HASÍCÍ PŘÍSTROJE\" as t;"
+        },
+        {
+            "id": "budovy",
+            "title": "Budovy (z db)",
+            "geomType": "Polygon",
+            "source": "sql",
+            "color": "#1f6feb",
+            "priority": 0,
+            "specificFilters": [],
+            "sql": "SELECT t.*, ST_AsGeoJSON(ST_TRANSFORM(ST_setSRID(t.geometry,3857),4326)) AS geom FROM \"BUDOVY\" as t;"
+        },
+        {
+            "id": "mistnosti",
+            "title": "Místnosti (z db)",
+            "geomType": "Polygon",
+            "source": "sql",
+            "color": "#93d2b5",
+            "priority": 1,
+            "specificFilters": [
+                {
+                    "type": "select",
+                    "id": "mtyp",
+                    "label": "Typ místnosti",
+                    "property": "popis",
+                    "predicate": "",
+                    "values": []
+                }
+            ],
+            "sql": "SELECT t.*, ST_AsGeoJSON(ST_TRANSFORM(ST_setSRID(t.geom,3857),4326)) AS geom FROM \"MÍSTNOSTI\" as t;"
+        }
+    ]
+}

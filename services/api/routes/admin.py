@@ -5,6 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from services.api.core.dependencies import get_current_admin_user
 from services.api.schemas.admin import (
     AdminDeviceOptionsResponse,
+    AdminMapLayerCreateRequest,
+    AdminMapLayerRecord,
+    AdminMapLayersResponse,
+    AdminMapLayerUpdateRequest,
     AdminUserCreateRequest,
     AdminUserRecord,
     AdminUsersResponse,
@@ -19,6 +23,13 @@ from services.api.services.dashboard_admin import (
     update_admin_user,
 )
 from services.api.services.dashboard_auth import DashboardUserContext
+from services.api.services.map_layers import (
+    MapLayerOperationError,
+    create_map_layer_admin,
+    delete_map_layer_admin,
+    list_map_layers_admin,
+    update_map_layer_admin,
+)
 
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
@@ -125,6 +136,82 @@ def delete_user(
     try:
         delete_admin_user(current_user, username=username)
     except AdminOperationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/map-layers",
+    response_model=AdminMapLayersResponse,
+    summary="List map layers",
+    description="Vraci konfiguraci mapovych vrstev pro spravu mapovych podkladu. Vyzaduje admin opravneni.",
+)
+def get_admin_map_layers(
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> AdminMapLayersResponse:
+    layers = list_map_layers_admin(current_user)
+    return AdminMapLayersResponse(total=len(layers), layers=layers)
+
+
+@router.post(
+    "/map-layers",
+    response_model=AdminMapLayerRecord,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create map layer",
+    description="Vytvori novou konfigurovatelnou mapovou vrstvu. Vyzaduje admin opravneni.",
+)
+def create_map_layer(
+    payload: AdminMapLayerCreateRequest,
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> AdminMapLayerRecord:
+    try:
+        record = create_map_layer_admin(current_user, **payload.model_dump())
+    except MapLayerOperationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return AdminMapLayerRecord(**record)
+
+
+@router.patch(
+    "/map-layers/{layer_id}",
+    response_model=AdminMapLayerRecord,
+    summary="Update map layer",
+    description="Aktualizuje konfiguraci mapove vrstvy vcetne stylu a viditelnosti. Vyzaduje admin opravneni.",
+)
+def update_map_layer(
+    layer_id: str,
+    payload: AdminMapLayerUpdateRequest,
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> AdminMapLayerRecord:
+    try:
+        updates = payload.model_dump(exclude={"layer_id"})
+        record = update_map_layer_admin(current_user, layer_id=layer_id, **updates)
+    except MapLayerOperationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return AdminMapLayerRecord(**record)
+
+
+@router.delete(
+    "/map-layers/{layer_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete map layer",
+    description="Smaze konfiguraci mapove vrstvy. Zdrojova data zustavaji beze zmeny. Vyzaduje admin opravneni.",
+)
+def delete_map_layer(
+    layer_id: str,
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> Response:
+    try:
+        delete_map_layer_admin(current_user, layer_id=layer_id)
+    except MapLayerOperationError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),

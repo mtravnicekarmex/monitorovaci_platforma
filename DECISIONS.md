@@ -184,3 +184,19 @@ Implications:
 - Do not delete or untrack runtime artifacts without explicit user approval.
 - Candidate cleanup items include SmartFuelPass session files, scheduler lock files, `frontend_next/tsconfig.tsbuildinfo`, and nested electric-meter data artifacts.
 - If cleanup is approved later, document the exact files and `.gitignore` changes.
+
+## DEC-014: Map Layers Are Admin-Configured Metadata
+
+Date: 2026-06-05
+
+Decision: Map-layer visibility, source table metadata, filterable columns, popup columns, draw order, and Leaflet style are managed as dashboard metadata in `dashboard.Map_Layers`.
+
+Rationale: Map podklady will grow beyond Vodomery. Hardcoding every layer in one route would make adding contextual and device layers slow and error-prone.
+
+Implications:
+
+- Admins configure layer metadata, not arbitrary SQL.
+- Backend validates configured source tables and columns through `information_schema`.
+- Context layers are gated by page access.
+- Device layers can use `restrict_to_allowed_devices=True` and a `device_section_key`; feature loading must still enforce assigned device IDs.
+- Future map pages should consume the map-layer catalog instead of duplicating layer definitions in page-specific code.

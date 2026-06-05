@@ -16,6 +16,7 @@ from moduly.mereni.plynomery.alerting.outlier_notifications import ensure_plynom
 from moduly.mereni.kalorimetry.database.outlier_reviews import ensure_kalorimetry_outlier_review_table
 from moduly.mereni.elektromery.database.elektromery_db_vse import ensure_elektromery_vse_table
 from moduly.apps.smartfuelpass.database.db_init import ensure_smartfuelpass_tables
+from services.api.services.map_layers import ensure_default_map_layers
 
 
 def ensure_streamlit_user_columns() -> None:
@@ -49,6 +50,7 @@ def ensure_dashboard_tables() -> None:
 
     Base.metadata.create_all(bind=ENGINE_PG)
     ensure_streamlit_user_columns()
+    ensure_default_map_layers()
     ensure_web_search_tables()
     ensure_expected_zero_table()
     ensure_plynomery_expected_zero_table()

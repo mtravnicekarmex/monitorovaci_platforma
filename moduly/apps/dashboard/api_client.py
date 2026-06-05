@@ -39,6 +39,10 @@ def _build_url(path: str) -> str:
     return f"{_api_base_url()}{path}"
 
 
+def get_dashboard_api_base_url() -> str:
+    return _api_base_url()
+
+
 def _api_unavailable_message(detail: str) -> str:
     return (
         f"Dashboard API neni dostupne na {_api_base_url()}. "
@@ -200,6 +204,73 @@ def delete_admin_user(access_token: str, username: str) -> None:
         f"/api/v1/admin/users/{username}",
         access_token=access_token,
     )
+
+
+def list_admin_map_layers(access_token: str) -> list[dict[str, object]]:
+    response = _request(
+        "GET",
+        "/api/v1/admin/map-layers",
+        access_token=access_token,
+    )
+    payload = response.json()
+    return [dict(item) for item in payload.get("layers", [])]
+
+
+def create_admin_map_layer(access_token: str, payload: dict[str, object]) -> dict[str, object]:
+    response = _request(
+        "POST",
+        "/api/v1/admin/map-layers",
+        access_token=access_token,
+        json_payload=payload,
+    )
+    return dict(response.json())
+
+
+def update_admin_map_layer(access_token: str, layer_id: str, payload: dict[str, object]) -> dict[str, object]:
+    response = _request(
+        "PATCH",
+        f"/api/v1/admin/map-layers/{layer_id}",
+        access_token=access_token,
+        json_payload=payload,
+    )
+    return dict(response.json())
+
+
+def delete_admin_map_layer(access_token: str, layer_id: str) -> None:
+    _request(
+        "DELETE",
+        f"/api/v1/admin/map-layers/{layer_id}",
+        access_token=access_token,
+    )
+
+
+def get_map_layer_catalog(access_token: str) -> dict[str, object]:
+    response = _request(
+        "GET",
+        "/api/v1/map/layers/catalog",
+        access_token=access_token,
+    )
+    return dict(response.json())
+
+
+def get_map_features(access_token: str, payload: dict[str, object]) -> dict[str, object]:
+    response = _request(
+        "POST",
+        "/api/v1/map/features",
+        access_token=access_token,
+        json_payload=payload,
+    )
+    return dict(response.json())
+
+
+def get_map_filter_options(access_token: str, payload: dict[str, object]) -> dict[str, object]:
+    response = _request(
+        "POST",
+        "/api/v1/map/filter-options",
+        access_token=access_token,
+        json_payload=payload,
+    )
+    return dict(response.json())
 
 
 def get_scheduler_health(access_token: str) -> dict[str, object]:

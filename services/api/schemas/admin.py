@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -47,6 +48,63 @@ class AdminUserUpdateRequest(BaseModel):
     device_ids: list[str] | None = None
     is_active: bool | None = None
     is_admin: bool | None = None
+
+
+class AdminMapLayerRecord(BaseModel):
+    layer_id: str
+    title: str
+    layer_kind: str
+    source_schema: str
+    source_table: str
+    geometry_column: str
+    identifier_column: str
+    source_srid: int
+    target_srid: int
+    property_columns: list[str]
+    property_aliases: dict[str, Any]
+    filter_columns: list[str]
+    popup_columns: list[str]
+    style: dict[str, Any]
+    device_section_key: str | None = None
+    restrict_to_allowed_devices: bool
+    map_enabled: bool
+    default_visible: bool
+    is_active: bool
+    draw_order: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminMapLayersResponse(BaseModel):
+    total: int
+    layers: list[AdminMapLayerRecord]
+
+
+class AdminMapLayerCreateRequest(BaseModel):
+    layer_id: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
+    title: str = Field(min_length=1, max_length=250)
+    layer_kind: str = Field(default="context", pattern="^(context|device)$")
+    source_schema: str = Field(default="evidence", min_length=1, max_length=100)
+    source_table: str = Field(min_length=1, max_length=250)
+    geometry_column: str = Field(default="geom", min_length=1, max_length=100)
+    identifier_column: str = Field(min_length=1, max_length=100)
+    source_srid: int = 3857
+    target_srid: int = 4326
+    property_columns: list[str] = Field(default_factory=list)
+    property_aliases: dict[str, Any] = Field(default_factory=dict)
+    filter_columns: list[str] = Field(default_factory=list)
+    popup_columns: list[str] = Field(default_factory=list)
+    style: dict[str, Any] = Field(default_factory=dict)
+    device_section_key: str | None = Field(default=None, max_length=100)
+    restrict_to_allowed_devices: bool = False
+    map_enabled: bool = True
+    default_visible: bool = True
+    is_active: bool = True
+    draw_order: int = 100
+
+
+class AdminMapLayerUpdateRequest(AdminMapLayerCreateRequest):
+    layer_id: str | None = Field(default=None, max_length=100, exclude=True)
 
 
 class SchedulerJobHealth(BaseModel):

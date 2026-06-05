@@ -35,6 +35,9 @@ OUTLIER_ABSOLUTE_MIN_DELTA = 10.0
 OUTLIER_P90_SPREAD_MULTIPLIER = 25.0
 OUTLIER_STD_MULTIPLIER = 12.0
 OUTLIER_P99_MULTIPLIER = 8.0
+MAX_GAP_MULTIPLIER = 2
+MIN_NIGHT_DELTA = 0.01
+SPIKE_RETURN_BASELINE_MAX_DELTA = OUTLIER_ABSOLUTE_MIN_DELTA
 
 
 def chunked(items, size=CHUNK_SIZE):
@@ -381,6 +384,47 @@ def is_delta_outlier(delta, stats):
     return delta > threshold
 
 
+def is_single_sample_return_spike(row, next_row, prev, *, interval, candidate_delta):
+    if (
+        candidate_delta is None
+        or candidate_delta <= OUTLIER_ABSOLUTE_MIN_DELTA
+        or not prev
+        or not next_row
+        or row.get("identifikace") != next_row.get("identifikace")
+    ):
+        return False
+
+    dt = row.get("date")
+    next_dt = next_row.get("date")
+    if not isinstance(dt, datetime) or not isinstance(next_dt, datetime):
+        return False
+    if next_dt <= dt:
+        return False
+
+    try:
+        row_objem = float(row["objem"])
+        next_objem = float(next_row["objem"])
+        prev_objem = float(prev["objem"])
+        next_interval = int(next_row.get("interval_minutes") or interval)
+    except (TypeError, ValueError):
+        return False
+
+    if next_interval != int(interval):
+        return False
+
+    expected_interval = timedelta(minutes=int(interval))
+    if next_dt - dt > expected_interval * MAX_GAP_MULTIPLIER:
+        return False
+
+    if not has_significant_negative_diff(next_objem, row_objem):
+        return False
+    if has_significant_negative_diff(next_objem, prev_objem):
+        return False
+
+    returned_delta = next_objem - prev_objem
+    return returned_delta <= SPIKE_RETURN_BASELINE_MAX_DELTA
+
+
 def format_ident_count_summary(counts, *, limit=10):
     if not counts:
         return ""
@@ -538,9 +582,6 @@ def prepare_rows(
     if not new_rows:
         return ([], []) if include_outlier_reviews else []
 
-    MAX_GAP_MULTIPLIER = 2
-    MIN_NIGHT_DELTA = 0.01
-
     affected_idents = {r["identifikace"] for r in new_rows}
     last_existing = get_last_measurements(session, affected_idents, only_valid=True)
     reference_time = max(
@@ -577,21 +618,34 @@ def prepare_rows(
     outlier_by_ident = {}
     overrides_by_key = review_overrides or {}
 
-    for r in new_rows:
+    for row_index, r in enumerate(new_rows):
 
-        reset_detected = r.get("reset_detected", False)
         ident = r["identifikace"]
         dt = r["date"]
         interval = r["interval_minutes"]
         objem = r["objem"]
 
         prev = previous_map.get(ident)
+        next_row = None
+        if row_index + 1 < len(new_rows):
+            candidate_next_row = new_rows[row_index + 1]
+            if candidate_next_row.get("identifikace") == ident:
+                next_row = candidate_next_row
 
         delta = None
         gap_detected = False
         is_valid_row = True
         ident_stats = recent_delta_stats.get(ident)
         review_override = overrides_by_key.get((ident, dt, source_name))
+        reset_detected = bool(r.get("reset_detected", False))
+
+        if (
+            reset_detected
+            and prev
+            and prev["date"]
+            and not has_significant_negative_diff(objem, prev["objem"])
+        ):
+            reset_detected = False
 
         # -------------------------------------------------
         # RESET má prioritu – nová baseline
@@ -675,9 +729,22 @@ def prepare_rows(
                 # ----------------------------
                 if objem >= prev["objem"]:
                     candidate_delta = objem - prev["objem"]
+                    is_return_spike = is_single_sample_return_spike(
+                        r,
+                        next_row,
+                        prev,
+                        interval=interval,
+                        candidate_delta=candidate_delta,
+                    )
                     is_normal_outlier = (
                         review_override == "CONFIRMED_OUTLIER"
-                        or is_delta_outlier(candidate_delta, ident_stats)
+                        or (
+                            review_override != "CONFIRMED_CONSUMPTION"
+                            and (
+                                is_delta_outlier(candidate_delta, ident_stats)
+                                or is_return_spike
+                            )
+                        )
                     )
                     if is_normal_outlier:
                         if review_override == "CONFIRMED_CONSUMPTION":

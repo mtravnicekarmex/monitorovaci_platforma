@@ -24,6 +24,26 @@ from moduly.apps.dashboard.vodomery_shared import (
 )
 
 
+EVENT_TYPE_FILTER_OPTIONS = (
+    "",
+    "NIGHT_USAGE",
+    "SPIKE",
+    "LONG_LEAK",
+    "ZERO_FLOW",
+    "EXPECTED_ZERO_USAGE",
+    "OUTLIER_REVIEW",
+)
+EVENT_TYPE_FILTER_LABELS = {
+    "": "Vsechny eventy",
+    "NIGHT_USAGE": "NIGHT_USAGE",
+    "SPIKE": "SPIKE",
+    "LONG_LEAK": "LONG_LEAK",
+    "ZERO_FLOW": "ZERO_FLOW",
+    "EXPECTED_ZERO_USAGE": "EXPECTED_ZERO_USAGE",
+    "OUTLIER_REVIEW": "OUTLIER_REVIEW",
+}
+
+
 st.set_page_config(
     page_title="Vodomery - Anomalie a eventy",
     page_icon="🚨",
@@ -52,6 +72,24 @@ def format_events_table(events_df):
     return prepare_event_display_dataframe(display_df)
 
 
+def filter_events_by_type(events_df, event_type: str):
+    if not event_type or events_df.empty or "event_type" not in events_df.columns:
+        return events_df
+    normalized_event_type = str(event_type)
+    return events_df.loc[
+        events_df["event_type"].fillna("").astype(str) == normalized_event_type
+    ].copy()
+
+
+def render_event_type_selector(label: str, key: str) -> str:
+    return st.selectbox(
+        label,
+        options=EVENT_TYPE_FILTER_OPTIONS,
+        format_func=lambda value: EVENT_TYPE_FILTER_LABELS.get(value, value),
+        key=key,
+    )
+
+
 def render_dashboard() -> None:
     render_vodomery_header("Vodoměry - Anomalie a eventy", "")
     user_is_admin, allowed_devices = get_vodomery_access_context()
@@ -63,10 +101,18 @@ def render_dashboard() -> None:
 
     with st.container(border=True):
         st.subheader("Aktuálně otevřené eventy")
+        open_event_type = render_event_type_selector(
+            "Typ eventu k zobrazeni",
+            "vodomery_open_event_type_filter",
+        )
         st.caption("Zobrazeny jsou pouze eventy s trváním delším než 120 minut.")
+        filtered_open_events_df = filter_events_by_type(open_events_df, open_event_type)
         if open_events_df.empty:
             st.info("Nejsou evidovany zadne aktualne otevrene eventy.")
+        elif filtered_open_events_df.empty:
+            st.info("Pro vybrany typ nejsou evidovany zadne aktualne otevrene eventy.")
         else:
+            open_events_df = filtered_open_events_df
             summary_cols = st.columns(4)
             critical_events = int((open_events_df["severity"] == "CRITICAL").sum())
             high_events = int((open_events_df["severity"] == "HIGH").sum())
@@ -83,10 +129,18 @@ def render_dashboard() -> None:
 
     with st.container(border=True):
         st.subheader("Historie eventů")
+        resolved_event_type = render_event_type_selector(
+            "Typ eventu k zobrazeni",
+            "vodomery_resolved_event_type_filter",
+        )
         st.caption("Zobrazeny jsou pouze eventy s trváním delším než 120 minut.")
+        filtered_resolved_events_df = filter_events_by_type(resolved_events_df, resolved_event_type)
         if resolved_events_df.empty:
             st.info("Za posledních 7 dní nejsou evidovany zadne vyresene eventy.")
+        elif filtered_resolved_events_df.empty:
+            st.info("Pro vybrany typ nejsou za poslednich 7 dni evidovany zadne vyresene eventy.")
         else:
+            resolved_events_df = filtered_resolved_events_df
             history_df = format_events_table(resolved_events_df).sort_values(["Konec", "Trvani [min]"], ascending=[False, False])
             st.dataframe(history_df, width="stretch", hide_index=True)
 

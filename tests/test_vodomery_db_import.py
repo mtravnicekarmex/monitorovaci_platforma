@@ -206,6 +206,68 @@ def test_prepare_rows_marks_extreme_delta_invalid_and_keeps_valid_baseline(monke
     assert rows[1]["delta"] == pytest.approx(0.6)
 
 
+def test_prepare_rows_marks_single_sample_return_spike_invalid_with_contaminated_stats(monkeypatch):
+    last_valid = SimpleNamespace(
+        objem=100.0,
+        date=datetime.datetime(2026, 4, 10, 10, 0, 0),
+        seriove_cislo="S1",
+    )
+
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "get_last_measurements",
+        lambda session, affected_idents, *, only_valid=False: {"A": last_valid},
+    )
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "get_recent_delta_stats",
+        lambda session, affected_idents, *, reference_time=None: {
+            "A": {
+                "sample_size": 1000,
+                "median": 0.0,
+                "p90": 0.0,
+                "p99": 13000.0,
+                "std": 2000.0,
+            }
+        },
+    )
+
+    rows, reviews = vodomery_db_vse.prepare_rows(
+        session=None,
+        new_rows=[
+            {
+                "recid": 1,
+                "identifikace": "A",
+                "seriove_cislo": "S1",
+                "date": datetime.datetime(2026, 4, 10, 10, 15, 0),
+                "objem": 13150.0,
+                "interval_minutes": 15,
+                "reset_detected": False,
+            },
+            {
+                "recid": 2,
+                "identifikace": "A",
+                "seriove_cislo": "S1",
+                "date": datetime.datetime(2026, 4, 10, 10, 30, 0),
+                "objem": 100.6,
+                "interval_minutes": 15,
+                "reset_detected": True,
+            },
+        ],
+        source_name="AREAL",
+        include_outlier_reviews=True,
+    )
+
+    assert rows[0]["platne"] is False
+    assert rows[0]["delta"] is None
+    assert rows[1]["platne"] is True
+    assert rows[1]["reset_detected"] is False
+    assert rows[1]["delta"] == pytest.approx(0.6)
+    assert len(reviews) == 1
+    assert reviews[0]["candidate_delta"] == pytest.approx(13050.0)
+    assert reviews[0]["detection_kind"] == "NORMAL_DELTA"
+
+
 def test_prepare_rows_skips_gap_fill_for_extreme_gap_delta(monkeypatch):
     last_valid = SimpleNamespace(
         objem=100.0,

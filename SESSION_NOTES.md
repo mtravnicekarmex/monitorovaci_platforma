@@ -508,3 +508,24 @@ Decisions/notes:
 
 Follow-up:
 - Validate with real device photo paths in the running Streamlit UI.
+
+### 2026-06-05
+
+Scope:
+- Persisted current map architecture and image proxy context into the project documentation files.
+
+Changed:
+- Updated `AGENTS.md` with map API/service/dashboard entry points, map-image safety notes, CORS notes, and the targeted map test command.
+- Added `DEC-015` to `DECISIONS.md` for authorized API proxy serving of map device photos.
+
+Verified:
+- Documentation files were updated in the working tree.
+
+Not verified:
+- No tests were run for documentation-only changes.
+
+Decisions/notes:
+- `SESSION_NOTES.md` already contained detailed implementation logs for map layers, filter options, popup photos, and the image endpoint.
+
+Follow-up:
+- Use `AGENTS.md`, `DECISIONS.md`, and `SESSION_NOTES.md` as the continuation context in the next session.

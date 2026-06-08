@@ -38,13 +38,20 @@ At the end of every substantive session:
 - `core/scheduler/scheduler.py`: scheduler execution, locks, metrics, manual run specs, and alert emails.
 - `core/scheduler/metrics.py`: scheduler metrics persistence in `core/scheduler/logs/scheduler_metrics.json`.
 - `services/api/main.py`: FastAPI application entry point and router registration.
+- `services/api/core/config.py`: FastAPI runtime settings, including token and CORS configuration.
 - `services/api/core/tokens.py`: custom HMAC bearer token implementation.
 - `services/api/core/dependencies.py`: API authentication, admin, section, and device access dependencies.
+- `services/api/routes/map.py`: general map API for layer catalog, features, filter options, and authorized device images.
+- `services/api/services/map_layers.py`: map-layer metadata, access checks, filtering, distinct filter options, and image proxy orchestration.
+- `services/api/services/device_map.py`: GeoJSON map feature loading, device detail enrichment, and map image file resolution.
 - `moduly/apps/dashboard/login.py`: main Streamlit dashboard entry point.
 - `moduly/apps/dashboard/navigation_config.py`: authoritative Streamlit navigation and permissions configuration.
 - `moduly/apps/dashboard/auth.py`: Streamlit authentication/session state and API login flow.
+- `moduly/apps/dashboard/map_shared.py`: shared Leaflet map HTML rendering and map API payload helpers.
 - `moduly/apps/dashboard/database/models.py`: dashboard user and permission model.
 - `moduly/apps/dashboard/database/db_init.py`: dashboard and feature table bootstrap.
+- `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`: Streamlit admin page for map layer configuration.
+- `moduly/apps/dashboard/pages/36_mapove_podklady.py`: Streamlit `Mapove podklady / Mapa` page.
 - `frontend_next/`: experimental Next.js MVP. It is not the active production dashboard and is not currently used in daily operation. Treat it as a future migration/prototype area, not as the source of truth for current dashboard behavior.
 - `.streamlit/config.toml`: Streamlit server and navigation settings.
 - `Caddyfile`: local reverse proxy configuration.
@@ -71,6 +78,7 @@ Treat these as sensitive or operational artifacts:
 - `data/smartfuelpass/auto_login_session.json`
 - Any `.env`, credentials, cookies, tokens, browser sessions, or account data.
 - Raw meter data and imported source files unless the user explicitly requests inspection.
+- Device photo paths and photo files referenced by source columns such as `foto`; serve them only through authorized API paths.
 
 Known hygiene topics to handle only after explicit approval:
 
@@ -91,6 +99,9 @@ Known hygiene topics to handle only after explicit approval:
 - FastAPI should be the preferred boundary for new external or frontend-facing capabilities.
 - Streamlit remains the active dashboard unless a task explicitly targets the experimental Next.js area.
 - Shared behavior should live in modules/services, not in duplicated page logic.
+- `Mapove podklady` uses general FastAPI map endpoints and admin-configured metadata in `dashboard.Map_Layers`.
+- Map feature images must be resolved server-side from `layer_id` and device identifier; do not expose an endpoint that serves arbitrary client-supplied file paths.
+- Browser map image loading depends on API CORS origins; local defaults cover Streamlit `8001` and Caddy/proxy `8080`, and non-local origins should be configured through `API_CORS_ORIGINS`.
 
 ## Time Semantics
 
@@ -138,6 +149,8 @@ Known job families:
 - Navigation and permission definitions belong in `moduly/apps/dashboard/navigation_config.py`.
 - Login/session behavior belongs in `moduly/apps/dashboard/auth.py`.
 - Dashboard database bootstrap belongs in `moduly/apps/dashboard/database/db_init.py`.
+- General map UI belongs to `moduly/apps/dashboard/pages/36_mapove_podklady.py`; map-layer administration belongs to `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`.
+- Shared map rendering and request helpers belong in `moduly/apps/dashboard/map_shared.py`.
 - For dashboard page changes, prefer small helpers and tested filtering/formatting behavior.
 - For visual or UX changes, preserve existing project patterns unless the user explicitly asks for redesign.
 
@@ -171,6 +184,7 @@ python -m pytest tests -v --tb=short
 python -m pytest tests\test_scheduler.py -v --tb=short
 python -m pytest tests\test_vodomery_db_import.py -v --tb=short
 python -m pytest tests\test_dashboard_navigation_config.py -v --tb=short
+.venv\Scripts\python.exe -m pytest tests\test_map_routes.py tests\test_map_layers_service.py tests\test_dashboard_map_shared.py tests\test_dashboard_navigation_config.py tests\test_device_map_service.py -v --tb=short
 ```
 
 Experimental frontend command:

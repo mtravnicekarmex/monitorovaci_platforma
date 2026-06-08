@@ -200,3 +200,19 @@ Implications:
 - Context layers are gated by page access.
 - Device layers can use `restrict_to_allowed_devices=True` and a `device_section_key`; feature loading must still enforce assigned device IDs.
 - Future map pages should consume the map-layer catalog instead of duplicating layer definitions in page-specific code.
+
+## DEC-015: Map Device Photos Are Served Through an Authorized API Proxy
+
+Date: 2026-06-05
+
+Decision: Device photos in map popups are loaded through authenticated FastAPI endpoint `GET /api/v1/map/images` using `layer_id` and device identifier. The client must not send or control a raw filesystem path.
+
+Rationale: Browser access to local or UNC paths is unreliable and unsafe. Serving images through the API allows the backend to enforce user permissions, layer availability, device assignment, file existence, and supported image types.
+
+Implications:
+
+- Map image endpoints must resolve paths server-side from trusted device metadata such as the `foto` detail column.
+- Image access must reuse map-layer/device access checks and bearer token authentication.
+- Empty or missing `foto` values should not render broken image placeholders in the dashboard.
+- Direct arbitrary file serving based on a client-provided path is not allowed.
+- Dashboard browser image fetches require CORS for the dashboard origin; local defaults cover Streamlit `8001` and Caddy/proxy `8080`, and other origins should be configured through `API_CORS_ORIGINS`.

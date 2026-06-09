@@ -37,6 +37,7 @@ class MapLayerConfig:
     device_section_key: str | None = None
     map_enabled: bool = True
     default_visible: bool = True
+    show_photo: bool = False
     draw_order: int = 100
     filter_columns: tuple[str, ...] = ()
     popup_columns: tuple[str, ...] = ()
@@ -65,6 +66,9 @@ SUPPORTED_IMAGE_SUFFIXES = {
     ".png",
     ".webp",
 }
+PHOTO_PATH_PREFIX_FALLBACKS: tuple[tuple[str, str], ...] = (
+    ("P:\\", "\\\\SERVER1A\\Company\\"),
+)
 
 
 VODOMERY_MAP_LAYER = MapLayerConfig(
@@ -89,6 +93,7 @@ VODOMERY_MAP_LAYER = MapLayerConfig(
     restrict_to_allowed_devices=True,
     layer_kind="device",
     device_section_key="vodomery",
+    show_photo=True,
     draw_order=100,
     filter_columns=("budova", "patro", "mistnost_id", "identifikace"),
     popup_columns=(
@@ -194,7 +199,6 @@ VODOMERY_DETAIL_COLUMNS: tuple[str, ...] = (
     "redukcni_ventil",
     "filtr",
     "poznamka_vodomery",
-    "foto",
 )
 
 
@@ -235,9 +239,31 @@ def _path_from_photo_value(value: object) -> Path:
     return Path(raw_value)
 
 
+def _photo_path_candidates(value: object) -> tuple[Path, ...]:
+    primary_path = _path_from_photo_value(value)
+    primary_text = str(primary_path)
+    candidates = [primary_path]
+
+    for source_prefix, replacement_prefix in PHOTO_PATH_PREFIX_FALLBACKS:
+        if not primary_text.casefold().startswith(source_prefix.casefold()):
+            continue
+        relative_path = primary_text[len(source_prefix):].lstrip("\\/")
+        candidates.append(Path(f"{replacement_prefix}{relative_path}"))
+
+    unique_candidates: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        candidate_key = str(candidate).casefold()
+        if candidate_key in seen:
+            continue
+        seen.add(candidate_key)
+        unique_candidates.append(candidate)
+    return tuple(unique_candidates)
+
+
 def _resolve_image_file(value: object) -> MapFeatureImageFile:
-    path = _path_from_photo_value(value)
-    if not path.is_file():
+    path = next((candidate for candidate in _photo_path_candidates(value) if candidate.is_file()), None)
+    if path is None:
         raise MapFeatureImageNotFound("Soubor fotky neexistuje.")
 
     suffix = path.suffix.casefold()
@@ -323,11 +349,16 @@ def _build_layer_statement(
     return statement
 
 
-def _load_vodomery_device_details(identifiers: tuple[str, ...]) -> dict[str, dict[str, object]]:
+def _load_vodomery_device_details(
+    identifiers: tuple[str, ...],
+    *,
+    include_photo: bool,
+) -> dict[str, dict[str, object]]:
     if not identifiers:
         return {}
 
-    selected_columns = [getattr(Vodomer_areal_Zarizeni, column) for column in VODOMERY_DETAIL_COLUMNS]
+    detail_columns = VODOMERY_DETAIL_COLUMNS + (("foto",) if include_photo else ())
+    selected_columns = [getattr(Vodomer_areal_Zarizeni, column) for column in detail_columns]
     session = get_session_ms()
     try:
         rows = (
@@ -342,7 +373,7 @@ def _load_vodomery_device_details(identifiers: tuple[str, ...]) -> dict[str, dic
     for row in rows:
         record = {
             column: _serialize_property_value(value)
-            for column, value in zip(VODOMERY_DETAIL_COLUMNS, tuple(row), strict=True)
+            for column, value in zip(detail_columns, tuple(row), strict=True)
         }
         identifier = record.get("identifikace")
         if identifier:
@@ -355,7 +386,10 @@ def _load_detail_properties(
     identifiers: tuple[str, ...],
 ) -> dict[str, dict[str, object]]:
     if config.layer_id == VODOMERY_MAP_LAYER.layer_id:
-        return _load_vodomery_device_details(identifiers)
+        return _load_vodomery_device_details(
+            identifiers,
+            include_photo=config.show_photo,
+        )
     return {}
 
 
@@ -364,10 +398,15 @@ def resolve_map_feature_image_file(config: MapLayerConfig, identifier: str) -> M
     if not cleaned_identifier:
         raise MapFeatureImageError("identifier je povinne.")
 
+    if not config.show_photo:
+        raise MapFeatureImageError("Zobrazeni fotek neni pro vrstvu povoleno.")
     if config.layer_id != VODOMERY_MAP_LAYER.layer_id:
         raise MapFeatureImageError("Vrstva nema podporovane fotky.")
 
-    detail = _load_vodomery_device_details((cleaned_identifier,)).get(cleaned_identifier)
+    detail = _load_vodomery_device_details(
+        (cleaned_identifier,),
+        include_photo=True,
+    ).get(cleaned_identifier)
     if not detail:
         raise MapFeatureImageNotFound("Detail zarizeni nebyl nalezen.")
     return _resolve_image_file(detail.get("foto"))
@@ -396,6 +435,9 @@ def _row_to_feature(
     identifier = properties.get(config.identifier_column)
     detail = dict(detail_properties.get(str(identifier), {}) if detail_properties else {})
     properties["detail_source_found"] = bool(detail)
+    photo_value = detail.pop("foto", None)
+    if config.show_photo:
+        properties["has_photo"] = bool(str(photo_value or "").strip())
     properties.update(detail)
     properties["layer_id"] = config.layer_id
     properties["layer_title"] = config.title

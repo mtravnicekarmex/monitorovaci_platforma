@@ -145,7 +145,7 @@ def test_leaflet_map_html_renders_foto_as_popup_image_only_when_present():
                         {
                             "type": "Feature",
                             "geometry": {"type": "Point", "coordinates": [14.1, 50.7]},
-                            "properties": {"identifikace": "V-1", "foto": "C:\\foto\\v1.jpg"},
+                            "properties": {"identifikace": "V-1", "has_photo": True},
                         }
                     ],
                 },
@@ -165,9 +165,22 @@ def test_leaflet_map_html_renders_foto_as_popup_image_only_when_present():
     assert "function photoPlaceholderHtml" in html
     assert "fetch(mapImageUrl" in html
     assert '"Authorization": `Bearer ${mapImageAccessToken}`' in html
+    assert "properties.has_photo === true" in html
     assert 'String(key).toLowerCase() !== "foto"' in html
     assert "photoPlaceholderHtml(properties, layerId, layerConfig)" in html
     assert "file:///" not in html
+
+
+def test_leaflet_map_html_supports_same_origin_image_api():
+    html = build_leaflet_map_html(
+        {"layers": []},
+        image_api_base_url="",
+        access_token="test-token",
+    )
+
+    assert 'const mapImageEndpointUrl = "/api/v1/map/images";' in html
+    assert "const parentUrl = document.referrer || window.location.href;" in html
+    assert "new URL(mapImageEndpointUrl, parentUrl)" in html
 
 
 def test_normalize_catalog_layers_keeps_only_layer_dicts():

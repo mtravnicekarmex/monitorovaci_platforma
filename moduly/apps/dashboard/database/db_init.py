@@ -44,12 +44,38 @@ def ensure_streamlit_user_columns() -> None:
             conn.execute(text(statement))
 
 
+def ensure_map_layer_columns() -> None:
+    inspector = inspect(ENGINE_PG)
+    try:
+        columns = {column["name"] for column in inspector.get_columns("Map_Layers", schema="dashboard")}
+    except Exception:
+        return
+
+    if "show_photo" in columns:
+        return
+
+    with ENGINE_PG.begin() as conn:
+        conn.execute(
+            text(
+                'ALTER TABLE dashboard."Map_Layers" '
+                "ADD COLUMN show_photo BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
+        conn.execute(
+            text(
+                'UPDATE dashboard."Map_Layers" '
+                "SET show_photo = TRUE WHERE layer_id = 'vodomery'"
+            )
+        )
+
+
 def ensure_dashboard_tables() -> None:
     with ENGINE_PG.begin() as conn:
         conn.execute(text("CREATE SCHEMA IF NOT EXISTS dashboard"))
 
     Base.metadata.create_all(bind=ENGINE_PG)
     ensure_streamlit_user_columns()
+    ensure_map_layer_columns()
     ensure_default_map_layers()
     ensure_web_search_tables()
     ensure_expected_zero_table()

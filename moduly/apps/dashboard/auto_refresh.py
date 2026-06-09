@@ -10,7 +10,6 @@ from app.time_utils import prague_now_naive
 from core.scheduler.job_schedule import SCHEDULER_TIMEZONE, get_scheduler_job_specs
 
 
-SENSOR_DB_WRITE_MINUTES: tuple[int, ...] = (5, 16, 35, 50)
 SENSOR_REFRESH_BUFFER_MINUTES = 1
 QUARTER_HOUR_JOB_ID = "quarter_hour_job"
 QUARTER_HOUR_PAGE_INTERVAL_MINUTES = 15
@@ -26,12 +25,39 @@ def normalize_refresh_minutes(refresh_minutes: Sequence[int]) -> tuple[int, ...]
     return normalized
 
 
+def get_scheduler_job_run_minutes(job_id: str) -> tuple[int, ...]:
+    for job_spec in get_scheduler_job_specs():
+        if job_spec.id != job_id:
+            continue
+
+        trigger = job_spec.build_trigger()
+        window_start = SCHEDULER_REFERENCE_START.replace(minute=0, second=0, microsecond=0)
+        window_end = window_start + datetime.timedelta(hours=1)
+        fire_time = trigger.get_next_fire_time(None, window_start)
+        run_minutes: list[int] = []
+
+        while fire_time is not None and fire_time < window_end:
+            run_minutes.append(int(fire_time.minute))
+            fire_time = trigger.get_next_fire_time(fire_time, fire_time)
+
+        if not run_minutes:
+            raise ValueError(f"Scheduler job '{job_id}' does not run within the reference hour.")
+        return normalize_refresh_minutes(run_minutes)
+
+    raise ValueError(f"Scheduler job '{job_id}' was not found.")
+
+
+SENSOR_DB_WRITE_MINUTES: tuple[int, ...] = get_scheduler_job_run_minutes(QUARTER_HOUR_JOB_ID)
+
+
 def build_post_write_refresh_minutes(
-    write_minutes: Sequence[int] = SENSOR_DB_WRITE_MINUTES,
+    write_minutes: Sequence[int] | None = None,
     *,
     buffer_minutes: int = SENSOR_REFRESH_BUFFER_MINUTES,
 ) -> tuple[int, ...]:
-    normalized_write_minutes = normalize_refresh_minutes(write_minutes)
+    normalized_write_minutes = normalize_refresh_minutes(
+        SENSOR_DB_WRITE_MINUTES if write_minutes is None else write_minutes
+    )
     normalized_buffer = int(buffer_minutes)
     if normalized_buffer < 0 or normalized_buffer > 59:
         raise ValueError("Refresh buffer must be in range 0-59 minutes.")
@@ -73,9 +99,8 @@ def build_interval_refresh_minutes(
 
 
 SENSOR_REFRESH_MINUTES: tuple[int, ...] = build_post_write_refresh_minutes()
-QUARTER_HOUR_PAGE_REFRESH_MINUTES: tuple[int, ...] = build_interval_refresh_minutes(
-    get_scheduler_job_anchor_minute(QUARTER_HOUR_JOB_ID),
-    interval_minutes=QUARTER_HOUR_PAGE_INTERVAL_MINUTES,
+QUARTER_HOUR_PAGE_REFRESH_MINUTES: tuple[int, ...] = build_post_write_refresh_minutes(
+    get_scheduler_job_run_minutes(QUARTER_HOUR_JOB_ID),
 )
 
 

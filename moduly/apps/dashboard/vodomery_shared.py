@@ -193,6 +193,25 @@ def filter_min_duration_events(df: pd.DataFrame) -> pd.DataFrame:
     ].copy()
 
 
+def align_latest_hour_timestamp(
+    df: pd.DataFrame,
+    last_actual_timestamp: datetime.datetime | None,
+    *,
+    date_column: str = "date",
+) -> pd.DataFrame:
+    aligned = df.copy()
+    if aligned.empty or last_actual_timestamp is None or date_column not in aligned.columns:
+        return aligned
+
+    parsed_dates = pd.to_datetime(aligned[date_column], errors="coerce")
+    latest_timestamp = pd.Timestamp(last_actual_timestamp)
+    latest_hour = latest_timestamp.floor("h")
+    latest_hour_mask = parsed_dates == latest_hour
+    if latest_hour_mask.any():
+        aligned.loc[latest_hour_mask, date_column] = latest_timestamp.to_pydatetime()
+    return aligned
+
+
 @st.cache_data(ttl=60)
 def load_overview_metrics(
     source_filter: str,

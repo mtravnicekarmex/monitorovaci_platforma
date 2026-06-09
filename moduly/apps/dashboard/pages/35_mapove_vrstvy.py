@@ -182,6 +182,7 @@ def build_payload(prefix: str, current: dict[str, object] | None = None) -> dict
         "restrict_to_allowed_devices": bool(st.session_state.get(f"{prefix}_restrict_to_allowed_devices", False)),
         "map_enabled": bool(st.session_state.get(f"{prefix}_map_enabled", True)),
         "default_visible": bool(st.session_state.get(f"{prefix}_default_visible", True)),
+        "show_photo": bool(st.session_state.get(f"{prefix}_show_photo", False)),
         "is_active": bool(st.session_state.get(f"{prefix}_is_active", True)),
         "draw_order": int(st.session_state.get(f"{prefix}_draw_order", 100)),
     }
@@ -232,7 +233,7 @@ def render_layer_fields(prefix: str, current: dict[str, object] | None = None, *
         key=f"{prefix}_target_srid",
     )
 
-    state_cols = st.columns([1, 1, 1, 1])
+    state_cols = st.columns([1, 1, 1, 1, 1])
     state_cols[0].checkbox("Aktivni", value=bool(current.get("is_active", True)), key=f"{prefix}_is_active")
     state_cols[1].checkbox("Mapove zobrazovani", value=bool(current.get("map_enabled", True)), key=f"{prefix}_map_enabled")
     state_cols[2].checkbox("Viditelna defaultne", value=bool(current.get("default_visible", True)), key=f"{prefix}_default_visible")
@@ -240,6 +241,12 @@ def render_layer_fields(prefix: str, current: dict[str, object] | None = None, *
         "Omezit podle zarizeni",
         value=bool(current.get("restrict_to_allowed_devices", False)),
         key=f"{prefix}_restrict_to_allowed_devices",
+    )
+    state_cols[4].checkbox(
+        "Zobrazit foto",
+        value=bool(current.get("show_photo", False)),
+        key=f"{prefix}_show_photo",
+        help="Pri zapnuti se pro zarizeni nacita cesta ze sloupce foto.",
     )
 
     st.text_input(
@@ -296,6 +303,7 @@ def render_page() -> None:
                     "mapa": "ANO" if layer["map_enabled"] else "NE",
                     "aktivni": "ANO" if layer["is_active"] else "NE",
                     "device_filter": "ANO" if layer["restrict_to_allowed_devices"] else "NE",
+                    "foto": "ANO" if layer["show_photo"] else "NE",
                     "poradi": layer["draw_order"],
                 }
                 for layer in layers
@@ -318,6 +326,7 @@ def render_page() -> None:
                 "target_srid": 4326,
                 "map_enabled": True,
                 "default_visible": True,
+                "show_photo": False,
                 "is_active": True,
                 "draw_order": 100,
                 "style": DEFAULT_STYLE,

@@ -418,6 +418,9 @@ def test_monthly_job_calls_all_monthly_reports(monkeypatch):
     def fake_b1_report():
         return None
 
+    def fake_jordan_report():
+        return None
+
     def fake_monthly_elektromery_report():
         return None
 
@@ -425,6 +428,7 @@ def test_monthly_job_calls_all_monthly_reports(monkeypatch):
     monkeypatch.setattr(scheduler, "send_monthly_vodomery_branch_report", fake_monthly_branch_report)
     monkeypatch.setattr(scheduler, "send_monthly_vodomery_billing_summary_report", fake_monthly_billing_summary_report)
     monkeypatch.setattr(scheduler, "send_monthly_b1_consumption_report", fake_b1_report)
+    monkeypatch.setattr(scheduler, "send_monthly_jordan_consumption_report", fake_jordan_report)
     monkeypatch.setattr(scheduler, "send_monthly_elektromery_branch_report", fake_monthly_elektromery_report)
     monkeypatch.setattr(scheduler, "_run_database_preflight_or_skip", lambda job_id: None)
     monkeypatch.setattr(
@@ -440,8 +444,17 @@ def test_monthly_job_calls_all_monthly_reports(monkeypatch):
         fake_monthly_branch_report,
         fake_monthly_billing_summary_report,
         fake_b1_report,
+        fake_jordan_report,
         fake_monthly_elektromery_report,
     ]
+
+
+def test_monthly_jordan_report_is_available_for_manual_run():
+    manual_specs = scheduler.get_manual_run_specs()
+
+    jordan_spec = manual_specs["send_monthly_jordan_consumption_report"]
+    assert jordan_spec.run_fn is scheduler.send_monthly_jordan_consumption_report
+    assert jordan_spec.lock_names == ("monthly_job",)
 
 
 def test_daily_vodomery_branch_report_job_sends_email_report(monkeypatch):

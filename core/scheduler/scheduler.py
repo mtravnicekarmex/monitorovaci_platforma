@@ -49,6 +49,7 @@ from moduly.mereni.vodomery.reporting import (
     send_monthly_vodomery_branch_report,
     send_monthly_vodomery_billing_summary_report,
     send_monthly_b1_consumption_report,
+    send_monthly_jordan_consumption_report,
     send_vodomery_model_rebuild_report,
     send_monthly_vodomery_consumption_report,
 )
@@ -860,6 +861,7 @@ def monthly_job():
     safe_call(send_monthly_vodomery_branch_report)
     safe_call(send_monthly_vodomery_billing_summary_report)
     safe_call(send_monthly_b1_consumption_report)
+    safe_call(send_monthly_jordan_consumption_report)
     safe_call(send_monthly_elektromery_branch_report)
 
 
@@ -1251,6 +1253,15 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             label="Mesicni report spotreby B1",
             description="Odeslani mesicniho reportu spotreby objektu B1.",
             run_fn=send_monthly_b1_consumption_report,
+            lock_names=("monthly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="send_monthly_jordan_consumption_report",
+            label="Mesicni report spotreby JORDAN",
+            description="Odeslani mesicniho reportu spotreby objektu JORDAN.",
+            run_fn=send_monthly_jordan_consumption_report,
             lock_names=("monthly_job",),
             is_scheduled=False,
             kind="internal_step",

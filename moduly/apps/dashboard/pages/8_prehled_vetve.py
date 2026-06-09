@@ -20,6 +20,7 @@ from moduly.apps.dashboard.auto_refresh import QUARTER_HOUR_PAGE_REFRESH_MINUTES
 from moduly.apps.dashboard.api_client import DashboardApiError
 from moduly.apps.dashboard.auth import require_page_access
 from moduly.apps.dashboard.vodomery_shared import (
+    align_latest_hour_timestamp,
     format_consumption_with_unit,
     get_vodomery_access_context,
     load_branch_day_overview,
@@ -80,30 +81,36 @@ def render_sidebar_filters() -> datetime.date:
     return selected_date
 
 
-def build_branch_chart(hourly_df):
+def build_branch_chart(hourly_df, last_actual_timestamp: datetime.datetime | None):
+    actual_df = align_latest_hour_timestamp(
+        hourly_df.dropna(subset=["kumulovana_spotreba_graf"]),
+        last_actual_timestamp,
+    )
+    connected_prediction_df = align_latest_hour_timestamp(
+        hourly_df.dropna(subset=["navazna_predikce"]),
+        last_actual_timestamp,
+    )
     limit_chart = alt.Chart(hourly_df.dropna(subset=["denni_limit"])).mark_line(color="#dc2626").encode(
         x=alt.X("date:T", title=None),
-        y=alt.Y("denni_limit:Q", title=None),
+        y=alt.Y("denni_limit:Q", title="Spotřeba [m³]"),
     )
     expected_chart = alt.Chart(hourly_df).mark_line(color="#dedcd9").encode(
         x=alt.X("date:T", title=None),
-        y=alt.Y("ocekavana_kumulovana_spotreba:Q", title=None),
+        y=alt.Y("ocekavana_kumulovana_spotreba:Q", title="Spotřeba [m³]"),
     )
-    actual_chart = alt.Chart(hourly_df).mark_line(color="#1f77b4").encode(
+    actual_chart = alt.Chart(actual_df).mark_line(color="#1f77b4").encode(
         x=alt.X("date:T", title=None),
-        y=alt.Y("kumulovana_spotreba_graf:Q", title=None),
+        y=alt.Y("kumulovana_spotreba_graf:Q", title="Spotřeba [m³]"),
     )
     billing_chart = alt.Chart(
         hourly_df.dropna(subset=["fakturacni_kumulovana_spotreba_graf"])
     ).mark_line(color="#f97316").encode(
         x=alt.X("date:T", title=None),
-        y=alt.Y("fakturacni_kumulovana_spotreba_graf:Q", title=None),
+        y=alt.Y("fakturacni_kumulovana_spotreba_graf:Q", title="Spotřeba [m³]"),
     )
-    connected_prediction_chart = alt.Chart(
-        hourly_df.dropna(subset=["navazna_predikce"])
-    ).mark_line(color="#8ecae6").encode(
+    connected_prediction_chart = alt.Chart(connected_prediction_df).mark_line(color="#8ecae6").encode(
         x=alt.X("date:T", title=None),
-        y=alt.Y("navazna_predikce:Q", title=None),
+        y=alt.Y("navazna_predikce:Q", title="Spotřeba [m³]"),
     )
     return (limit_chart + expected_chart + connected_prediction_chart + actual_chart + billing_chart).interactive()
 
@@ -207,6 +214,7 @@ def build_branch_stacked_area_chart(
     area_df = area_df.loc[area_df["date"] <= last_actual_hour].copy()
     if area_df.empty:
         return None
+    area_df = align_latest_hour_timestamp(area_df, last_actual_timestamp)
 
     prediction_df = hourly_df.loc[:, ["date", "ocekavana_spotreba"]].copy()
     prediction_df["ocekavana_spotreba"] = pd.to_numeric(prediction_df["ocekavana_spotreba"], errors="coerce")
@@ -383,7 +391,10 @@ def render_branch_card(branch_data: dict[str, object], selected_date: datetime.d
         charts_col, donut_col = st.columns((4.2, 1.8))
         with charts_col:
             with st.container(border=True):
-                st.altair_chart(build_branch_chart(hourly_df), width="stretch")
+                st.altair_chart(
+                    build_branch_chart(hourly_df, last_actual_timestamp),
+                    width="stretch",
+                )
                 render_branch_legend()
             area_chart = build_branch_stacked_area_chart(
                 device_hourly_df,

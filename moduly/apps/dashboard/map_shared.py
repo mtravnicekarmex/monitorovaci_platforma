@@ -37,6 +37,13 @@ def _json_string_for_script(value: str) -> str:
     return json.dumps(value, ensure_ascii=False).replace("</", "<\\/")
 
 
+def _map_image_endpoint_url(image_api_base_url: str | None) -> str:
+    if image_api_base_url is None:
+        return ""
+    base_url = image_api_base_url.rstrip("/")
+    return f"{base_url}/api/v1/map/images" if base_url else "/api/v1/map/images"
+
+
 def _normalize_map_layers(payload: dict[str, object]) -> list[dict[str, Any]]:
     layers = payload.get("layers")
     if isinstance(layers, list):
@@ -166,7 +173,7 @@ def build_leaflet_map_html(
     encoded_payload = _json_payload_to_base64({"layers": layers})
     primary_layer_id = escape(str(payload.get("primary_layer_id") or "vodomery"))
     layer_title = escape(str(payload.get("title") or "Mapa"))
-    image_endpoint_url = f"{image_api_base_url.rstrip('/')}/api/v1/map/images" if image_api_base_url else ""
+    image_endpoint_url = _map_image_endpoint_url(image_api_base_url)
     image_endpoint_js = _json_string_for_script(image_endpoint_url)
     access_token_js = _json_string_for_script(access_token or "")
 
@@ -322,7 +329,7 @@ def build_leaflet_map_html(
     }}
 
     function photoPlaceholderHtml(properties, layerId, layerConfig) {{
-      const hasPhoto = String(properties.foto ?? "").trim();
+      const hasPhoto = properties.has_photo === true || String(properties.foto ?? "").trim();
       if (!hasPhoto || !mapImageEndpointUrl || !mapImageAccessToken) {{
         return "";
       }}
@@ -334,7 +341,13 @@ def build_leaflet_map_html(
     }}
 
     function mapImageUrl(layerId, identifier) {{
-      const url = new URL(mapImageEndpointUrl);
+      let url;
+      try {{
+        url = new URL(mapImageEndpointUrl);
+      }} catch (_) {{
+        const parentUrl = document.referrer || window.location.href;
+        url = new URL(mapImageEndpointUrl, parentUrl);
+      }}
       url.searchParams.set("layer_id", layerId);
       url.searchParams.set("identifier", identifier);
       return url.toString();

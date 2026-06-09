@@ -101,7 +101,8 @@ Known hygiene topics to handle only after explicit approval:
 - Shared behavior should live in modules/services, not in duplicated page logic.
 - `Mapove podklady` uses general FastAPI map endpoints and admin-configured metadata in `dashboard.Map_Layers`.
 - Map feature images must be resolved server-side from `layer_id` and device identifier; do not expose an endpoint that serves arbitrary client-supplied file paths.
-- Browser map image loading depends on API CORS origins; local defaults cover Streamlit `8001` and Caddy/proxy `8080`, and non-local origins should be configured through `API_CORS_ORIGINS`.
+- Browser map image loading should use same-origin `/api/v1/map/images` through Caddy, which routes `/api/*` to FastAPI and other requests to Streamlit.
+- Deployments that do not expose the API under the dashboard origin must set `DASHBOARD_BROWSER_API_BASE_URL` and configure the matching origin through `API_CORS_ORIGINS`.
 
 ## Time Semantics
 
@@ -131,6 +132,7 @@ SmartFuelPass intervals use start/end UTC/source semantics. Do not simplify time
 - Metrics are persisted by `core/scheduler/metrics.py`.
 - Avoid adding schedule definitions directly inside feature modules.
 - When changing scheduler behavior, run targeted scheduler tests and check manual-run compatibility.
+- Dashboard refreshes tied to `quarter_hour_job` must derive its exact run minutes from the central scheduler specification and refresh after those slots; do not assume regular 15-minute spacing.
 
 Known job families:
 
@@ -153,6 +155,9 @@ Known job families:
 - Shared map rendering and request helpers belong in `moduly/apps/dashboard/map_shared.py`.
 - For dashboard page changes, prefer small helpers and tested filtering/formatting behavior.
 - For visual or UX changes, preserve existing project patterns unless the user explicitly asks for redesign.
+- Branch overview hourly graphs plot the current incomplete hour at the latest real measurement timestamp so the chart does not appear stale.
+- Vodomery photo paths stored under `P:\` require a server-side fallback to `\\SERVER1A\Company\`, because service processes may not inherit interactive mapped drives.
+- Map GeoJSON should expose only photo availability such as `has_photo`; raw and resolved filesystem paths must remain server-side.
 
 ## Measurement Domains
 

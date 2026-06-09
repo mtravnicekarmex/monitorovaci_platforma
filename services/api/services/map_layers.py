@@ -47,6 +47,7 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
         "restrict_to_allowed_devices": False,
         "map_enabled": True,
         "default_visible": True,
+        "show_photo": False,
         "is_active": True,
         "draw_order": 10,
     },
@@ -73,6 +74,7 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
         "restrict_to_allowed_devices": False,
         "map_enabled": True,
         "default_visible": True,
+        "show_photo": False,
         "is_active": True,
         "draw_order": 20,
     },
@@ -115,6 +117,7 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
         "restrict_to_allowed_devices": True,
         "map_enabled": True,
         "default_visible": True,
+        "show_photo": True,
         "is_active": True,
         "draw_order": 100,
     },
@@ -229,6 +232,7 @@ def _serialize_record(layer: Dashboard_MapLayer) -> dict[str, object]:
         "restrict_to_allowed_devices": bool(layer.restrict_to_allowed_devices),
         "map_enabled": bool(layer.map_enabled),
         "default_visible": bool(layer.default_visible),
+        "show_photo": bool(layer.show_photo),
         "is_active": bool(layer.is_active),
         "draw_order": int(layer.draw_order),
         "created_at": layer.created_at,
@@ -254,6 +258,7 @@ def map_layer_record_to_config(record: dict[str, object]) -> MapLayerConfig:
         device_section_key=str(record["device_section_key"]) if record.get("device_section_key") else None,
         map_enabled=bool(record.get("map_enabled", True)),
         default_visible=bool(record.get("default_visible", True)),
+        show_photo=bool(record.get("show_photo", False)),
         draw_order=int(record.get("draw_order", 100)),
         filter_columns=tuple(str(column) for column in record.get("filter_columns", []) or []),
         popup_columns=tuple(str(column) for column in record.get("popup_columns", []) or []),
@@ -279,6 +284,7 @@ def _apply_record_fields(layer: Dashboard_MapLayer, values: dict[str, object]) -
     layer.restrict_to_allowed_devices = bool(values["restrict_to_allowed_devices"])
     layer.map_enabled = bool(values["map_enabled"])
     layer.default_visible = bool(values["default_visible"])
+    layer.show_photo = bool(values["show_photo"])
     layer.is_active = bool(values["is_active"])
     layer.draw_order = int(values["draw_order"])
     layer.updated_at = utc_now_naive()
@@ -304,6 +310,7 @@ def _prepare_record_values(
     restrict_to_allowed_devices: bool,
     map_enabled: bool,
     default_visible: bool,
+    show_photo: bool,
     is_active: bool,
     draw_order: int,
 ) -> dict[str, object]:
@@ -331,6 +338,7 @@ def _prepare_record_values(
         "restrict_to_allowed_devices": bool(restrict_to_allowed_devices),
         "map_enabled": bool(map_enabled),
         "default_visible": bool(default_visible),
+        "show_photo": bool(show_photo),
         "is_active": bool(is_active),
         "draw_order": int(draw_order),
     }

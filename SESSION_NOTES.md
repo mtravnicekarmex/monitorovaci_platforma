@@ -529,3 +529,96 @@ Decisions/notes:
 
 Follow-up:
 - Use `AGENTS.md`, `DECISIONS.md`, and `SESSION_NOTES.md` as the continuation context in the next session.
+
+### 2026-06-08
+
+Scope:
+- Added a monthly consumption report for the JORDAN site.
+- Generalized the existing B1 report implementation for reusable site-level meter reports.
+
+Changed:
+- Added JORDAN report meters `G_V2`, `Gmt2`, and `G-2.3`.
+- Added JORDAN to `monthly_job` and the manual scheduler run registry.
+- Added `MONTHLY_JORDAN_CONSUMPTION_REPORT_RECIPIENTS` to `.env.example`.
+- Added shared PostgreSQL loaders for water and calorimeter cumulative states and the existing MSSQL electricity total loader.
+
+Verified:
+- Targeted report, recipient configuration, and scheduler tests passed.
+- Python compile checks passed for the changed report and scheduler modules.
+- Read-only dry run for May 2026 found usable start and end states for all three JORDAN meters without printing measurement values or sending email.
+
+Not verified:
+- No real email was sent.
+- The full test suite was not run.
+
+Decisions/notes:
+- Site-level monthly reports use a shared report specification instead of duplicating period, SQL, HTML, and delivery logic.
+- The user confirmed that calorimeter `Gmt2` should be displayed in `kWh`.
+- Recipient keys are `MONTHLY_B1_CONSUMPTION_REPORT_RECIPIENTS` and `MONTHLY_JORDAN_CONSUMPTION_REPORT_RECIPIENTS` because both reports combine multiple meter domains.
+
+Follow-up:
+- None for the JORDAN report.
+
+### 2026-06-09
+
+Scope:
+- Investigated stale-looking data on the Streamlit page `Přehled větve`.
+- Corrected scheduler-aligned refresh and current-hour chart timestamps.
+- Added the cumulative chart Y-axis label while preserving X-axis alignment between both branch graphs.
+- Restored authorized Vodoměry photo loading on `Mapové podklady`.
+
+Changed:
+- Dashboard refresh now derives the exact `quarter_hour_job` run minutes and refreshes at `:06`, `:17`, `:36`, and `:48`.
+- Current incomplete hourly buckets are plotted at the latest actual measurement timestamp.
+- The upper cumulative graph uses the Y-axis label `Spotřeba [m³]`.
+- The map image resolver translates stored `P:\...` paths to the `\\SERVER1A\Company\...` fallback.
+- Vodoměry GeoJSON exposes `has_photo` instead of the raw `foto` path.
+- Added and updated targeted tests for refresh timing, chart timestamp alignment, map rendering, and image resolution.
+
+Verified:
+- Scheduler and import metrics showed a successful water import on 2026-06-09 and current source measurements.
+- Refresh, timestamp helper, and related service tests: 14 passed.
+- Related dashboard tests: 24 passed.
+- Targeted map tests: 64 passed.
+- Read-only map diagnostic returned 59 Vodoměry features, 4 with photos, all 4 resolvable, and no raw photo paths exposed.
+- Python compile checks and `git diff --check` passed; only existing line-ending warnings were reported.
+
+Not verified:
+- The full pytest suite was not run.
+- Live browser rendering after a FastAPI process restart was not verified.
+
+Decisions/notes:
+- Dashboard refreshes must follow exact central scheduler slots rather than assume regular quarter-hour spacing.
+- Mapped drives are not reliable for service processes; device photo paths are translated server-side.
+- Map clients receive photo availability only and load image bytes through the authenticated API endpoint.
+
+Follow-up:
+- Restart or reload FastAPI if required, then validate the photo popup in the running `Mapové podklady` page.
+
+### 2026-06-09
+
+Scope:
+- Diagnosed the failed map photo load for device `F_V1`.
+- Corrected browser routing for authenticated map image requests.
+
+Changed:
+- Caddy now routes `/api/*` to FastAPI and all other requests to Streamlit.
+- Map image requests default to same-origin `/api/v1/map/images` instead of the server-internal `127.0.0.1:8000` URL.
+- Added `DASHBOARD_BROWSER_API_BASE_URL` as an optional override for deployments without same-origin API routing.
+- Reloaded the running Caddy configuration.
+
+Verified:
+- Server-side resolution for `F_V1` found an existing JPEG.
+- Authenticated live request through Caddy returned HTTP 200, `image/jpeg`, and a valid JPEG signature.
+- Targeted map tests passed: 44 passed.
+- Python compile checks and Caddy validation passed.
+
+Not verified:
+- The popup was not clicked in a real remote browser after the change.
+- The full pytest suite was not run.
+
+Decisions/notes:
+- Same-origin proxying avoids remote-browser localhost failures and removes CORS from the normal Caddy deployment path.
+
+Follow-up:
+- Refresh the `Mapove podklady / Mapa` page so Streamlit renders the updated map HTML.

@@ -34,7 +34,7 @@ from moduly.apps.dashboard.overview_weather import (
     format_overview_date,
 )
 from moduly.apps.dashboard.manometry_shared import format_pressure_with_unit
-from moduly.apps.dashboard.vodomery_shared import format_consumption_with_unit
+from moduly.apps.dashboard.vodomery_shared import align_latest_hour_timestamp, format_consumption_with_unit
 from app.time_utils import prague_now_naive
 
 
@@ -871,6 +871,7 @@ def build_branch_stacked_area_chart(
     area_df = area_df.loc[area_df["date"] <= last_actual_hour].copy()
     if area_df.empty:
         return None
+    area_df = align_latest_hour_timestamp(area_df, last_actual_timestamp)
 
     prediction_df = hourly_df.loc[:, ["date", "ocekavana_spotreba"]].copy()
     prediction_df = prediction_df.dropna(subset=["date", "ocekavana_spotreba"])

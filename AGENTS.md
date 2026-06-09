@@ -47,6 +47,7 @@ At the end of every substantive session:
 - `moduly/apps/dashboard/login.py`: main Streamlit dashboard entry point.
 - `moduly/apps/dashboard/navigation_config.py`: authoritative Streamlit navigation and permissions configuration.
 - `moduly/apps/dashboard/auth.py`: Streamlit authentication/session state and API login flow.
+- `moduly/apps/dashboard/responsive.py`: shared mobile breakpoint and responsive page styles for pilot dashboard pages.
 - `moduly/apps/dashboard/map_shared.py`: shared Leaflet map HTML rendering and map API payload helpers.
 - `moduly/apps/dashboard/database/models.py`: dashboard user and permission model.
 - `moduly/apps/dashboard/database/db_init.py`: dashboard and feature table bootstrap.
@@ -144,6 +145,7 @@ Known job families:
 - `weekly_job`
 - `smartfuelpass_weekly_report_job`
 - `monthly_job`
+- `monthly_b1_v1_consumption_report_job`
 
 ## Dashboard
 
@@ -153,11 +155,15 @@ Known job families:
 - Dashboard database bootstrap belongs in `moduly/apps/dashboard/database/db_init.py`.
 - General map UI belongs to `moduly/apps/dashboard/pages/36_mapove_podklady.py`; map-layer administration belongs to `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`.
 - Shared map rendering and request helpers belong in `moduly/apps/dashboard/map_shared.py`.
+- The mobile dashboard pilot uses the same Streamlit pages as desktop and switches layout through a `720px` responsive breakpoint.
+- Mobile map geolocation stays in the browser, is requested only after a user action, and must not be persisted or sent to the API.
+- Browser geolocation on a remote phone requires the dashboard to be opened through a trusted HTTPS origin; plain LAN HTTP is not sufficient.
 - For dashboard page changes, prefer small helpers and tested filtering/formatting behavior.
 - For visual or UX changes, preserve existing project patterns unless the user explicitly asks for redesign.
 - Branch overview hourly graphs plot the current incomplete hour at the latest real measurement timestamp so the chart does not appear stale.
 - Vodomery photo paths stored under `P:\` require a server-side fallback to `\\SERVER1A\Company\`, because service processes may not inherit interactive mapped drives.
 - Map GeoJSON should expose only photo availability such as `has_photo`; raw and resolved filesystem paths must remain server-side.
+- The `B1_V1` monthly report runs on the last Czech business day at 13:03 and uses the interval from 13:15 on the previous month's last Czech business day through 13:00 on the current month's last Czech business day.
 
 ## Measurement Domains
 
@@ -189,7 +195,7 @@ python -m pytest tests -v --tb=short
 python -m pytest tests\test_scheduler.py -v --tb=short
 python -m pytest tests\test_vodomery_db_import.py -v --tb=short
 python -m pytest tests\test_dashboard_navigation_config.py -v --tb=short
-.venv\Scripts\python.exe -m pytest tests\test_map_routes.py tests\test_map_layers_service.py tests\test_dashboard_map_shared.py tests\test_dashboard_navigation_config.py tests\test_device_map_service.py -v --tb=short
+.venv\Scripts\python.exe -m pytest tests\test_map_routes.py tests\test_map_layers_service.py tests\test_dashboard_map_shared.py tests\test_dashboard_navigation_config.py tests\test_device_map_service.py tests\test_dashboard_responsive.py -v --tb=short
 ```
 
 Experimental frontend command:

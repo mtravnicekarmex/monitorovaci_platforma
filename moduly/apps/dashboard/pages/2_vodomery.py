@@ -19,6 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from moduly.apps.dashboard.api_client import DashboardApiError
 from moduly.apps.dashboard.auth import require_page_access
+from moduly.apps.dashboard.responsive import render_responsive_page_styles
 from moduly.apps.dashboard.time_semantics import add_chart_time, time_axis_column
 from moduly.apps.dashboard.vodomery_shared import (
     format_consumption_dataframe,
@@ -355,23 +356,27 @@ def build_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 def render_summary_metrics(df: pd.DataFrame, change_table: pd.DataFrame) -> None:
     total_consumption = round(float(df["kumulovana_spotreba"].iloc[-1]), 3)
-    metric_cols = st.columns(4)
-    metric_cols[0].metric("Spotřeba za období", format_consumption_with_unit(total_consumption))
-    if has_prediction_data(df):
-        expected_total = round(float(df["ocekavana_spotreba"].fillna(0).sum()), 3)
-        deviation = round(total_consumption - expected_total, 3)
-        if expected_total != 0:
-            deviation_pct = (deviation / expected_total) * 100
-            deviation_pct_label = f"{deviation_pct:+.1f} %"
+    with st.container(key="mobile_metric_grid_vodomery_summary"):
+        metric_cols = st.columns(4)
+        metric_cols[0].metric("Spotřeba za období", format_consumption_with_unit(total_consumption))
+        if has_prediction_data(df):
+            expected_total = round(float(df["ocekavana_spotreba"].fillna(0).sum()), 3)
+            deviation = round(total_consumption - expected_total, 3)
+            if expected_total != 0:
+                deviation_pct = (deviation / expected_total) * 100
+                deviation_pct_label = f"{deviation_pct:+.1f} %"
+            else:
+                deviation_pct_label = "N/A"
+            metric_cols[1].metric("Očekávaná spotřeba", format_consumption_with_unit(expected_total))
+            metric_cols[2].metric("Odchylka", format_consumption_with_unit(deviation, signed=True))
+            metric_cols[3].metric("Odchylka [%]", deviation_pct_label)
         else:
-            deviation_pct_label = "N/A"
-        metric_cols[1].metric("Očekávaná spotřeba", format_consumption_with_unit(expected_total))
-        metric_cols[2].metric("Odchylka", format_consumption_with_unit(deviation, signed=True))
-        metric_cols[3].metric("Odchylka [%]", deviation_pct_label)
-    else:
-        metric_cols[1].metric("Resety a výměny", max(int(df["reset_detected"].fillna(False).sum()), len(change_table) // 2))
-        metric_cols[2].metric("Počet měření", int(len(df)))
-        metric_cols[3].metric("Predikce", "N/A")
+            metric_cols[1].metric(
+                "Resety a výměny",
+                max(int(df["reset_detected"].fillna(False).sum()), len(change_table) // 2),
+            )
+            metric_cols[2].metric("Počet měření", int(len(df)))
+            metric_cols[3].metric("Predikce", "N/A")
 
 
 
@@ -543,6 +548,7 @@ def render_export_button(df: pd.DataFrame, selected_ident: str, start_date: date
 
 def render_dashboard() -> None:
     render_page_styles()
+    render_responsive_page_styles()
     st.markdown(
         """
         <div class="vodomery-hero">

@@ -26,6 +26,7 @@ from moduly.apps.dashboard.map_shared import (
     normalize_catalog_layers,
     normalize_filter_options_payload,
 )
+from moduly.apps.dashboard.responsive import render_responsive_page_styles
 
 
 st.set_page_config(
@@ -47,13 +48,6 @@ def _format_layer_label(layer_by_id: dict[str, dict[str, object]], layer_id: str
     title = str(layer.get("title") or layer_id)
     layer_kind = str(layer.get("layer_kind") or "context")
     return f"{title} ({layer_kind})"
-
-
-def _total_features(payload: dict[str, object]) -> int:
-    layers = payload.get("layers")
-    if not isinstance(layers, list):
-        return 0
-    return sum(int(layer.get("total") or 0) for layer in layers if isinstance(layer, dict))
 
 
 def _session_filters_by_layer(
@@ -82,17 +76,49 @@ def _session_filters_by_layer(
     return filters_by_layer
 
 
-def _active_filter_value_count(filters_by_layer: dict[str, dict[str, list[str]]]) -> int:
-    return sum(len(values) for layer_filters in filters_by_layer.values() for values in layer_filters.values())
+def render_map_page_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        .map-mobile-filter-note {
+            display: none;
+        }
+
+        @media (max-width: 720px) {
+            .map-mobile-filter-note {
+                display: block;
+                margin: 0.25rem 0 0.75rem;
+                color: #64748b;
+                font-size: 0.85rem;
+            }
+
+            .st-key-map_page_layout [data-testid="stHorizontalBlock"] {
+                flex-direction: column !important;
+            }
+
+            .st-key-map_page_layout [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+                flex: 1 1 100% !important;
+                width: 100% !important;
+                min-width: 100% !important;
+            }
+
+            .st-key-map_page_layout [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {
+                order: 2;
+            }
+
+            .st-key-map_page_layout [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) {
+                order: 1;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_page() -> None:
-    st.title("Mapove podklady")
-    st.caption(
-        "Obecna mapa nad konfigurovatelnymi vrstvami. Vrstvy a jejich filtry vychazeji z katalogu "
-        "mapovych podkladu a z opravneni aktualniho uzivatele."
-    )
-
+    render_responsive_page_styles()
+    render_map_page_styles()
     access_token = get_auth_token()
     if not access_token:
         raise DashboardApiError("Chybi bearer token pro dashboard API.")
@@ -111,10 +137,10 @@ def render_page() -> None:
         if bool(layer.get("default_visible", True))
     ] or layer_ids[:1]
 
-    filter_col, map_col = st.columns([0.85, 4.15], gap="small")
+    with st.container(key="map_page_layout"):
+        filter_col, map_col = st.columns([0.85, 4.15], gap="small")
 
     with filter_col:
-        st.subheader("Vrstvy")
         selected_layer_ids = st.multiselect(
             "Aktivni vrstvy",
             options=layer_ids,
@@ -139,6 +165,10 @@ def render_page() -> None:
 
     filters_by_layer: dict[str, dict[str, list[str]]] = {}
     with filter_col:
+        st.markdown(
+            '<div class="map-mobile-filter-note">Mapa je na telefonu zobrazena nad timto panelem.</div>',
+            unsafe_allow_html=True,
+        )
         st.subheader("Filtry")
         for layer_id in selected_layer_ids:
             layer = layer_by_id[layer_id]
@@ -174,11 +204,6 @@ def render_page() -> None:
     filtered_payload = load_map_features_payload(access_token, filtered_request)
 
     with map_col:
-        metric_cols = st.columns(3)
-        metric_cols[0].metric("Aktivni vrstvy", len(selected_layer_ids))
-        metric_cols[1].metric("Prvky po filtru", _total_features(filtered_payload))
-        metric_cols[2].metric("Aktivni filtry", _active_filter_value_count(filters_by_layer))
-
         components.html(
             build_leaflet_map_html(
                 filtered_payload,

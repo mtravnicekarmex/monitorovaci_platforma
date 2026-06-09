@@ -9,6 +9,7 @@ from moduly.mereni.vodomery.reporting import _email_config as email_config
 from moduly.mereni.vodomery.reporting import billing_summary_report
 from moduly.mereni.vodomery.reporting import model_rebuild_report
 from moduly.mereni.vodomery.reporting import monthly_b1_consumption_report
+from moduly.mereni.vodomery.reporting import monthly_b1_v1_consumption_report
 from moduly.mereni.vodomery.reporting import monthly_jordan_consumption_report
 from moduly.mereni.vodomery.reporting import monthly_branch_report
 from moduly.mereni.vodomery.reporting import monthly_consumption_report
@@ -44,6 +45,25 @@ def test_monthly_jordan_report_uses_dedicated_recipient_env(monkeypatch):
     monkeypatch.setattr(email_config, "config", lambda key, default="": values.get(key, default))
 
     assert monthly_jordan_consumption_report._load_recipients() == ["jordan@armex.cz"]
+
+
+def test_monthly_b1_v1_report_uses_dedicated_recipient_env(monkeypatch):
+    values = {
+        "MONTHLY_B1_CONSUMPTION_REPORT_RECIPIENTS": "b1@armex.cz",
+        "MONTHLY_B1_V1_CONSUMPTION_REPORT_RECIPIENTS": "b1-v1@armex.cz",
+    }
+    monkeypatch.setattr(email_config, "config", lambda key, default="": values.get(key, default))
+
+    assert monthly_b1_v1_consumption_report._load_recipients() == ["b1-v1@armex.cz"]
+
+
+def test_monthly_b1_v1_report_falls_back_to_b1_recipients(monkeypatch):
+    values = {
+        "MONTHLY_B1_CONSUMPTION_REPORT_RECIPIENTS": "b1@armex.cz",
+    }
+    monkeypatch.setattr(email_config, "config", lambda key, default="": values.get(key, default))
+
+    assert monthly_b1_v1_consumption_report._load_recipients() == ["b1@armex.cz"]
 
 
 def test_model_rebuild_report_does_not_fallback_to_monthly_consumption_recipients(monkeypatch):

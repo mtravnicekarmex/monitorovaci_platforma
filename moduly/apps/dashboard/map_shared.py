@@ -227,16 +227,74 @@ def build_leaflet_map_html(
       color: #17202a;
       padding: 3px 0;
     }}
+    .map-location-control a {{
+      display: flex;
+      width: 40px;
+      height: 40px;
+      align-items: center;
+      justify-content: center;
+      color: #0f172a;
+      font-size: 23px;
+      line-height: 1;
+      text-decoration: none;
+      background: #ffffff;
+    }}
+    .map-location-control {{
+      display: none;
+    }}
+    .map-location-control a.is-locating {{
+      color: #2563eb;
+      cursor: progress;
+    }}
+    .map-location-status {{
+      position: absolute;
+      left: 12px;
+      bottom: 12px;
+      z-index: 700;
+      display: none;
+      max-width: min(360px, calc(100vw - 24px));
+      box-sizing: border-box;
+      padding: 9px 12px;
+      border: 1px solid rgba(15, 23, 42, 0.16);
+      border-radius: 10px;
+      color: #0f172a;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.16);
+      font-size: 13px;
+    }}
+    .map-location-status.is-visible {{
+      display: block;
+    }}
+    .map-location-status.is-error {{
+      color: #991b1b;
+      border-color: rgba(185, 28, 28, 0.24);
+      background: rgba(254, 242, 242, 0.97);
+    }}
     .map-popup-photo {{
       display: block;
       width: 100%;
       max-width: 320px;
       max-height: 240px;
       object-fit: contain;
-      margin-top: 10px;
       border: 1px solid #d8dee9;
       border-radius: 10px;
       background: #ffffff;
+    }}
+    .map-popup-photo-button {{
+      display: block;
+      width: 100%;
+      margin-top: 10px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      cursor: zoom-in;
+    }}
+    .map-popup-photo-hint {{
+      display: block;
+      margin-top: 4px;
+      color: #526070;
+      font-size: 11px;
+      text-align: center;
     }}
     .map-popup-photo-loading,
     .map-popup-photo-error {{
@@ -247,12 +305,122 @@ def build_leaflet_map_html(
     .map-popup-photo-error {{
       color: #b91c1c;
     }}
+    .map-photo-lightbox {{
+      position: fixed;
+      inset: 0;
+      z-index: 2000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      box-sizing: border-box;
+      background: rgba(15, 23, 42, 0.92);
+    }}
+    .map-photo-lightbox.is-open {{
+      display: flex;
+    }}
+    .map-photo-lightbox-content {{
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      max-width: 100%;
+      max-height: 100%;
+    }}
+    .map-photo-lightbox-image {{
+      display: block;
+      max-width: calc(100vw - 48px);
+      max-height: calc(100vh - 100px);
+      object-fit: contain;
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+    }}
+    .map-photo-lightbox-actions {{
+      display: flex;
+      gap: 10px;
+      margin-top: 14px;
+    }}
+    .map-photo-lightbox-action {{
+      border: 1px solid rgba(255, 255, 255, 0.55);
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.12);
+      font: inherit;
+      text-decoration: none;
+      cursor: pointer;
+    }}
+    .map-photo-lightbox-action:hover {{
+      background: rgba(255, 255, 255, 0.22);
+    }}
+    @media (max-width: 720px) {{
+      #map {{
+        border-radius: 10px;
+      }}
+      .map-badge {{
+        top: 10px;
+        left: 56px;
+        max-width: calc(100vw - 126px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }}
+      .leaflet-control-layers {{
+        max-width: calc(100vw - 80px);
+        max-height: 44vh;
+        overflow-y: auto;
+      }}
+      .leaflet-popup-content {{
+        width: auto !important;
+        max-width: calc(100vw - 76px);
+        margin: 12px;
+      }}
+      .popup-table {{
+        min-width: 0;
+        width: 100%;
+        font-size: 12px;
+      }}
+      .popup-table th {{
+        max-width: 42vw;
+        white-space: normal;
+      }}
+      .map-location-control a {{
+        width: 44px;
+        height: 44px;
+      }}
+      .map-location-control {{
+        display: block;
+      }}
+      .map-photo-lightbox {{
+        padding: 12px;
+      }}
+      .map-photo-lightbox-image {{
+        max-width: calc(100vw - 24px);
+        max-height: calc(100vh - 92px);
+      }}
+    }}
   </style>
 </head>
 <body>
   <div style="position: relative;">
     <div id="map"></div>
     <div class="map-badge">{layer_title}</div>
+    <div id="map-location-status" class="map-location-status" role="status" aria-live="polite"></div>
+  </div>
+  <div id="map-photo-lightbox" class="map-photo-lightbox" aria-hidden="true">
+    <div class="map-photo-lightbox-content" role="dialog" aria-modal="true" aria-label="Zvetsena fotografie">
+      <img id="map-photo-lightbox-image" class="map-photo-lightbox-image" alt="Foto zarizeni">
+      <div class="map-photo-lightbox-actions">
+        <a
+          id="map-photo-lightbox-open"
+          class="map-photo-lightbox-action"
+          href="#"
+          target="_blank"
+          rel="noopener noreferrer"
+        >Otevrit v nove karte</a>
+        <button id="map-photo-lightbox-close" class="map-photo-lightbox-action" type="button">Zavrit</button>
+      </div>
+    </div>
   </div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
@@ -260,6 +428,11 @@ def build_leaflet_map_html(
     const primaryLayerId = "{primary_layer_id}";
     const mapImageEndpointUrl = {image_endpoint_js};
     const mapImageAccessToken = {access_token_js};
+    const photoLightbox = document.getElementById("map-photo-lightbox");
+    const photoLightboxImage = document.getElementById("map-photo-lightbox-image");
+    const photoLightboxOpen = document.getElementById("map-photo-lightbox-open");
+    const photoLightboxClose = document.getElementById("map-photo-lightbox-close");
+    const locationStatus = document.getElementById("map-location-status");
     const displayFieldsByLayer = {{
       vodomery: [
         ["identifikace", "Identifikace"],
@@ -353,6 +526,45 @@ def build_leaflet_map_html(
       return url.toString();
     }}
 
+    function openPhotoLightbox(image) {{
+      if (!image || !image.src) {{
+        return;
+      }}
+      photoLightboxImage.src = image.src;
+      photoLightboxImage.alt = image.alt || "Foto zarizeni";
+      photoLightboxOpen.href = image.src;
+      photoLightbox.classList.add("is-open");
+      photoLightbox.setAttribute("aria-hidden", "false");
+      photoLightboxClose.focus();
+    }}
+
+    function closePhotoLightbox() {{
+      photoLightbox.classList.remove("is-open");
+      photoLightbox.setAttribute("aria-hidden", "true");
+      photoLightboxImage.removeAttribute("src");
+      photoLightboxOpen.href = "#";
+    }}
+
+    document.addEventListener("click", (event) => {{
+      const photoButton = event.target.closest(".map-popup-photo-button");
+      if (photoButton) {{
+        event.preventDefault();
+        event.stopPropagation();
+        openPhotoLightbox(photoButton.querySelector(".map-popup-photo"));
+      }}
+    }});
+    photoLightboxClose.addEventListener("click", closePhotoLightbox);
+    photoLightbox.addEventListener("click", (event) => {{
+      if (event.target === photoLightbox) {{
+        closePhotoLightbox();
+      }}
+    }});
+    document.addEventListener("keydown", (event) => {{
+      if (event.key === "Escape" && photoLightbox.classList.contains("is-open")) {{
+        closePhotoLightbox();
+      }}
+    }});
+
     async function loadPopupPhotos(container) {{
       if (!container || !mapImageEndpointUrl || !mapImageAccessToken) {{
         return;
@@ -377,7 +589,12 @@ def build_leaflet_map_html(
           const blob = await response.blob();
           const objectUrl = URL.createObjectURL(blob);
           target.dataset.mapPhoto = "loaded";
-          target.innerHTML = `<img class="map-popup-photo" src="${{escapeHtml(objectUrl)}}" alt="Foto zarizeni" loading="lazy">`;
+          target.innerHTML = `
+            <button class="map-popup-photo-button" type="button" aria-label="Zvetsit fotografii">
+              <img class="map-popup-photo" src="${{escapeHtml(objectUrl)}}" alt="Foto zarizeni" loading="lazy">
+              <span class="map-popup-photo-hint">Kliknutim zvetsit</span>
+            </button>
+          `;
         }} catch (_) {{
           target.dataset.mapPhoto = "error";
           target.innerHTML = '<div class="map-popup-photo-error">Fotku se nepodarilo nacist.</div>';
@@ -390,6 +607,9 @@ def build_leaflet_map_html(
         return;
       }}
       container.querySelectorAll(".map-popup-photo").forEach((image) => {{
+        if (photoLightboxImage.src === image.src) {{
+          closePhotoLightbox();
+        }}
         if (image.src && image.src.startsWith("blob:")) {{
           URL.revokeObjectURL(image.src);
         }}
@@ -488,6 +708,9 @@ def build_leaflet_map_html(
 
     const overlayLayers = {{}};
     const leafletLayers = [];
+    let currentLocationMarker = null;
+    let currentAccuracyCircle = null;
+    let locationStatusTimer = null;
     const layers = Array.isArray(mapPayload.layers) ? mapPayload.layers : [];
     layers.forEach((layerConfig) => {{
       const layerId = String(layerConfig.layer_id || "layer");
@@ -509,14 +732,99 @@ def build_leaflet_map_html(
       leafletLayers.push({{ id: layerId, layer: leafletLayer }});
     }});
 
+    const compactMapControls = window.matchMedia("(max-width: 720px)").matches;
     L.control.layers(
       {{
         "Zakladni mapa": osmBaseLayer,
         "Letecka mapa (CUZK)": aerialBaseLayer
       }},
       overlayLayers,
-      {{ collapsed: false, position: "topright" }}
+      {{ collapsed: compactMapControls, position: "topright" }}
     ).addTo(map);
+
+    function showLocationStatus(message, isError = false) {{
+      if (locationStatusTimer) {{
+        window.clearTimeout(locationStatusTimer);
+      }}
+      locationStatus.textContent = message;
+      locationStatus.classList.toggle("is-error", isError);
+      locationStatus.classList.add("is-visible");
+      locationStatusTimer = window.setTimeout(() => {{
+        locationStatus.classList.remove("is-visible");
+      }}, isError ? 8000 : 5000);
+    }}
+
+    const locationControl = L.control({{ position: "topleft" }});
+    locationControl.onAdd = () => {{
+      const container = L.DomUtil.create("div", "leaflet-bar map-location-control");
+      const button = L.DomUtil.create("a", "", container);
+      button.href = "#";
+      button.title = "Zobrazit moji polohu";
+      button.setAttribute("role", "button");
+      button.setAttribute("aria-label", "Zobrazit moji polohu");
+      button.innerHTML = "&#9678;";
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.disableScrollPropagation(container);
+      L.DomEvent.on(button, "click", (event) => {{
+        L.DomEvent.preventDefault(event);
+        if (!window.isSecureContext) {{
+          showLocationStatus("Poloha telefonu je dostupna pouze pri otevreni dashboardu pres HTTPS.", true);
+          return;
+        }}
+        if (!navigator.geolocation) {{
+          showLocationStatus("Tento prohlizec nepodporuje zjisteni polohy.", true);
+          return;
+        }}
+        button.classList.add("is-locating");
+        showLocationStatus("Zjistuji polohu telefonu...");
+        map.locate({{
+          setView: false,
+          watch: false,
+          enableHighAccuracy: true,
+          timeout: 12000,
+          maximumAge: 15000
+        }});
+      }});
+      map.on("locationfound locationerror", () => button.classList.remove("is-locating"));
+      return container;
+    }};
+    locationControl.addTo(map);
+
+    map.on("locationfound", (event) => {{
+      if (currentLocationMarker) {{
+        map.removeLayer(currentLocationMarker);
+      }}
+      if (currentAccuracyCircle) {{
+        map.removeLayer(currentAccuracyCircle);
+      }}
+      currentLocationMarker = L.circleMarker(event.latlng, {{
+        radius: 9,
+        color: "#ffffff",
+        weight: 3,
+        fillColor: "#2563eb",
+        fillOpacity: 1
+      }}).addTo(map);
+      currentAccuracyCircle = L.circle(event.latlng, {{
+        radius: event.accuracy,
+        color: "#2563eb",
+        weight: 1.5,
+        fillColor: "#60a5fa",
+        fillOpacity: 0.14
+      }}).addTo(map);
+      currentLocationMarker.bindPopup(
+        `<strong>Moje poloha</strong><br>Presnost priblizne ${{Math.round(event.accuracy)}} m`
+      );
+      map.setView(event.latlng, Math.max(map.getZoom(), 19));
+      currentLocationMarker.openPopup();
+      showLocationStatus(`Poloha zobrazena s presnosti priblizne ${{Math.round(event.accuracy)}} m.`);
+    }});
+
+    map.on("locationerror", (event) => {{
+      const message = event.code === 1
+        ? "Pristup k poloze nebyl povolen."
+        : "Polohu telefonu se nepodarilo zjistit.";
+      showLocationStatus(message, true);
+    }});
 
     try {{
       const primaryLayer = leafletLayers.find((item) => item.id === primaryLayerId)?.layer || leafletLayers[0]?.layer;

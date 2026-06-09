@@ -27,7 +27,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
 from sqlalchemy import text
 from app.channels.email import send_email_outlook
-from app.time_utils import utc_now_naive
+from app.czech_business_calendar import is_last_czech_business_day
+from app.time_utils import prague_today, utc_now_naive
 from core.scheduler.job_schedule import SCHEDULER_TIMEZONE_NAME, get_scheduler_job_specs
 from core.scheduler.metrics import SCHEDULER_HEARTBEAT_TTL_SECONDS, get_metrics_store
 from decouple import config
@@ -49,6 +50,7 @@ from moduly.mereni.vodomery.reporting import (
     send_monthly_vodomery_branch_report,
     send_monthly_vodomery_billing_summary_report,
     send_monthly_b1_consumption_report,
+    send_monthly_b1_v1_consumption_report,
     send_monthly_jordan_consumption_report,
     send_vodomery_model_rebuild_report,
     send_monthly_vodomery_consumption_report,
@@ -865,6 +867,33 @@ def monthly_job():
     safe_call(send_monthly_elektromery_branch_report)
 
 
+@locked_job
+def monthly_b1_v1_consumption_report_job():
+    reference_date = prague_today()
+    if not is_last_czech_business_day(reference_date):
+        logger.info(
+            "JOB SKIPPED | id=monthly_b1_v1_consumption_report_job "
+            "| reason=not_last_czech_business_day | date=%s",
+            reference_date.isoformat(),
+        )
+        return SkippedJobResult(
+            reason="not_last_czech_business_day",
+            lock_names=("monthly_b1_v1_consumption_report_job",),
+        )
+
+    preflight_result = _run_database_preflight_or_skip(
+        "monthly_b1_v1_consumption_report_job"
+    )
+    if preflight_result is not None:
+        return preflight_result
+
+    safe_call(vodomery_db_import)
+    return safe_call(
+        send_monthly_b1_v1_consumption_report,
+        reference_date=reference_date,
+    )
+
+
 def _run_vodomery_scoring_step() -> None:
     for model_version in get_candidate_model_versions():
         score_new_measurements(
@@ -949,6 +978,7 @@ def _get_job_functions():
         "weekly_job": weekly_job,
         "smartfuelpass_weekly_report_job": smartfuelpass_weekly_report_job,
         "monthly_job": monthly_job,
+        "monthly_b1_v1_consumption_report_job": monthly_b1_v1_consumption_report_job,
     }
 
 
@@ -1254,6 +1284,18 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             description="Odeslani mesicniho reportu spotreby objektu B1.",
             run_fn=send_monthly_b1_consumption_report,
             lock_names=("monthly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="send_monthly_b1_v1_consumption_report",
+            label="Mesicni report spotreby B1_V1",
+            description=(
+                "Odeslani reportu B1_V1 za posledni uzavreny interval "
+                "ceskych pracovnich dni."
+            ),
+            run_fn=send_monthly_b1_v1_consumption_report,
+            lock_names=("monthly_b1_v1_consumption_report_job",),
             is_scheduled=False,
             kind="internal_step",
         ),

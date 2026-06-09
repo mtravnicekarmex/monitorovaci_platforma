@@ -223,3 +223,19 @@ Clarification (2026-06-09):
 - Stored `P:\...` photo paths are translated server-side to the service-accessible `\\SERVER1A\Company\...` fallback because service processes may not inherit mapped drives.
 - Browser photo requests use same-origin `/api/v1/map/images` through Caddy; Caddy routes `/api/*` to FastAPI and the remaining traffic to Streamlit.
 - `DASHBOARD_BROWSER_API_BASE_URL` is an override for deployments where the browser must call FastAPI at another origin.
+
+## DEC-016: Mobile Dashboard Uses Responsive Streamlit Pages
+
+Date: 2026-06-09
+
+Decision: Mobile optimization is implemented as responsive behavior in the active Streamlit pages, not as a separate mobile application or a switch to the experimental Next.js frontend.
+
+Rationale: The desktop and mobile dashboard must keep the same authentication, permissions, data loading, and business behavior while adapting layout for narrow viewports.
+
+Implications:
+
+- Desktop layout remains the default; mobile rules apply below the shared `720px` breakpoint.
+- The pilot covers `Overview`, `Vodomery / Prehled`, and `Mapove podklady / Mapa`.
+- Mobile map geolocation is initiated explicitly by the user and rendered only in the Leaflet client.
+- Phone coordinates are not sent to FastAPI or persisted.
+- Remote mobile geolocation requires a trusted HTTPS dashboard origin.

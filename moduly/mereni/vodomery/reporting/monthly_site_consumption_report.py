@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from enum import Enum
 import html
+from typing import Callable
 
 from decouple import config
 from sqlalchemy import text
@@ -39,6 +40,8 @@ class SiteReportSpec:
     recipient_env_key: str
     context_label: str
     meters: tuple[MeterSpec, ...]
+    include_cutoff_measurement: bool = False
+    recipient_fallback_env_keys: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,11 @@ class ReportPeriod:
 
     @property
     def date_range_label(self) -> str:
+        if self.period_start.time() != time.min or self.period_end.time() != time.min:
+            return (
+                f"{self.period_start.strftime('%d.%m.%Y %H:%M')} - "
+                f"{self.period_end.strftime('%d.%m.%Y %H:%M')}"
+            )
         period_end_inclusive = self.period_end - timedelta(days=1)
         return (
             f"{self.period_start.strftime('%d.%m.%Y')} - "
@@ -79,10 +87,16 @@ class MeterConsumptionSummary:
 def send_monthly_site_consumption_report(
     spec: SiteReportSpec,
     reference_date: date | None = None,
+    *,
+    period_resolver: Callable[[date | None], ReportPeriod] | None = None,
 ) -> dict[str, object]:
-    period = get_previous_month_period(reference_date)
+    period = (
+        period_resolver(reference_date)
+        if period_resolver is not None
+        else get_previous_month_period(reference_date)
+    )
     recipients = filter_placeholder_recipients(
-        load_report_recipients(spec.recipient_env_key),
+        load_site_report_recipients(spec),
         context_label=spec.context_label,
     )
     if not recipients:
@@ -120,6 +134,15 @@ def send_monthly_site_consumption_report(
     }
 
 
+def load_site_report_recipients(spec: SiteReportSpec) -> tuple[str, ...]:
+    if spec.recipient_fallback_env_keys:
+        return load_report_recipients(
+            spec.recipient_env_key,
+            fallback_env_keys=spec.recipient_fallback_env_keys,
+        )
+    return load_report_recipients(spec.recipient_env_key)
+
+
 def get_previous_month_period(reference_date: date | None = None) -> ReportPeriod:
     base_date = reference_date or prague_today()
     current_month_start = base_date.replace(day=1)
@@ -153,8 +176,18 @@ def build_meter_summaries(
             else:
                 raise ValueError(f"Nepodporovany zdroj meridla: {meter.source}")
 
-            start_value = load_meter_value_before(conn, meter, period.period_start)
-            end_value = load_meter_value_before(conn, meter, period.period_end)
+            start_value = load_meter_value_before(
+                conn,
+                meter,
+                period.period_start,
+                include_cutoff=spec.include_cutoff_measurement,
+            )
+            end_value = load_meter_value_before(
+                conn,
+                meter,
+                period.period_end,
+                include_cutoff=spec.include_cutoff_measurement,
+            )
             summaries.append(
                 MeterConsumptionSummary(
                     meter_type=meter.meter_type,
@@ -168,13 +201,34 @@ def build_meter_summaries(
     return tuple(summaries)
 
 
-def load_meter_value_before(conn, meter: MeterSpec, cutoff: datetime) -> float | None:
+def load_meter_value_before(
+    conn,
+    meter: MeterSpec,
+    cutoff: datetime,
+    *,
+    include_cutoff: bool = False,
+) -> float | None:
     if meter.source == MeterSource.VODOMER_PG:
-        return load_last_valid_vodomer_value_before(conn, meter.identifier, cutoff)
+        return load_last_valid_vodomer_value_before(
+            conn,
+            meter.identifier,
+            cutoff,
+            include_cutoff=include_cutoff,
+        )
     if meter.source == MeterSource.KALORIMETR_PG:
-        return load_last_valid_kalorimetr_energy_before(conn, meter.identifier, cutoff)
+        return load_last_valid_kalorimetr_energy_before(
+            conn,
+            meter.identifier,
+            cutoff,
+            include_cutoff=include_cutoff,
+        )
     if meter.source == MeterSource.ELEKTROMER_MS:
-        return load_last_valid_elektromer_total_before(conn, meter.identifier, cutoff)
+        return load_last_valid_elektromer_total_before(
+            conn,
+            meter.identifier,
+            cutoff,
+            include_cutoff=include_cutoff,
+        )
     raise ValueError(f"Nepodporovany zdroj meridla: {meter.source}")
 
 
@@ -182,14 +236,21 @@ def build_subject(period: ReportPeriod, spec: SiteReportSpec) -> str:
     return f"Spotřeba {spec.site_label} - {period.month_label}"
 
 
-def load_last_valid_vodomer_value_before(conn, identifier: str, cutoff: datetime) -> float | None:
+def load_last_valid_vodomer_value_before(
+    conn,
+    identifier: str,
+    cutoff: datetime,
+    *,
+    include_cutoff: bool = False,
+) -> float | None:
+    cutoff_operator = "<=" if include_cutoff else "<"
     row = conn.execute(
         text(
-            """
+            f"""
             SELECT objem
             FROM monitoring."Mereni_vodomery_vse"
             WHERE identifikace = :identifier
-              AND date < :cutoff
+              AND date {cutoff_operator} :cutoff
               AND platne = TRUE
               AND objem IS NOT NULL
             ORDER BY date DESC, id DESC
@@ -204,14 +265,21 @@ def load_last_valid_vodomer_value_before(conn, identifier: str, cutoff: datetime
     return to_rounded_float(row[0]) if row else None
 
 
-def load_last_valid_kalorimetr_energy_before(conn, identifier: str, cutoff: datetime) -> float | None:
+def load_last_valid_kalorimetr_energy_before(
+    conn,
+    identifier: str,
+    cutoff: datetime,
+    *,
+    include_cutoff: bool = False,
+) -> float | None:
+    cutoff_operator = "<=" if include_cutoff else "<"
     row = conn.execute(
         text(
-            """
+            f"""
             SELECT spotreba_energie
             FROM monitoring."Mereni_kalorimetry_vse"
             WHERE identifikace = :identifier
-              AND date < :cutoff
+              AND date {cutoff_operator} :cutoff
               AND platne = TRUE
               AND spotreba_energie IS NOT NULL
             ORDER BY date DESC, id DESC
@@ -226,14 +294,21 @@ def load_last_valid_kalorimetr_energy_before(conn, identifier: str, cutoff: date
     return to_rounded_float(row[0]) if row else None
 
 
-def load_last_valid_elektromer_total_before(conn, identifier: str, cutoff: datetime) -> float | None:
+def load_last_valid_elektromer_total_before(
+    conn,
+    identifier: str,
+    cutoff: datetime,
+    *,
+    include_cutoff: bool = False,
+) -> float | None:
+    cutoff_operator = "<=" if include_cutoff else "<"
     row = conn.execute(
         text(
-            """
+            f"""
             SELECT TOP 1 total
             FROM dbo.Mereni_elektromery
             WHERE identifikace = :identifier
-              AND date < :cutoff
+              AND date {cutoff_operator} :cutoff
               AND total IS NOT NULL
             ORDER BY date DESC, recid DESC
             """

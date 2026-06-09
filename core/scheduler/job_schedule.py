@@ -82,6 +82,18 @@ SCHEDULER_JOB_SPECS: tuple[SchedulerJobSpec, ...] = (
         description="Mesicni reporty spotreb.",
         trigger_kwargs={"day": 1, "hour": 6, "minute": 20, "second": 5},
     ),
+    SchedulerJobSpec(
+        id="monthly_b1_v1_consumption_report_job",
+        label="Monthly B1_V1",
+        description="Mesicni report B1_V1 posledni cesky pracovni den v mesici.",
+        trigger_kwargs={
+            "day": "25-31",
+            "day_of_week": "mon-fri",
+            "hour": 13,
+            "minute": 3,
+            "second": 5,
+        },
+    ),
 )
 
 

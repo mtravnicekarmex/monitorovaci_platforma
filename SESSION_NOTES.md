@@ -622,3 +622,93 @@ Decisions/notes:
 
 Follow-up:
 - Refresh the `Mapove podklady / Mapa` page so Streamlit renders the updated map HTML.
+
+### 2026-06-09
+
+Scope:
+- Added a monthly consumption report for water meter `B1_V1`.
+- Added Czech business-day scheduling and exact intraday report boundaries.
+
+Changed:
+- Added `monthly_b1_v1_consumption_report_job`, scheduled at 13:03 near month end and guarded to run only on the last Czech business day.
+- The report interval starts at 13:15 on the previous month's last Czech business day and ends at 13:00 on the current month's last Czech business day.
+- The scheduled job refreshes water-meter data before calculating the report.
+- Added `MONTHLY_B1_V1_CONSUMPTION_REPORT_RECIPIENTS` with fallback to the existing B1 monthly report recipients.
+- Added Czech fixed and Easter holiday handling.
+
+Verified:
+- Report, recipient, and scheduler tests passed: 57 tests.
+- Read-only dry run for the latest completed interval found start, end, and consumption values for `B1_V1`.
+- Effective recipients are configured through the B1 fallback without printing addresses.
+- Python compile checks and `git diff --check` passed; only line-ending warnings were reported.
+
+Not verified:
+- No email was sent.
+- The full test suite was not run.
+
+Decisions/notes:
+- Measurements within the requested boundary minute can contain non-zero seconds, so internal cutoffs use the end of the `13:15` and `13:00` minutes while email labels retain the requested minute values.
+
+Follow-up:
+- Restart the scheduler process so it loads the new job definition.
+
+### 2026-06-09
+
+Scope:
+- Improved photo viewing and usable map space on `Mapove podklady / Mapa`.
+
+Changed:
+- Clicking a device photo opens a large lightbox over the map.
+- The lightbox can be closed by button, backdrop click, or Escape and offers opening the photo in a new browser tab.
+- Removed the page title, explanatory caption, `Vrstvy` heading, and the three map metrics.
+- The map now starts at the top of the page beside the layer and filter controls.
+
+Verified:
+- Python compile checks passed for the changed dashboard map modules.
+- Targeted map and navigation tests passed: 68 map tests after the photo lightbox change and 32 dashboard map/navigation tests after the layout change.
+- `git diff --check` reported no whitespace errors, only line-ending warnings.
+- The installed Streamlit iframe configuration includes popup permission needed for opening the photo in a new tab.
+
+Not verified:
+- Live browser interaction and final visual layout were not tested.
+- The full pytest suite was not run.
+
+Decisions/notes:
+- Authorized image loading remains unchanged and continues to use the existing FastAPI image proxy and temporary browser blob URLs.
+- No durable architectural decision was added.
+
+Follow-up:
+- Candidate space improvements are a map fullscreen control, a collapsible layer/filter panel, and viewport-based map height.
+
+### 2026-06-09
+
+Scope:
+- Added the mobile optimization pilot for `Overview`, `Vodomery / Prehled`, and `Mapove podklady / Mapa`.
+- Added optional display of the phone position in the Leaflet map.
+
+Changed:
+- Added shared responsive styles with a `720px` mobile breakpoint.
+- Pilot page columns stack on mobile while KPI groups use two columns.
+- Overview weather cards and dense headers adapt to narrow screens.
+- The mobile map is displayed before its Streamlit filter panel and Leaflet controls use mobile sizing.
+- Added a mobile-only `Moje poloha` map control with accuracy circle and permission/error feedback.
+- Device location remains browser-only and is not sent to the API.
+
+Verified:
+- Python compile checks passed for all changed dashboard modules.
+- Responsive, map, navigation, overview, and Vodomery targeted tests passed.
+- Full targeted map suite passed: 71 tests.
+- Generated map JavaScript passed Chromium syntax validation.
+- `git diff --check` reported no whitespace errors, only existing line-ending warnings.
+
+Not verified:
+- Live interaction on a physical phone was not tested.
+- Geolocation was not tested through a deployed trusted HTTPS origin.
+- The full pytest suite was not run.
+
+Decisions/notes:
+- Mobile and desktop use the same Streamlit pages; layout changes are CSS responsive rules, not separate page implementations.
+- Remote mobile browser geolocation requires HTTPS. The current plain HTTP `:8080` Caddy listener will show an explanatory error instead of requesting location.
+
+Follow-up:
+- Configure a trusted HTTPS dashboard origin before validating phone geolocation in production.

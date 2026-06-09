@@ -390,6 +390,7 @@ def test_scheduled_db_jobs_skip_before_work_when_database_preflight_fails(monkey
         return skipped_result
 
     monkeypatch.setattr(scheduler, "_run_database_preflight_or_skip", fake_preflight)
+    monkeypatch.setattr(scheduler, "is_last_czech_business_day", lambda _value: True)
     monkeypatch.setattr(
         scheduler,
         "safe_call",
@@ -455,6 +456,65 @@ def test_monthly_jordan_report_is_available_for_manual_run():
     jordan_spec = manual_specs["send_monthly_jordan_consumption_report"]
     assert jordan_spec.run_fn is scheduler.send_monthly_jordan_consumption_report
     assert jordan_spec.lock_names == ("monthly_job",)
+
+
+def test_monthly_b1_v1_job_skips_outside_last_czech_business_day(monkeypatch):
+    monkeypatch.setattr(scheduler, "prague_today", lambda: datetime.date(2026, 6, 29))
+    monkeypatch.setattr(scheduler, "is_last_czech_business_day", lambda _value: False)
+    monkeypatch.setattr(
+        scheduler,
+        "_run_database_preflight_or_skip",
+        lambda _job_id: pytest.fail("preflight must not run before the report is due"),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "safe_call",
+        lambda *args, **kwargs: pytest.fail("report must not run before the report is due"),
+    )
+
+    result = scheduler.monthly_b1_v1_consumption_report_job.__scheduler_unlocked_fn__()
+
+    assert result == scheduler.SkippedJobResult(
+        reason="not_last_czech_business_day",
+        lock_names=("monthly_b1_v1_consumption_report_job",),
+    )
+
+
+def test_monthly_b1_v1_job_sends_report_on_last_czech_business_day(monkeypatch):
+    reference_date = datetime.date(2026, 6, 30)
+    calls = []
+
+    monkeypatch.setattr(scheduler, "prague_today", lambda: reference_date)
+    monkeypatch.setattr(scheduler, "is_last_czech_business_day", lambda _value: True)
+    monkeypatch.setattr(scheduler, "_run_database_preflight_or_skip", lambda _job_id: None)
+    monkeypatch.setattr(
+        scheduler,
+        "safe_call",
+        lambda fn, *args, **kwargs: calls.append((fn, args, kwargs)),
+    )
+
+    scheduler.monthly_b1_v1_consumption_report_job.__scheduler_unlocked_fn__()
+
+    assert calls == [
+        (
+            scheduler.vodomery_db_import,
+            (),
+            {},
+        ),
+        (
+            scheduler.send_monthly_b1_v1_consumption_report,
+            (),
+            {"reference_date": reference_date},
+        )
+    ]
+
+
+def test_monthly_b1_v1_report_is_available_for_manual_run():
+    manual_specs = scheduler.get_manual_run_specs()
+
+    report_spec = manual_specs["send_monthly_b1_v1_consumption_report"]
+    assert report_spec.run_fn is scheduler.send_monthly_b1_v1_consumption_report
+    assert report_spec.lock_names == ("monthly_b1_v1_consumption_report_job",)
 
 
 def test_daily_vodomery_branch_report_job_sends_email_report(monkeypatch):
@@ -781,6 +841,11 @@ def test_main_scheduler_registers_monthly_and_daily_report_jobs(monkeypatch, fak
     scheduler.main_scheduler()
 
     monthly_job = next(job for job in fake_scheduler.jobs if job["id"] == "monthly_job")
+    b1_v1_job = next(
+        job
+        for job in fake_scheduler.jobs
+        if job["id"] == "monthly_b1_v1_consumption_report_job"
+    )
     daily_job = next(job for job in fake_scheduler.jobs if job["id"] == "daily_job")
     smartfuelpass_job = next(job for job in fake_scheduler.jobs if job["id"] == "smartfuelpass_weekly_report_job")
     daily_branch_job = next(job for job in fake_scheduler.jobs if job["id"] == "daily_vodomery_branch_report_job")
@@ -794,6 +859,12 @@ def test_main_scheduler_registers_monthly_and_daily_report_jobs(monkeypatch, fak
     assert "hour='6'" in str(monthly_job["trigger"])
     assert "minute='20'" in str(monthly_job["trigger"])
     assert "second='5'" in str(monthly_job["trigger"])
+    assert b1_v1_job["fn"] is scheduler.monthly_b1_v1_consumption_report_job
+    assert "day='25-31'" in str(b1_v1_job["trigger"])
+    assert "day_of_week='mon-fri'" in str(b1_v1_job["trigger"])
+    assert "hour='13'" in str(b1_v1_job["trigger"])
+    assert "minute='3'" in str(b1_v1_job["trigger"])
+    assert "second='5'" in str(b1_v1_job["trigger"])
     assert smartfuelpass_job["fn"] is scheduler.smartfuelpass_weekly_report_job
     assert "day_of_week='tue'" in str(smartfuelpass_job["trigger"])
     assert "hour='6'" in str(smartfuelpass_job["trigger"])

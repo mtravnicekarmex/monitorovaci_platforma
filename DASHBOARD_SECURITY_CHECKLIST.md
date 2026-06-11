@@ -15,16 +15,25 @@ Status values:
 
 ### 1. Replace the hard-coded API token secret
 
-- [ ] Generate a long cryptographically random production `API_TOKEN_SECRET`.
-- [ ] Store the secret outside Git, for example in the local `.env` or a protected service environment.
-- [ ] Remove the fixed secret from:
+- [x] Generate a long cryptographically random production `API_TOKEN_SECRET`.
+- [x] Store the secret outside Git, for example in the local `.env` or a protected service environment.
+- [x] Remove the fixed secret from:
   - `start_api_dashboard.bat`
   - `start_api_dashboard - kopie.bat`
   - `scripts/start_all_services.ps1`
-- [ ] Make startup fail clearly when the production secret is missing.
-- [ ] Restart FastAPI so tokens signed with the old secret stop working.
-- [ ] Verify that a newly issued token works and an old token returns HTTP 401.
-- [ ] Add regression tests preventing a fixed development secret from returning to tracked launchers.
+  - `run.txt`
+- [x] Make startup fail clearly when the production secret is missing.
+- [!] Restart FastAPI so tokens signed with the old secret stop working.
+- [-] Verify that a newly issued token works and an old token returns HTTP 401.
+- [x] Add regression tests preventing a fixed development secret from returning to tracked launchers.
+
+Current status on 2026-06-11:
+
+- The new 384-bit random secret is stored in the ignored local `.env`.
+- A temporary loopback-only FastAPI instance successfully validated a token signed with the new secret.
+- The running API on port `8000` still accepts tokens signed with the old known secret.
+- Restart is blocked because the current API process was started in a Windows security context that denied process termination, including the approved elevated attempt.
+- Complete the rotation by restarting the existing privileged API process or restarting the workstation, then verify that an old-secret token returns HTTP 401.
 
 Completion criteria:
 

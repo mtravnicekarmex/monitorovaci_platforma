@@ -1038,3 +1038,34 @@ Decisions/notes:
 - DEC-020 records persistent dashboard login behavior.
 - DEC-021 expands DEC-016 from the mobile pilot to the complete active Streamlit dashboard.
 - `main.py` remains only the scheduler entry point and was not changed.
+
+### 2026-06-11 - Dashboard security remediation P0.1
+
+Scope:
+- Started the dashboard security checklist with API token signing-key rotation.
+- Removed the known development signing secret from tracked runtime launchers.
+
+Changed:
+- `start_api_dashboard.bat` now loads `API_TOKEN_SECRET` through application configuration.
+- Removed the same fixed secret from `start_api_dashboard - kopie.bat`, `scripts/start_all_services.ps1`, and `run.txt`.
+- Generated a new 384-bit random secret in the ignored local `.env`.
+- Added `tests/test_dashboard_security_config.py`.
+- Added `DASHBOARD_SECURITY_CHECKLIST.md` progress and DEC-022.
+
+Verified:
+- The old known signing secret produced a token accepted by the currently running API before rotation.
+- A temporary loopback-only FastAPI instance loaded the new `.env` secret and accepted a newly signed token.
+- The temporary API instance was stopped and port `18000` was released.
+- Security, Caddy, browser-session, auth-state, auth-service, and navigation targeted tests passed: 36 tests.
+
+Not verified:
+- The running API on port `8000` could not be restarted because Windows denied terminating its privileged process tree.
+- The live API therefore still uses the old signing secret until restarted from its original administrative context or after a workstation restart.
+- Live rejection of an old-secret token remains pending after that restart.
+
+Decisions/notes:
+- API signing secrets must remain outside version control and must not be assigned by tracked launchers.
+- `main.py`, Streamlit, scheduler, and Caddy were not restarted or changed by this step.
+
+Follow-up:
+- Restart FastAPI or the workstation, then verify health, a new token, and HTTP 401 for an old-secret token.

@@ -324,3 +324,18 @@ Implications:
 - Tables and tab bars may scroll horizontally inside their own containers, but the page itself should not overflow horizontally.
 - Charts, images, iframes, forms, expanders, dialogs, and action buttons must fit the mobile viewport.
 - Existing desktop layouts remain unchanged above the breakpoint.
+
+## DEC-022: API Signing Secrets Stay Outside Version Control
+
+Date: 2026-06-11
+
+Decision: `API_TOKEN_SECRET` must be supplied through an ignored local `.env` file or a protected service environment. Runtime launchers must not contain or assign an API signing secret.
+
+Rationale: A tracked and predictable HMAC secret allows an attacker with source access to forge bearer tokens for dashboard users.
+
+Implications:
+
+- `start_api_dashboard.bat`, its tracked copy, `scripts/start_all_services.ps1`, and `run.txt` do not assign the secret and rely on application configuration.
+- FastAPI startup fails when the secret is missing or remains set to the documented placeholder.
+- Rotating the secret invalidates every bearer token signed with the previous value.
+- Regression tests must prevent fixed API signing secrets from returning to tracked launchers.

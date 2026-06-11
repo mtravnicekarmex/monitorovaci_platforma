@@ -49,7 +49,6 @@ exit /b 0
 
 :run_api
 cd /d "%PROJECT_DIR%"
-set "API_TOKEN_SECRET=monitoring-platforma-local-dev-secret"
 "%PROJECT_DIR%.venv\Scripts\python.exe" -m uvicorn services.api.main:app --host 127.0.0.1 --port 8000 --reload
 exit /b %ERRORLEVEL%
 

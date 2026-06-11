@@ -59,9 +59,9 @@ Je znam konecny verejny hostname a mame pristup k jeho DNS zone.
 
 ### 2. Zabezpeceni aplikace pred zverejnenim
 
-- [ ] Odstranit pevne zapsany vyvojovy `API_TOKEN_SECRET` ze `start_api_dashboard.bat`.
-- [ ] Vygenerovat dlouhy nahodny produkcni `API_TOKEN_SECRET`.
-- [ ] Ulozit secret mimo verzovany kod, napr. do lokalniho `.env` nebo zabezpeceneho systemoveho prostredi.
+- [x] Odstranit pevne zapsany vyvojovy `API_TOKEN_SECRET` ze `start_api_dashboard.bat`.
+- [x] Vygenerovat dlouhy nahodny produkcni `API_TOKEN_SECRET`.
+- [x] Ulozit secret mimo verzovany kod, napr. do lokalniho `.env` nebo zabezpeceneho systemoveho prostredi.
 - [ ] Odstranit `--reload` ze spousteni Uvicorn.
 - [ ] Overit, ze `.env` a dalsi soubory se secrets nejsou verzovane ani verejne dostupne.
 - [ ] Overit silna hesla vsech aktivnich dashboard uzivatelu.

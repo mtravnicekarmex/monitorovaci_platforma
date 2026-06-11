@@ -42,7 +42,7 @@ $services = @(
             -ProjectRootPath $resolvedProjectRoot `
             -PythonPath $pythonExe `
             -WindowTitle "Monitoring API" `
-            -EnvironmentAssignment "API_TOKEN_SECRET=monitoring-platforma-local-dev-secret" `
+            -EnvironmentAssignment '' `
             -CommandLine '-m uvicorn services.api.main:app --host 127.0.0.1 --port 8000 --reload'
     },
     @{

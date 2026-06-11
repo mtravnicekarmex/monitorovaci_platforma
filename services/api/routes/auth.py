@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from datetime import timezone
 
-from services.api.core.dependencies import get_current_user
-from services.api.core.tokens import TokenError, create_access_token
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.security import HTTPAuthorizationCredentials
+
+from app.dashboard_session import DASHBOARD_SESSION_COOKIE_NAME
+from services.api.core.dependencies import bearer_scheme, get_current_user
+from services.api.core.tokens import TokenError, create_access_token, decode_access_token
 from services.api.schemas.auth import LoginRequest, TokenResponse, UserProfileResponse
 from services.api.schemas.auth import EmailUpdateRequest, PasswordChangeRequest, UsersExistResponse
 from services.api.services.dashboard_auth import (
@@ -76,6 +80,63 @@ def login(payload: LoginRequest) -> TokenResponse:
 )
 def me(current_user: DashboardUserContext = Depends(get_current_user)) -> UserProfileResponse:
     return _profile_from_context(current_user)
+
+
+def _request_uses_https(request: Request) -> bool:
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    if forwarded_proto:
+        return forwarded_proto.split(",", 1)[0].strip().lower() == "https"
+    return request.url.scheme == "https"
+
+
+@router.post(
+    "/browser-session",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Persist browser session",
+    description="Ulozi aktualni bearer token do zabezpecene HttpOnly cookie pro obnovu Streamlit session po reloadu.",
+)
+def persist_browser_session(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    _current_user: DashboardUserContext = Depends(get_current_user),
+) -> Response:
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Chybi bearer token.",
+        )
+
+    token_payload = decode_access_token(credentials.credentials)
+    expires_at = token_payload.expires_at.replace(tzinfo=timezone.utc)
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    response.set_cookie(
+        key=DASHBOARD_SESSION_COOKIE_NAME,
+        value=credentials.credentials,
+        expires=expires_at,
+        httponly=True,
+        secure=_request_uses_https(request),
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+@router.delete(
+    "/browser-session",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Clear browser session",
+    description="Odstrani cookie pouzivanou pro obnovu Streamlit session.",
+)
+def clear_browser_session(request: Request) -> Response:
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    response.delete_cookie(
+        key=DASHBOARD_SESSION_COOKIE_NAME,
+        httponly=True,
+        secure=_request_uses_https(request),
+        samesite="lax",
+        path="/",
+    )
+    return response
 
 
 @router.patch(

@@ -272,3 +272,55 @@ Implications:
 - Caddy validates the runtime configuration before every run or reload.
 - If Caddy is already running, the launcher reloads it through `127.0.0.1:2019` instead of starting a competing listener on ports 80 and 443.
 - The root project `Caddyfile` remains the tracked mirror and must stay synchronized with the runtime file under `C:\Program Files\Caddy`.
+
+## DEC-019: Public Clients Use the Dashboard Hostname
+
+Date: 2026-06-11
+
+Decision: The only supported public client entry point is `https://monitoring.armexholding.cz`. Direct client access through the public IP address is not required or supported.
+
+Rationale: All dashboard and API clients should use the stable HTTPS hostname so Caddy can apply the correct TLS certificate, hostname routing, and same-origin API behavior.
+
+Implications:
+
+- Operational verification should target `monitoring.armexholding.cz`, not a URL containing the public IP address.
+- The public DNS record must continue to resolve the hostname to the current public endpoint.
+- A same-server connection to the public IP is not a required health check and missing NAT loopback is not considered a dashboard failure.
+- Caddy continues to route `/api/*` to FastAPI and all remaining hostname traffic to Streamlit.
+- `main.py` remains only the scheduler entry point and is unrelated to public hostname routing.
+
+## DEC-020: Dashboard Authentication Persists Across Browser Reloads
+
+Date: 2026-06-11
+
+Decision: A valid dashboard login is persisted in the browser through the `monitoring_dashboard_session` HttpOnly cookie and restored into Streamlit session state after a browser reload.
+
+Rationale: Streamlit `session_state` alone is not durable across a hard browser reload. Requiring users to enter credentials again while their API bearer token is still valid creates unnecessary disruption.
+
+Implications:
+
+- FastAPI endpoints `POST /api/v1/auth/browser-session` and `DELETE /api/v1/auth/browser-session` own browser cookie creation and deletion.
+- The cookie uses `HttpOnly`, `SameSite=Lax`, path `/`, token-aligned expiration, and `Secure` when the request is forwarded over HTTPS.
+- Streamlit reads the cookie through `st.context.cookies`, validates the token through `/api/v1/auth/me`, and then rebuilds the authenticated user state.
+- Logout and HTTP 401 token failures clear both Streamlit authentication state and the browser cookie.
+- API outages do not automatically delete a potentially valid persisted cookie.
+- The bearer token is not placed in a URL or client-readable local storage.
+
+## DEC-021: Responsive Layout Applies to the Whole Streamlit Dashboard
+
+Date: 2026-06-11
+
+Clarifies: DEC-016
+
+Decision: The shared `720px` responsive layout now applies to every active Streamlit dashboard page through the common `moduly/apps/dashboard/login.py` entry point.
+
+Rationale: Maintaining responsive behavior page by page caused inconsistent mobile support and duplicated style injection. All active pages share the same Streamlit navigation and can use one common responsive layer.
+
+Implications:
+
+- The earlier three-page pilot scope in DEC-016 is complete and no longer limits mobile support.
+- Shared responsive rules live in `moduly/apps/dashboard/responsive.py`; pages should add local mobile CSS only for genuinely page-specific behavior.
+- General columns stack on mobile, while metric-only rows remain two cards wide.
+- Tables and tab bars may scroll horizontally inside their own containers, but the page itself should not overflow horizontally.
+- Charts, images, iframes, forms, expanders, dialogs, and action buttons must fit the mobile viewport.
+- Existing desktop layouts remain unchanged above the breakpoint.

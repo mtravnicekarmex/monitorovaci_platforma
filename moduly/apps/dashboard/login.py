@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 import sys
 
@@ -10,6 +11,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from moduly.apps.dashboard import auth as dashboard_auth
+
+
+if not hasattr(dashboard_auth, "restore_auth_state_from_browser_cookie"):
+    dashboard_auth = importlib.reload(dashboard_auth)
+
+
 from moduly.apps.dashboard.auth import (
     DashboardApiError,
     any_dashboard_users,
@@ -19,10 +27,16 @@ from moduly.apps.dashboard.auth import (
     get_page_sidebar_location,
     init_auth_state,
     login,
+    restore_auth_state_from_browser_cookie,
     render_sidebar_footer,
     render_sidebar_nav,
+    sync_browser_auth_session,
 )
 from moduly.apps.dashboard.navigation_config import format_page_label, get_page_definition
+from moduly.apps.dashboard import responsive as dashboard_responsive
+
+
+dashboard_responsive = importlib.reload(dashboard_responsive)
 
 
 st.set_page_config(
@@ -33,6 +47,9 @@ st.set_page_config(
 
 
 init_auth_state()
+restore_auth_state_from_browser_cookie()
+sync_browser_auth_session()
+dashboard_responsive.render_responsive_page_styles()
 
 
 LOGIN_PAGE_STYLE = """

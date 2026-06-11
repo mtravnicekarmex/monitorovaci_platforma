@@ -19,7 +19,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from moduly.apps.dashboard.api_client import DashboardApiError
 from moduly.apps.dashboard.auth import require_page_access
-from moduly.apps.dashboard.responsive import render_responsive_page_styles
 from moduly.apps.dashboard.time_semantics import add_chart_time, time_axis_column
 from moduly.apps.dashboard.vodomery_shared import (
     format_consumption_dataframe,
@@ -548,7 +547,6 @@ def render_export_button(df: pd.DataFrame, selected_ident: str, start_date: date
 
 def render_dashboard() -> None:
     render_page_styles()
-    render_responsive_page_styles()
     st.markdown(
         """
         <div class="vodomery-hero">

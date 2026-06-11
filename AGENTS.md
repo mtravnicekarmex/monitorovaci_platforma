@@ -105,6 +105,7 @@ Known hygiene topics to handle only after explicit approval:
 - Browser map image loading should use same-origin `/api/v1/map/images` through Caddy, which routes `/api/*` to FastAPI and other requests to Streamlit.
 - Deployments that do not expose the API under the dashboard origin must set `DASHBOARD_BROWSER_API_BASE_URL` and configure the matching origin through `API_CORS_ORIGINS`.
 - Public dashboard HTTPS is served at `https://monitoring.armexholding.cz`.
+- `https://monitoring.armexholding.cz` is the only supported public client entry point; direct client access through the public IP address is not required or supported.
 - `start_api_dashboard.bat` starts or reloads `C:\Program Files\Caddy\caddy.exe` only after FastAPI and Streamlit health checks pass.
 - The runtime Caddy configuration is `C:\Program Files\Caddy\Caddyfile`; keep the tracked root `Caddyfile` synchronized with it.
 
@@ -155,10 +156,13 @@ Known job families:
 - Streamlit is the active dashboard.
 - Navigation and permission definitions belong in `moduly/apps/dashboard/navigation_config.py`.
 - Login/session behavior belongs in `moduly/apps/dashboard/auth.py`.
+- Dashboard login survives browser reload through the `monitoring_dashboard_session` HttpOnly cookie. FastAPI owns cookie creation and deletion through `/api/v1/auth/browser-session`; Streamlit restores the session by validating the stored bearer token through `/api/v1/auth/me`.
 - Dashboard database bootstrap belongs in `moduly/apps/dashboard/database/db_init.py`.
 - General map UI belongs to `moduly/apps/dashboard/pages/36_mapove_podklady.py`; map-layer administration belongs to `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`.
 - Shared map rendering and request helpers belong in `moduly/apps/dashboard/map_shared.py`.
-- The mobile dashboard pilot uses the same Streamlit pages as desktop and switches layout through a `720px` responsive breakpoint.
+- All active Streamlit dashboard pages use the shared mobile layout from `moduly/apps/dashboard/responsive.py` through the common `login.py` entry point.
+- Desktop remains the default layout; mobile rules apply below the shared `720px` breakpoint.
+- On mobile, general page columns stack vertically, metric rows use two cards per row, and tables, charts, forms, dialogs, tabs, images, and action buttons must remain usable without page-level horizontal overflow.
 - Mobile map geolocation stays in the browser, is requested only after a user action, and must not be persisted or sent to the API.
 - Browser geolocation on a remote phone requires the dashboard to be opened through a trusted HTTPS origin; plain LAN HTTP is not sufficient.
 - For dashboard page changes, prefer small helpers and tested filtering/formatting behavior.

@@ -34,7 +34,6 @@ from moduly.apps.dashboard.overview_weather import (
     format_overview_date,
 )
 from moduly.apps.dashboard.manometry_shared import format_pressure_with_unit
-from moduly.apps.dashboard.responsive import render_responsive_page_styles
 from moduly.apps.dashboard.vodomery_shared import align_latest_hour_timestamp, format_consumption_with_unit
 from app.time_utils import prague_now_naive
 
@@ -1263,7 +1262,6 @@ def render_module_grid(cards: list[dict[str, object]]) -> None:
 
 
 render_overview_styles()
-render_responsive_page_styles()
 enable_scheduled_page_refresh(
     "dashboard_overview",
     cache_clearers=(load_dashboard_overview_cards.clear, load_overview_weather.clear),

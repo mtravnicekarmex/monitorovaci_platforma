@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 
@@ -10,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import streamlit as st
 
+from app.dashboard_session import DASHBOARD_SESSION_COOKIE_NAME
 from moduly.apps.dashboard.api_client import DashboardApiError
 from moduly.apps.dashboard.api_client import (
     any_dashboard_users_exist,
@@ -41,6 +43,105 @@ def init_auth_state() -> None:
     st.session_state.setdefault("auth_last_login_at", None)
     st.session_state.setdefault("post_login_redirect", "")
     st.session_state.setdefault("requested_login_redirect", "")
+    st.session_state.setdefault("auth_cookie_restore_attempted", False)
+    st.session_state.setdefault("auth_cookie_clear_pending", False)
+    st.session_state.setdefault("auth_cookie_sync_runs_remaining", 0)
+
+
+def _clear_auth_state(*, clear_browser_cookie: bool) -> None:
+    st.session_state["authenticated"] = False
+    st.session_state["auth_token"] = ""
+    st.session_state["auth_token_expires_at"] = None
+    st.session_state["auth_user"] = ""
+    st.session_state["auth_email"] = None
+    st.session_state["auth_is_admin"] = False
+    st.session_state["auth_allowed_sections"] = ()
+    st.session_state["auth_allowed_pages"] = ()
+    st.session_state["auth_allowed_devices"] = ()
+    st.session_state["auth_last_login_at"] = None
+    st.session_state["post_login_redirect"] = ""
+    st.session_state["auth_cookie_sync_runs_remaining"] = 0
+    if clear_browser_cookie:
+        st.session_state["auth_cookie_clear_pending"] = True
+
+
+def restore_auth_state_from_browser_cookie() -> bool:
+    init_auth_state()
+    if st.session_state["authenticated"]:
+        return True
+    if st.session_state["auth_cookie_restore_attempted"]:
+        return False
+    if st.session_state["auth_cookie_clear_pending"]:
+        return False
+
+    st.session_state["auth_cookie_restore_attempted"] = True
+    access_token = str(st.context.cookies.get(DASHBOARD_SESSION_COOKIE_NAME, "") or "")
+    if not access_token:
+        return False
+
+    try:
+        user_payload = api_get_me(access_token)
+    except DashboardApiError as exc:
+        if exc.status_code == 401:
+            _clear_auth_state(clear_browser_cookie=True)
+        return False
+
+    apply_authenticated_user(user_payload, access_token=access_token)
+    st.session_state["auth_cookie_sync_runs_remaining"] = 0
+    return True
+
+
+def _build_browser_session_sync_html(*, access_token: str | None = None, clear: bool = False) -> str:
+    method = "DELETE" if clear else "POST"
+    headers = "{}"
+    if access_token:
+        headers = json.dumps({"Authorization": f"Bearer {access_token}"})
+
+    return f"""
+<script>
+(async () => {{
+    const options = {{
+        method: {json.dumps(method)},
+        headers: {headers},
+        credentials: "same-origin",
+        cache: "no-store"
+    }};
+    for (let attempt = 0; attempt < 3; attempt += 1) {{
+        try {{
+            const response = await fetch("/api/v1/auth/browser-session", options);
+            if (response.ok || (response.status >= 400 && response.status < 500)) {{
+                return;
+            }}
+        }} catch (error) {{
+            // A short retry covers navigation immediately after login.
+        }}
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+    }}
+}})();
+</script>
+"""
+
+
+def sync_browser_auth_session() -> None:
+    init_auth_state()
+    if st.session_state["auth_cookie_clear_pending"]:
+        st.html(
+            _build_browser_session_sync_html(clear=True),
+            unsafe_allow_javascript=True,
+        )
+        st.session_state["auth_cookie_clear_pending"] = False
+        return
+
+    remaining_runs = int(st.session_state["auth_cookie_sync_runs_remaining"])
+    access_token = get_auth_token()
+    if not st.session_state["authenticated"] or not access_token or remaining_runs <= 0:
+        return
+
+    st.html(
+        _build_browser_session_sync_html(access_token=access_token),
+        unsafe_allow_javascript=True,
+    )
+    st.session_state["auth_cookie_sync_runs_remaining"] = remaining_runs - 1
 
 
 def any_dashboard_users() -> bool:
@@ -144,6 +245,7 @@ def apply_authenticated_user(
     st.session_state["authenticated"] = True
     if access_token is not None:
         st.session_state["auth_token"] = access_token
+        st.session_state["auth_cookie_sync_runs_remaining"] = 2
     if expires_at is not None:
         st.session_state["auth_token_expires_at"] = expires_at
     st.session_state["auth_user"] = str(user_payload.get("username") or "")
@@ -172,17 +274,7 @@ def logout() -> None:
             api_logout(access_token)
         except DashboardApiError:
             pass
-    st.session_state["authenticated"] = False
-    st.session_state["auth_token"] = ""
-    st.session_state["auth_token_expires_at"] = None
-    st.session_state["auth_user"] = ""
-    st.session_state["auth_email"] = None
-    st.session_state["auth_is_admin"] = False
-    st.session_state["auth_allowed_sections"] = ()
-    st.session_state["auth_allowed_pages"] = ()
-    st.session_state["auth_allowed_devices"] = ()
-    st.session_state["auth_last_login_at"] = None
-    st.session_state["post_login_redirect"] = ""
+    _clear_auth_state(clear_browser_cookie=True)
 
 
 def refresh_current_user() -> bool:
@@ -191,8 +283,9 @@ def refresh_current_user() -> bool:
         return False
     try:
         user_payload = api_get_me(access_token)
-    except DashboardApiError:
-        logout()
+    except DashboardApiError as exc:
+        if exc.status_code == 401:
+            _clear_auth_state(clear_browser_cookie=True)
         return False
     apply_authenticated_user(user_payload)
     return True

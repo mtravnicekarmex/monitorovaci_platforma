@@ -20,6 +20,10 @@ DEFAULT_API_START_COMMAND = "powershell -ExecutionPolicy Bypass -File scripts\\s
 class DashboardApiError(RuntimeError):
     """Raised when the dashboard cannot complete an API request."""
 
+    def __init__(self, message: str, *, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
 
 @dataclass(frozen=True)
 class DashboardSessionPayload:
@@ -105,7 +109,7 @@ def _request(
     if not detail:
         detail = response.text.strip() or f"HTTP {response.status_code}"
 
-    raise DashboardApiError(str(detail))
+    raise DashboardApiError(str(detail), status_code=response.status_code)
 
 
 def any_dashboard_users_exist() -> bool:

@@ -26,7 +26,6 @@ from moduly.apps.dashboard.map_shared import (
     normalize_catalog_layers,
     normalize_filter_options_payload,
 )
-from moduly.apps.dashboard.responsive import render_responsive_page_styles
 
 
 st.set_page_config(
@@ -98,7 +97,6 @@ def render_map_page_styles() -> None:
 
 
 def render_page() -> None:
-    render_responsive_page_styles()
     render_map_page_styles()
     access_token = get_auth_token()
     if not access_token:

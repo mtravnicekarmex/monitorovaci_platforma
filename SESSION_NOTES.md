@@ -964,3 +964,77 @@ Last verified before restart:
 Working tree warning:
 - Existing user/runtime changes remain present and must not be reverted.
 - Relevant restart work is in `start_api_dashboard.bat`, `Caddyfile`, `tests/test_caddy_config.py`, `AGENTS.md`, `DECISIONS.md`, `PUBLIC_HTTPS_DEPLOYMENT.md`, and `SESSION_NOTES.md`.
+
+### 2026-06-11 - Post-restart runtime verification
+
+Scope:
+- Verified the complete runtime after the workstation restart.
+- Confirmed the supported public access policy.
+
+Changed:
+- Updated persistent context to state that `https://monitoring.armexholding.cz` is the only supported public client entry point.
+- Recorded that direct client access through the public IP address is not required or supported.
+
+Verified:
+- FastAPI live and ready endpoints on `127.0.0.1:8000` returned HTTP 200.
+- Streamlit health on `127.0.0.1:8001` returned HTTP 200.
+- The scheduler held its process lock, refreshed its heartbeat, and completed the 2026-06-11 14:16 quarter-hour job successfully.
+- The water, gas, and pressure imports executed by that job completed successfully.
+- Exactly one persistent Caddy process was running.
+- Caddy owned TCP ports 80 and 443 and its admin endpoint on `127.0.0.1:2019`.
+- The tracked and deployed Caddyfile SHA-256 hashes matched and the deployed configuration validated successfully.
+- HTTP for `monitoring.armexholding.cz` redirected to HTTPS with status 308.
+- HTTPS returned the Streamlit dashboard with status 200.
+- An unauthenticated `/api/*` request returned FastAPI HTTP 401 JSON rather than Streamlit HTML.
+- The served certificate used TLS 1.3, matched `monitoring.armexholding.cz`, had a valid Let's Encrypt chain, and was valid from 2026-06-11 through 2026-09-09.
+
+Not verified:
+- Direct access through the public IP address was not treated as a required check.
+- External access from a separate internet connection was not tested during this session.
+
+Decisions/notes:
+- All public client connections use `https://monitoring.armexholding.cz`.
+- DNS still maps the hostname to the public endpoint, but clients do not connect using the IP address as the URL.
+- `main.py` remains the scheduler entry point and requires no change for public HTTPS routing.
+
+### 2026-06-11 - Persistent login and dashboard-wide mobile layout
+
+Scope:
+- Fixed dashboard logout after a browser reload.
+- Extended the existing mobile dashboard behavior from the three-page pilot to all active Streamlit pages.
+- Added hot-reload handling for shared authentication and responsive modules in the common dashboard entry point.
+
+Changed:
+- Added the shared browser session cookie name in `app/dashboard_session.py`.
+- Added FastAPI browser-session endpoints for setting and deleting the authenticated HttpOnly cookie.
+- Added HTTP status metadata to `DashboardApiError` so Streamlit can distinguish invalid authentication from temporary API outages.
+- Added Streamlit authentication restore, cookie synchronization, logout cleanup, and invalid-token cleanup.
+- Applied shared responsive styles globally from `moduly/apps/dashboard/login.py`.
+- Expanded responsive CSS for mobile columns, metric grids, tables, charts, images, tabs, forms, dialogs, sidebars, and full-width touch actions.
+- Removed duplicate responsive style calls from `Overview`, `Vodomery / Prehled`, and `Mapove podklady / Mapa`.
+- Added authentication-route, authentication-state, and responsive-layout regression tests.
+
+Verified:
+- Dashboard authentication and navigation tests passed: 29 tests.
+- Dashboard-focused tests passed: 105 tests.
+- Final targeted responsive, map-layout, and navigation tests passed: 26 tests.
+- Python compilation passed for the dashboard package and changed authentication modules.
+- Live Streamlit login rendered without `ImportError`.
+- Headless Chromium at a `390x844` viewport confirmed mobile page padding, full-width login action, stacked content columns, two-column metric rows, and no JavaScript errors.
+- Local FastAPI and Streamlit health endpoints returned HTTP 200.
+- Browser-session deletion returned HTTP 204 with `Secure`, `HttpOnly`, and `SameSite=Lax` cookie attributes when `X-Forwarded-Proto` was HTTPS.
+- The complete test suite result was 422 passed and 2 failed.
+
+Not verified:
+- Authenticated navigation through every dashboard page was not exercised manually on a physical phone.
+- External HTTPS access from a separate network was not retested during this work.
+
+Known unrelated test failures:
+- `tests/test_vodomery_reports.py::test_build_consumption_curve_day_aggregates_water_measurements`
+- `tests/test_vodomery_reports.py::test_build_vodomery_report_html_contains_expected_sections`
+- Both failures reproduce when `tests/test_vodomery_reports.py` is run alone and are outside the authentication and responsive-layout changes.
+
+Decisions/notes:
+- DEC-020 records persistent dashboard login behavior.
+- DEC-021 expands DEC-016 from the mobile pilot to the complete active Streamlit dashboard.
+- `main.py` remains only the scheduler entry point and was not changed.

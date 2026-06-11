@@ -55,7 +55,7 @@ At the end of every substantive session:
 - `moduly/apps/dashboard/pages/36_mapove_podklady.py`: Streamlit `Mapove podklady / Mapa` page.
 - `frontend_next/`: experimental Next.js MVP. It is not the active production dashboard and is not currently used in daily operation. Treat it as a future migration/prototype area, not as the source of truth for current dashboard behavior.
 - `.streamlit/config.toml`: Streamlit server and navigation settings.
-- `Caddyfile`: local reverse proxy configuration.
+- `Caddyfile`: tracked mirror of the deployed public proxy configuration at `C:\Program Files\Caddy\Caddyfile`.
 - `requirements-api.txt`: Python runtime/API dependency set.
 - `tests/`: pytest suite for scheduler, imports, dashboards, reports, auth/navigation, anomaly handling, and supporting services.
 
@@ -104,6 +104,9 @@ Known hygiene topics to handle only after explicit approval:
 - Map feature images must be resolved server-side from `layer_id` and device identifier; do not expose an endpoint that serves arbitrary client-supplied file paths.
 - Browser map image loading should use same-origin `/api/v1/map/images` through Caddy, which routes `/api/*` to FastAPI and other requests to Streamlit.
 - Deployments that do not expose the API under the dashboard origin must set `DASHBOARD_BROWSER_API_BASE_URL` and configure the matching origin through `API_CORS_ORIGINS`.
+- Public dashboard HTTPS is served at `https://monitoring.armexholding.cz`.
+- `start_api_dashboard.bat` starts or reloads `C:\Program Files\Caddy\caddy.exe` only after FastAPI and Streamlit health checks pass.
+- The runtime Caddy configuration is `C:\Program Files\Caddy\Caddyfile`; keep the tracked root `Caddyfile` synchronized with it.
 
 ## Time Semantics
 

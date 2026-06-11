@@ -239,3 +239,36 @@ Implications:
 - Mobile map geolocation is initiated explicitly by the user and rendered only in the Leaflet client.
 - Phone coordinates are not sent to FastAPI or persisted.
 - Remote mobile geolocation requires a trusted HTTPS dashboard origin.
+
+## DEC-017: Public Caddy Runs Independently
+
+Date: 2026-06-11
+
+Decision: Caddy is operated as a separate process from `start_api_dashboard.bat`. The public dashboard hostname is `monitoring.armexholding.cz`.
+
+Rationale: Separating the reverse proxy lifecycle from the application launcher avoids coupling Caddy restarts and configuration reloads to FastAPI, Streamlit, and scheduler startup.
+
+Implications:
+
+- `start_api_dashboard.bat` starts FastAPI, Streamlit, and the scheduler only.
+- The public Caddy site uses its automatically managed public HTTPS certificate.
+- Requests under `/api/*` must be proxied to FastAPI on `127.0.0.1:8000`; remaining requests are proxied to Streamlit on `127.0.0.1:8001`.
+- Caddy startup, reload, and service recovery must be managed independently.
+
+## DEC-018: Application Launcher Manages Program Files Caddy
+
+Date: 2026-06-11
+
+Supersedes: DEC-017
+
+Decision: `start_api_dashboard.bat` again manages Caddy startup and reload. The runtime binary and configuration are `C:\Program Files\Caddy\caddy.exe` and `C:\Program Files\Caddy\Caddyfile`.
+
+Rationale: Caddy and its operational files were consolidated into a stable system location, and the application launcher should restore the complete API, scheduler, dashboard, and HTTPS proxy runtime together.
+
+Implications:
+
+- The launcher checks that both Caddy files exist before starting application processes.
+- FastAPI health is verified first, then Streamlit health, and only then Caddy is started or reloaded.
+- Caddy validates the runtime configuration before every run or reload.
+- If Caddy is already running, the launcher reloads it through `127.0.0.1:2019` instead of starting a competing listener on ports 80 and 443.
+- The root project `Caddyfile` remains the tracked mirror and must stay synchronized with the runtime file under `C:\Program Files\Caddy`.

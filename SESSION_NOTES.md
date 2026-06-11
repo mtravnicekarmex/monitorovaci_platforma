@@ -712,3 +712,255 @@ Decisions/notes:
 
 Follow-up:
 - Configure a trusted HTTPS dashboard origin before validating phone geolocation in production.
+
+### 2026-06-09
+
+Scope:
+- Changed the mobile layout order on `Mapove podklady / Mapa`.
+
+Changed:
+- The layer selection and layer filters now render above the map on screens up to the shared `720px` breakpoint.
+- Removed the obsolete note that said the map was displayed above the filter panel.
+- Added a regression test for the mobile column order.
+
+Verified:
+- Python compile checks passed for the changed map page and its layout test.
+- Targeted responsive, map, and navigation tests passed: 36 tests.
+- `git diff --check` reported no whitespace errors, only the existing line-ending warning.
+
+Not verified:
+- Live rendering on a physical phone was not tested.
+- The full pytest suite was not run.
+
+Decisions/notes:
+- Desktop map layout remains unchanged.
+- No durable architectural decision was added.
+
+Follow-up:
+- None.
+
+### 2026-06-10
+
+Scope:
+- Diagnosed mobile geolocation failure on `Mapove podklady / Mapa`.
+- Added an HTTPS dashboard entry point required by mobile browser geolocation.
+
+Changed:
+- Caddy now serves the dashboard and `/api/*` on HTTPS for `server2a.armex.local`, `server2a`, and `192.168.3.250`.
+- HTTPS certificates are issued by the local Caddy CA.
+- The public local CA certificate is downloadable from `http://server2a:8080/caddy-local-root.crt`.
+- Added a Domain/Private Windows Firewall rule for inbound TCP 443.
+- Added a regression test for the HTTPS and CA-download Caddy configuration.
+
+Verified:
+- Streamlit 1.57 already delegates `geolocation` to its HTML iframe.
+- Caddy validation and reload passed.
+- HTTPS dashboard requests through the local proxy returned HTTP 200.
+- The CA download returned the expected X.509 certificate response.
+- The targeted responsive and map tests passed.
+
+Not verified:
+- The CA certificate was not installed and trusted on a physical phone.
+- Live geolocation was not tested on a physical phone.
+- The full pytest suite was not run.
+
+Decisions/notes:
+- Plain LAN HTTP cannot provide browser geolocation; the phone must use the trusted URL `https://server2a.armex.local`.
+- Trusting the local Caddy CA is a one-time device setup and does not expose the CA private key.
+
+Follow-up:
+- Install and trust `monitoring-dashboard-local-ca.crt` on each phone that needs dashboard geolocation.
+
+### 2026-06-10
+
+Scope:
+- Diagnosed failed HTTPS and local CA download URLs.
+- Corrected the dashboard HTTPS endpoint to the actual server identity.
+
+Changed:
+- Caddy now serves HTTPS for `server4a.armex.local`, `server4a`, and `192.168.3.249`.
+- The local CA is available as both `/caddy-local-root.crt` and `/caddy-local-port.crt`.
+- The CA download is also exposed over HTTPS on port 443.
+
+Verified:
+- The machine identity is `SERVER4A`; `server2a.armex.local` resolves to the unavailable address `192.168.3.250`.
+- Caddy validation and reload passed.
+- Dashboard and CA download requests returned HTTP 200 through `192.168.3.249`.
+- The targeted Caddy configuration test passed.
+
+Not verified:
+- Access from a physical phone was not tested.
+- TCP 8080 could not be added to Windows Firewall because the current process lacks administrator rights.
+
+Decisions/notes:
+- Use `https://192.168.3.249` as the reliable LAN dashboard URL.
+- The CA can be downloaded through `https://192.168.3.249/caddy-local-root.crt` after bypassing the initial trust warning.
+
+Follow-up:
+- An administrator can allow inbound TCP 8080 if plain-HTTP CA download is still required.
+
+### 2026-06-10 - Restart handoff
+
+Current state:
+- The machine is `SERVER4A`, with the monitoring LAN address `192.168.3.249`.
+- `server2a.armex.local` incorrectly targets `192.168.3.250` and must not be used for this dashboard.
+- Caddy is configured for `server4a.armex.local`, `server4a`, and `192.168.3.249`.
+- Caddy was validated and reloaded before the restart.
+
+Verified URLs:
+- Dashboard: `https://192.168.3.249`
+- Dashboard by name: `https://server4a.armex.local`
+- CA download: `https://192.168.3.249/caddy-local-root.crt`
+- Compatible CA alias: `https://192.168.3.249/caddy-local-port.crt`
+- All URLs returned HTTP 200 locally; TLS verification passed against the Caddy root CA with Windows revocation checking disabled.
+
+Pending after restart:
+- Confirm Caddy, FastAPI on `127.0.0.1:8000`, and Streamlit on `127.0.0.1:8001` started.
+- Test the dashboard and CA download from the phone.
+- Install and trust the downloaded local CA on the phone.
+- If plain HTTP download on `http://192.168.3.249:8080/...` is required, create an inbound TCP 8080 firewall rule from an elevated administrator session. The previous attempt failed with Windows error 5 (access denied).
+
+Working tree warning:
+- Existing user/runtime changes remain present. Do not revert them.
+- Relevant work from this session is in `Caddyfile`, `tests/test_caddy_config.py`, and `SESSION_NOTES.md`.
+
+### 2026-06-10
+
+Scope:
+- Added `armex.monitoring` as the preferred HTTPS dashboard hostname.
+
+Changed:
+- Added `armex.monitoring` to the Caddy HTTPS site while retaining the existing server-name and IP aliases.
+- Updated the Caddy configuration regression test.
+
+Verified:
+- Caddy validation and reload passed.
+- The targeted Caddy configuration test passed.
+- A local HTTPS request for `https://armex.monitoring` returned HTTP 200 with the Caddy root CA.
+
+Not verified:
+- `armex.monitoring` does not yet resolve through network DNS.
+- Access from another device was not tested.
+
+Decisions/notes:
+- Network DNS must map `armex.monitoring` to `192.168.3.249` before other devices can use the new name.
+- The internal DNS server is `192.168.3.252` (`server1a.armex.local`); it serves `armex.local`, but no `monitoring` zone currently exists.
+- The exact hostname requires a `monitoring` DNS zone with an `armex` A record targeting `192.168.3.249`.
+- `main.py` is unrelated to the dashboard hostname and was not changed.
+
+### 2026-06-10
+
+Scope:
+- Prepared a step-by-step plan for publishing the dashboard to the public internet over HTTPS.
+
+Changed:
+- Added `PUBLIC_HTTPS_DEPLOYMENT.md` with preparation, security, DNS, router, Caddy, verification, rollback, and HTTP shutdown checklists.
+
+Verified:
+- The plan reflects the current public IP `77.95.46.168`, internet-facing server address `192.168.2.249`, and localhost-only FastAPI/Streamlit listeners.
+
+Not verified:
+- No production DNS, router, firewall, or public Caddy changes were made.
+
+Decisions/notes:
+- Tailscale remains the service and rollback access during public HTTPS deployment.
+- Public port `8080` must remain only temporarily and be removed after successful HTTPS verification.
+
+### 2026-06-11
+
+Scope:
+- Separated Caddy startup from the FastAPI, Streamlit, and scheduler launcher.
+- Added the public HTTPS dashboard hostname.
+
+Changed:
+- `start_api_dashboard.bat` no longer contains or invokes the Caddy startup branch.
+- The launcher now exits after starting Streamlit instead of falling through into a second API invocation.
+- Replaced the old LAN/internal-CA Caddy configuration with the single public hostname `monitoring.armexholding.cz`.
+- The public site routes `/api/*` to FastAPI and remaining requests to Streamlit.
+
+Verified:
+- Added a Caddy configuration regression test for the public hostname and separate API/Streamlit routing.
+- Caddy configuration validation passed.
+- Local TLS verification for `monitoring.armexholding.cz` returned HTTP 200 for the dashboard.
+- Public DNS resolves `monitoring.armexholding.cz` to `77.95.46.168`.
+
+Not verified:
+- HTTPS access through the public IP from an external network was not tested; the same-server public-IP request timed out, consistent with unavailable NAT loopback.
+- The live Caddy process did not accept the updated configuration because its admin API reload remained blocked and timed out.
+- The live `/api/v1/map/layers/catalog` request still returns Streamlit HTTP 200 HTML instead of FastAPI authentication JSON.
+
+Decisions/notes:
+- Caddy is now an independently managed runtime process.
+- The public dashboard URL is `https://monitoring.armexholding.cz`.
+- The independently managed Caddy process must be restarted or successfully reloaded with the project `Caddyfile` before same-origin map API calls work through the public domain.
+
+### 2026-06-11
+
+Scope:
+- Moved Caddy runtime ownership back into `start_api_dashboard.bat`.
+- Adopted the Caddy installation and runtime configuration under `C:\Program Files\Caddy`.
+
+Changed:
+- Added explicit `CADDY_DIR`, `CADDY_EXE`, and `CADDY_CONFIG` paths to the launcher.
+- Added preflight checks for the Caddy executable and configuration.
+- Added a Streamlit `/_stcore/health` readiness check before Caddy startup.
+- Added Caddy configuration validation before both first start and reload.
+- Existing Caddy processes are reloaded through `127.0.0.1:2019`; otherwise Caddy runs in the foreground of its launcher window.
+- Synchronized the deployed `C:\Program Files\Caddy\Caddyfile` with the tracked project configuration.
+- The deployed proxy routes `/api/*` to FastAPI on port `8000` and all remaining traffic to Streamlit on port `8001`.
+
+Verified:
+- Caddy 2.11.4 was found at `C:\Program Files\Caddy\caddy.exe`.
+- Project and deployed Caddyfile SHA-256 hashes matched after synchronization.
+- Runtime Caddy configuration validation passed.
+- Caddy was stopped and restarted through `start_api_dashboard.bat caddy`.
+- The running command line uses `run --config "C:\Program Files\Caddy\Caddyfile" --adapter caddyfile`.
+- Ports 80, 443, and 2019 are owned by the new Caddy process.
+- Local TLS checks returned dashboard HTTP 200, unauthenticated API HTTP 401 JSON, and HTTP-to-HTTPS redirect 308.
+- Re-running `start_api_dashboard.bat caddy` completed a successful reload without starting a second Caddy process.
+- Targeted Caddy configuration and launcher tests passed.
+
+Not verified:
+- The complete launcher was not run because FastAPI, Streamlit, and the scheduler were already active and a full run would start duplicate application processes.
+- External access from a separate internet connection was not tested.
+
+Decisions/notes:
+- DEC-018 supersedes the earlier independent-Caddy decision DEC-017.
+- The root `Caddyfile` is the tracked mirror; the launcher reads the deployed copy under `C:\Program Files\Caddy`.
+
+### 2026-06-11 - Restart handoff
+
+Current state before workstation restart:
+- `start_api_dashboard.bat` starts FastAPI, scheduler, Streamlit, and then Caddy.
+- FastAPI must pass `http://127.0.0.1:8000/health/live`.
+- Streamlit must pass `http://127.0.0.1:8001/_stcore/health`.
+- Caddy runs from `C:\Program Files\Caddy\caddy.exe`.
+- Caddy loads `C:\Program Files\Caddy\Caddyfile`.
+- The deployed and tracked project Caddyfile SHA-256 hashes matched before restart.
+- Caddy routes `/api/*` to FastAPI on `127.0.0.1:8000` and remaining traffic to Streamlit on `127.0.0.1:8001`.
+
+Expected processes and listeners after restart:
+- FastAPI/Uvicorn on `127.0.0.1:8000`.
+- Streamlit on `127.0.0.1:8001`.
+- Scheduler running `main.py`.
+- Caddy from `C:\Program Files\Caddy\caddy.exe` on TCP 80 and 443 with admin endpoint `127.0.0.1:2019`.
+
+Checks for the next session:
+- Confirm the four runtime processes started without duplicate instances.
+- Confirm `http://127.0.0.1:8000/health/live` returns HTTP 200.
+- Confirm `http://127.0.0.1:8001/_stcore/health` returns HTTP 200.
+- Confirm `http://monitoring.armexholding.cz` redirects to HTTPS.
+- Confirm `https://monitoring.armexholding.cz` returns the Streamlit dashboard.
+- Confirm unauthenticated `https://monitoring.armexholding.cz/api/v1/map/layers/catalog` returns FastAPI HTTP 401 JSON rather than Streamlit HTML.
+- Confirm Caddy command line uses `run --config "C:\Program Files\Caddy\Caddyfile" --adapter caddyfile`.
+
+Last verified before restart:
+- Dashboard HTTPS returned HTTP 200.
+- Unauthenticated map API returned HTTP 401 with `application/json`.
+- HTTP returned redirect 308 to HTTPS.
+- Re-running `start_api_dashboard.bat caddy` successfully reloaded the existing Caddy process.
+- Targeted tests passed: `tests/test_caddy_config.py` with 2 tests.
+
+Working tree warning:
+- Existing user/runtime changes remain present and must not be reverted.
+- Relevant restart work is in `start_api_dashboard.bat`, `Caddyfile`, `tests/test_caddy_config.py`, `AGENTS.md`, `DECISIONS.md`, `PUBLIC_HTTPS_DEPLOYMENT.md`, and `SESSION_NOTES.md`.

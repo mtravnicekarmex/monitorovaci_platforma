@@ -80,18 +80,7 @@ def render_map_page_styles() -> None:
     st.markdown(
         """
         <style>
-        .map-mobile-filter-note {
-            display: none;
-        }
-
         @media (max-width: 720px) {
-            .map-mobile-filter-note {
-                display: block;
-                margin: 0.25rem 0 0.75rem;
-                color: #64748b;
-                font-size: 0.85rem;
-            }
-
             .st-key-map_page_layout [data-testid="stHorizontalBlock"] {
                 flex-direction: column !important;
             }
@@ -100,14 +89,6 @@ def render_map_page_styles() -> None:
                 flex: 1 1 100% !important;
                 width: 100% !important;
                 min-width: 100% !important;
-            }
-
-            .st-key-map_page_layout [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {
-                order: 2;
-            }
-
-            .st-key-map_page_layout [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) {
-                order: 1;
             }
         }
         </style>
@@ -165,10 +146,6 @@ def render_page() -> None:
 
     filters_by_layer: dict[str, dict[str, list[str]]] = {}
     with filter_col:
-        st.markdown(
-            '<div class="map-mobile-filter-note">Mapa je na telefonu zobrazena nad timto panelem.</div>',
-            unsafe_allow_html=True,
-        )
         st.subheader("Filtry")
         for layer_id in selected_layer_ids:
             layer = layer_by_id[layer_id]

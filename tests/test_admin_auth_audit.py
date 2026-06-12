@@ -110,6 +110,15 @@ def test_update_user_audits_password_role_activation_and_revocation(monkeypatch)
         "role_change",
         "account_activation_change",
     ]
+    revocation = next(
+        event for event in audit.events if event["event_type"] == "token_revocation"
+    )
+    assert revocation["reason"] == "admin_security_update"
+    assert revocation["details"]["changed_fields"] == [
+        "password",
+        "is_active",
+        "is_admin",
+    ]
     assert "not-recorded" not in repr(audit.events)
 
 
@@ -133,3 +142,37 @@ def test_delete_user_audits_account_deletion_and_token_revocation(monkeypatch):
         "account_deleted",
         "token_revocation",
     ]
+
+
+def test_permission_only_update_audits_token_revocation(monkeypatch):
+    audit = _AuditStub()
+    monkeypatch.setattr(admin_routes, "auth_audit_service", audit)
+    monkeypatch.setattr(
+        admin_routes,
+        "update_admin_user",
+        lambda *_args, **_kwargs: AdminUserUpdateResult(
+            record=_user_record(available_pages=["dashboard_overview"]),
+            changed_fields=("available_pages",),
+            password_changed=False,
+            role_changed=False,
+            active_changed=False,
+            previous_is_admin=False,
+            previous_is_active=True,
+        ),
+    )
+
+    admin_routes.update_user(
+        "target",
+        AdminUserUpdateRequest(available_pages=["dashboard_overview"]),
+        _request(),
+        SimpleNamespace(username="admin"),
+    )
+
+    assert [event["event_type"] for event in audit.events] == [
+        "account_updated",
+        "token_revocation",
+    ]
+    assert audit.events[1]["reason"] == "admin_security_update"
+    assert audit.events[1]["details"] == {
+        "changed_fields": ["available_pages"]
+    }

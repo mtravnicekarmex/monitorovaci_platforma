@@ -274,15 +274,26 @@ def upsert_user(
             )
             session.add(user)
         else:
+            current_sections = resolve_user_sections(user)
+            current_pages = resolve_user_pages(user, current_sections)
+            security_state_changed = (
+                bool(password)
+                or current_sections != resolved_sections
+                or current_pages != resolved_pages
+                or user.get_seznam_zarizeni() != resolved_devices
+                or bool(user.is_admin) != bool(is_admin)
+                or bool(user.is_active) != bool(is_active)
+            )
             if password:
                 user.heslo = hash_password(password)
-                user.token_version = int(user.token_version or 0) + 1
             user.email = email.strip() if email else None
             user.dostupne_sekce = serialized_sections
             user.dostupne_stranky = serialized_pages
             user.seznam_zarizeni = serialized_devices
             user.is_admin = is_admin
             user.is_active = is_active
+            if security_state_changed:
+                user.token_version = int(user.token_version or 0) + 1
 
         session.commit()
     finally:

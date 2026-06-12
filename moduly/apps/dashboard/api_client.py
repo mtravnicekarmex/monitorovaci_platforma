@@ -152,6 +152,20 @@ def get_me(access_token: str) -> dict[str, object]:
     return dict(response.json())
 
 
+def refresh_session(access_token: str) -> DashboardSessionPayload:
+    response = _request(
+        "POST",
+        "/api/v1/auth/session/refresh",
+        access_token=access_token,
+    )
+    payload = response.json()
+    return DashboardSessionPayload(
+        access_token=str(payload["access_token"]),
+        expires_at=str(payload["expires_at"]),
+        user=dict(payload["user"]),
+    )
+
+
 def update_my_email(access_token: str, email: str | None) -> dict[str, object]:
     response = _request(
         "PATCH",

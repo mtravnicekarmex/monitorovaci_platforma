@@ -193,7 +193,17 @@ Known job families:
 - Streamlit is the active dashboard.
 - Navigation and permission definitions belong in `moduly/apps/dashboard/navigation_config.py`.
 - Login/session behavior belongs in `moduly/apps/dashboard/auth.py`.
-- Dashboard login survives browser reload through the `monitoring_dashboard_session` HttpOnly cookie. FastAPI owns cookie creation and deletion through `/api/v1/auth/browser-session`; Streamlit restores the session by validating the stored bearer token through `/api/v1/auth/me`.
+- Dashboard login survives browser reload through the
+  `__Host-monitoring_dashboard_session` HttpOnly cookie. The cookie is always
+  `Secure`, `SameSite=Lax`, and scoped to `Path=/` without a `Domain`
+  attribute. FastAPI owns cookie creation and deletion through
+  `/api/v1/auth/browser-session`.
+- Dashboard bearer tokens use a 30-minute rolling request-inactivity limit and
+  an 8-hour absolute session limit by default. Active Streamlit sessions renew
+  at most once every five minutes through `/api/v1/auth/session/refresh`.
+- Password, role, activation, section, page, and device-permission changes
+  increment `token_version` and revoke existing bearer tokens and browser
+  sessions. Email-only changes do not revoke sessions.
 - New and changed dashboard passwords use one shared validator: at least 15
   characters, up to 1024 characters, Unicode and spaces allowed, no character
   composition rule, and rejection through the tracked local password

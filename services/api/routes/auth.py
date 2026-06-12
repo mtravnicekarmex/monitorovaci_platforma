@@ -5,11 +5,19 @@ from datetime import timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials
 
-from app.dashboard_session import DASHBOARD_SESSION_COOKIE_NAME
+from app.dashboard_session import (
+    DASHBOARD_SESSION_COOKIE_NAME,
+    LEGACY_DASHBOARD_SESSION_COOKIE_NAME,
+)
 from services.api.core.auth_audit import auth_audit_service
 from services.api.core.dependencies import bearer_scheme, get_current_user
 from services.api.core.login_throttle import get_login_client_ip, login_attempt_limiter
-from services.api.core.tokens import TokenError, create_access_token, decode_access_token
+from services.api.core.tokens import (
+    TokenError,
+    create_access_token,
+    decode_access_token,
+    renew_access_token,
+)
 from services.api.schemas.auth import LoginRequest, TokenResponse, UserProfileResponse
 from services.api.schemas.auth import EmailUpdateRequest, PasswordChangeRequest, UsersExistResponse
 from services.api.services.dashboard_auth import (
@@ -49,7 +57,8 @@ def users_exist() -> UsersExistResponse:
     response_model=TokenResponse,
     summary="User login",
     description="Přihlášení uživatele. Vrací JWT access token a profil uživatele. "
-    "Token je platný po dobu nastavenou v API_TOKEN_EXPIRE_MINUTES.",
+    "Relace používá klouzavý limit API_SESSION_INACTIVITY_MINUTES a pevný "
+    "limit API_TOKEN_EXPIRY_MINUTES.",
 )
 def login(payload: LoginRequest, request: Request) -> TokenResponse:
     client_ip = get_login_client_ip(request)
@@ -131,11 +140,39 @@ def me(current_user: DashboardUserContext = Depends(get_current_user)) -> UserPr
     return _profile_from_context(current_user)
 
 
-def _request_uses_https(request: Request) -> bool:
-    forwarded_proto = request.headers.get("x-forwarded-proto", "")
-    if forwarded_proto:
-        return forwarded_proto.split(",", 1)[0].strip().lower() == "https"
-    return request.url.scheme == "https"
+@router.post(
+    "/session/refresh",
+    response_model=TokenResponse,
+    summary="Refresh active session",
+    description=(
+        "Obnovi kratkou platnost aktivni relace bez prekroceni jejiho "
+        "absolutniho casoveho limitu."
+    ),
+)
+def refresh_session(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    current_user: DashboardUserContext = Depends(get_current_user),
+) -> TokenResponse:
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Chybi bearer token.",
+        )
+
+    try:
+        token_payload = decode_access_token(credentials.credentials)
+        access_token, expires_at = renew_access_token(token_payload)
+    except TokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+
+    return TokenResponse(
+        access_token=access_token,
+        expires_at=expires_at,
+        user=_profile_from_context(current_user),
+    )
 
 
 @router.post(
@@ -145,7 +182,6 @@ def _request_uses_https(request: Request) -> bool:
     description="Ulozi aktualni bearer token do zabezpecene HttpOnly cookie pro obnovu Streamlit session po reloadu.",
 )
 def persist_browser_session(
-    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     _current_user: DashboardUserContext = Depends(get_current_user),
 ) -> Response:
@@ -163,7 +199,14 @@ def persist_browser_session(
         value=credentials.credentials,
         expires=expires_at,
         httponly=True,
-        secure=_request_uses_https(request),
+        secure=True,
+        samesite="lax",
+        path="/",
+    )
+    response.delete_cookie(
+        key=LEGACY_DASHBOARD_SESSION_COOKIE_NAME,
+        httponly=True,
+        secure=True,
         samesite="lax",
         path="/",
     )
@@ -176,15 +219,20 @@ def persist_browser_session(
     summary="Clear browser session",
     description="Odstrani cookie pouzivanou pro obnovu Streamlit session.",
 )
-def clear_browser_session(request: Request) -> Response:
+def clear_browser_session() -> Response:
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
-    response.delete_cookie(
-        key=DASHBOARD_SESSION_COOKIE_NAME,
-        httponly=True,
-        secure=_request_uses_https(request),
-        samesite="lax",
-        path="/",
-    )
+    for cookie_name in (
+        DASHBOARD_SESSION_COOKIE_NAME,
+        LEGACY_DASHBOARD_SESSION_COOKIE_NAME,
+    ):
+        response.delete_cookie(
+            key=cookie_name,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            path="/",
+        )
+    response.headers["Clear-Site-Data"] = '"cache", "storage"'
     return response
 
 

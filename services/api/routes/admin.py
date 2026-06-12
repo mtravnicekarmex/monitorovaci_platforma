@@ -156,13 +156,28 @@ def update_user(
             target_username=target_username,
             source_ip=client_ip,
         )
+    revoked_fields = tuple(
+        field
+        for field in update_result.changed_fields
+        if field
+        in {
+            "password",
+            "available_sections",
+            "available_pages",
+            "device_ids",
+            "is_active",
+            "is_admin",
+        }
+    )
+    if revoked_fields:
         auth_audit_service.record_security_event(
             event_type="token_revocation",
             result="success",
-            reason="admin_password_reset",
+            reason="admin_security_update",
             actor_username=current_user.username,
             target_username=target_username,
             source_ip=client_ip,
+            details={"changed_fields": list(revoked_fields)},
         )
     if update_result.role_changed:
         auth_audit_service.record_security_event(

@@ -2298,3 +2298,147 @@ Known risks or accepted gaps:
 - P1.6 MFA/SSO remains deferred, so compromise of an administrator password
   can still be sufficient for account access.
 - P1.9 browser session hardening has not started.
+
+### 2026-06-12 14:28 CEST - Post-restart verification
+
+Scope:
+- Verified the committed P1.7/P1.8 deployment after the workstation restart
+  described in the 13:29 CEST handoff.
+
+Verified:
+- Windows boot completed at 13:39:14 CEST. Scheduled task
+  `API_dashboard_caddy` ran at 13:39:24 CEST with result `0`, remained
+  `Ready`, and used the expected boot trigger and tracked launcher.
+- HEAD was `b3e3e29` (`security check P1.7 a P1.8 hotovo`), and the working
+  tree was clean before this verification note was appended.
+- FastAPI had one listener on `127.0.0.1:8000`, Streamlit had one listener on
+  `127.0.0.1:8001`, and one Caddy runtime owned TCP 80/443 and
+  `127.0.0.1:2019`. Separate Tailscale-interface TCP 443 listeners were
+  present as expected.
+- FastAPI live/ready and Streamlit health endpoints returned HTTP 200.
+- Scheduler metrics reported `scheduler_running=true`; the
+  `scheduler_process` lock was held and the heartbeat was within the
+  configured 300-second TTL.
+- The post-restart `quarter_hour_job` completed successfully at 14:16:07
+  CEST, with 0 failures and 96 successes in 24 hours; its next run was
+  scheduled for 14:35:05 CEST.
+- Tracked and runtime Caddyfile SHA-256 values both remained
+  `F41D3B31EA03308CB4345B1D11F0488B11D1FE527CBF135B0E1E166E5E7BC9BE`,
+  and the runtime configuration validated successfully.
+- Local hostname routing returned HTTP 308 from HTTP to HTTPS, HTTP 200 for
+  the HTTPS dashboard, HTTP 401 JSON for an unauthenticated protected API
+  route, and HTTP 401 JSON for the map image endpoint both without
+  credentials and with a bearer header alone.
+- FastAPI OpenAPI kept `APIKeyCookie` named
+  `monitoring_dashboard_session` for the image endpoint and `HTTPBearer` for
+  the normal protected map catalog route.
+- The combined P1.7/P1.8 suite passed all 73 tests. Python compilation of the
+  changed application modules and `git diff --check` also passed.
+- Regression coverage confirmed the main bearer token is absent from map
+  iframe HTML, image requests remain same-origin, Leaflet assets match the
+  reviewed hashes, and active dashboard sources load no external executable
+  scripts.
+
+Not verified:
+- No real dashboard credential, bearer token, browser cookie, authenticated
+  map, or device photo was read or used.
+- External access from a separate network was not tested.
+- The full pytest suite was not rerun; verification used the focused 73-test
+  P1.7/P1.8 suite.
+
+Deviations:
+- None.
+
+Follow-up:
+- Continue with P1.9 browser session hardening.
+
+### 2026-06-12 18:28 CEST - Browser session hardening
+
+Scope:
+- Completed dashboard security checklist item P1.9.
+- Added bounded rolling sessions, a host-bound cookie, periodic renewal, and
+  revocation for authorization changes.
+
+Changed:
+- Renamed the browser cookie to
+  `__Host-monitoring_dashboard_session`; it is always `Secure`, `HttpOnly`,
+  `SameSite=Lax`, `Path=/`, and has no `Domain` attribute.
+- Added signed token claims for issue time, session start, rolling expiry, and
+  absolute expiry.
+- Added a 30-minute default request-inactivity limit, an 8-hour absolute
+  limit, and `POST /api/v1/auth/session/refresh`.
+- Active Streamlit sessions renew at most once every five minutes without
+  extending the original absolute expiry.
+- Rejected the previous token format without the new session claims. Existing
+  users therefore need one new login after deployment.
+- Password, role, activation, allowed-section, allowed-page, and
+  allowed-device changes now increment `token_version` once and revoke all
+  existing sessions. Email-only updates keep sessions valid.
+- Browser-session deletion removes both the current and retired cookie and
+  returns `Clear-Site-Data` for origin cache and storage.
+- Added DEC-031 and updated the checklist, API configuration example, API
+  README, and operating context.
+
+Verified:
+- Focused P1.9 lifecycle tests passed: 50 tests.
+- Broader authentication, audit, password, Caddy, navigation, responsive,
+  map, and session tests passed: 154 tests.
+- The full suite passed 492 of 494 tests. The same two unrelated,
+  independently reproducible failures remain in
+  `tests/test_vodomery_reports.py`.
+- Python compilation, FastAPI import, and `git diff --check` passed.
+- Running FastAPI live/ready and Streamlit health endpoints returned HTTP 200.
+- Live OpenAPI exposed the refresh route and the
+  `__Host-monitoring_dashboard_session` cookie security scheme while normal
+  protected routes remained on `HTTPBearer`.
+- A synthetic legacy-format token signed by the current application was
+  rejected with HTTP 401 because the new session claims were absent.
+- Local public-hostname HTTPS returned HTTP 200; the unauthenticated map image
+  and session-refresh routes returned HTTP 401.
+
+Not verified:
+- No real dashboard password, bearer token, browser cookie, or authenticated
+  map session was read or used.
+- A real browser login, five-minute renewal, 30-minute inactivity expiry, and
+  eight-hour absolute expiry were not observed wall-clock end to end.
+- External access from a separate network was not tested.
+
+Decisions/notes:
+- Request activity, including dashboard reruns, can renew the rolling timeout;
+  the absolute eight-hour limit remains fixed.
+- No workstation restart is required for P1.9. Uvicorn reload loaded the API
+  changes, and Streamlit will use the changed auth module on application
+  rerun.
+
+Follow-up:
+- Continue with P1.10 by moving privileged revision writes behind FastAPI
+  server-side authorization.
+
+### 2026-06-12 22:26 CEST - Database connectivity observation
+
+Scope:
+- Investigated an unexpected scheduler skip found during the final P1.9
+  runtime sanity check.
+
+Observed:
+- Scheduler remained running, held its process lock, and refreshed its
+  heartbeat within the configured 300-second TTL.
+- `quarter_hour_job` was skipped at 22:18:32 CEST with
+  `database_unavailable`; its next retry remained scheduled for 22:35:05 CEST.
+- FastAPI live/ready and Streamlit health endpoints still returned HTTP 200.
+- DNS resolved the configured database host, but TCP connections to both
+  PostgreSQL port 5432 and MS SQL port 1433 failed.
+- A direct combined database availability check did not complete within 60
+  seconds. A separate MS SQL connection returned a network/login timeout, and
+  the separate PostgreSQL connection did not complete within 20 seconds.
+
+Decisions/notes:
+- This is an external database/network availability issue, not a P1.9 code or
+  test failure.
+- No process restart or configuration change was attempted. The scheduler's
+  existing preflight behavior safely skips database jobs and retries on their
+  next scheduled run.
+
+Follow-up:
+- Confirm corporate network/database availability and verify that a later
+  `quarter_hour_job` returns to `success`.

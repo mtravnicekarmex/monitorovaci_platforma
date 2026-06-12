@@ -30,15 +30,25 @@ def _user_payload():
 def test_restore_auth_state_from_browser_cookie(monkeypatch):
     fake_st = FakeStreamlit({DASHBOARD_SESSION_COOKIE_NAME: "persisted-token"})
     monkeypatch.setattr(auth, "st", fake_st)
-    monkeypatch.setattr(auth, "api_get_me", lambda token: _user_payload() if token == "persisted-token" else None)
+    monkeypatch.setattr(
+        auth,
+        "api_refresh_session",
+        lambda token: DashboardSessionPayload(
+            access_token="refreshed-token",
+            expires_at="2026-06-11T18:00:00",
+            user=_user_payload(),
+        )
+        if token == "persisted-token"
+        else None,
+    )
 
     restored = auth.restore_auth_state_from_browser_cookie()
 
     assert restored is True
     assert fake_st.session_state["authenticated"] is True
-    assert fake_st.session_state["auth_token"] == "persisted-token"
+    assert fake_st.session_state["auth_token"] == "refreshed-token"
     assert fake_st.session_state["auth_user"] == "tester"
-    assert fake_st.session_state["auth_cookie_sync_runs_remaining"] == 0
+    assert fake_st.session_state["auth_cookie_sync_runs_remaining"] == 2
 
 
 def test_invalid_browser_cookie_is_scheduled_for_deletion(monkeypatch):
@@ -48,7 +58,7 @@ def test_invalid_browser_cookie_is_scheduled_for_deletion(monkeypatch):
     def reject_token(_token):
         raise DashboardApiError("Token expiroval.", status_code=401)
 
-    monkeypatch.setattr(auth, "api_get_me", reject_token)
+    monkeypatch.setattr(auth, "api_refresh_session", reject_token)
 
     assert auth.restore_auth_state_from_browser_cookie() is False
     assert fake_st.session_state["auth_cookie_clear_pending"] is True
@@ -114,9 +124,66 @@ def test_api_outage_does_not_delete_persisted_cookie(monkeypatch):
     monkeypatch.setattr(auth, "st", fake_st)
     monkeypatch.setattr(
         auth,
-        "api_get_me",
+        "api_refresh_session",
         lambda _token: (_ for _ in ()).throw(DashboardApiError("API neni dostupne.")),
     )
 
     assert auth.restore_auth_state_from_browser_cookie() is False
     assert fake_st.session_state["auth_cookie_clear_pending"] is False
+
+
+def test_active_session_is_periodically_renewed(monkeypatch):
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(auth, "st", fake_st)
+    now = [auth.utc_now_naive()]
+    monkeypatch.setattr(auth, "utc_now_naive", lambda: now[0])
+    auth.init_auth_state()
+    auth.apply_authenticated_user(
+        _user_payload(),
+        access_token="old-token",
+        expires_at="2026-06-11T18:00:00",
+    )
+    now[0] += auth.SESSION_RENEWAL_INTERVAL
+    monkeypatch.setattr(
+        auth,
+        "api_refresh_session",
+        lambda token: DashboardSessionPayload(
+            access_token="renewed-token",
+            expires_at="2026-06-11T18:30:00",
+            user=_user_payload(),
+        )
+        if token == "old-token"
+        else None,
+    )
+
+    assert auth.refresh_current_user() is True
+    assert fake_st.session_state["auth_token"] == "renewed-token"
+    assert fake_st.session_state["auth_cookie_sync_runs_remaining"] == 2
+
+
+def test_recently_renewed_session_only_refreshes_profile(monkeypatch):
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(auth, "st", fake_st)
+    now = auth.utc_now_naive()
+    monkeypatch.setattr(auth, "utc_now_naive", lambda: now)
+    auth.init_auth_state()
+    auth.apply_authenticated_user(
+        _user_payload(),
+        access_token="current-token",
+        expires_at="2026-06-11T18:00:00",
+    )
+    monkeypatch.setattr(
+        auth,
+        "api_get_me",
+        lambda token: _user_payload() if token == "current-token" else None,
+    )
+    monkeypatch.setattr(
+        auth,
+        "api_refresh_session",
+        lambda _token: (_ for _ in ()).throw(
+            AssertionError("session should not be renewed yet")
+        ),
+    )
+
+    assert auth.refresh_current_user() is True
+    assert fake_st.session_state["auth_token"] == "current-token"

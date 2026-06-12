@@ -11,6 +11,7 @@ class ApiSettings:
     version: str
     token_secret: str
     token_expiry_minutes: int
+    session_inactivity_minutes: int
     cors_origins: tuple[str, ...]
 
 
@@ -39,11 +40,31 @@ def _get_cors_origins() -> tuple[str, ...]:
     return origins
 
 
+def _get_positive_int(name: str, *, default: int) -> int:
+    value = config(name, default=default, cast=int)
+    if value <= 0:
+        raise ValueError(f"{name} musi byt kladne cele cislo.")
+    return value
+
+
 def get_api_settings() -> ApiSettings:
+    absolute_expiry_minutes = _get_positive_int(
+        "API_TOKEN_EXPIRY_MINUTES",
+        default=480,
+    )
+    inactivity_minutes = _get_positive_int(
+        "API_SESSION_INACTIVITY_MINUTES",
+        default=30,
+    )
+    if inactivity_minutes > absolute_expiry_minutes:
+        raise ValueError(
+            "API_SESSION_INACTIVITY_MINUTES nesmi byt vyssi nez API_TOKEN_EXPIRY_MINUTES."
+        )
     return ApiSettings(
         title=config("API_TITLE", default="Monitoring Platform API"),
         version=config("API_VERSION", default="0.1.0"),
         token_secret=_get_required_token_secret(),
-        token_expiry_minutes=config("API_TOKEN_EXPIRY_MINUTES", default=480, cast=int),
+        token_expiry_minutes=absolute_expiry_minutes,
+        session_inactivity_minutes=inactivity_minutes,
         cors_origins=_get_cors_origins(),
     )

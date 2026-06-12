@@ -89,3 +89,39 @@ def test_api_startup_rejects_missing_or_placeholder_token_secret(
 
     with pytest.raises(ValueError, match="API_TOKEN_SECRET"):
         api_config._get_required_token_secret()
+
+
+@pytest.mark.parametrize(
+    ("absolute_minutes", "inactivity_minutes", "message"),
+    [
+        (480, 0, "API_SESSION_INACTIVITY_MINUTES"),
+        (30, 31, "nesmi byt vyssi"),
+    ],
+)
+def test_api_startup_rejects_invalid_session_timeouts(
+    monkeypatch,
+    absolute_minutes,
+    inactivity_minutes,
+    message,
+):
+    values = {
+        "API_TITLE": "Test API",
+        "API_VERSION": "test",
+        "API_TOKEN_EXPIRY_MINUTES": absolute_minutes,
+        "API_SESSION_INACTIVITY_MINUTES": inactivity_minutes,
+    }
+
+    def fake_config(name, default=None, cast=None):
+        value = values.get(name, default)
+        return cast(value) if cast is not None else value
+
+    monkeypatch.setattr(api_config, "config", fake_config)
+    monkeypatch.setattr(
+        api_config,
+        "_get_required_token_secret",
+        lambda: "test-secret",
+    )
+    monkeypatch.setattr(api_config, "_get_cors_origins", lambda: ())
+
+    with pytest.raises(ValueError, match=message):
+        api_config.get_api_settings()

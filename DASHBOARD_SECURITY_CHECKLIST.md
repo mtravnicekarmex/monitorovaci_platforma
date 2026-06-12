@@ -304,14 +304,47 @@ Completion criteria:
 
 ### 9. Harden browser session handling
 
-- [ ] Rename the session cookie with the `__Host-` prefix.
-- [ ] Always set `Secure`, `HttpOnly`, `SameSite=Lax` or stricter, and `Path=/`.
-- [ ] Do not derive security attributes from untrusted forwarded headers.
-- [ ] Add an inactivity timeout appropriate for operational dashboard use.
-- [ ] Keep an absolute timeout and consider periodic token renewal.
-- [ ] Rotate or invalidate sessions after password, role, account-status, and permission changes.
-- [ ] Consider `Clear-Site-Data` during logout where browser compatibility permits.
-- [ ] Add session lifecycle tests.
+- [x] Rename the session cookie with the `__Host-` prefix.
+- [x] Always set `Secure`, `HttpOnly`, `SameSite=Lax` or stricter, and `Path=/`.
+- [x] Do not derive security attributes from untrusted forwarded headers.
+- [x] Add an inactivity timeout appropriate for operational dashboard use.
+- [x] Keep an absolute timeout and consider periodic token renewal.
+- [x] Rotate or invalidate sessions after password, role, account-status, and permission changes.
+- [x] Consider `Clear-Site-Data` during logout where browser compatibility permits.
+- [x] Add session lifecycle tests.
+
+Completed on 2026-06-12:
+
+- The browser cookie is now
+  `__Host-monitoring_dashboard_session`. FastAPI always sets it with
+  `Secure`, `HttpOnly`, `SameSite=Lax`, and `Path=/`, and never sets a
+  `Domain` attribute.
+- Cookie security no longer depends on `X-Forwarded-Proto` or another request
+  header. The supported browser entry point remains the public HTTPS hostname.
+- Tokens now contain signed issue, session-start, rolling-expiry, and
+  absolute-expiry timestamps. The default rolling request-inactivity limit is
+  30 minutes and the absolute limit is 480 minutes.
+- Active Streamlit sessions renew at most once every five minutes through
+  `POST /api/v1/auth/session/refresh`. Renewal preserves the original
+  session-start timestamp and cannot extend the absolute limit.
+- Tokens created before this claim format are rejected. The first dashboard
+  access after deployment therefore requires one new login.
+- Password, role, activation, allowed-section, allowed-page, and
+  allowed-device changes increment `token_version` once and immediately revoke
+  existing bearer tokens and browser sessions. Email-only changes do not
+  revoke sessions.
+- Logout deletes both the current `__Host-` cookie and the retired legacy
+  cookie. The browser-session deletion response also clears origin cache and
+  storage through `Clear-Site-Data`; cookies are deleted explicitly to avoid
+  domain-wide cookie clearing behavior.
+- Focused lifecycle tests passed 50 tests, the broader security/dashboard/map
+  suite passed 154 tests, and the full suite passed 492 of 494 tests. The two
+  remaining failures are the previously documented unrelated failures in
+  `tests/test_vodomery_reports.py`.
+- Live verification confirmed the new OpenAPI cookie name and refresh route,
+  rejected a synthetic legacy-format token with HTTP 401, and kept FastAPI,
+  Streamlit, HTTPS dashboard routing, and unauthenticated image protection
+  healthy.
 
 Completion criteria:
 
@@ -458,7 +491,8 @@ Completion criteria:
 - [x] Protected FastAPI endpoints require bearer authentication.
 - [x] Domain API services enforce device filtering for non-admin users.
 - [x] Admin API routes enforce server-side admin authorization.
-- [x] Browser session cookie is currently `HttpOnly`, `Secure` over HTTPS, and `SameSite=Lax`.
+- [x] Browser session cookie uses the `__Host-` prefix and is always `Secure`,
+  `HttpOnly`, `SameSite=Lax`, and scoped to `Path=/`.
 - [x] Passwords are salted and hashed with PBKDF2-HMAC-SHA256.
 - [x] Password changes and logout increment `token_version` and revoke older tokens.
 - [x] Map image paths are resolved server-side and are not supplied directly by clients.
@@ -488,6 +522,10 @@ Verified through 2026-06-12:
 - The complete suite passed 471 of 473 tests. Two independently reproducible
   failures remain in `tests/test_vodomery_reports.py`; no vodomery reporting
   source or test file was changed by P1.5.
+- P1.9 session lifecycle coverage passed 50 focused tests and 154 broader
+  security/dashboard/map tests.
+- The full suite after P1.9 passed 492 of 494 tests. The same two unrelated
+  `tests/test_vodomery_reports.py` failures remain.
 - No dependency vulnerability scan was run because `pip-audit` was not installed.
 
 ## References

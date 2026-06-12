@@ -566,3 +566,37 @@ Implications:
   external HTTP(S) script tags.
 - External map tile, weather, and API data endpoints remain allowed because
   they do not provide executable JavaScript.
+
+## DEC-031: Browser Sessions Use Host-Bound Rolling Tokens
+
+Date: 2026-06-12
+
+Clarifies: DEC-020, DEC-029
+
+Decision: Browser persistence uses the
+`__Host-monitoring_dashboard_session` HttpOnly cookie and signed bearer tokens
+with both a rolling request-inactivity expiry and a fixed absolute session
+expiry.
+
+Rationale: The previous cookie inherited one eight-hour bearer-token lifetime,
+derived `Secure` from request headers, and did not revoke sessions for every
+authorization change. A host-bound cookie, short rolling expiry, fixed
+absolute limit, and centralized `token_version` revocation reduce the useful
+lifetime of a stolen session and close privilege-change gaps.
+
+Implications:
+
+- The cookie is always `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, and has
+  no `Domain` attribute. Direct HTTP browser persistence is unsupported.
+- The default rolling request-inactivity limit is 30 minutes and the absolute
+  session limit is 480 minutes.
+- Active Streamlit sessions renew at most once every five minutes through
+  `/api/v1/auth/session/refresh`; renewal never changes the original session
+  start or absolute expiry.
+- Tokens without the new signed time claims are rejected, so deployment
+  invalidates sessions issued by the previous token format.
+- Password, role, activation, section, page, and device-permission changes
+  increment `token_version` once and revoke all existing sessions. Email-only
+  changes do not revoke sessions.
+- Logout explicitly deletes both the current and legacy cookies and clears
+  origin cache and storage without requesting domain-wide cookie clearing.

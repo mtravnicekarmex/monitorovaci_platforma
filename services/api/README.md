@@ -149,7 +149,8 @@ Konfigurace se načítá z proměnných prostředí (viz `.env.example`):
 | `API_TITLE` | Název API |
 | `API_VERSION` | Verze API |
 | `API_TOKEN_SECRET` | Tajný klíč pro JWT tokeny |
-| `API_TOKEN_EXPIRE_MINUTES` | Platnost tokenu v minutách |
+| `API_TOKEN_EXPIRY_MINUTES` | Absolutní maximální platnost relace v minutách |
+| `API_SESSION_INACTIVITY_MINUTES` | Klouzavá platnost aktivní relace v minutách |
 | `DATABASE_URL` | Připojení k databázi |
 
 Další krok migrace je přepojení Streamlit loginu a prvních vodoměrových přehledů z přímého DB přístupu na tyto endpointy.

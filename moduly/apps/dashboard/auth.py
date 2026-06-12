@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 import ipaddress
 import json
 from pathlib import Path
@@ -12,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import streamlit as st
 
+from app.time_utils import utc_now_naive
 from app.dashboard_session import DASHBOARD_SESSION_COOKIE_NAME
 from moduly.apps.dashboard.api_client import DashboardApiError
 from moduly.apps.dashboard.api_client import (
@@ -19,6 +21,7 @@ from moduly.apps.dashboard.api_client import (
     get_me as api_get_me,
     login as api_login,
     logout as api_logout,
+    refresh_session as api_refresh_session,
 )
 from moduly.apps.dashboard.navigation_config import (
     SECTIONS,
@@ -32,6 +35,7 @@ from moduly.apps.dashboard.navigation_config import (
 
 
 LOGIN_CLIENT_IP_FORWARDING_ENABLED = True
+SESSION_RENEWAL_INTERVAL = timedelta(minutes=5)
 
 
 def init_auth_state() -> None:
@@ -50,6 +54,7 @@ def init_auth_state() -> None:
     st.session_state.setdefault("auth_cookie_restore_attempted", False)
     st.session_state.setdefault("auth_cookie_clear_pending", False)
     st.session_state.setdefault("auth_cookie_sync_runs_remaining", 0)
+    st.session_state.setdefault("auth_last_token_refresh_at", None)
 
 
 def _clear_auth_state(*, clear_browser_cookie: bool) -> None:
@@ -65,6 +70,7 @@ def _clear_auth_state(*, clear_browser_cookie: bool) -> None:
     st.session_state["auth_last_login_at"] = None
     st.session_state["post_login_redirect"] = ""
     st.session_state["auth_cookie_sync_runs_remaining"] = 0
+    st.session_state["auth_last_token_refresh_at"] = None
     if clear_browser_cookie:
         st.session_state["auth_cookie_clear_pending"] = True
 
@@ -84,14 +90,17 @@ def restore_auth_state_from_browser_cookie() -> bool:
         return False
 
     try:
-        user_payload = api_get_me(access_token)
+        session_payload = api_refresh_session(access_token)
     except DashboardApiError as exc:
         if exc.status_code == 401:
             _clear_auth_state(clear_browser_cookie=True)
         return False
 
-    apply_authenticated_user(user_payload, access_token=access_token)
-    st.session_state["auth_cookie_sync_runs_remaining"] = 0
+    apply_authenticated_user(
+        session_payload.user,
+        access_token=session_payload.access_token,
+        expires_at=session_payload.expires_at,
+    )
     return True
 
 
@@ -262,6 +271,7 @@ def apply_authenticated_user(
     if access_token is not None:
         st.session_state["auth_token"] = access_token
         st.session_state["auth_cookie_sync_runs_remaining"] = 2
+        st.session_state["auth_last_token_refresh_at"] = utc_now_naive()
     if expires_at is not None:
         st.session_state["auth_token_expires_at"] = expires_at
     st.session_state["auth_user"] = str(user_payload.get("username") or "")
@@ -297,17 +307,32 @@ def logout() -> None:
     _clear_auth_state(clear_browser_cookie=True)
 
 
+def _session_renewal_due() -> bool:
+    last_refresh_at = st.session_state.get("auth_last_token_refresh_at")
+    if last_refresh_at is None:
+        return True
+    return utc_now_naive() - last_refresh_at >= SESSION_RENEWAL_INTERVAL
+
+
 def refresh_current_user() -> bool:
     access_token = get_auth_token()
     if not access_token:
         return False
     try:
-        user_payload = api_get_me(access_token)
+        if _session_renewal_due():
+            session_payload = api_refresh_session(access_token)
+            apply_authenticated_user(
+                session_payload.user,
+                access_token=session_payload.access_token,
+                expires_at=session_payload.expires_at,
+            )
+        else:
+            user_payload = api_get_me(access_token)
+            apply_authenticated_user(user_payload)
     except DashboardApiError as exc:
         if exc.status_code == 401:
             _clear_auth_state(clear_browser_cookie=True)
         return False
-    apply_authenticated_user(user_payload)
     return True
 
 

@@ -6,7 +6,10 @@ from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from starlette.requests import Request
 
-from app.dashboard_session import DASHBOARD_SESSION_COOKIE_NAME
+from app.dashboard_session import (
+    DASHBOARD_SESSION_COOKIE_NAME,
+    LEGACY_DASHBOARD_SESSION_COOKIE_NAME,
+)
 from services.api.core.login_throttle import LoginFailureStatus
 from services.api.routes import auth as auth_routes
 from services.api.schemas.auth import LoginRequest, PasswordChangeRequest
@@ -31,7 +34,7 @@ def _request(*, scheme: str = "http", forwarded_proto: str | None = None) -> Req
     )
 
 
-def test_persist_browser_session_sets_secure_httponly_cookie(monkeypatch):
+def test_persist_browser_session_sets_host_secure_httponly_cookie(monkeypatch):
     monkeypatch.setattr(
         auth_routes,
         "decode_access_token",
@@ -39,29 +42,100 @@ def test_persist_browser_session_sets_secure_httponly_cookie(monkeypatch):
     )
 
     response = auth_routes.persist_browser_session(
-        _request(forwarded_proto="https"),
         HTTPAuthorizationCredentials(scheme="Bearer", credentials="token-value"),
         SimpleNamespace(username="tester"),
     )
 
-    cookie = response.headers["set-cookie"]
+    cookies = response.headers.getlist("set-cookie")
+    cookie = next(
+        value
+        for value in cookies
+        if value.startswith(f"{DASHBOARD_SESSION_COOKIE_NAME}=token-value")
+    )
     assert response.status_code == 204
-    assert f"{DASHBOARD_SESSION_COOKIE_NAME}=token-value" in cookie
+    assert DASHBOARD_SESSION_COOKIE_NAME.startswith("__Host-")
     assert "HttpOnly" in cookie
     assert "Path=/" in cookie
     assert "SameSite=lax" in cookie
     assert "Secure" in cookie
+    assert "Domain=" not in cookie
+    assert any(
+        value.startswith(f"{LEGACY_DASHBOARD_SESSION_COOKIE_NAME}=")
+        and "Max-Age=0" in value
+        for value in cookies
+    )
 
 
-def test_clear_browser_session_expires_cookie():
-    response = auth_routes.clear_browser_session(_request(scheme="https"))
+def test_clear_browser_session_expires_current_and_legacy_cookie():
+    response = auth_routes.clear_browser_session()
 
-    cookie = response.headers["set-cookie"]
+    cookies = response.headers.getlist("set-cookie")
     assert response.status_code == 204
-    assert f"{DASHBOARD_SESSION_COOKIE_NAME}=" in cookie
-    assert "Max-Age=0" in cookie
-    assert "HttpOnly" in cookie
-    assert "Secure" in cookie
+    assert response.headers["clear-site-data"] == '"cache", "storage"'
+    for cookie_name in (
+        DASHBOARD_SESSION_COOKIE_NAME,
+        LEGACY_DASHBOARD_SESSION_COOKIE_NAME,
+    ):
+        cookie = next(
+            value for value in cookies if value.startswith(f"{cookie_name}=")
+        )
+        assert "Max-Age=0" in cookie
+        assert "HttpOnly" in cookie
+        assert "Secure" in cookie
+        assert "Path=/" in cookie
+
+
+def test_refresh_session_preserves_absolute_session_start(monkeypatch):
+    original_payload = SimpleNamespace(
+        subject="tester",
+        token_version=2,
+        session_started_at=datetime(2026, 6, 12, 8, 0),
+    )
+    renewed_expires_at = datetime(2026, 6, 12, 8, 30)
+    monkeypatch.setattr(
+        auth_routes,
+        "decode_access_token",
+        lambda token: original_payload if token == "old-token" else None,
+    )
+    monkeypatch.setattr(
+        auth_routes,
+        "renew_access_token",
+        lambda payload: (
+            "renewed-token",
+            renewed_expires_at,
+        )
+        if payload is original_payload
+        else None,
+    )
+    current_user = SimpleNamespace(
+        username="tester",
+        email=None,
+        is_admin=False,
+        is_active=True,
+        allowed_sections=(),
+        allowed_pages=(),
+        allowed_devices=(),
+        last_login_at=None,
+        to_profile_dict=lambda: {
+            "username": "tester",
+            "email": None,
+            "is_admin": False,
+            "is_active": True,
+            "allowed_sections": [],
+            "allowed_pages": [],
+            "allowed_devices": [],
+            "last_login_at": None,
+        },
+    )
+
+    response = auth_routes.refresh_session(
+        HTTPAuthorizationCredentials(scheme="Bearer", credentials="old-token"),
+        current_user,
+    )
+
+    assert response.access_token == "renewed-token"
+    assert response.expires_at == renewed_expires_at
+    assert response.user.username == "tester"
 
 
 class _LoginLimiterStub:

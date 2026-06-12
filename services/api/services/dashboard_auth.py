@@ -18,6 +18,7 @@ from moduly.apps.dashboard.database.users import (
     verify_user_password,
 )
 from moduly.apps.dashboard.navigation_config import get_page_definition, get_section_definition
+from moduly.apps.dashboard.security import PasswordPolicyError
 
 
 class AuthenticationError(ValueError):
@@ -172,9 +173,10 @@ def change_dashboard_user_password(
             "Soucasne heslo neni spravne.",
             reason_category="invalid_current_password",
         )
-    if len(new_password) < 8:
-        raise UserUpdateError("Nove heslo musi mit alespon 8 znaku.")
-    update_password(username, new_password)
+    try:
+        update_password(username, new_password)
+    except PasswordPolicyError as exc:
+        raise UserUpdateError(str(exc)) from exc
 
 
 def logout_dashboard_user(username: str) -> None:

@@ -1616,3 +1616,46 @@ Not verified:
 - Live IP password-spray and administrator-account alert thresholds were not
   triggered to avoid blocking the production source IP or touching a real
   administrator account; both are covered by unit tests.
+
+### 2026-06-12 - Password policy hardening
+
+Scope:
+- Completed dashboard security checklist item P1.5.
+
+Changed:
+- Added one shared password validator for administrator creation/reset,
+  self-service changes, local CLI management, Streamlit forms, and the
+  database password-write boundary.
+- Added a tracked local common/compromised password blocklist including
+  deployment-specific expected values.
+- Required 15 to 1024 characters while preserving Unicode, spaces, long
+  passphrases, password-manager values, and paste.
+- Added Unicode NFC normalization before password hashing.
+- Increased PBKDF2-HMAC-SHA256 from 390,000 to 600,000 iterations.
+- Added transparent rehash of older valid PBKDF2 hashes after successful login
+  without incrementing token version or requiring a bulk reset.
+- Changed the bootstrap CLI to use a hidden password prompt when `--password`
+  is omitted.
+- Added DEC-028 and deployment documentation.
+
+Verified:
+- Password-policy, blocklist, Unicode normalization, work-factor, legacy
+  verification, automatic rehash, admin create/reset, self-service, CLI, UI
+  wiring, authentication, audit, Caddy, navigation, and responsive tests
+  passed: 84 tests.
+- The full test suite passed 471 of 473 tests.
+- FastAPI application import and Python compilation of changed modules passed.
+- On this workstation, 600,000-iteration PBKDF2 hashing took approximately
+  0.126 seconds and verification approximately 0.132 seconds.
+- FastAPI live/ready, Streamlit health, and the public invalid-login path
+  remained operational after Uvicorn reloaded the change.
+
+Not verified:
+- No real dashboard user password was read, changed, or used for login.
+- Existing production hash iteration counts were not enumerated because
+  migration occurs safely on successful login and raw password hashes remain
+  sensitive.
+- Two full-suite failures reproduce independently in
+  `tests/test_vodomery_reports.py`: the day consumption curve expectation and
+  an outdated report-heading expectation. P1.5 did not change vodomery report
+  code or tests, so those failures were left outside this security task.

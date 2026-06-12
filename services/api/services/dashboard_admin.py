@@ -10,6 +10,7 @@ from moduly.apps.dashboard.database.users import (
     list_users,
     upsert_user,
 )
+from moduly.apps.dashboard.security import PasswordPolicyError
 from moduly.mereni.elektromery.database.models import Elektromer_areal_Mereni
 from moduly.mereni.kalorimetry.database.models import Kalorimetr_areal_Mereni
 from moduly.mereni.manometry.database.models import Manometr_areal_Zarizeni, Mereni_manometry
@@ -159,16 +160,19 @@ def create_admin_user(
     if get_user(cleaned_username) is not None:
         raise AdminOperationError("Uzivatel jiz existuje.")
 
-    upsert_user(
-        username=cleaned_username,
-        password=password,
-        email=email,
-        dostupne_sekce=available_sections,
-        dostupne_stranky=available_pages,
-        seznam_zarizeni=device_ids,
-        is_admin=is_admin,
-        is_active=is_active,
-    )
+    try:
+        upsert_user(
+            username=cleaned_username,
+            password=password,
+            email=email,
+            dostupne_sekce=available_sections,
+            dostupne_stranky=available_pages,
+            seznam_zarizeni=device_ids,
+            is_admin=is_admin,
+            is_active=is_active,
+        )
+    except PasswordPolicyError as exc:
+        raise AdminOperationError(str(exc)) from exc
     created_user = get_user(cleaned_username)
     if created_user is None:
         raise AdminOperationError("Uzivatele se nepodarilo nacist po ulozeni.")
@@ -227,16 +231,19 @@ def update_admin_user(
         resolved_is_active=resolved_is_active,
     )
 
-    upsert_user(
-        username=cleaned_username,
-        password=resolved_password,
-        email=resolved_email,
-        dostupne_sekce=resolved_sections,
-        dostupne_stranky=resolved_pages,
-        seznam_zarizeni=resolved_device_ids,
-        is_admin=resolved_is_admin,
-        is_active=resolved_is_active,
-    )
+    try:
+        upsert_user(
+            username=cleaned_username,
+            password=resolved_password,
+            email=resolved_email,
+            dostupne_sekce=resolved_sections,
+            dostupne_stranky=resolved_pages,
+            seznam_zarizeni=resolved_device_ids,
+            is_admin=resolved_is_admin,
+            is_active=resolved_is_active,
+        )
+    except PasswordPolicyError as exc:
+        raise AdminOperationError(str(exc)) from exc
     updated_record = next(
         row for row in list_admin_users(user_context)
         if row["username"] == cleaned_username

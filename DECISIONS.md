@@ -480,3 +480,30 @@ Implications:
   15 minutes.
 - Audit write failures must not change authentication responses or expose log
   content to clients.
+
+## DEC-028: Dashboard Passwords Use A Shared 15-Character Policy
+
+Date: 2026-06-12
+
+Decision: Every supported dashboard password creation or change path uses one
+shared validator. New passwords require at least 15 characters, permit Unicode,
+spaces, passphrases and password-manager values, and are checked against a
+local common/compromised password blocklist without composition rules or
+periodic expiry.
+
+Rationale: Password-only authentication needs sufficient length and breached
+password screening while avoiding brittle character-class rules that reduce
+usability and encourage predictable substitutions.
+
+Implications:
+
+- The shared validator is enforced at the database write boundary and reused
+  by administrator, self-service, CLI, and Streamlit UI paths.
+- Passwords are Unicode NFC-normalized before hashing.
+- PBKDF2-HMAC-SHA256 uses 600,000 iterations for new hashes.
+- Valid older PBKDF2 hashes remain accepted and are transparently rehashed
+  after successful authentication without incrementing `token_version`.
+- Existing users are not forced through a bulk password reset. The stronger
+  length and blocklist policy applies when a password is created or changed.
+- The tracked `moduly/apps/dashboard/password_blocklist.txt` is the local
+  offline baseline and can be expanded as operational intelligence improves.

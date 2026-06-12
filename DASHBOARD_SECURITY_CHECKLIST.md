@@ -151,14 +151,39 @@ Completion criteria:
 
 ### 5. Strengthen password policy
 
-- [ ] Apply one shared password validator to user creation, admin reset, CLI creation, and self-service changes.
-- [ ] Require at least 15 characters while password-only authentication is used.
-- [ ] Allow long passphrases, Unicode, spaces, password managers, and paste.
-- [ ] Reject commonly used and compromised passwords using a local or privacy-preserving blocklist.
-- [ ] Do not require arbitrary periodic password changes.
-- [ ] Increase PBKDF2-HMAC-SHA256 from 390,000 to at least 600,000 iterations, or migrate to Argon2id.
-- [ ] Rehash older hashes after a successful login.
-- [ ] Add tests for every password entry path and hash migration.
+- [x] Apply one shared password validator to user creation, admin reset, CLI creation, and self-service changes.
+- [x] Require at least 15 characters while password-only authentication is used.
+- [x] Allow long passphrases, Unicode, spaces, password managers, and paste.
+- [x] Reject commonly used and compromised passwords using a local or privacy-preserving blocklist.
+- [x] Do not require arbitrary periodic password changes.
+- [x] Increase PBKDF2-HMAC-SHA256 from 390,000 to at least 600,000 iterations, or migrate to Argon2id.
+- [x] Rehash older hashes after a successful login.
+- [x] Add tests for every password entry path and hash migration.
+
+Completed on 2026-06-12:
+
+- `moduly/apps/dashboard/security.py` owns one password validator used by the
+  database write boundary, administrator create/reset flows, self-service
+  password changes, Streamlit forms, and the local user-management CLI.
+- New passwords require 15 to 1024 characters. Spaces, Unicode, long
+  passphrases, browser paste, and password-manager generated values remain
+  supported. No uppercase/lowercase/digit/symbol composition rule or periodic
+  password expiry was introduced.
+- Passwords are normalized to Unicode NFC before hashing. Blocklist matching is
+  case-insensitive and whitespace-normalized so trivial padding does not bypass
+  the tracked local common/compromised password list or username-derived
+  values.
+- New hashes use PBKDF2-HMAC-SHA256 with 600,000 iterations. Existing valid
+  390,000-iteration hashes continue to authenticate and are rehashed
+  automatically after the next successful login without changing
+  `token_version` or requiring a bulk password reset.
+- The bootstrap CLI prompts for a password without exposing it in process
+  arguments when `--password` is omitted; the argument remains available for
+  existing controlled automation.
+- On the production workstation, a 600,000-iteration test hash took
+  approximately 0.126 seconds and verification approximately 0.132 seconds.
+- Targeted password-policy, hash-migration, authentication, audit, Caddy,
+  navigation, and responsive-layout tests passed: 84 tests.
 
 Completion criteria:
 
@@ -384,6 +409,11 @@ Verified through 2026-06-12:
 - Targeted authentication-audit, admin-audit, CLI-audit, auth-route, throttle,
   auth-state, security-config, Caddy, navigation, and responsive-layout tests
   passed: 65 tests.
+- Password-policy and compatible hash-migration coverage passed together with
+  the broader security/dashboard suite: 84 tests.
+- The complete suite passed 471 of 473 tests. Two independently reproducible
+  failures remain in `tests/test_vodomery_reports.py`; no vodomery reporting
+  source or test file was changed by P1.5.
 - No dependency vulnerability scan was run because `pip-audit` was not installed.
 
 ## References

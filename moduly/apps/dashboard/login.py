@@ -91,7 +91,7 @@ def render_login_page() -> None:
         st.warning("V databazi zatim neni zadny uzivatel dashboardu.")
         st.code(
             "py moduly\\apps\\dashboard\\database\\create_user.py "
-            "--username admin --password tvoje_heslo --admin",
+            "--username admin --admin",
             language="powershell",
         )
 

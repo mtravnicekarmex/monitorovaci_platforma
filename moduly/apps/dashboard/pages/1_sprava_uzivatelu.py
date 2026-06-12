@@ -28,6 +28,11 @@ from moduly.apps.dashboard.navigation_config import (
     get_configurable_section_keys,
     normalize_page_keys,
 )
+from moduly.apps.dashboard.security import (
+    PASSWORD_POLICY_HELP,
+    PasswordPolicyError,
+    validate_password,
+)
 
 
 st.set_page_config(
@@ -96,7 +101,11 @@ def render_page() -> None:
         with st.form("create_user_form"):
             new_username = st.text_input("Uzivatel")
             new_email = st.text_input("Email")
-            new_password = st.text_input("Heslo", type="password")
+            new_password = st.text_input(
+                "Heslo",
+                type="password",
+                help=PASSWORD_POLICY_HELP,
+            )
             new_is_admin = st.checkbox("Admin", value=False)
             new_is_active = st.checkbox("Aktivni", value=True)
             new_sections = st.multiselect(
@@ -126,6 +135,11 @@ def render_page() -> None:
             elif not new_password:
                 st.error("Heslo je povinne.")
             else:
+                try:
+                    validate_password(new_password, username=new_username.strip())
+                except PasswordPolicyError as exc:
+                    st.error(str(exc))
+                    return
                 resolved_pages = normalize_selected_pages(new_sections, new_pages)
                 api_create_admin_user(
                     get_auth_token(),
@@ -185,7 +199,7 @@ def render_page() -> None:
                 edit_password = st.text_input(
                     "Nove heslo",
                     type="password",
-                    help="Nech prazdne, pokud heslo nechces menit.",
+                    help=f"Nech prazdne, pokud heslo nechces menit. {PASSWORD_POLICY_HELP}",
                 )
                 edit_sections = st.multiselect(
                     "Dostupne sekce",
@@ -221,6 +235,12 @@ def render_page() -> None:
                 delete_pressed = delete_col.form_submit_button("Smazat uzivatele")
 
             if save_pressed:
+                if edit_password:
+                    try:
+                        validate_password(edit_password, username=username)
+                    except PasswordPolicyError as exc:
+                        st.error(str(exc))
+                        continue
                 resolved_pages = normalize_selected_pages(edit_sections, edit_pages)
                 api_update_admin_user(
                     get_auth_token(),

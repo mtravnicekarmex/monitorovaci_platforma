@@ -12,12 +12,17 @@ from moduly.apps.dashboard.navigation_config import (
     normalize_page_keys,
     normalize_section_keys,
 )
-from moduly.apps.dashboard.security import hash_password, verify_password
+from moduly.apps.dashboard.security import (
+    hash_password,
+    password_hash_needs_rehash,
+    validate_password,
+    verify_password,
+)
 
 
 DUMMY_PASSWORD_HASH = (
-    "pbkdf2_sha256$390000$dashboard-login-timing-padding$"
-    "1efac37498f163f5afbef0b7a56c0b35973fe50b8fc80e737d8447a49d5e96fd"
+    "pbkdf2_sha256$600000$dashboard-login-timing-padding$"
+    "a8dc438ae9510ef7e289eb4eaca4d026e7171a890cc22798a8330fdda411a75a"
 )
 
 
@@ -121,6 +126,9 @@ def authenticate_user_with_result(
                 is_admin_account=bool(getattr(user, "is_admin", False)),
             )
 
+        if password_hash_needs_rehash(user.heslo):
+            user.heslo = hash_password(password)
+            session.commit()
         session.expunge(user)
         return UserAuthenticationResult(
             user=user,
@@ -181,6 +189,7 @@ def update_last_login(username: str, login_time) -> None:
 
 
 def update_password(username: str, new_password: str) -> None:
+    validate_password(new_password, username=username)
     session = get_session_pg()
     try:
         user = session.get(Streamlit_Users, username)
@@ -215,6 +224,9 @@ def upsert_user(
     is_admin: bool = False,
     is_active: bool = True,
 ) -> None:
+    if password is not None:
+        validate_password(password, username=username)
+
     session = get_session_pg()
     try:
         user = session.get(Streamlit_Users, username)

@@ -300,6 +300,24 @@ tokeny ani hodnoty cookies. Alert zaznamy se severity `warning` vznikaji pri:
 - IP lockoutu po 20 neuspesnych pokusech napric ucty,
 - 3 neuspesnych pokusech na administratorsky ucet behem 15 minut.
 
+### Password policy
+
+Nove nebo menene dashboardove heslo musi mit 15 az 1024 znaku. Mezery,
+Unicode, dlouhe passphrase a hodnoty z password manageru jsou povolene.
+Nevyzaduje se kombinace velkych a malych pismen, cislic a symbolu ani
+periodicka zmena hesla.
+
+Slaba hesla jsou odmitana pres lokalni soubor:
+
+```text
+moduly\apps\dashboard\password_blocklist.txt
+```
+
+Hesla se pred hashovanim normalizuji do Unicode NFC a ukladaji jako
+PBKDF2-HMAC-SHA256 s 600 000 iteracemi. Starsi platne PBKDF2 hashe se po
+uspesnem prihlaseni automaticky prehashuji. Hromadny reset existujicich hesel
+neni vyzadovan.
+
 Nasazeni tracked konfigurace do `C:\Program Files\Caddy` se provadi z
 elevovaneho PowerShellu:
 

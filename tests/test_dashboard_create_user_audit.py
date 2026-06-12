@@ -15,7 +15,7 @@ def _args(**updates):
     values = {
         "username": "target",
         "email": "",
-        "password": "not-recorded",
+        "password": "not-recorded-but-strong",
         "zarizeni": "",
         "sekce": "",
         "stranky": "",
@@ -39,7 +39,7 @@ def test_cli_create_user_audits_account_without_password(monkeypatch):
 
     assert audit.events[0]["event_type"] == "account_created"
     assert audit.events[0]["details"] == {"is_admin": True, "is_active": True}
-    assert "not-recorded" not in repr(audit.events)
+    assert "not-recorded-but-strong" not in repr(audit.events)
 
 
 def test_cli_update_user_audits_password_role_activation_and_revocation(monkeypatch):
@@ -68,4 +68,4 @@ def test_cli_update_user_audits_password_role_activation_and_revocation(monkeypa
         "role_change",
         "account_activation_change",
     ]
-    assert "not-recorded" not in repr(audit.events)
+    assert "not-recorded-but-strong" not in repr(audit.events)

@@ -25,6 +25,11 @@ from moduly.apps.dashboard.auth import (
     refresh_current_user,
     require_page_access,
 )
+from moduly.apps.dashboard.security import (
+    PASSWORD_POLICY_HELP,
+    PasswordPolicyError,
+    validate_password,
+)
 
 
 st.set_page_config(
@@ -80,7 +85,11 @@ with password_col:
     st.subheader("Změna hesla")
     with st.form("change_password_form"):
         current_password = st.text_input("Současné heslo", type="password")
-        new_password = st.text_input("Nové heslo", type="password")
+        new_password = st.text_input(
+            "Nové heslo",
+            type="password",
+            help=PASSWORD_POLICY_HELP,
+        )
         new_password_confirm = st.text_input("Potvrzení nového hesla", type="password")
         submitted = st.form_submit_button("Změnit heslo")
 
@@ -89,11 +98,12 @@ if submitted:
         password_col.error("Vyplň všechna pole.")
     elif new_password != new_password_confirm:
         password_col.error("Nové heslo a potvrzení se neshoduji.")
-    elif len(new_password) < 8:
-        password_col.error("Nové heslo musí mít alespoň 8 znaků.")
     else:
         try:
+            validate_password(new_password, username=username)
             change_my_password(get_auth_token(), current_password, new_password)
+        except PasswordPolicyError as exc:
+            password_col.error(str(exc))
         except DashboardApiError as exc:
             password_col.error(str(exc))
         else:

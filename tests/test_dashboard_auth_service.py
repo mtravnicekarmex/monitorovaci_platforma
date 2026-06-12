@@ -34,12 +34,16 @@ class _FakeSession:
         self.user = user
         self.closed = False
         self.expunge_calls = []
+        self.commit_calls = 0
 
     def get(self, _model, _username):
         return self.user
 
     def expunge(self, user):
         self.expunge_calls.append(user)
+
+    def commit(self):
+        self.commit_calls += 1
 
     def close(self):
         self.closed = True

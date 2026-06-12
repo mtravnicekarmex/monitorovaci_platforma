@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from moduly.apps.dashboard.database.db_init import ensure_dashboard_tables
 from moduly.apps.dashboard.database.users import get_user, upsert_user
+from moduly.apps.dashboard.security import PasswordPolicyError, validate_password
 from services.api.core.auth_audit import auth_audit_service
 
 
@@ -19,7 +20,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Vytvori nebo aktualizuje uzivatele dashboardu.")
     parser.add_argument("--username", required=True, help="Login uzivatele")
     parser.add_argument("--email", default="", help="Email uzivatele")
-    parser.add_argument("--password", required=True, help="Heslo v otevrene podobe; ulozi se jako hash")
+    parser.add_argument(
+        "--password",
+        help="Heslo v otevrene podobe; pokud chybi, nacte se skrytym promptem.",
+    )
     parser.add_argument(
         "--zarizeni",
         default="",
@@ -42,6 +46,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    password = args.password
+    if password is None:
+        password = getpass.getpass("Heslo: ")
+    try:
+        validate_password(password, username=args.username.strip())
+    except PasswordPolicyError as exc:
+        raise SystemExit(str(exc)) from exc
+
     ensure_dashboard_tables()
     username = args.username.strip()
     existing_user = get_user(username)
@@ -51,7 +63,7 @@ def main() -> None:
 
     upsert_user(
         username=username,
-        password=args.password,
+        password=password,
         email=args.email.strip() or None,
         dostupne_sekce=dostupne_sekce,
         dostupne_stranky=dostupne_stranky,

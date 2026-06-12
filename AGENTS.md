@@ -192,6 +192,13 @@ Known job families:
 - Navigation and permission definitions belong in `moduly/apps/dashboard/navigation_config.py`.
 - Login/session behavior belongs in `moduly/apps/dashboard/auth.py`.
 - Dashboard login survives browser reload through the `monitoring_dashboard_session` HttpOnly cookie. FastAPI owns cookie creation and deletion through `/api/v1/auth/browser-session`; Streamlit restores the session by validating the stored bearer token through `/api/v1/auth/me`.
+- New and changed dashboard passwords use one shared validator: at least 15
+  characters, up to 1024 characters, Unicode and spaces allowed, no character
+  composition rule, and rejection through the tracked local password
+  blocklist. Passwords are NFC-normalized before hashing.
+- Dashboard password hashes use PBKDF2-HMAC-SHA256 with 600,000 iterations.
+  Older valid PBKDF2 hashes remain accepted and are rehashed after the next
+  successful login without forcing a bulk password reset.
 - Dashboard database bootstrap belongs in `moduly/apps/dashboard/database/db_init.py`.
 - General map UI belongs to `moduly/apps/dashboard/pages/36_mapove_podklady.py`; map-layer administration belongs to `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`.
 - Shared map rendering and request helpers belong in `moduly/apps/dashboard/map_shared.py`.

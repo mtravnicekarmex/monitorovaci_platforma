@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import APIKeyCookie, HTTPAuthorizationCredentials, HTTPBearer
 
+from app.dashboard_session import DASHBOARD_SESSION_COOKIE_NAME
 from services.api.core.tokens import TokenError, decode_access_token
 from services.api.services.dashboard_auth import (
     AuthorizationError,
@@ -14,19 +15,15 @@ from services.api.services.dashboard_auth import (
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
+browser_session_scheme = APIKeyCookie(
+    name=DASHBOARD_SESSION_COOKIE_NAME,
+    auto_error=False,
+)
 
 
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-) -> DashboardUserContext:
-    if credentials is None or credentials.scheme.lower() != "bearer":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Chybi bearer token.",
-        )
-
+def _get_user_context_from_access_token(access_token: str) -> DashboardUserContext:
     try:
-        payload = decode_access_token(credentials.credentials)
+        payload = decode_access_token(access_token)
     except TokenError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -46,6 +43,28 @@ def get_current_user(
         )
 
     return user_context
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> DashboardUserContext:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Chybi bearer token.",
+        )
+    return _get_user_context_from_access_token(credentials.credentials)
+
+
+def get_current_browser_session_user(
+    access_token: str | None = Depends(browser_session_scheme),
+) -> DashboardUserContext:
+    if not access_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Chybi dashboard session cookie.",
+        )
+    return _get_user_context_from_access_token(access_token)
 
 
 def get_current_vodomery_user(

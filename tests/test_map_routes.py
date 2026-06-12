@@ -1,13 +1,56 @@
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
+from app.dashboard_session import DASHBOARD_SESSION_COOKIE_NAME
+from services.api.core import dependencies
 from services.api.routes import map as map_routes
 from services.api.schemas.device_map import MapLayerFeaturesRequest
 from services.api.services.dashboard_auth import AuthorizationError
 from services.api.services.device_map import MapFeatureImageFile, MapFeatureImageNotFound
+
+
+def test_browser_session_user_uses_httponly_cookie_token(monkeypatch):
+    token_payload = SimpleNamespace(subject="tester", token_version=3)
+    user_context = SimpleNamespace(username="tester", token_version=3)
+    monkeypatch.setattr(
+        dependencies,
+        "decode_access_token",
+        lambda token: token_payload if token == "cookie-token" else None,
+    )
+    monkeypatch.setattr(
+        dependencies,
+        "get_dashboard_user_context",
+        lambda subject: user_context if subject == "tester" else None,
+    )
+
+    current_user = dependencies.get_current_browser_session_user("cookie-token")
+
+    assert current_user is user_context
+
+
+def test_browser_session_user_rejects_bearer_without_cookie():
+    with pytest.raises(HTTPException) as exc_info:
+        dependencies.get_current_browser_session_user(None)
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Chybi dashboard session cookie."
+
+
+def test_map_image_route_uses_browser_session_cookie_dependency():
+    dependency = inspect.signature(map_routes.get_map_image).parameters["current_user"].default.dependency
+    cookie_scheme = (
+        inspect.signature(dependencies.get_current_browser_session_user)
+        .parameters["access_token"]
+        .default.dependency
+    )
+
+    assert dependency is dependencies.get_current_browser_session_user
+    assert cookie_scheme is dependencies.browser_session_scheme
+    assert dependencies.browser_session_scheme.model.name == DASHBOARD_SESSION_COOKIE_NAME
 
 
 def test_map_layer_features_request_accepts_single_filter_value():
@@ -170,6 +213,7 @@ def test_get_map_image_returns_file_response(monkeypatch, tmp_path):
     assert Path(response.path) == image_path
     assert response.media_type == "image/jpeg"
     assert response.headers["cache-control"] == "private, max-age=300"
+    assert response.headers["vary"] == "Cookie"
 
 
 def test_get_map_image_maps_missing_photo_to_404(monkeypatch):

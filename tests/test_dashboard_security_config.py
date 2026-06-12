@@ -1,4 +1,7 @@
+import base64
+import hashlib
 from pathlib import Path
+import re
 import subprocess
 
 import pytest
@@ -14,6 +17,16 @@ RUNTIME_LAUNCHERS = (
     PROJECT_ROOT / "run.txt",
 )
 COMPROMISED_DEVELOPMENT_SECRET = b"monitoring-platforma-" + b"local-dev-secret"
+DASHBOARD_SOURCE_ROOT = PROJECT_ROOT / "moduly" / "apps" / "dashboard"
+LEAFLET_ASSET_ROOT = DASHBOARD_SOURCE_ROOT / "assets" / "leaflet" / "1.9.4"
+LEAFLET_SRI_SHA256 = {
+    "leaflet.css": "p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=",
+    "leaflet.js": "20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=",
+}
+EXTERNAL_SCRIPT_PATTERN = re.compile(
+    r"""<script\b[^>]*\bsrc\s*=\s*["']https?://""",
+    flags=re.IGNORECASE,
+)
 
 
 def test_runtime_launchers_do_not_contain_or_assign_api_token_secret():
@@ -40,6 +53,25 @@ def test_compromised_development_secret_is_absent_from_tracked_files():
         for path in tracked_paths
         if path.is_file() and COMPROMISED_DEVELOPMENT_SECRET in path.read_bytes()
     ]
+
+    assert matching_paths == []
+
+
+def test_vendored_leaflet_assets_match_reviewed_release_hashes():
+    for asset_name, expected_hash in LEAFLET_SRI_SHA256.items():
+        digest = hashlib.sha256((LEAFLET_ASSET_ROOT / asset_name).read_bytes()).digest()
+        assert base64.b64encode(digest).decode("ascii") == expected_hash
+
+    assert (LEAFLET_ASSET_ROOT / "LICENSE").is_file()
+
+
+def test_active_dashboard_sources_do_not_load_external_executable_scripts():
+    matching_paths = []
+    for pattern in ("*.py", "*.html"):
+        for path in DASHBOARD_SOURCE_ROOT.rglob(pattern):
+            source = path.read_text(encoding="utf-8")
+            if EXTERNAL_SCRIPT_PATTERN.search(source):
+                matching_paths.append(path.relative_to(PROJECT_ROOT))
 
     assert matching_paths == []
 

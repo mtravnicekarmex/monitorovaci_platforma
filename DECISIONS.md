@@ -507,3 +507,62 @@ Implications:
   length and blocklist policy applies when a password is created or changed.
 - The tracked `moduly/apps/dashboard/password_blocklist.txt` is the local
   offline baseline and can be expanded as operational intelligence improves.
+
+## DEC-029: Map Iframes Do Not Receive The Main API Token
+
+Date: 2026-06-12
+
+Clarifies: DEC-015
+
+Decision: Map iframe HTML and JavaScript do not receive the dashboard bearer
+token. `GET /api/v1/map/images` authenticates through the existing HttpOnly
+dashboard session cookie and remains the only non-auth route that accepts that
+cookie as credentials.
+
+Rationale: Passing the main bearer token into generated iframe JavaScript
+allowed any script executing in that iframe to reuse the token against admin
+or unrelated API operations. The browser can attach an HttpOnly same-origin
+cookie without exposing its value to JavaScript.
+
+Implications:
+
+- Map image requests must use same-origin `/api/v1/map/images` through Caddy.
+- The image route validates token signature, expiry, user activity, and
+  `token_version`, then reuses existing layer and device authorization.
+- A bearer header without the dashboard session cookie is not accepted by the
+  image endpoint.
+- Other FastAPI routes continue to require bearer authentication and do not
+  accept the dashboard session cookie.
+- `DASHBOARD_BROWSER_API_BASE_URL` is removed; deployments must expose the API
+  under the dashboard origin.
+- Map HTML regression tests must reject the presence of the main token,
+  `Authorization` headers, or token-bearing iframe arguments.
+
+## DEC-030: Authenticated Dashboard JavaScript Is Application-Controlled
+
+Date: 2026-06-12
+
+Decision: Leaflet `1.9.4` JavaScript, CSS, and referenced images are pinned in
+the repository and embedded into generated map iframe HTML. Authenticated
+dashboard pages must not load executable JavaScript from public third-party
+origins at runtime.
+
+Rationale: A compromised CDN response or upstream package path could execute
+with the privileges of an authenticated dashboard page or map iframe.
+Repository-pinned assets can be reviewed, hashed, tested, and deployed with
+the application.
+
+Implications:
+
+- Reviewed Leaflet assets live under
+  `moduly/apps/dashboard/assets/leaflet/1.9.4` with their BSD license and
+  source metadata.
+- Vendored `leaflet.js` and `leaflet.css` must continue to match the recorded
+  official SHA-256 SRI values unless an explicit reviewed upgrade changes the
+  version and hashes.
+- `map_shared.py` embeds Leaflet code, styles, and image data directly into
+  the iframe and must not restore `unpkg.com` or another executable-code CDN.
+- Regression coverage scans active dashboard Python and HTML sources for
+  external HTTP(S) script tags.
+- External map tile, weather, and API data endpoints remain allowed because
+  they do not provide executable JavaScript.

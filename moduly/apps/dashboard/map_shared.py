@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import json
+from functools import lru_cache
 from html import escape
+from pathlib import Path
 from typing import Any
 
 import streamlit as st
@@ -11,6 +13,13 @@ from moduly.apps.dashboard.api_client import get_map_features, get_map_filter_op
 
 
 DEFAULT_MAP_HEIGHT_PX = 720
+LEAFLET_VERSION = "1.9.4"
+LEAFLET_ASSET_DIR = Path(__file__).resolve().parent / "assets" / "leaflet" / LEAFLET_VERSION
+LEAFLET_CSS_IMAGE_NAMES = (
+    "layers.png",
+    "layers-2x.png",
+    "marker-icon.png",
+)
 
 
 @st.cache_data(ttl=60)
@@ -33,15 +42,30 @@ def _json_payload_to_base64(payload: dict[str, Any]) -> str:
     return base64.b64encode(raw.encode("utf-8")).decode("ascii")
 
 
-def _json_string_for_script(value: str) -> str:
-    return json.dumps(value, ensure_ascii=False).replace("</", "<\\/")
+@lru_cache(maxsize=None)
+def _leaflet_image_data_uri(image_name: str) -> str:
+    image_data = (LEAFLET_ASSET_DIR / "images" / image_name).read_bytes()
+    return f"data:image/png;base64,{base64.b64encode(image_data).decode('ascii')}"
 
 
-def _map_image_endpoint_url(image_api_base_url: str | None) -> str:
-    if image_api_base_url is None:
-        return ""
-    base_url = image_api_base_url.rstrip("/")
-    return f"{base_url}/api/v1/map/images" if base_url else "/api/v1/map/images"
+@lru_cache(maxsize=1)
+def _leaflet_css_for_inline_html() -> str:
+    css = (LEAFLET_ASSET_DIR / "leaflet.css").read_text(encoding="utf-8")
+    for image_name in LEAFLET_CSS_IMAGE_NAMES:
+        css = css.replace(
+            f"url(images/{image_name})",
+            f"url({_leaflet_image_data_uri(image_name)})",
+        )
+    if "url(images/" in css:
+        raise RuntimeError("Leaflet CSS contains an unbundled image reference.")
+    return css.replace("</style", "<\\/style")
+
+
+@lru_cache(maxsize=1)
+def _leaflet_javascript_for_inline_html() -> str:
+    javascript = (LEAFLET_ASSET_DIR / "leaflet.js").read_text(encoding="utf-8")
+    javascript = javascript.replace("\n//# sourceMappingURL=leaflet.js.map", "")
+    return javascript.replace("</script", "<\\/script")
 
 
 def _normalize_map_layers(payload: dict[str, object]) -> list[dict[str, Any]]:
@@ -165,26 +189,30 @@ def build_leaflet_map_html(
     payload: dict[str, object],
     *,
     height_px: int = DEFAULT_MAP_HEIGHT_PX,
-    image_api_base_url: str | None = None,
-    access_token: str | None = None,
 ) -> str:
     layers = _normalize_map_layers(payload)
 
     encoded_payload = _json_payload_to_base64({"layers": layers})
     primary_layer_id = escape(str(payload.get("primary_layer_id") or "vodomery"))
     layer_title = escape(str(payload.get("title") or "Mapa"))
-    image_endpoint_url = _map_image_endpoint_url(image_api_base_url)
-    image_endpoint_js = _json_string_for_script(image_endpoint_url)
-    access_token_js = _json_string_for_script(access_token or "")
-
+    leaflet_css = _leaflet_css_for_inline_html()
+    leaflet_javascript = _leaflet_javascript_for_inline_html()
+    leaflet_default_icon_options = json.dumps(
+        {
+            "iconRetinaUrl": _leaflet_image_data_uri("marker-icon-2x.png"),
+            "iconUrl": _leaflet_image_data_uri("marker-icon.png"),
+            "shadowUrl": _leaflet_image_data_uri("marker-shadow.png"),
+        },
+        separators=(",", ":"),
+    )
     return f"""
 <!doctype html>
 <html lang="cs">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
+{leaflet_css}
     html, body {{
       margin: 0;
       padding: 0;
@@ -422,12 +450,14 @@ def build_leaflet_map_html(
       </div>
     </div>
   </div>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
+{leaflet_javascript}
+  </script>
+  <script>
+    L.Icon.Default.mergeOptions({leaflet_default_icon_options});
     const encodedPayload = "{encoded_payload}";
     const primaryLayerId = "{primary_layer_id}";
-    const mapImageEndpointUrl = {image_endpoint_js};
-    const mapImageAccessToken = {access_token_js};
+    const mapImageEndpointUrl = "/api/v1/map/images";
     const photoLightbox = document.getElementById("map-photo-lightbox");
     const photoLightboxImage = document.getElementById("map-photo-lightbox-image");
     const photoLightboxOpen = document.getElementById("map-photo-lightbox-open");
@@ -503,7 +533,7 @@ def build_leaflet_map_html(
 
     function photoPlaceholderHtml(properties, layerId, layerConfig) {{
       const hasPhoto = properties.has_photo === true || String(properties.foto ?? "").trim();
-      if (!hasPhoto || !mapImageEndpointUrl || !mapImageAccessToken) {{
+      if (!hasPhoto) {{
         return "";
       }}
       const identifier = featureIdentifier(properties, layerConfig);
@@ -566,7 +596,7 @@ def build_leaflet_map_html(
     }});
 
     async function loadPopupPhotos(container) {{
-      if (!container || !mapImageEndpointUrl || !mapImageAccessToken) {{
+      if (!container) {{
         return;
       }}
       const targets = container.querySelectorAll('[data-map-photo="pending"]');
@@ -574,9 +604,9 @@ def build_leaflet_map_html(
         target.dataset.mapPhoto = "loading";
         try {{
           const response = await fetch(mapImageUrl(target.dataset.layerId, target.dataset.identifier), {{
+            credentials: "same-origin",
             headers: {{
-              "Accept": "image/*",
-              "Authorization": `Bearer ${{mapImageAccessToken}}`
+              "Accept": "image/*"
             }}
           }});
           if (response.status === 404) {{

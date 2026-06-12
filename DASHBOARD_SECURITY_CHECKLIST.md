@@ -192,11 +192,37 @@ Completion criteria:
 
 ### 6. Add MFA or corporate SSO
 
-- [ ] Decide between corporate OIDC/SAML SSO and application-managed MFA.
+Status: Deferred by user decision on 2026-06-12. This item remains open and is
+not considered completed.
+
+- [!] Decide between corporate OIDC/SAML SSO and application-managed MFA.
 - [ ] Require MFA at minimum for administrators.
 - [ ] Define enrollment, recovery, revocation, and lost-device procedures.
 - [ ] Require recent reauthentication for sensitive actions.
 - [ ] Add tests for authentication and recovery flows.
+
+Reason for deferral:
+
+- The project will continue with the remaining P1 security items before
+  selecting and operating a new identity or second-factor system.
+- No corporate identity-provider integration details have been confirmed.
+- Application-managed MFA would introduce enrollment, recovery, revocation,
+  and support responsibilities that should not be implemented without an
+  explicit operating decision.
+
+Accepted residual risk:
+
+- Compromise of a dashboard administrator password can still be sufficient to
+  access that account.
+- Existing password hardening, login throttling, audit logging, temporary
+  lockouts, and token revocation reduce but do not remove this risk.
+
+Revisit:
+
+- When corporate OIDC/SAML capabilities and ownership are known.
+- Before materially expanding administrator access or dashboard exposure.
+- After the currently actionable P1 session, token, and authorization items
+  have been addressed.
 
 Completion criteria:
 
@@ -206,11 +232,37 @@ Completion criteria:
 
 ### 7. Remove the full bearer token from map iframe JavaScript
 
-- [ ] Replace the token-bearing iframe flow with a design that does not expose the main API token to map JavaScript.
-- [ ] Consider an authorized same-origin image endpoint using the browser session cookie.
-- [ ] If a delegated token is necessary, make it short-lived and limited to a specific image and operation.
-- [ ] Ensure the map cannot use credentials for admin or unrelated API calls.
-- [ ] Add tests proving that generated map HTML contains no main bearer token.
+- [x] Replace the token-bearing iframe flow with a design that does not expose the main API token to map JavaScript.
+- [x] Consider an authorized same-origin image endpoint using the browser session cookie.
+- [x] If a delegated token is necessary, make it short-lived and limited to a specific image and operation.
+- [x] Ensure the map cannot use credentials for admin or unrelated API calls.
+- [x] Add tests proving that generated map HTML contains no main bearer token.
+
+Completed on 2026-06-12:
+
+- `build_leaflet_map_html` no longer accepts or serializes an access token.
+- Map photo requests use same-origin `/api/v1/map/images` with browser-managed
+  credentials. JavaScript cannot read the HttpOnly dashboard session cookie.
+- The image endpoint has a dedicated cookie dependency that validates the
+  existing token signature, expiry, user activity, and `token_version`.
+- OpenAPI describes the image operation with an `APIKeyCookie` security scheme
+  using `monitoring_dashboard_session`.
+- The image endpoint continues to enforce map-layer and device authorization.
+- A bearer header without the dashboard session cookie is rejected by the
+  image endpoint. Other protected API routes continue to require bearer
+  authentication and do not accept the cookie.
+- No delegated token was needed. The cookie credential is accepted only at
+  the map image operation.
+- The cross-origin `DASHBOARD_BROWSER_API_BASE_URL` image override was removed;
+  deployments must expose `/api/v1/map/images` under the dashboard origin.
+- Image responses use private caching and vary on the cookie.
+- Generated map HTML tests reject the main token, bearer text,
+  `Authorization` headers, and token-bearing iframe arguments.
+- Targeted map, authentication, and device authorization tests passed:
+  66 tests.
+- Live verification after Uvicorn reload returned HTTP 401 for both a
+  no-cookie request and a bearer-only request to the image endpoint, while
+  the normal map catalog continued to use bearer authentication.
 
 Completion criteria:
 
@@ -218,11 +270,33 @@ Completion criteria:
 
 ### 8. Remove third-party executable JavaScript from authenticated pages
 
-- [ ] Host the required Leaflet JavaScript and CSS locally.
-- [ ] Pin reviewed versions in the repository or controlled static assets.
-- [ ] Remove runtime loading from `unpkg.com`.
-- [ ] Review all other authenticated pages for externally loaded scripts.
-- [ ] Add a regression test preventing unapproved external script origins.
+- [x] Host the required Leaflet JavaScript and CSS locally.
+- [x] Pin reviewed versions in the repository or controlled static assets.
+- [x] Remove runtime loading from `unpkg.com`.
+- [x] Review all other authenticated pages for externally loaded scripts.
+- [x] Add a regression test preventing unapproved external script origins.
+
+Completed on 2026-06-12:
+
+- Leaflet `1.9.4` is vendored under
+  `moduly/apps/dashboard/assets/leaflet/1.9.4`.
+- The vendored `leaflet.js` and `leaflet.css` match the official SHA-256 SRI
+  values published by Leaflet. The BSD 2-Clause license and source metadata
+  are stored beside the assets.
+- `map_shared.py` reads the reviewed assets through an in-process cache and
+  embeds them into the map iframe. The browser no longer loads Leaflet code or
+  styles from `unpkg.com` or another runtime CDN.
+- Leaflet CSS image dependencies and default marker images are embedded as
+  local data URIs, so the iframe does not depend on a public asset route.
+- Active dashboard Python and HTML sources were reviewed for external
+  executable script tags. The remaining external map tile and weather
+  endpoints provide data or images, not executable JavaScript.
+- Regression tests verify the Leaflet hashes, reject external HTTP(S) script
+  tags in active dashboard sources, and confirm generated map HTML contains no
+  external script source or unbundled Leaflet image reference.
+- The combined P1.7/P1.8 map, authentication, authorization, and security
+  suite passed all 73 tests. Python compilation and live FastAPI/Streamlit
+  health checks also passed.
 
 Completion criteria:
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 
-from services.api.core.dependencies import get_current_user
+from services.api.core.dependencies import get_current_browser_session_user, get_current_user
 from services.api.schemas.device_map import (
     MapFilterOptionsRequest,
     MapFilterOptionsResponse,
@@ -109,13 +109,14 @@ def post_map_filter_options(
     summary="Load map feature image",
     description=(
         "Vraci fotku zarizeni podle layer_id a identifier. "
-        "Cesta k souboru se neprebira z klienta, ale dohledava se server-side z povoleneho detailu zarizeni."
+        "Cesta k souboru se neprebira z klienta, ale dohledava se server-side z povoleneho detailu zarizeni. "
+        "Endpoint pouziva HttpOnly dashboard session cookie misto bearer tokenu v mapovem iframe."
     ),
 )
 def get_map_image(
     layer_id: str = Query(min_length=1),
     identifier: str = Query(min_length=1),
-    current_user: DashboardUserContext = Depends(get_current_user),
+    current_user: DashboardUserContext = Depends(get_current_browser_session_user),
 ) -> FileResponse:
     try:
         image_file = load_map_feature_image_file(
@@ -142,5 +143,8 @@ def get_map_image(
     return FileResponse(
         image_file.path,
         media_type=image_file.media_type,
-        headers={"Cache-Control": "private, max-age=300"},
+        headers={
+            "Cache-Control": "private, max-age=300",
+            "Vary": "Cookie",
+        },
     )

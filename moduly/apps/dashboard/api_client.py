@@ -47,10 +47,6 @@ def get_dashboard_api_base_url() -> str:
     return _api_base_url()
 
 
-def get_dashboard_browser_api_base_url() -> str:
-    return config("DASHBOARD_BROWSER_API_BASE_URL", default="").strip().rstrip("/")
-
-
 def _api_unavailable_message(detail: str) -> str:
     return (
         f"Dashboard API neni dostupne na {_api_base_url()}. "

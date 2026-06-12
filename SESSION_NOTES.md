@@ -1659,3 +1659,642 @@ Not verified:
   `tests/test_vodomery_reports.py`: the day consumption curve expectation and
   an outdated report-heading expectation. P1.5 did not change vodomery report
   code or tests, so those failures were left outside this security task.
+
+### 2026-06-12 11:43 CEST - Pre-restart handoff
+
+Reason for restart:
+- Renew the complete production runtime through the supported Windows
+  Task Scheduler boot path.
+- Verify dashboard security checklist item P1.5 from a cold application start,
+  including the shared password policy, 600,000-iteration PBKDF2 hashes, and
+  compatible legacy-hash handling.
+
+Current task/conversation state:
+- Completed and committed P1.5 password policy hardening in commit
+  `ff7513d` (`security check P1.5 hotovo`).
+- P1.5 code, tests, checklist, DEC-028, and deployment documentation are
+  complete.
+- Pending: restart Windows, run all checks below, and append a dated
+  post-restart verification entry with any deviations.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and
+  `SESSION_NOTES.md`, then run `git status --short`.
+
+Working tree and deployment:
+- `git status --short --untracked-files=all` was empty before this handoff.
+- At restart, the only expected uncommitted change is this appended
+  `SESSION_NOTES.md` handoff.
+- Relevant deployed source is commit `ff7513d`; no Caddy configuration was
+  changed by P1.5.
+- Tracked and deployed Caddyfile SHA-256 values both equal
+  `F41D3B31EA03308CB4345B1D11F0488B11D1FE527CBF135B0E1E166E5E7BC9BE`.
+- `C:\Program Files\Caddy\Caddyfile` validated successfully immediately before
+  restart.
+- Scheduled task `API_dashboard_caddy` was `Ready`; its last run was
+  2026-06-12 09:25:23 CEST with result `0`. It has a boot trigger, runs as
+  user `tra` with highest run level, and executes the tracked
+  `start_api_dashboard.bat`.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, or commit the ignored local `.env` containing
+  `API_TOKEN_SECRET`.
+- Do not inspect, print, change, delete, or commit
+  `data/smartfuelpass/session_cookies.json` or other browser session data.
+- Do not print raw authentication audit records from
+  `C:\ProgramData\monitorovaci_platforma\logs\auth_audit.jsonl`.
+- The retired ProgramData Caddy gate credential files remain sensitive and
+  must not be printed, changed, or deleted.
+- Do not read or request real dashboard passwords, bearer tokens, cookies, or
+  stored password hashes during verification.
+
+Expected processes and listeners after restart:
+- One FastAPI/Uvicorn runtime owns the single listener
+  `127.0.0.1:8000`. Reload mode may create a parent/child process tree, but
+  there must be only one listener.
+- One Streamlit runtime owns the single listener `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime from `C:\Program Files\Caddy\caddy.exe` owns TCP 80 and
+  443 plus `127.0.0.1:2019`.
+- Tailscale may separately own its interface-specific TCP 443 listeners; that
+  is expected and is not a duplicate public Caddy listener.
+
+Expected application state:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200.
+- Streamlit `/_stcore/health`: HTTP 200.
+- Scheduler reports `scheduler_running=true`, holds the process lock, and has
+  a heartbeat no older than the configured 300-second TTL.
+- Immediately before restart, `quarter_hour_job` last ran successfully at
+  `2026-06-12T11:35:08.501241`, had 0 failures and 96 successes in 24 hours,
+  and its next run was `2026-06-12T11:47:05+02:00`.
+- Tracked and runtime Caddyfile hashes remain equal to the SHA-256 above and
+  the runtime configuration validates.
+- Local hostname routing through Caddy returns HTTP 308 from HTTP to HTTPS,
+  HTTP 200 for the HTTPS Streamlit page, and FastAPI HTTP 401 JSON for a
+  protected API request without a bearer token.
+- A validly encoded invalid login returns the same generic HTTP 401 JSON
+  response without account-enumeration detail.
+- P1.5 constants remain 15-character minimum, 1024-character maximum, and
+  600,000 PBKDF2-HMAC-SHA256 iterations. The tracked password blocklist loads,
+  weak/short test values are rejected, and a generated non-production Unicode
+  passphrase is accepted and hashed with the current work factor.
+- Existing valid legacy PBKDF2 hashes remain accepted and are rehashed only
+  after successful login. Do not test this against a real user automatically.
+
+Required post-restart checks:
+- Confirm the scheduled task ran after boot with result `0`.
+- Confirm exactly one listener each on 8000, 8001, 80, 443, and 2019, allowing
+  the documented Tailscale-interface 443 listeners.
+- Confirm FastAPI live/ready and Streamlit health endpoints.
+- Confirm scheduler lock ownership, heartbeat age, latest job status, next
+  run, and at least one successful post-restart scheduled job.
+- Confirm tracked/runtime Caddyfile hash equality and run `caddy validate`.
+- Confirm local Caddy hostname routing with explicit loopback resolution:
+  HTTP 308, HTTPS dashboard 200, and protected API 401 JSON.
+- Import `services.api.main` and run a non-production password-policy smoke
+  check without reading the database or any real credential.
+- Confirm a public invalid login remains generic HTTP 401; use only a
+  disposable identifier and avoid triggering a throttle threshold unless
+  specifically needed.
+- Confirm `git status --short` shows only the expected handoff change and no
+  startup-generated tracked changes.
+- Append the actual verification results and deviations to this file.
+
+Known risks or accepted gaps:
+- Uvicorn production startup still uses `--reload`; removal remains P2.13.
+- No real credential-based dashboard login or live legacy-hash migration will
+  be automated.
+- Existing production hash iteration counts were not enumerated.
+- The full suite has two independently reproducible, unrelated failures in
+  `tests/test_vodomery_reports.py`; P1.5 targeted coverage passed 84 tests and
+  the full suite passed 471 of 473 tests.
+- Direct access through the public endpoint from this server may lack NAT
+  loopback; local Caddy verification uses the production hostname resolved
+  explicitly to `127.0.0.1`.
+
+### 2026-06-12 12:19 CEST - Post-restart verification
+
+Scope:
+- Verified the cold production runtime and P1.5 password-policy deployment
+  after the workstation restart described in the 11:43 CEST handoff.
+
+Verified:
+- Windows boot completed at 11:44:55 CEST. Scheduled task
+  `API_dashboard_caddy` ran at 11:45:05 CEST with result `0`, uses the boot
+  trigger, and points to the tracked `start_api_dashboard.bat`.
+- FastAPI had one listener on `127.0.0.1:8000`, Streamlit had one listener on
+  `127.0.0.1:8001`, and one Caddy runtime owned TCP 80/443 and
+  `127.0.0.1:2019`. Separate Tailscale-interface TCP 443 listeners were
+  present as expected.
+- FastAPI live/ready and Streamlit health endpoints returned HTTP 200.
+- Scheduler metrics reported `scheduler_running=true`; the
+  `scheduler_process` file lock was held and the heartbeat was within the
+  configured 300-second TTL.
+- The first checked post-restart `quarter_hour_job` completed successfully at
+  12:16:10 CEST, with 0 failures and 96 successes in 24 hours; its next run
+  was scheduled for 12:35:05 CEST.
+- Tracked and runtime Caddyfile SHA-256 values both remained
+  `F41D3B31EA03308CB4345B1D11F0488B11D1FE527CBF135B0E1E166E5E7BC9BE`.
+  The runtime Caddy configuration validated successfully.
+- Local hostname routing through Caddy returned HTTP 308 from HTTP to HTTPS,
+  HTTP 200 for the HTTPS Streamlit page, and FastAPI HTTP 401 JSON for an
+  unauthenticated protected API route.
+- A valid disposable invalid-login request returned the generic FastAPI HTTP
+  401 JSON response without account-enumeration detail.
+- FastAPI imported successfully. The password-policy smoke check confirmed
+  the 15/1024 character limits, loaded blocklist, 600,000 PBKDF2 iterations,
+  weak-password rejection, Unicode passphrase support, current-hash
+  verification, and verification/rehash detection for a synthetic
+  390,000-iteration legacy hash.
+- Targeted password-policy and security-configuration tests passed:
+  24 tests.
+- `git status --short --untracked-files=all` contained only the expected
+  `SESSION_NOTES.md` handoff/verification change.
+
+Not verified:
+- No real dashboard password, production password hash, bearer token, or
+  browser session was read or used.
+- External access from a separate network was not tested.
+- The full pytest suite was not rerun because P1.5 already passed its broader
+  84-test set and the full-suite baseline before restart.
+
+Deviations:
+- None.
+
+### 2026-06-12 - MFA/SSO deferred
+
+Scope:
+- Reviewed dashboard security checklist item P1.6.
+
+Decisions/notes:
+- The user deferred selection and implementation of corporate OIDC/SAML SSO
+  or application-managed MFA.
+- P1.6 remains open and is not considered completed.
+- The accepted residual risk is that a compromised administrator password can
+  still be sufficient for account access.
+- Existing password hardening, throttling, audit logging, temporary lockouts,
+  and token revocation remain compensating controls.
+- Revisit P1.6 when corporate identity-provider capabilities are known, before
+  materially expanding administrator access or public exposure, or after the
+  currently actionable P1 items are addressed.
+
+Follow-up:
+- Continue with P1.7: remove the full bearer token from map iframe JavaScript.
+
+### 2026-06-12 - Map iframe bearer token removal
+
+Scope:
+- Completed dashboard security checklist item P1.7.
+
+Changed:
+- Removed the main bearer token and `Authorization` header from generated map
+  iframe HTML and JavaScript.
+- Changed map photo loading to same-origin `/api/v1/map/images` with
+  browser-managed credentials.
+- Added a dedicated FastAPI dependency that accepts the existing HttpOnly
+  dashboard session cookie only for the map image endpoint.
+- Preserved token signature, expiry, user activity, `token_version`, map-layer,
+  and device authorization checks.
+- Kept all other protected FastAPI routes on bearer authentication.
+- Removed `DASHBOARD_BROWSER_API_BASE_URL` and its `.env.example` entry because
+  map image authentication now requires same-origin routing.
+- Added DEC-029 and updated the operating context and security checklist.
+
+Verified:
+- Targeted map, map-layer, device-image, authentication-route, and dashboard
+  auth-state tests passed: 66 tests.
+- Python compilation passed for all changed application modules.
+- FastAPI application import passed.
+- FastAPI live/ready and Streamlit health endpoints returned HTTP 200 after
+  Uvicorn reloaded the changes.
+- The live image endpoint returned HTTP 401 with the missing-cookie response
+  both without credentials and with a bearer header alone.
+- A normal protected map catalog request with an invalid bearer token still
+  followed bearer validation, confirming that cookie authentication was not
+  enabled globally.
+- OpenAPI exposes `GET /api/v1/map/images` with the dedicated `APIKeyCookie`
+  scheme and keeps the normal `HTTPBearer` scheme for other protected routes.
+- `git diff --check` reported no whitespace errors.
+
+Not verified:
+- A real authenticated device photo was not opened in a browser because no
+  dashboard credential or browser cookie was read or requested.
+- The full pytest suite was not run; verification focused on the changed map,
+  authentication, and authorization surfaces.
+
+Decisions/notes:
+- Compromise of map iframe JavaScript no longer exposes a reusable dashboard
+  API token.
+- P1.8 remains important because Leaflet JavaScript is still loaded from
+  `unpkg.com` and executes in the authenticated map iframe.
+
+Follow-up:
+- Continue with P1.8: host Leaflet JavaScript and CSS locally.
+
+### 2026-06-12 12:51 CEST - Pre-restart handoff
+
+Reason for restart:
+- Renew the complete production runtime through the supported Windows Task
+  Scheduler boot path.
+- Verify dashboard security checklist item P1.7 from a cold application start,
+  especially the dedicated cookie authentication for map images and the
+  absence of the main bearer token from map iframe JavaScript.
+
+Current task/conversation state:
+- Completed implementation and targeted verification of P1.7.
+- Deferred P1.6 MFA/SSO by explicit user decision; it remains open.
+- P1.7 removes the main bearer token from generated map HTML, authenticates
+  only `GET /api/v1/map/images` with the HttpOnly dashboard session cookie,
+  and keeps all other protected API routes on bearer authentication.
+- P1.7 changes are not committed. The current HEAD remains
+  `ff7513d` (`security check P1.5 hotovo`).
+- Pending: restart Windows, execute all checks below, append actual
+  post-restart results and deviations, then continue with P1.8 local Leaflet
+  hosting.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and
+  `SESSION_NOTES.md`, then run `git status --short --untracked-files=all`.
+
+Working tree and deployment:
+- `git status --short --untracked-files=all` immediately before this handoff:
+
+```text
+ M .env.example
+ M AGENTS.md
+ M DASHBOARD_SECURITY_CHECKLIST.md
+ M DECISIONS.md
+ M SESSION_NOTES.md
+ M moduly/apps/dashboard/api_client.py
+ M moduly/apps/dashboard/map_shared.py
+ M moduly/apps/dashboard/pages/36_mapove_podklady.py
+ M services/api/core/dependencies.py
+ M services/api/routes/map.py
+ M tests/test_dashboard_map_page_layout.py
+ M tests/test_dashboard_map_shared.py
+ M tests/test_map_routes.py
+```
+
+- All listed changes belong to the current restart handoff, the previously
+  recorded P1.6 deferral, or the P1.7 implementation. Do not discard or
+  overwrite them after restart.
+- Uvicorn reload already loaded the changed Python source in the current
+  runtime, but the restart will verify a cold scheduled-task startup.
+- No Caddy configuration change is part of P1.7.
+- Tracked and deployed Caddyfile SHA-256 values both equal
+  `F41D3B31EA03308CB4345B1D11F0488B11D1FE527CBF135B0E1E166E5E7BC9BE`.
+- The deployed Caddy configuration validated successfully before restart.
+- Targeted P1.7 map, authentication, and authorization tests passed:
+  66 tests.
+- Python compilation and FastAPI import passed.
+- `git diff --check` reported no whitespace errors.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, or commit the ignored local `.env` containing
+  `API_TOKEN_SECRET`.
+- Do not inspect, print, change, delete, or commit SmartFuelPass cookies or
+  other browser session artifacts.
+- Do not print raw authentication audit records from
+  `C:\ProgramData\monitorovaci_platforma\logs\auth_audit.jsonl`.
+- Do not read or print the value of the
+  `monitoring_dashboard_session` HttpOnly cookie, any bearer token, password,
+  or stored password hash during verification.
+- The retired ProgramData Caddy gate credential files remain sensitive and
+  must not be printed, changed, or deleted.
+
+Windows scheduled startup expectation:
+- Scheduled task name: `API_dashboard_caddy`.
+- Executable:
+  `C:\Users\tra\PycharmProjects\monitorovaci_platforma\start_api_dashboard.bat`.
+- Trigger: Windows boot (`MSFT_TaskBootTrigger`).
+- Principal: user `tra`, highest run level.
+- Before restart the task was `Ready`; its previous run at
+  2026-06-12 11:45:05 CEST completed with result `0`.
+
+Expected processes and listeners after restart:
+- One FastAPI/Uvicorn runtime owns the single listener
+  `127.0.0.1:8000`. Reload mode may create a parent/child process tree, but
+  there must be only one listener.
+- One Streamlit runtime owns the single listener `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime from `C:\Program Files\Caddy\caddy.exe` owns TCP 80 and
+  443 plus `127.0.0.1:2019`.
+- Tailscale may separately own interface-specific TCP 443 listeners; those are
+  expected and are not duplicate public Caddy listeners.
+
+Expected application state:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200.
+- Streamlit `/_stcore/health`: HTTP 200.
+- Scheduler reports `scheduler_running=true`, holds the process lock, and has
+  a heartbeat no older than the configured 300-second TTL.
+- Immediately before restart, `quarter_hour_job` last ran successfully at
+  `2026-06-12T12:47:08.170524`, had 0 failures and 96 successes in 24 hours,
+  and its next run was `2026-06-12T13:05:05+02:00`.
+- Tracked and runtime Caddyfile hashes remain equal to the SHA-256 above and
+  the runtime configuration validates.
+- Local hostname routing through Caddy returns HTTP 308 from HTTP to HTTPS,
+  HTTP 200 for the HTTPS Streamlit page, and FastAPI HTTP 401 JSON for an
+  unauthenticated protected bearer API route.
+- `GET /api/v1/map/images` without the dashboard session cookie returns HTTP
+  401 JSON with the missing-cookie response.
+- Sending a bearer header without the session cookie to the image endpoint
+  still returns the missing-cookie HTTP 401 response.
+- Other protected API routes continue to use bearer validation and do not
+  accept cookie authentication.
+- OpenAPI describes the image endpoint with `APIKeyCookie` named
+  `monitoring_dashboard_session` and retains `HTTPBearer` for normal protected
+  API operations.
+- Generated map HTML contains no bearer token, `Authorization` header,
+  `mapImageAccessToken`, or token-bearing iframe argument.
+- Authenticated photo requests use same-origin `/api/v1/map/images` with
+  `credentials: "same-origin"`; raw filesystem paths remain server-side.
+
+Required post-restart checks:
+- Confirm the scheduled task ran after boot with result `0`.
+- Confirm exactly one listener each on 8000, 8001, 80, 443, and 2019, allowing
+  the documented Tailscale-interface 443 listeners.
+- Confirm FastAPI live/ready and Streamlit health endpoints.
+- Confirm scheduler lock ownership, heartbeat age, latest job status, next
+  run, and at least one successful post-restart scheduled job.
+- Confirm tracked/runtime Caddyfile hash equality and run `caddy validate`.
+- Confirm local Caddy hostname routing with explicit loopback resolution:
+  HTTP 308, HTTPS dashboard 200, and protected bearer API 401 JSON.
+- Confirm the image endpoint returns missing-cookie HTTP 401 both without
+  credentials and with a bearer header alone.
+- Import `services.api.main` and inspect OpenAPI without printing credentials:
+  image security must be `APIKeyCookie`; normal protected routes must remain
+  `HTTPBearer`.
+- Run the targeted 66-test P1.7 suite and Python compilation.
+- Search generated/source map HTML contracts to confirm no main bearer token
+  or browser API override returned.
+- Confirm `git status --short --untracked-files=all` still contains exactly
+  the expected uncommitted P1.6/P1.7 documentation and code changes plus this
+  handoff; no startup-generated tracked changes may appear.
+- A real authenticated map photo may be checked manually by the user without
+  exposing the cookie or password. Do not automate by reading browser state.
+- Append a dated post-restart verification entry with results and deviations.
+
+Known risks or accepted gaps:
+- Uvicorn production startup still uses `--reload`; removal remains P2.13.
+- A real authenticated device photo was not opened automatically before the
+  restart because no dashboard credential or browser cookie was read.
+- The full pytest suite was not rerun for P1.7; the focused 66-test set passed.
+- Leaflet JavaScript and CSS are still loaded from `unpkg.com`; P1.8 is the
+  next planned security item.
+- P1.6 MFA/SSO remains deferred, so compromise of an administrator password
+  can still be sufficient for account access.
+
+### 2026-06-12 13:05 CEST - Post-restart verification
+
+Scope:
+- Verified the cold production runtime and P1.7 map iframe credential changes
+  after the workstation restart described in the 12:51 CEST handoff.
+
+Verified:
+- Windows boot completed at 12:55:48 CEST. Scheduled task
+  `API_dashboard_caddy` ran at 12:55:58 CEST with result `0`, remained
+  `Ready`, used its boot trigger, and pointed to the tracked launcher.
+- FastAPI had one listener on `127.0.0.1:8000`, Streamlit had one listener on
+  `127.0.0.1:8001`, and one Caddy runtime owned TCP 80/443 and
+  `127.0.0.1:2019`. Separate Tailscale-interface TCP 443 listeners were
+  present as expected.
+- FastAPI live/ready and Streamlit health endpoints returned HTTP 200.
+- Scheduler metrics reported `scheduler_running=true`; the
+  `scheduler_process` file lock was held and the heartbeat was within the
+  configured 300-second TTL.
+- The first post-restart `quarter_hour_job` completed successfully at
+  13:05:10 CEST, with 0 failures and 96 successes in 24 hours; its next run
+  was scheduled for 13:16:05 CEST.
+- Tracked and runtime Caddyfile SHA-256 values both remained
+  `F41D3B31EA03308CB4345B1D11F0488B11D1FE527CBF135B0E1E166E5E7BC9BE`.
+  The runtime Caddy configuration validated successfully.
+- Local hostname routing through Caddy returned HTTP 308 from HTTP to HTTPS,
+  HTTP 200 for the HTTPS Streamlit page, and FastAPI HTTP 401 JSON for an
+  unauthenticated protected bearer API route.
+- `GET /api/v1/map/images` returned HTTP 401 without the dashboard session
+  cookie and also returned HTTP 401 when sent only a synthetic bearer header.
+- FastAPI imported successfully. OpenAPI described the image endpoint with
+  `APIKeyCookie` named `monitoring_dashboard_session` and kept `HTTPBearer`
+  for the normal protected map catalog route.
+- Generated map HTML used same-origin `/api/v1/map/images` with
+  `credentials: "same-origin"` and contained no `Authorization` header,
+  bearer text, token variable, or browser API override.
+- The focused P1.7 test suite passed all 66 tests. Python compilation passed
+  for every changed application module, and `git diff --check` reported no
+  whitespace errors.
+- `git status --short --untracked-files=all` contained exactly the expected
+  uncommitted P1.6/P1.7 documentation, application, and test changes.
+
+Not verified:
+- No real dashboard password, bearer token, browser cookie, production
+  password hash, or authenticated device photo was read or used.
+- External access from a separate network was not tested.
+- The full pytest suite was not rerun; verification used the focused 66-test
+  P1.7 suite from the handoff.
+
+Deviations:
+- None.
+
+Follow-up:
+- Continue with P1.8 by pinning and hosting the reviewed Leaflet JavaScript
+  and CSS under application control and adding an external-script regression
+  test.
+
+### 2026-06-12 13:21 CEST - Local Leaflet assets
+
+Scope:
+- Completed dashboard security checklist item P1.8.
+
+Changed:
+- Vendored Leaflet `1.9.4` JavaScript, CSS, five referenced PNG assets, BSD
+  license, and source/hash metadata under
+  `moduly/apps/dashboard/assets/leaflet/1.9.4`.
+- Replaced runtime `unpkg.com` Leaflet loading with cached local asset reads
+  and inline iframe CSS/JavaScript.
+- Embedded Leaflet CSS images and default marker images as data URIs.
+- Added DEC-030 and updated the operating context and security checklist.
+- Added regression tests for the official Leaflet SRI hashes, external
+  executable script origins, inline map assets, and unbundled CSS references.
+
+Verified:
+- Vendored `leaflet.css` matched official SHA-256 SRI
+  `p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=`.
+- Vendored `leaflet.js` matched official SHA-256 SRI
+  `20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=`.
+- Generated map HTML contained Leaflet `1.9.4`, no external script source,
+  no `unpkg.com` reference, no unbundled `url(images/...)` reference, and no
+  stale source-map directive.
+- Active dashboard Python and HTML sources contained no external HTTP(S)
+  executable script tag.
+- The combined P1.7/P1.8 map, authentication, authorization, and security
+  suite passed all 73 tests.
+- Python compilation, `git diff --check`, FastAPI live/ready, and Streamlit
+  health checks passed.
+
+Not verified:
+- No real authenticated map interaction was automated because no dashboard
+  credential or browser cookie was read or requested.
+- The full pytest suite was not rerun; verification focused on the affected
+  map, authentication, authorization, and security surfaces.
+
+Decisions/notes:
+- External OSM/CUZK map tiles and weather data remain network resources, but
+  authenticated dashboard pages no longer execute third-party JavaScript.
+- A workstation restart is not required for P1.8; Streamlit loads the changed
+  renderer and repository assets on the next page rerun.
+
+Follow-up:
+- Continue with P1.9 browser session hardening.
+
+### 2026-06-12 13:29 CEST - Pre-restart handoff
+
+Reason for restart:
+- Save the completed P1.7 and P1.8 security work and renew the complete
+  production runtime through the supported Windows Task Scheduler boot path.
+- Verify cookie-only map image authentication and locally vendored Leaflet
+  assets from a cold start before continuing with P1.9 browser session
+  hardening.
+
+Current task/conversation state:
+- P1.6 MFA/SSO remains deferred by explicit user decision.
+- P1.7 is complete: map iframe JavaScript no longer receives the main bearer
+  token, and only the map image endpoint accepts the HttpOnly dashboard
+  session cookie.
+- P1.8 is complete: Leaflet `1.9.4` JavaScript, CSS, images, license, and
+  metadata are pinned under application control with no runtime executable
+  code loading from `unpkg.com`.
+- Pending before restart: commit all expected P1.6/P1.7/P1.8 files. Do not
+  restart if staging, commit, or final clean-tree verification fails.
+- Pending after restart: execute all checks below, append the actual result,
+  then continue with P1.9 from `DASHBOARD_SECURITY_CHECKLIST.md`.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and
+  `SESSION_NOTES.md`, then run `git status --short --untracked-files=all`.
+
+Working tree and deployment:
+- Current HEAD before saving is `ff7513d` (`security check P1.5 hotovo`) on
+  `master`.
+- Expected files to commit before restart:
+
+```text
+.gitattributes
+.env.example
+AGENTS.md
+DASHBOARD_SECURITY_CHECKLIST.md
+DECISIONS.md
+SESSION_NOTES.md
+moduly/apps/dashboard/api_client.py
+moduly/apps/dashboard/assets/leaflet/1.9.4/LICENSE
+moduly/apps/dashboard/assets/leaflet/1.9.4/THIRD_PARTY.md
+moduly/apps/dashboard/assets/leaflet/1.9.4/images/layers-2x.png
+moduly/apps/dashboard/assets/leaflet/1.9.4/images/layers.png
+moduly/apps/dashboard/assets/leaflet/1.9.4/images/marker-icon-2x.png
+moduly/apps/dashboard/assets/leaflet/1.9.4/images/marker-icon.png
+moduly/apps/dashboard/assets/leaflet/1.9.4/images/marker-shadow.png
+moduly/apps/dashboard/assets/leaflet/1.9.4/leaflet.css
+moduly/apps/dashboard/assets/leaflet/1.9.4/leaflet.js
+moduly/apps/dashboard/map_shared.py
+moduly/apps/dashboard/pages/36_mapove_podklady.py
+services/api/core/dependencies.py
+services/api/routes/map.py
+tests/test_dashboard_map_page_layout.py
+tests/test_dashboard_map_shared.py
+tests/test_dashboard_security_config.py
+tests/test_map_routes.py
+```
+
+- The expected working tree after commit and before restart is clean.
+- Uvicorn reload and Streamlit page reruns have already loaded the Python
+  changes in the current runtime; the restart will verify the committed cold
+  startup.
+- No Caddy configuration change is part of P1.7 or P1.8.
+- Tracked and deployed Caddyfile SHA-256 values both equal
+  `F41D3B31EA03308CB4345B1D11F0488B11D1FE527CBF135B0E1E166E5E7BC9BE`.
+- The runtime Caddy configuration validated successfully before restart.
+- The combined P1.7/P1.8 suite passed all 73 tests. Python compilation and
+  `git diff --check` passed.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, or commit the ignored local `.env` containing
+  `API_TOKEN_SECRET`.
+- Do not inspect, print, change, delete, or commit SmartFuelPass cookies or
+  other browser session artifacts.
+- Do not print raw authentication audit records from
+  `C:\ProgramData\monitorovaci_platforma\logs\auth_audit.jsonl`.
+- Do not read or print the `monitoring_dashboard_session` cookie, any bearer
+  token, password, or stored password hash during verification.
+- The retired ProgramData Caddy gate credential files remain sensitive and
+  must not be printed, changed, or deleted.
+
+Windows scheduled startup expectation:
+- Scheduled task name: `API_dashboard_caddy`.
+- Executable:
+  `C:\Users\tra\PycharmProjects\monitorovaci_platforma\start_api_dashboard.bat`.
+- Trigger: Windows boot (`MSFT_TaskBootTrigger`).
+- Principal: user `tra`, highest run level.
+- Before restart the task was `Ready`; its last run at
+  2026-06-12 12:55:58 CEST completed with result `0`.
+
+Expected processes and listeners after restart:
+- One FastAPI/Uvicorn runtime owns the single listener
+  `127.0.0.1:8000`. Reload mode may create a parent/child process tree, but
+  there must be only one listener.
+- One Streamlit runtime owns the single listener `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime from `C:\Program Files\Caddy\caddy.exe` owns TCP 80 and
+  443 plus `127.0.0.1:2019`.
+- Tailscale may separately own interface-specific TCP 443 listeners; those
+  are expected and are not duplicate public Caddy listeners.
+
+Expected application state:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200.
+- Streamlit `/_stcore/health`: HTTP 200.
+- Scheduler reports `scheduler_running=true`, holds the process lock, and has
+  a heartbeat no older than the configured 300-second TTL.
+- Immediately before restart, `quarter_hour_job` last ran successfully at
+  `2026-06-12T13:16:08.313423`, had 0 failures and 96 successes in 24 hours,
+  and its next run was `2026-06-12T13:35:05+02:00`.
+- Tracked and runtime Caddyfile hashes remain equal to the SHA-256 above and
+  the runtime configuration validates.
+- Local hostname routing through Caddy returns HTTP 308 from HTTP to HTTPS,
+  HTTP 200 for the HTTPS Streamlit page, and FastAPI HTTP 401 JSON for an
+  unauthenticated protected bearer API route.
+- `GET /api/v1/map/images` without the dashboard session cookie returns HTTP
+  401, including when a bearer header is sent without the cookie.
+- OpenAPI keeps `APIKeyCookie` only for the image endpoint and `HTTPBearer`
+  for normal protected routes.
+- Generated map HTML contains no main token, bearer header, external
+  executable script source, `unpkg.com` reference, unbundled Leaflet image
+  path, or stale source-map directive.
+- Vendored `leaflet.js` and `leaflet.css` continue to match the official
+  SHA-256 SRI values recorded in the tests and `THIRD_PARTY.md`.
+
+Required post-restart checks:
+- Confirm the scheduled task ran after boot with result `0`.
+- Confirm exactly one listener each on 8000, 8001, 80, 443, and 2019, allowing
+  the documented Tailscale-interface 443 listeners.
+- Confirm FastAPI live/ready and Streamlit health endpoints.
+- Confirm scheduler lock ownership, heartbeat age, latest job status, next
+  run, and at least one successful post-restart scheduled job.
+- Confirm tracked/runtime Caddyfile hash equality and run `caddy validate`.
+- Confirm local Caddy hostname routing with explicit loopback resolution:
+  HTTP 308, HTTPS dashboard 200, protected bearer API 401, and map image
+  endpoint 401 without the dashboard cookie.
+- Import `services.api.main` and inspect OpenAPI without printing credentials:
+  image security must be `APIKeyCookie`; normal protected routes must remain
+  `HTTPBearer`.
+- Run the 73-test combined P1.7/P1.8 suite and Python compilation.
+- Generate map HTML and confirm the token, same-origin image, local Leaflet,
+  asset hash, and external-script regression contracts.
+- Confirm `git status --short --untracked-files=all` is clean and HEAD is the
+  commit created immediately before this restart.
+- A real authenticated map may be checked manually by the user without
+  exposing the cookie or password. Do not automate by reading browser state.
+- Append a dated post-restart verification entry with results and deviations.
+
+Known risks or accepted gaps:
+- Uvicorn production startup still uses `--reload`; removal remains P2.13.
+- No real authenticated map or device photo will be automated.
+- The full pytest suite was not rerun; the focused combined suite passed all
+  73 tests.
+- P1.6 MFA/SSO remains deferred, so compromise of an administrator password
+  can still be sufficient for account access.
+- P1.9 browser session hardening has not started.

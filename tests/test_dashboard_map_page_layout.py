@@ -13,3 +13,11 @@ def test_mobile_map_page_keeps_filters_before_map():
     assert "order: 2" not in source
     assert "order: 1" not in source
     assert "Mapa je na telefonu zobrazena nad timto panelem." not in source
+
+
+def test_map_page_does_not_pass_main_token_to_iframe():
+    source = MAP_PAGE_PATH.read_text(encoding="utf-8")
+
+    assert "access_token=access_token" not in source
+    assert "image_api_base_url=" not in source
+    assert "get_dashboard_browser_api_base_url" not in source

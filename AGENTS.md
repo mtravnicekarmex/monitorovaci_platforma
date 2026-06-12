@@ -104,8 +104,10 @@ Known hygiene topics to handle only after explicit approval:
 - Shared behavior should live in modules/services, not in duplicated page logic.
 - `Mapove podklady` uses general FastAPI map endpoints and admin-configured metadata in `dashboard.Map_Layers`.
 - Map feature images must be resolved server-side from `layer_id` and device identifier; do not expose an endpoint that serves arbitrary client-supplied file paths.
-- Browser map image loading should use same-origin `/api/v1/map/images` through Caddy, which routes `/api/*` to FastAPI and other requests to Streamlit.
-- Deployments that do not expose the API under the dashboard origin must set `DASHBOARD_BROWSER_API_BASE_URL` and configure the matching origin through `API_CORS_ORIGINS`.
+- Browser map image loading must use same-origin `/api/v1/map/images` through Caddy, which routes `/api/*` to FastAPI and other requests to Streamlit.
+- Map iframe JavaScript must never receive the main API bearer token. The image endpoint authenticates only through the existing HttpOnly dashboard session cookie; other API routes continue to require bearer authentication.
+- Do not restore a cross-origin map image API override. Deployments must expose the image endpoint under the dashboard origin so the browser can use the protected session cookie without disclosing it to JavaScript.
+- Leaflet `1.9.4` JavaScript, CSS, images, license, and source metadata are vendored under `moduly/apps/dashboard/assets/leaflet/1.9.4` and embedded by `map_shared.py`; do not restore runtime executable-code loading from a public CDN.
 - Public dashboard HTTPS is served at `https://monitoring.armexholding.cz`.
 - Caddy exposes the Streamlit login page directly without a second browser
   authentication prompt. FastAPI rate-limits `/api/v1/auth/login` by normalized

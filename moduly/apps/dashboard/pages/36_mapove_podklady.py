@@ -11,10 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from moduly.apps.dashboard.api_client import (
-    DashboardApiError,
-    get_dashboard_browser_api_base_url,
-)
+from moduly.apps.dashboard.api_client import DashboardApiError
 from moduly.apps.dashboard.auth import get_auth_token, require_page_access
 from moduly.apps.dashboard.map_shared import (
     build_leaflet_map_html,
@@ -183,8 +180,6 @@ def render_page() -> None:
             build_leaflet_map_html(
                 filtered_payload,
                 height_px=880,
-                image_api_base_url=get_dashboard_browser_api_base_url(),
-                access_token=access_token,
             ),
             height=900,
             scrolling=False,

@@ -1,3 +1,5 @@
+import inspect
+
 from moduly.apps.dashboard.map_shared import (
     build_leaflet_map_html,
     build_map_features_request,
@@ -18,6 +20,13 @@ def test_leaflet_map_html_exposes_osm_and_aerial_base_layers():
 
     html = build_leaflet_map_html(payload)
 
+    assert "Leaflet 1.9.4" in html
+    assert "unpkg.com" not in html
+    assert "<script src=" not in html
+    assert "url(images/" not in html
+    assert "data:image/png;base64," in html
+    assert "L.Icon.Default.mergeOptions" in html
+    assert "sourceMappingURL=leaflet.js.map" not in html
     assert "osmBaseLayer" in html
     assert "aerialBaseLayer" in html
     assert "ORTOFOTO_WM/MapServer/tile/{z}/{y}/{x}" in html
@@ -153,18 +162,18 @@ def test_leaflet_map_html_renders_foto_as_popup_image_only_when_present():
         ],
     }
 
-    html = build_leaflet_map_html(
-        payload,
-        image_api_base_url="http://127.0.0.1:8000",
-        access_token="test-token",
-    )
+    html = build_leaflet_map_html(payload)
 
     assert "map-popup-photo" in html
     assert "mapImageEndpointUrl" in html
-    assert "http://127.0.0.1:8000/api/v1/map/images" in html
+    assert 'const mapImageEndpointUrl = "/api/v1/map/images";' in html
     assert "function photoPlaceholderHtml" in html
     assert "fetch(mapImageUrl" in html
-    assert '"Authorization": `Bearer ${mapImageAccessToken}`' in html
+    assert 'credentials: "same-origin"' in html
+    assert "Authorization" not in html
+    assert "Bearer" not in html
+    assert "mapImageAccessToken" not in html
+    assert "access_token" not in inspect.signature(build_leaflet_map_html).parameters
     assert "properties.has_photo === true" in html
     assert 'String(key).toLowerCase() !== "foto"' in html
     assert "photoPlaceholderHtml(properties, layerId, layerConfig)" in html
@@ -176,15 +185,12 @@ def test_leaflet_map_html_renders_foto_as_popup_image_only_when_present():
 
 
 def test_leaflet_map_html_supports_same_origin_image_api():
-    html = build_leaflet_map_html(
-        {"layers": []},
-        image_api_base_url="",
-        access_token="test-token",
-    )
+    html = build_leaflet_map_html({"layers": []})
 
     assert 'const mapImageEndpointUrl = "/api/v1/map/images";' in html
     assert "const parentUrl = document.referrer || window.location.href;" in html
     assert "new URL(mapImageEndpointUrl, parentUrl)" in html
+    assert "DASHBOARD_BROWSER_API_BASE_URL" not in html
 
 
 def test_leaflet_map_html_supports_mobile_device_location():

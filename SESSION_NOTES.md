@@ -2442,3 +2442,145 @@ Decisions/notes:
 Follow-up:
 - Confirm corporate network/database availability and verify that a later
   `quarter_hour_job` returns to `success`.
+
+### 2026-06-12 22:37 CEST - Pre-restart handoff
+
+Reason for restart:
+- Save the completed P1.9 browser-session hardening and renew the complete
+  production runtime through the supported Windows Task Scheduler boot path.
+- Verify the committed session token/cookie behavior from a cold start.
+- Recheck the external database connectivity problem observed before restart;
+  the restart is not assumed to repair an unavailable database server or
+  corporate network path.
+
+Current task/conversation state:
+- P1.6 MFA/SSO remains deferred by explicit user decision.
+- P1.7, P1.8, and P1.9 are complete.
+- P1.9 introduced the `__Host-monitoring_dashboard_session` cookie, a
+  30-minute rolling request-inactivity timeout, an 8-hour absolute timeout,
+  periodic token renewal, and session revocation after security-relevant user
+  changes.
+- P1.10 privileged revision-write authorization has not started.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`,
+  `SESSION_NOTES.md`, and `DASHBOARD_SECURITY_CHECKLIST.md`, then run
+  `git status --short --untracked-files=all`.
+
+Working tree and deployment:
+- Current saved P1.9 commit is `a0900a7de36797ce44be49a8106ad929149ac4ed`
+  (`security check 1.4 hotovo`) on `master` and `origin/master`.
+- The working tree was clean before this handoff was appended.
+- This handoff must be committed separately before restart; the expected
+  working tree immediately before restart is clean.
+- Uvicorn reload already loaded the P1.9 API changes. Live OpenAPI exposed
+  `/api/v1/auth/session/refresh` and cookie security name
+  `__Host-monitoring_dashboard_session`.
+- Streamlit health and FastAPI live/ready returned HTTP 200.
+- Local Caddy routing returned HTTP 308 to HTTPS, dashboard HTTP 200,
+  protected bearer API HTTP 401, and unauthenticated refresh HTTP 401.
+- Tracked and runtime Caddyfile SHA-256 values both equal
+  `F41D3B31EA03308CB4345B1D11F0488B11D1FE527CBF135B0E1E166E5E7BC9BE`.
+- The deployed Caddy configuration validated successfully before restart.
+- Focused P1.9 lifecycle tests passed 50 tests; the broader security,
+  authentication, dashboard, and map suite passed 154 tests.
+- The full suite passed 492 of 494 tests. The two remaining failures are the
+  previously documented unrelated failures in
+  `tests/test_vodomery_reports.py`.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, or commit the ignored local `.env` containing
+  `API_TOKEN_SECRET`.
+- Do not inspect, print, change, delete, or commit SmartFuelPass cookies or
+  other browser session artifacts.
+- Do not print raw authentication audit records from
+  `C:\ProgramData\monitorovaci_platforma\logs\auth_audit.jsonl`.
+- Do not read or print the `__Host-monitoring_dashboard_session` cookie, any
+  bearer token, password, or stored password hash during verification.
+- The retired ProgramData Caddy gate credential files remain sensitive and
+  must not be printed, changed, or deleted.
+
+Windows scheduled startup expectation:
+- Scheduled task name: `API_dashboard_caddy`.
+- Executable:
+  `C:\Users\tra\PycharmProjects\monitorovaci_platforma\start_api_dashboard.bat`.
+- Trigger: Windows boot (`MSFT_TaskBootTrigger`).
+- Principal: user `tra`, highest run level.
+- Before restart the task was `Ready`; its last run at
+  2026-06-12 13:39:24 CEST completed with result `0`.
+
+Expected processes and listeners after restart:
+- One FastAPI/Uvicorn runtime owns the single listener
+  `127.0.0.1:8000`. Reload mode may create a parent/child process tree, but
+  there must be only one listener.
+- One Streamlit runtime owns the single listener `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime from `C:\Program Files\Caddy\caddy.exe` owns TCP 80 and
+  443 plus `127.0.0.1:2019`.
+- Tailscale may separately own interface-specific TCP 443 listeners; those are
+  expected and are not duplicate public Caddy listeners.
+
+Expected application and security state:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200.
+- Streamlit `/_stcore/health`: HTTP 200.
+- Tracked and runtime Caddyfile hashes remain equal to the SHA-256 above and
+  the runtime configuration validates.
+- Local hostname routing returns HTTP 308 from HTTP to HTTPS, HTTP 200 for the
+  dashboard, HTTP 401 JSON for an unauthenticated protected bearer route, HTTP
+  401 for the map image endpoint without its cookie, and HTTP 401 for session
+  refresh without a bearer token.
+- OpenAPI contains `/api/v1/auth/session/refresh`.
+- OpenAPI uses `APIKeyCookie` named
+  `__Host-monitoring_dashboard_session` for the map image endpoint and
+  `HTTPBearer` for normal protected routes.
+- A token in the retired format without signed `iat`, `ses`, and `abs` claims
+  is rejected with HTTP 401.
+- Existing browser sessions issued before P1.9 remain invalid; users need one
+  new login. No credential-based login should be automated.
+
+Database and scheduler state before restart:
+- Scheduler was running, held its process lock, and had a live heartbeat.
+- The scheduler slot planned for 22:35 completed at 22:49:32 CEST after
+  database connection timeouts and was skipped with
+  `database_unavailable`, 0 failures, and 82 successes in the preceding 24
+  hours.
+- The next `quarter_hour_job` attempt was scheduled for 23:05:05 CEST.
+- DNS resolved `server2a` to the configured internal address, but direct TCP
+  checks to PostgreSQL port 5432 and MS SQL port 1433 both failed immediately
+  before this handoff.
+- FastAPI readiness does not include both scheduler source databases, so HTTP
+  200 readiness does not prove scheduler database availability.
+
+Required post-restart checks:
+- Confirm the scheduled task ran after boot with result `0`.
+- Confirm exactly one listener each on 8000, 8001, 80, 443, and 2019, allowing
+  the documented Tailscale-interface 443 listeners.
+- Confirm FastAPI live/ready and Streamlit health endpoints.
+- Confirm scheduler lock ownership, heartbeat age, latest job status, next
+  run, and at least one completed post-restart scheduler slot.
+- Test TCP connectivity to `server2a` ports 5432 and 1433 without printing
+  credentials. If unavailable, record the continuing external outage and do
+  not treat a skipped database job as an application deployment regression.
+- If both database ports recover, confirm `quarter_hour_job` returns to
+  `success`.
+- Confirm tracked/runtime Caddyfile hash equality and run `caddy validate`.
+- Confirm local Caddy hostname routing with explicit loopback resolution:
+  HTTP 308, HTTPS dashboard 200, protected bearer API 401, map image 401
+  without cookie, and refresh 401 without bearer authentication.
+- Inspect live OpenAPI without printing credentials: refresh route present,
+  image cookie name uses the `__Host-` prefix, and normal routes remain
+  `HTTPBearer`.
+- Run the focused 50-test P1.9 lifecycle suite, Python compilation, FastAPI
+  import, and `git diff --check`.
+- Confirm `git status --short --untracked-files=all` is clean and HEAD is the
+  commit containing this handoff.
+- Append a dated post-restart verification entry with all results and
+  deviations.
+
+Known risks or accepted gaps:
+- Uvicorn production startup still uses `--reload`; removal remains P2.13.
+- No real credential-based login, browser renewal, inactivity expiry, or
+  absolute expiry will be automated.
+- External access from a separate network was not tested.
+- P1.6 MFA/SSO remains deferred.
+- The database host/network path was unavailable immediately before restart;
+  application restart cannot guarantee its recovery.

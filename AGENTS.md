@@ -77,6 +77,8 @@ Treat these as sensitive or operational artifacts:
 
 - `data/smartfuelpass/session_cookies.json`
 - `data/smartfuelpass/auto_login_session.json`
+- `C:\ProgramData\monitorovaci_platforma\caddy-dashboard-auth.env`
+- `C:\ProgramData\monitorovaci_platforma\dashboard-proxy-credentials.txt`
 - Any `.env`, credentials, cookies, tokens, browser sessions, or account data.
 - Raw meter data and imported source files unless the user explicitly requests inspection.
 - Device photo paths and photo files referenced by source columns such as `foto`; serve them only through authorized API paths.
@@ -105,9 +107,42 @@ Known hygiene topics to handle only after explicit approval:
 - Browser map image loading should use same-origin `/api/v1/map/images` through Caddy, which routes `/api/*` to FastAPI and other requests to Streamlit.
 - Deployments that do not expose the API under the dashboard origin must set `DASHBOARD_BROWSER_API_BASE_URL` and configure the matching origin through `API_CORS_ORIGINS`.
 - Public dashboard HTTPS is served at `https://monitoring.armexholding.cz`.
+- Caddy exposes the Streamlit login page directly without a second browser
+  authentication prompt. FastAPI rate-limits `/api/v1/auth/login` by normalized
+  account identifier and trusted client IP with temporary increasing lockouts.
+- Authentication events are written as rotated JSONL audit records under
+  `C:\ProgramData\monitorovaci_platforma\logs\auth_audit.jsonl` by default.
+  Audit records contain normalized identifiers, trusted source IPs, result and
+  reason categories, and security-alert counters; they must never contain
+  passwords, bearer tokens, or cookie values.
+- Uvicorn accepts forwarded client information only from the loopback Caddy
+  proxy; application code uses the trusted request scope rather than parsing
+  raw `X-Forwarded-For` headers.
 - `https://monitoring.armexholding.cz` is the only supported public client entry point; direct client access through the public IP address is not required or supported.
 - `start_api_dashboard.bat` starts or reloads `C:\Program Files\Caddy\caddy.exe` only after FastAPI and Streamlit health checks pass.
 - The runtime Caddy configuration is `C:\Program Files\Caddy\Caddyfile`; keep the tracked root `Caddyfile` synchronized with it.
+- On the Windows production workstation, `start_api_dashboard.bat` is launched
+  by Windows Task Scheduler with the trigger `At system startup`. This allows
+  FastAPI, Streamlit, the scheduler, and Caddy to start without an interactive
+  user login.
+- Processes started by that scheduled task run in a non-interactive session;
+  their console windows are not available for later operational control.
+- The current supported way to renew or restart the complete runtime process
+  set is to restart the whole Windows workstation. Do not assume that an agent
+  can safely stop and recreate individual production processes from the current
+  interactive session.
+- Changes to the launcher or process startup arguments take effect only after
+  the scheduled task runs again, normally after a workstation restart. Do not
+  redesign this startup/recovery model without explicit user approval.
+- Before every workstation restart, append a dated restart handoff to
+  `SESSION_NOTES.md`. The handoff must preserve the current conversation/task
+  state, completed and pending work, changed/uncommitted files, deployment
+  state, reason for restart, and any sensitive artifacts that must not be
+  printed or modified.
+- The same handoff must list the expected post-restart processes and listeners,
+  plus exact health, scheduler, Caddy, routing, authentication, and
+  change-specific verification steps. Do not request or initiate a restart
+  until this handoff has been written and checked.
 
 ## Time Semantics
 

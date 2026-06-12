@@ -14,7 +14,10 @@ if str(PROJECT_ROOT) not in sys.path:
 from moduly.apps.dashboard import auth as dashboard_auth
 
 
-if not hasattr(dashboard_auth, "restore_auth_state_from_browser_cookie"):
+if not getattr(dashboard_auth, "LOGIN_CLIENT_IP_FORWARDING_ENABLED", False):
+    from moduly.apps.dashboard import api_client as dashboard_api_client
+
+    importlib.reload(dashboard_api_client)
     dashboard_auth = importlib.reload(dashboard_auth)
 
 

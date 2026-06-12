@@ -33,7 +33,6 @@ if not exist "%CADDY_CONFIG%" (
     pause
     exit /b 1
 )
-
 echo Spoustim API na http://127.0.0.1:8000
 start "Monitoring API" cmd /k call "%~f0" api
 
@@ -99,7 +98,7 @@ exit /b 0
 
 :run_api
 cd /d "%PROJECT_DIR%"
-"%PROJECT_DIR%.venv\Scripts\python.exe" -m uvicorn services.api.main:app --host 127.0.0.1 --port 8000 --reload
+"%PROJECT_DIR%.venv\Scripts\python.exe" -m uvicorn services.api.main:app --host 127.0.0.1 --port 8000 --reload --proxy-headers --forwarded-allow-ips 127.0.0.1
 exit /b %ERRORLEVEL%
 
 :run_dashboard
@@ -122,7 +121,6 @@ if not exist "%CADDY_CONFIG%" (
     echo Nenalezeno: %CADDY_CONFIG%
     exit /b 1
 )
-
 cd /d "%CADDY_DIR%"
 "%CADDY_EXE%" validate --config "%CADDY_CONFIG%" --adapter caddyfile
 if errorlevel 1 (

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
+from services.api.core.auth_audit import auth_audit_service
 from services.api.core.dependencies import get_current_admin_user
+from services.api.core.login_throttle import get_login_client_ip
 from services.api.schemas.admin import (
     AdminDeviceOptionsResponse,
     AdminMapLayerCreateRequest,
@@ -73,6 +75,7 @@ def get_admin_users(
 )
 def create_user(
     payload: AdminUserCreateRequest,
+    request: Request,
     current_user: DashboardUserContext = Depends(get_current_admin_user),
 ) -> AdminUserRecord:
     try:
@@ -92,6 +95,18 @@ def create_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+    auth_audit_service.record_security_event(
+        event_type="account_created",
+        result="success",
+        reason="admin_create",
+        actor_username=current_user.username,
+        target_username=str(user_record["username"]),
+        source_ip=get_login_client_ip(request),
+        details={
+            "is_active": bool(user_record["is_active"]),
+            "is_admin": bool(user_record["is_admin"]),
+        },
+    )
     return AdminUserRecord(**user_record)
 
 
@@ -105,11 +120,12 @@ def create_user(
 def update_user(
     username: str,
     payload: AdminUserUpdateRequest,
+    request: Request,
     current_user: DashboardUserContext = Depends(get_current_admin_user),
 ) -> AdminUserRecord:
     try:
         updates = payload.model_dump(exclude_unset=True)
-        user_record = update_admin_user(
+        update_result = update_admin_user(
             current_user,
             username=username,
             **updates,
@@ -119,7 +135,66 @@ def update_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
-    return AdminUserRecord(**user_record)
+    client_ip = get_login_client_ip(request)
+    target_username = str(update_result.record["username"])
+    if update_result.changed_fields:
+        auth_audit_service.record_security_event(
+            event_type="account_updated",
+            result="success",
+            reason="admin_update",
+            actor_username=current_user.username,
+            target_username=target_username,
+            source_ip=client_ip,
+            details={"changed_fields": list(update_result.changed_fields)},
+        )
+    if update_result.password_changed:
+        auth_audit_service.record_security_event(
+            event_type="password_change",
+            result="success",
+            reason="admin_reset",
+            actor_username=current_user.username,
+            target_username=target_username,
+            source_ip=client_ip,
+        )
+        auth_audit_service.record_security_event(
+            event_type="token_revocation",
+            result="success",
+            reason="admin_password_reset",
+            actor_username=current_user.username,
+            target_username=target_username,
+            source_ip=client_ip,
+        )
+    if update_result.role_changed:
+        auth_audit_service.record_security_event(
+            event_type="role_change",
+            result="success",
+            reason="admin_role_update",
+            actor_username=current_user.username,
+            target_username=target_username,
+            source_ip=client_ip,
+            details={
+                "previous_is_admin": update_result.previous_is_admin,
+                "is_admin": bool(update_result.record["is_admin"]),
+            },
+        )
+    if update_result.active_changed:
+        auth_audit_service.record_security_event(
+            event_type="account_activation_change",
+            result="success",
+            reason=(
+                "account_activated"
+                if bool(update_result.record["is_active"])
+                else "account_deactivated"
+            ),
+            actor_username=current_user.username,
+            target_username=target_username,
+            source_ip=client_ip,
+            details={
+                "previous_is_active": update_result.previous_is_active,
+                "is_active": bool(update_result.record["is_active"]),
+            },
+        )
+    return AdminUserRecord(**update_result.record)
 
 
 @router.delete(
@@ -131,15 +206,35 @@ def update_user(
 )
 def delete_user(
     username: str,
+    request: Request,
     current_user: DashboardUserContext = Depends(get_current_admin_user),
 ) -> Response:
     try:
-        delete_admin_user(current_user, username=username)
+        deleted_state = delete_admin_user(current_user, username=username)
     except AdminOperationError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+    if deleted_state is not None:
+        client_ip = get_login_client_ip(request)
+        auth_audit_service.record_security_event(
+            event_type="account_deleted",
+            result="success",
+            reason="admin_delete",
+            actor_username=current_user.username,
+            target_username=username,
+            source_ip=client_ip,
+            details=deleted_state,
+        )
+        auth_audit_service.record_security_event(
+            event_type="token_revocation",
+            result="success",
+            reason="account_deleted",
+            actor_username=current_user.username,
+            target_username=username,
+            source_ip=client_ip,
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

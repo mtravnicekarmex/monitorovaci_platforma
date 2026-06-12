@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from core.db.connect import get_session_ms, get_session_pg
 from moduly.apps.dashboard.database.users import (
     count_active_admin_users,
@@ -20,6 +22,17 @@ _MISSING = object()
 
 class AdminOperationError(ValueError):
     """Raised when an admin write operation is invalid."""
+
+
+@dataclass(frozen=True)
+class AdminUserUpdateResult:
+    record: dict[str, object]
+    changed_fields: tuple[str, ...]
+    password_changed: bool
+    role_changed: bool
+    active_changed: bool
+    previous_is_admin: bool
+    previous_is_active: bool
 
 
 def require_admin_access(user_context: DashboardUserContext) -> None:
@@ -173,7 +186,7 @@ def update_admin_user(
     device_ids: list[str] | None | object = _MISSING,
     is_active: bool | None | object = _MISSING,
     is_admin: bool | None | object = _MISSING,
-) -> dict[str, object]:
+) -> AdminUserUpdateResult:
     require_admin_access(user_context)
     cleaned_username = username.strip()
     if not cleaned_username:
@@ -224,14 +237,45 @@ def update_admin_user(
         is_admin=resolved_is_admin,
         is_active=resolved_is_active,
     )
-    return next(row for row in list_admin_users(user_context) if row["username"] == cleaned_username)
+    updated_record = next(
+        row for row in list_admin_users(user_context)
+        if row["username"] == cleaned_username
+    )
+    changed_fields = tuple(
+        field_name
+        for field_name, was_changed in (
+            ("password", bool(resolved_password)),
+            ("email", resolved_email != current_record["email"]),
+            (
+                "available_sections",
+                resolved_sections != list(current_record["available_sections"]),
+            ),
+            (
+                "available_pages",
+                resolved_pages != list(current_record["available_pages"]),
+            ),
+            ("device_ids", resolved_device_ids != list(current_record["device_ids"])),
+            ("is_active", resolved_is_active != bool(current_record["is_active"])),
+            ("is_admin", resolved_is_admin != bool(current_record["is_admin"])),
+        )
+        if was_changed
+    )
+    return AdminUserUpdateResult(
+        record=updated_record,
+        changed_fields=changed_fields,
+        password_changed=bool(resolved_password),
+        role_changed=resolved_is_admin != bool(current_record["is_admin"]),
+        active_changed=resolved_is_active != bool(current_record["is_active"]),
+        previous_is_admin=bool(current_record["is_admin"]),
+        previous_is_active=bool(current_record["is_active"]),
+    )
 
 
 def delete_admin_user(
     user_context: DashboardUserContext,
     *,
     username: str,
-) -> None:
+) -> dict[str, bool] | None:
     require_admin_access(user_context)
     cleaned_username = username.strip()
     if not cleaned_username:
@@ -240,7 +284,11 @@ def delete_admin_user(
         raise AdminOperationError("Nemuzes smazat prave prihlaseneho uzivatele.")
     existing_user = get_user(cleaned_username)
     if existing_user is None:
-        return
+        return None
+    deleted_security_state = {
+        "is_admin": bool(existing_user.is_admin),
+        "is_active": bool(existing_user.is_active),
+    }
     _ensure_active_admin_remains(
         username=cleaned_username,
         current_is_admin=bool(existing_user.is_admin),
@@ -249,3 +297,4 @@ def delete_admin_user(
         resolved_is_active=False,
     )
     delete_user(cleaned_username)
+    return deleted_security_state

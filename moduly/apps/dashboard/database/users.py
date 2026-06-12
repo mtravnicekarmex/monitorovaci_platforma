@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 
 from app.time_utils import utc_now_naive
@@ -12,6 +13,19 @@ from moduly.apps.dashboard.navigation_config import (
     normalize_section_keys,
 )
 from moduly.apps.dashboard.security import hash_password, verify_password
+
+
+DUMMY_PASSWORD_HASH = (
+    "pbkdf2_sha256$390000$dashboard-login-timing-padding$"
+    "1efac37498f163f5afbef0b7a56c0b35973fe50b8fc80e737d8447a49d5e96fd"
+)
+
+
+@dataclass(frozen=True)
+class UserAuthenticationResult:
+    user: Streamlit_Users | None
+    reason_category: str
+    is_admin_account: bool
 
 
 def any_users_exist() -> bool:
@@ -76,17 +90,43 @@ def count_active_admin_users(*, exclude_username: str | None = None) -> int:
 
 
 def authenticate_user(username: str, password: str) -> Streamlit_Users | None:
+    return authenticate_user_with_result(username, password).user
+
+
+def authenticate_user_with_result(
+    username: str,
+    password: str,
+) -> UserAuthenticationResult:
     session = get_session_pg()
     try:
         user = session.get(Streamlit_Users, username)
-        if user is None or not user.is_active:
-            return None
-
-        if not verify_password(password, user.heslo):
-            return None
+        password_hash = user.heslo if user is not None else DUMMY_PASSWORD_HASH
+        password_matches = verify_password(password, password_hash)
+        if user is None:
+            return UserAuthenticationResult(
+                user=None,
+                reason_category="unknown_account",
+                is_admin_account=False,
+            )
+        if not user.is_active:
+            return UserAuthenticationResult(
+                user=None,
+                reason_category="inactive_account",
+                is_admin_account=bool(getattr(user, "is_admin", False)),
+            )
+        if not password_matches:
+            return UserAuthenticationResult(
+                user=None,
+                reason_category="invalid_password",
+                is_admin_account=bool(getattr(user, "is_admin", False)),
+            )
 
         session.expunge(user)
-        return user
+        return UserAuthenticationResult(
+            user=user,
+            reason_category="authenticated",
+            is_admin_account=bool(getattr(user, "is_admin", False)),
+        )
     finally:
         session.close()
 

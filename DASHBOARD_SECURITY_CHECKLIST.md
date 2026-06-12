@@ -23,17 +23,18 @@ Status values:
   - `scripts/start_all_services.ps1`
   - `run.txt`
 - [x] Make startup fail clearly when the production secret is missing.
-- [!] Restart FastAPI so tokens signed with the old secret stop working.
-- [-] Verify that a newly issued token works and an old token returns HTTP 401.
+- [x] Restart FastAPI so tokens signed with the old secret stop working.
+- [x] Verify that a newly issued token works and an old token returns HTTP 401.
 - [x] Add regression tests preventing a fixed development secret from returning to tracked launchers.
 
-Current status on 2026-06-11:
+Completed on 2026-06-12:
 
-- The new 384-bit random secret is stored in the ignored local `.env`.
-- A temporary loopback-only FastAPI instance successfully validated a token signed with the new secret.
-- The running API on port `8000` still accepts tokens signed with the old known secret.
-- Restart is blocked because the current API process was started in a Windows security context that denied process termination, including the approved elevated attempt.
-- Complete the rotation by restarting the existing privileged API process or restarting the workstation, then verify that an old-secret token returns HTTP 401.
+- FastAPI restarted and loaded the new 384-bit random secret from the ignored local `.env`.
+- FastAPI live and ready endpoints returned HTTP 200.
+- Streamlit health returned HTTP 200.
+- A token signed by the running application with the current secret returned HTTP 200 from `/api/v1/auth/me`.
+- A token signed with the previous known development secret returned HTTP 401 with a signature mismatch.
+- The public-hostname Caddy route returned the Streamlit dashboard and routed an unauthenticated protected API request to FastAPI as HTTP 401 JSON.
 
 Completion criteria:
 
@@ -43,13 +44,39 @@ Completion criteria:
 
 ### 2. Restrict public access until login protection is complete
 
-- [ ] Decide on the temporary access restriction:
+- [x] Decide on the temporary access restriction:
   - Tailscale only
   - Corporate source IP allowlist
   - Additional authentication at the reverse proxy
-- [ ] Apply the selected restriction in Caddy or the network perimeter.
-- [ ] Verify authorized access and rejection of unauthorized public traffic.
-- [ ] Document rollback and emergency access.
+- [x] Apply the selected restriction in Caddy or the network perimeter.
+- [x] Verify authorized access and rejection of unauthorized public traffic.
+- [x] Document rollback and emergency access.
+
+Completed on 2026-06-12:
+
+- Selected temporary additional authentication at the Caddy reverse proxy.
+- Caddy requires the shared gate for the Streamlit surface and
+  `/api/v1/auth/login`.
+- Other `/api/*` routes are excluded from the Basic Auth gate because they use
+  FastAPI Bearer tokens in the same `Authorization` header.
+- Gate credentials are generated locally and stored outside Git under
+  `C:\ProgramData\monitorovaci_platforma` with ACL access limited to the
+  operating account, Administrators, and SYSTEM.
+- Requests without gate credentials and requests with invalid credentials
+  returned HTTP 401.
+- A request with valid gate credentials reached Streamlit with HTTP 200.
+- A gated login request reached FastAPI and returned schema validation JSON,
+  while an unauthenticated protected Bearer API request continued to return
+  FastAPI HTTP 401 JSON.
+- Rollback and emergency access are documented in
+  `PUBLIC_HTTPS_DEPLOYMENT.md`; Tailscale remains the backup access path.
+
+Superseded later on 2026-06-12:
+
+- The temporary Caddy gate was removed after P1.3 application login throttling
+  was implemented and verified.
+- The public dashboard again opens the normal Streamlit login page without a
+  separate browser Basic Auth prompt.
 
 Completion criteria:
 
@@ -59,13 +86,31 @@ Completion criteria:
 
 ### 3. Add login throttling and abuse protection
 
-- [ ] Rate-limit `/api/v1/auth/login` by both account identifier and client IP.
-- [ ] Use increasing delays or temporary lockouts after repeated failures.
-- [ ] Avoid permanent denial of service through attacker-triggered account lockout.
-- [ ] Return the same generic response for unknown, inactive, and incorrect-password accounts.
-- [ ] Reduce timing differences between unknown-user and wrong-password attempts.
-- [ ] Define trusted proxy handling before accepting `X-Forwarded-For`.
-- [ ] Add tests for limits, reset windows, proxy headers, and successful login after expiry.
+- [x] Rate-limit `/api/v1/auth/login` by both account identifier and client IP.
+- [x] Use increasing delays or temporary lockouts after repeated failures.
+- [x] Avoid permanent denial of service through attacker-triggered account lockout.
+- [x] Return the same generic response for unknown, inactive, and incorrect-password accounts.
+- [x] Reduce timing differences between unknown-user and wrong-password attempts.
+- [x] Define trusted proxy handling before accepting `X-Forwarded-For`.
+- [x] Add tests for limits, reset windows, proxy headers, and successful login after expiry.
+
+Completed on 2026-06-12:
+
+- Five failed attempts for one normalized account start a 30-second lockout;
+  repeated failures increase the lockout up to 15 minutes.
+- Twenty failures from one trusted client IP within 15 minutes trigger a
+  15-minute IP lockout across account identifiers.
+- Lockouts are temporary and failure history expires after 15 minutes.
+- Unknown, inactive, and incorrect-password accounts return one generic
+  authentication error. Unknown accounts verify against a dummy PBKDF2 hash to
+  reduce password-check timing differences.
+- Uvicorn accepts forwarded client information only from loopback Caddy, and
+  the application uses `request.client.host` instead of raw forwarded headers.
+- The temporary Caddy Basic Auth gate was removed after targeted tests passed.
+- Throttle state is in memory and resets on FastAPI restart; the current
+  production API uses one worker.
+- Live verification returned HTTP 401 for attempts 1-4 and HTTP 429 with
+  `Retry-After: 30` for attempt 5 against a disposable test identifier.
 
 Completion criteria:
 
@@ -74,11 +119,31 @@ Completion criteria:
 
 ### 4. Add authentication audit logging and alerts
 
-- [ ] Log successful and failed logins without logging passwords or bearer tokens.
-- [ ] Record timestamp, normalized username identifier, source IP, result, and reason category.
-- [ ] Log token revocation, password changes, role changes, and account activation changes.
-- [ ] Protect logs from dashboard users and avoid returning sensitive log content through errors.
-- [ ] Define alert thresholds for brute force, password spraying, and repeated admin-account failures.
+- [x] Log successful and failed logins without logging passwords or bearer tokens.
+- [x] Record timestamp, normalized username identifier, source IP, result, and reason category.
+- [x] Log token revocation, password changes, role changes, and account activation changes.
+- [x] Protect logs from dashboard users and avoid returning sensitive log content through errors.
+- [x] Define alert thresholds for brute force, password spraying, and repeated admin-account failures.
+
+Completed on 2026-06-12:
+
+- FastAPI writes structured JSONL authentication audit events to
+  `C:\ProgramData\monitorovaci_platforma\logs\auth_audit.jsonl` by default.
+- The file is outside the dashboard/API response surface, inherits the
+  restricted ProgramData ACL, rotates daily, and retains 90 backups.
+- Login records include UTC timestamp, normalized account identifier, trusted
+  source IP, success/failure result, internal reason category, and bounded
+  failure counters. Passwords, bearer tokens, and cookie values are not passed
+  to the audit service.
+- Password changes, logout and other token revocations, administrator password
+  resets, role changes, activation changes, account creation, and account
+  deletion are audited. The supported local user-management CLI writes the
+  same security events.
+- Security warning events are emitted when an account enters its five-attempt
+  brute-force lockout, an IP reaches the 20-attempt password-spray lockout, or
+  an administrator account receives three failed attempts within 15 minutes.
+- Audit write failures are logged internally and do not expose log content or
+  alter authentication responses.
 
 Completion criteria:
 
@@ -207,8 +272,27 @@ Completion criteria:
 - [ ] Separate development and production launch configurations.
 - [ ] Use deterministic dependency versions or a reviewed lock file.
 - [ ] Define service restart, log retention, and least-privilege operating account behavior.
+- [x] Document the current Windows startup and full-runtime recovery behavior.
+- [x] Require a written pre-restart state and post-restart expectation handoff.
 - [ ] Confirm FastAPI and Streamlit remain bound only to `127.0.0.1`.
 - [ ] Confirm Caddy admin API remains bound only to loopback.
+
+Current operational constraint documented on 2026-06-12:
+
+- Windows Task Scheduler launches `start_api_dashboard.bat` at system startup,
+  so the runtime starts without an interactive user login.
+- The resulting process consoles are not available from a later interactive
+  session.
+- The supported way to renew the complete production process set is a full
+  Windows workstation restart followed by post-restart health verification.
+- Do not start duplicate production processes manually. A migration to
+  independently controllable Windows services or scheduled tasks remains a
+  future hardening decision.
+- Before every restart, append a dated handoff to `SESSION_NOTES.md` with the
+  active task state, dirty working tree, runtime deployment state, expected
+  processes/listeners, and exact post-restart checks.
+- Do not initiate or request the restart until the handoff is complete. After
+  restart, append actual verification results and any deviations.
 
 Completion criteria:
 
@@ -269,6 +353,8 @@ Completion criteria:
 ## Current Positive Controls
 
 - [x] Public access uses HTTPS through Caddy.
+- [x] Public login attempts are rate-limited by account identifier and trusted client IP.
+- [x] Streamlit opens the application login directly without a second proxy credential prompt.
 - [x] FastAPI and Streamlit bind to loopback interfaces.
 - [x] Protected FastAPI endpoints require bearer authentication.
 - [x] Domain API services enforce device filtering for non-admin users.
@@ -280,11 +366,24 @@ Completion criteria:
 
 ## Verification Baseline
 
-Verified on 2026-06-11:
+Verified through 2026-06-12:
 
 - Public-hostname local TLS request returned HTTP 200.
 - An unauthenticated protected map API request returned HTTP 401.
-- Targeted authentication and navigation tests passed: 29 tests.
+- The rotated API signing secret is active and tokens signed with the previous secret are rejected.
+- Public dashboard returned HTTP 200 without a Basic Auth challenge after the
+  temporary gate was removed.
+- Live login throttling returned HTTP 429 with `Retry-After` at the configured
+  account threshold.
+- Authentication audit logging produced five failed-login records and one
+  `account_brute_force` warning for a disposable identifier. The test password
+  was absent from the JSONL file, whose ACL allows only SYSTEM,
+  Administrators, and the operating account.
+- Targeted Caddy, security, authentication, responsive-layout, and navigation
+  tests passed: 55 tests.
+- Targeted authentication-audit, admin-audit, CLI-audit, auth-route, throttle,
+  auth-state, security-config, Caddy, navigation, and responsive-layout tests
+  passed: 65 tests.
 - No dependency vulnerability scan was run because `pip-audit` was not installed.
 
 ## References

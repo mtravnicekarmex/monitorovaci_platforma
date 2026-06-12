@@ -176,6 +176,52 @@ Follow-up:
 - ...
 ```
 
+## Restart Handoff Template
+
+This entry is mandatory before every Windows workstation restart:
+
+```text
+### YYYY-MM-DD HH:MM - Pre-restart handoff
+
+Reason for restart:
+- ...
+
+Current task/conversation state:
+- Completed: ...
+- Pending: ...
+- First action after restart: ...
+
+Working tree and deployment:
+- `git status --short`: ...
+- Relevant changed files: ...
+- Runtime-deployed files and hash/config state: ...
+
+Sensitive/runtime artifacts:
+- Do not print/change/delete/commit: ...
+
+Expected processes after restart:
+- FastAPI/Uvicorn: one runtime on `127.0.0.1:8000`
+- Streamlit: one runtime on `127.0.0.1:8001`
+- Scheduler: one `main.py` runtime holding `scheduler_process` lock
+- Caddy: one runtime owning TCP 80/443 and `127.0.0.1:2019`
+
+Expected application state:
+- FastAPI live/ready: HTTP 200
+- Streamlit health: HTTP 200
+- Scheduler heartbeat/job expectations: ...
+- Tracked/runtime Caddyfile hash expectation: ...
+- HTTP -> HTTPS: 308
+- HTTPS dashboard: expected status/behavior ...
+- Protected API without bearer token: HTTP 401 JSON
+- Authentication/change-specific expectations: ...
+
+Required post-restart checks:
+- ...
+
+Known risks or accepted gaps:
+- ...
+```
+
 ## Session Log
 
 ### 2026-06-05
@@ -1069,3 +1115,504 @@ Decisions/notes:
 
 Follow-up:
 - Restart FastAPI or the workstation, then verify health, a new token, and HTTP 401 for an old-secret token.
+
+### 2026-06-11 - Security P0.1 restart handoff
+
+Current state before workstation restart:
+- The tracked launchers no longer assign `API_TOKEN_SECRET`.
+- The previous known development secret is absent from tracked runtime files.
+- A new 384-bit random `API_TOKEN_SECRET` is stored in the ignored local `.env`; its value was not printed or added to tracked documentation.
+- A temporary FastAPI instance on `127.0.0.1:18000` successfully loaded the new secret and validated a newly signed token.
+- The temporary instance was stopped and port `18000` was released.
+- The existing privileged FastAPI process on `127.0.0.1:8000` could not be terminated from the current session.
+- Immediately before restart, the live API and Streamlit health endpoints returned HTTP 200.
+- Immediately before restart, the live API still accepted a token signed with the old known secret.
+
+Expected state after restart:
+- `start_api_dashboard.bat` starts FastAPI without assigning a secret in the launcher.
+- FastAPI loads `API_TOKEN_SECRET` from the ignored local `.env`.
+- Tokens signed with the old known secret fail signature validation with HTTP 401.
+- Users must log in again because existing browser bearer tokens were signed with the previous secret.
+
+Required post-restart checks:
+- Confirm FastAPI health at `http://127.0.0.1:8000/health/live`.
+- Confirm Streamlit health at `http://127.0.0.1:8001/_stcore/health`.
+- Confirm public HTTPS dashboard access at `https://monitoring.armexholding.cz`.
+- Confirm a fresh dashboard login succeeds and persists across a browser reload.
+- Confirm an old-secret test token returns HTTP 401 from `/api/v1/auth/me`.
+- Update `DASHBOARD_SECURITY_CHECKLIST.md` P0.1 restart and old-token verification items to completed.
+
+Verification already completed:
+- Targeted security, Caddy, browser-session, auth-state, auth-service, and navigation tests: 36 passed.
+- `git diff --check` reported no whitespace errors.
+
+Files changed for security P0.1:
+- `start_api_dashboard.bat`
+- `start_api_dashboard - kopie.bat`
+- `scripts/start_all_services.ps1`
+- `run.txt`
+- `tests/test_dashboard_security_config.py`
+- `DASHBOARD_SECURITY_CHECKLIST.md`
+- `PUBLIC_HTTPS_DEPLOYMENT.md`
+- `DECISIONS.md`
+- `SESSION_NOTES.md`
+
+### 2026-06-12 - Security P0.1 post-restart completion
+
+Scope:
+- Verified the complete runtime after restart.
+- Completed the API signing-key rotation checks.
+
+Changed:
+- Marked the remaining P0.1 checklist items as completed.
+
+Verified:
+- FastAPI live and ready endpoints returned HTTP 200.
+- Streamlit health returned HTTP 200.
+- A token issued with the current `.env` secret returned HTTP 200 from `/api/v1/auth/me`.
+- A token signed with the previous known secret returned HTTP 401 because its signature did not match.
+- Caddy returned the Streamlit dashboard over local public-hostname TLS and routed protected `/api/*` traffic to FastAPI.
+- The scheduler process lock was held, its heartbeat was current, and the 2026-06-12 06:35 quarter-hour job completed successfully with no new scheduler errors after restart.
+
+Not verified:
+- Public HTTPS was not tested from a separate external network because this server does not have NAT loopback.
+- A credential-based browser login was not automated because no user password was read or requested.
+
+Decisions/notes:
+- P0.1 is complete.
+- P0.2 must not apply HTTP Basic Auth to all `/api/*` requests because FastAPI uses the same `Authorization` header for bearer tokens.
+
+### 2026-06-12 - Dashboard security remediation P0.2
+
+Scope:
+- Added a temporary second authentication gate at Caddy.
+- Restricted unrestricted access to Streamlit and the public login endpoint.
+
+Changed:
+- Added scoped Caddy Basic Auth for all non-`/api/*` paths and
+  `/api/v1/auth/login`.
+- Added local Caddy auth env loading to `start_api_dashboard.bat`.
+- Added `scripts/deploy_caddy_runtime.ps1` with validation, timestamped backup,
+  reload, and automatic rollback on deployment failure.
+- Added Caddy and launcher regression checks.
+- Documented credentials, deployment, emergency access, and rollback.
+- Added DEC-023.
+
+Runtime state:
+- Caddy username and bcrypt hash are stored outside Git in
+  `C:\ProgramData\monitorovaci_platforma\caddy-dashboard-auth.env`.
+- The plaintext credential handoff is stored in
+  `C:\ProgramData\monitorovaci_platforma\dashboard-proxy-credentials.txt`.
+- Both files and their parent directory allow access only to the operating
+  account, Administrators, and SYSTEM.
+- The credential value was not printed in command output or documentation.
+
+Verified:
+- Project and deployed Caddyfile SHA-256 hashes match.
+- The deployed configuration validates with the local auth env file.
+- Caddy reloaded successfully and remained a single process on ports 80, 443,
+  and the loopback admin endpoint 2019.
+- Dashboard requests without credentials and with invalid credentials returned
+  HTTP 401.
+- A dashboard request with valid credentials returned HTTP 200 HTML.
+- `/api/v1/auth/login` without gate credentials returned HTTP 401.
+- A gated login request reached FastAPI and returned HTTP 422 JSON for an empty
+  test payload.
+- An unauthenticated protected Bearer API route remained FastAPI HTTP 401 JSON.
+- FastAPI live/ready and Streamlit health endpoints remained HTTP 200.
+
+Not verified:
+- Access was not tested from a separate external network.
+- Browser credential prompting and WebSocket behavior were not exercised
+  manually in a graphical browser.
+
+Decisions/notes:
+- P0.2 uses the additional reverse-proxy authentication option.
+- Tailscale remains the emergency access path.
+- Remove the temporary gate only after P1 login throttling is complete.
+
+### 2026-06-12 - Security P0 restart handoff
+
+Current state before workstation restart:
+- Security checklist items P0.1 and P0.2 are completed.
+- FastAPI uses the rotated `API_TOKEN_SECRET` from the ignored local `.env`.
+- Tokens signed with the previous development secret are rejected with HTTP 401.
+- Caddy requires temporary shared authentication for the Streamlit surface and
+  `/api/v1/auth/login`.
+- Other `/api/*` routes remain under FastAPI Bearer authentication and are not
+  placed behind the Caddy Basic Auth gate.
+- The tracked and deployed Caddyfile SHA-256 hashes match.
+- At 2026-06-12 08:27 CEST, the scheduler heartbeat was current, the latest
+  quarter-hour status was `success`, and the next run was scheduled for 08:35.
+
+Sensitive local runtime files:
+- `C:\ProgramData\monitorovaci_platforma\caddy-dashboard-auth.env` contains the
+  Caddy username and bcrypt hash.
+- `C:\ProgramData\monitorovaci_platforma\dashboard-proxy-credentials.txt`
+  contains the plaintext operational credential handoff.
+- Do not print, commit, move, or delete these files.
+- Their ACL permits only the operating account, Administrators, and SYSTEM.
+
+Expected startup behavior:
+- `start_api_dashboard.bat` starts FastAPI, scheduler, and Streamlit.
+- After both health checks pass, it starts or reloads Caddy.
+- The launcher reads the Caddy gate settings from
+  `C:\ProgramData\monitorovaci_platforma\caddy-dashboard-auth.env`.
+- Missing or incomplete Caddy auth settings must stop Caddy startup rather than
+  expose the dashboard without the temporary gate.
+
+Required post-restart checks:
+- Confirm one FastAPI/Uvicorn listener on `127.0.0.1:8000`.
+- Confirm one Streamlit listener on `127.0.0.1:8001`.
+- Confirm one scheduler instance holds the `scheduler_process` lock and has a
+  current heartbeat.
+- Confirm one Caddy process owns TCP 80, 443, and loopback admin port 2019.
+- Confirm FastAPI `/health/live` and `/health/ready` return HTTP 200.
+- Confirm Streamlit `/_stcore/health` returns HTTP 200.
+- Confirm tracked and deployed Caddyfile hashes still match.
+- Confirm HTTP redirects to HTTPS with status 308.
+- Confirm HTTPS dashboard access without gate credentials returns HTTP 401 with
+  a Basic authentication challenge.
+- Confirm valid gate credentials return the Streamlit dashboard with HTTP 200.
+- Confirm `/api/v1/auth/login` without gate credentials returns HTTP 401.
+- Confirm valid gate credentials allow the login request to reach FastAPI.
+- Confirm an unauthenticated protected non-login `/api/*` route returns FastAPI
+  HTTP 401 JSON, not a Caddy Basic Auth response or Streamlit HTML.
+
+Verification completed before restart:
+- Targeted Caddy, security, authentication, and navigation suite: 37 passed.
+- FastAPI live/ready and Streamlit health endpoints returned HTTP 200.
+- Caddy configuration validation and reload passed.
+- Live gate checks passed for missing, invalid, and valid credentials.
+- `git diff --check` reported no whitespace errors.
+
+Working tree at handoff:
+- Security work remains uncommitted in `AGENTS.md`, `Caddyfile`,
+  `DASHBOARD_SECURITY_CHECKLIST.md`, `DECISIONS.md`,
+  `PUBLIC_HTTPS_DEPLOYMENT.md`, `SESSION_NOTES.md`,
+  `start_api_dashboard.bat`, `tests/test_caddy_config.py`,
+  `tests/test_dashboard_security_config.py`, and
+  `scripts/deploy_caddy_runtime.ps1`.
+- `data/smartfuelpass/session_cookies.json` is a separate sensitive runtime
+  change and must not be inspected, reverted, or included with security work
+  without explicit approval.
+
+Next security step:
+- Continue with P1.3, login throttling and abuse protection.
+- Preserve the temporary Caddy gate until application-level throttling is
+  implemented and verified.
+
+### 2026-06-12 - Application login throttling and Caddy gate removal
+
+Scope:
+- Restored the standard Streamlit login flow without a browser Basic Auth
+  prompt.
+- Replaced the temporary Caddy gate with FastAPI login throttling.
+
+Changed:
+- Added process-local login limits by normalized account and trusted client IP.
+- Added increasing temporary account lockouts and a bounded IP lockout.
+- Added generic authentication failures and dummy PBKDF2 work for unknown
+  accounts.
+- Restricted Uvicorn forwarded-header trust to loopback Caddy.
+- Removed Caddy gate directives and gate environment loading from the launcher
+  and deployment script.
+- Added DEC-024 and marked P1.3 complete.
+
+Verified:
+- Targeted login, authentication, Caddy, security, responsive-layout, and
+  navigation tests: 55 passed.
+- Python compilation passed for the changed authentication modules.
+- The tracked Caddy configuration validated successfully.
+- `git diff --check` reported no whitespace errors.
+- The tracked and deployed Caddyfile hashes match after deployment.
+- Public HTTPS returns the Streamlit page with HTTP 200 and no Basic Auth
+  challenge.
+- An empty public login request reaches FastAPI and returns HTTP 422 JSON.
+- A validly encoded invalid login returns the generic HTTP 401 response.
+- Live attempts 1-4 for a disposable account returned HTTP 401; attempt 5
+  returned HTTP 429 with `Retry-After: 30`.
+- Protected non-login API routes remain FastAPI HTTP 401 JSON.
+- FastAPI live/ready and Streamlit health endpoints remain HTTP 200.
+
+Not verified:
+- Credential-based dashboard login was not automated because no dashboard
+  password was read or requested.
+
+Decisions/notes:
+- DEC-024 supersedes the temporary gate decision DEC-023.
+- Retired ProgramData gate credential files remain sensitive and were not
+  deleted.
+
+### 2026-06-12 - Windows scheduled startup operating constraint
+
+Scope:
+- Recorded how the production runtime starts and how it must currently be
+  renewed after operational changes.
+
+Changed:
+- Added DEC-025.
+- Updated `AGENTS.md`, `PUBLIC_HTTPS_DEPLOYMENT.md`, and
+  `DASHBOARD_SECURITY_CHECKLIST.md` with the scheduled-start and recovery
+  contract.
+
+Decisions/notes:
+- Windows Task Scheduler launches `start_api_dashboard.bat` with the trigger
+  `At system startup`.
+- FastAPI, Streamlit, the scheduler, and Caddy therefore start without a user
+  logging into Windows.
+- These processes run in a non-interactive session and their console windows
+  cannot be accessed later.
+- The current supported way to renew the complete production runtime is to
+  restart the whole Windows workstation.
+- Future agents must not start a duplicate runtime set manually or assume that
+  individual scheduled processes can be safely restarted from an interactive
+  session.
+- Launcher and startup-argument changes require a workstation restart before
+  the scheduled runtime uses them.
+
+### 2026-06-12 - Mandatory restart handoff workflow
+
+Scope:
+- Added a mandatory state-preservation workflow before every Windows
+  workstation restart.
+
+Changed:
+- Added DEC-026.
+- Added the `Restart Handoff Template` to `SESSION_NOTES.md`.
+- Updated operating instructions, deployment documentation, and the security
+  checklist.
+
+Decisions/notes:
+- Before every restart, the active conversation/task state and expected
+  post-restart process state must be written to `SESSION_NOTES.md`.
+- The handoff must include the dirty working tree, runtime deployment state,
+  sensitive artifacts, expected processes/listeners, scheduler state, Caddy
+  state, exact HTTP expectations, and change-specific verification.
+- A restart must not be initiated or requested before the handoff is complete.
+- Actual post-restart verification and deviations must be appended afterward.
+
+### 2026-06-12 09:23 CEST - Pre-restart handoff
+
+Reason for restart:
+- Renew the complete production runtime through the supported Windows
+  Task Scheduler startup path.
+- Ensure the scheduled runtime loads the current `start_api_dashboard.bat`,
+  including trusted loopback proxy-header arguments, current login throttling,
+  and the Caddy configuration without the retired Basic Auth gate.
+
+Current task/conversation state:
+- Completed API signing-secret rotation and old-token rejection.
+- Removed the temporary Caddy Basic Auth browser prompt.
+- Restored the standard Streamlit dashboard login.
+- Added application login throttling by normalized account and trusted client
+  IP, generic authentication errors, and dummy PBKDF2 verification for unknown
+  users.
+- Added DEC-024, DEC-025, and DEC-026.
+- Documented Windows Task Scheduler startup and the mandatory restart handoff
+  workflow.
+- Pending: perform all checks below after restart and record actual results.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and
+  `SESSION_NOTES.md`, run `git status --short`, then execute the post-restart
+  checks in this handoff.
+- After successful verification, continue the dashboard security checklist;
+  the next unfinished authentication item is P1.4 audit logging and alerts.
+
+Working tree and deployment:
+- `git status --short` immediately before restart:
+
+```text
+ M AGENTS.md
+ M Caddyfile
+ M DASHBOARD_SECURITY_CHECKLIST.md
+ M DECISIONS.md
+ M PUBLIC_HTTPS_DEPLOYMENT.md
+ M SESSION_NOTES.md
+ M data/smartfuelpass/session_cookies.json
+ M moduly/apps/dashboard/api_client.py
+ M moduly/apps/dashboard/auth.py
+ M moduly/apps/dashboard/database/users.py
+ M moduly/apps/dashboard/login.py
+ M services/api/routes/auth.py
+ M start_api_dashboard.bat
+ M tests/test_auth_routes.py
+ M tests/test_caddy_config.py
+ M tests/test_dashboard_auth_service.py
+ M tests/test_dashboard_auth_state.py
+ M tests/test_dashboard_security_config.py
+?? scripts/deploy_caddy_runtime.ps1
+?? services/api/core/login_throttle.py
+?? tests/test_login_throttle.py
+```
+
+- Security/login/runtime changes remain uncommitted.
+- `data/smartfuelpass/session_cookies.json` is a separate sensitive runtime
+  change. Do not inspect, revert, delete, print, or include it with the
+  security work without explicit approval.
+- The tracked root `Caddyfile` is deployed to
+  `C:\Program Files\Caddy\Caddyfile`.
+- Tracked and deployed Caddyfile SHA-256 before restart:
+  `F41D3B31EA03308CB4345B1D11F0488B11D1FE527CBF135B0E1E166E5E7BC9BE`.
+- The deployed Caddy configuration validated successfully before restart.
+- Targeted login, authentication, Caddy, security, responsive-layout, and
+  navigation tests passed: 55 tests.
+- `git diff --check` reported no whitespace errors.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, or commit the ignored local `.env` containing
+  `API_TOKEN_SECRET`.
+- Do not print, change, delete, or commit
+  `data/smartfuelpass/session_cookies.json`.
+- The retired files
+  `C:\ProgramData\monitorovaci_platforma\caddy-dashboard-auth.env` and
+  `C:\ProgramData\monitorovaci_platforma\dashboard-proxy-credentials.txt`
+  remain sensitive even though Caddy no longer uses them.
+- Do not print bearer tokens, passwords, cookie values, or raw operational
+  data during verification.
+
+Windows scheduled startup expectation:
+- Scheduled task name: `API_dashboard_caddy`.
+- Executable:
+  `C:\Users\tra\PycharmProjects\monitorovaci_platforma\start_api_dashboard.bat`.
+- Trigger: Windows boot (`MSFT_TaskBootTrigger`, `At system startup`).
+- Principal: user `tra`, password logon type, highest run level.
+- The task starts the runtime without an interactive Windows login.
+
+Expected processes and listeners after restart:
+- One FastAPI/Uvicorn runtime owns the single listener
+  `127.0.0.1:8000`. Uvicorn reload mode may create a parent/child process tree,
+  but there must be only one listener.
+- One Streamlit runtime owns the single listener `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime from `C:\Program Files\Caddy\caddy.exe` owns TCP 80 and
+  443 plus the loopback admin endpoint `127.0.0.1:2019`.
+- Tailscale may separately own its Tailscale-interface port 443 listeners; this
+  is expected and is not a duplicate public Caddy listener.
+
+Expected application state after restart:
+- FastAPI `/health/live`: HTTP 200 JSON.
+- FastAPI `/health/ready`: HTTP 200 JSON.
+- Streamlit `/_stcore/health`: HTTP 200.
+- Scheduler metrics report `scheduler_running=true`, a heartbeat no older than
+  the configured 300-second TTL, and no duplicate process lock owner.
+- Before restart, the last `quarter_hour_job` run was
+  `2026-06-12T09:16:07.877981`, status `success`, with 0 failures in 24 hours;
+  the pre-restart next run was `2026-06-12T09:35:05+02:00`. After restart,
+  confirm the next applicable scheduled slot and at least one successful job.
+- The tracked and deployed Caddyfile hashes remain equal to the SHA-256 above.
+- The deployed Caddy configuration validates.
+- `http://monitoring.armexholding.cz` returns HTTP 308 to HTTPS.
+- `https://monitoring.armexholding.cz` returns the Streamlit page with HTTP 200
+  and no `WWW-Authenticate` Basic challenge or browser credential popup.
+- An unauthenticated protected non-login `/api/*` route returns FastAPI HTTP
+  401 JSON, not Streamlit HTML.
+- `/api/v1/auth/login` reaches FastAPI directly.
+- A validly encoded invalid login returns generic HTTP 401 JSON without account
+  enumeration detail.
+- A disposable test account returns HTTP 429 with `Retry-After` on the fifth
+  failed attempt; do not use a real dashboard account for this test.
+- A real dashboard credential login should be tested manually by the user;
+  no password should be read or requested by the agent.
+
+Required post-restart checks:
+- Confirm scheduled task startup completed and no duplicate listeners exist.
+- Confirm listeners on 8000, 8001, 80, 443, and 2019 match the expectations.
+- Confirm FastAPI live/ready and Streamlit health endpoints.
+- Confirm scheduler lock, heartbeat, latest status, and next run.
+- Confirm tracked/runtime Caddyfile hash equality and configuration validation.
+- Confirm HTTP 308, HTTPS dashboard 200 without Basic challenge, and protected
+  API 401 JSON.
+- Confirm generic invalid-login response and disposable-account throttling.
+- Confirm the working tree still contains the expected uncommitted changes and
+  no files were lost or unexpectedly modified by startup.
+- Append a dated post-restart verification entry with all results and
+  deviations.
+
+Known risks or accepted gaps:
+- Uvicorn production startup still uses `--reload`; removal remains P2.13.
+- Login throttle state is process-local and resets on restart; production
+  currently uses one API worker.
+- External access from a separate network and a real credential-based browser
+  login have not been automated.
+- The complete pytest suite was not rerun; the targeted security/dashboard set
+  passed 55 tests.
+
+### 2026-06-12 09:52 CEST - Post-restart verification
+
+Scope:
+- Verified the scheduled production runtime after the workstation restart
+  requested in the 09:23 CEST handoff.
+
+Verified:
+- Scheduled task `API_dashboard_caddy` ran at 09:25:23 with result `0`, uses a
+  boot trigger, and points to the tracked `start_api_dashboard.bat`.
+- FastAPI listens only on `127.0.0.1:8000`, Streamlit only on
+  `127.0.0.1:8001`, and one Caddy runtime owns public TCP 80/443 plus
+  `127.0.0.1:2019`. Separate Tailscale-interface 443 listeners remain expected.
+- FastAPI live/ready and Streamlit health endpoints returned HTTP 200.
+- The scheduler process lock was held. Metrics reported a running scheduler,
+  a current heartbeat, and a successful first post-restart
+  `quarter_hour_job` at 09:35:08 with zero failures in 24 hours.
+- Tracked and deployed Caddyfile SHA-256 values both equal
+  `F41D3B31EA03308CB4345B1D11F0488B11D1FE527CBF135B0E1E166E5E7BC9BE`.
+- The deployed Caddy configuration validated successfully.
+- HTTP returned 308 to HTTPS. HTTPS returned the Streamlit page with HTTP 200
+  and no Basic Auth challenge.
+- An unauthenticated protected API route returned FastAPI HTTP 401 JSON.
+- A validly encoded invalid login returned the generic HTTP 401 response.
+- A disposable account returned HTTP 401 on attempts 1-4 and HTTP 429 with
+  `Retry-After: 30` on attempt 5.
+- The working tree still contained the expected pre-restart changes; no
+  tracked file was lost or unexpectedly modified by startup.
+
+Not verified:
+- Public access from a separate external network was not tested because the
+  server does not have NAT loopback.
+- A real credential-based browser login was not automated or requested.
+
+Deviations:
+- None. A second Caddy process observed during parallel inspection was the
+  short-lived `caddy validate` command; only one Caddy process owned listeners.
+
+### 2026-06-12 - Authentication audit logging and alerts
+
+Scope:
+- Completed dashboard security checklist item P1.4.
+
+Changed:
+- Added structured authentication audit logging with daily rotation and
+  90-backup retention.
+- Added internal login reason categories while preserving one generic external
+  authentication failure response.
+- Added audit events for login success/failure/throttling, password changes,
+  token revocation, administrator password resets, role changes, activation
+  changes, account creation, and account deletion.
+- Added the same account/password/role/activation audit coverage to the
+  supported local user-management CLI.
+- Added warning events for account brute force, IP password spraying, and
+  repeated administrator-account failures.
+- Added DEC-027 and documented the protected audit path and thresholds.
+
+Runtime state:
+- The default audit file is
+  `C:\ProgramData\monitorovaci_platforma\logs\auth_audit.jsonl`.
+- Its ACL allows only SYSTEM, Administrators, and `ARMEX\tra`.
+- A live disposable-account test produced five failed-login records and one
+  `account_brute_force` warning record.
+- The disposable test password was absent from the matching JSONL records.
+
+Verified:
+- Authentication-audit, admin-audit, CLI-audit, auth-route, login-throttle,
+  auth-state, security-config, Caddy, navigation, and responsive-layout tests
+  passed: 65 tests.
+- Python compilation passed for all changed authentication and admin modules.
+- FastAPI live and ready endpoints remained HTTP 200 after Uvicorn reloaded the
+  changed source.
+
+Not verified:
+- A successful real-user login audit was not tested because no dashboard
+  password was read or requested.
+- Live IP password-spray and administrator-account alert thresholds were not
+  triggered to avoid blocking the production source IP or touching a real
+  administrator account; both are covered by unit tests.

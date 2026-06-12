@@ -7,7 +7,7 @@ from app.time_utils import utc_now_naive
 from moduly.apps.dashboard.database.models import Streamlit_Users
 from moduly.apps.dashboard.database.users import (
     any_users_exist,
-    authenticate_user,
+    authenticate_user_with_result,
     get_user,
     revoke_user_tokens,
     resolve_user_pages,
@@ -22,6 +22,17 @@ from moduly.apps.dashboard.navigation_config import get_page_definition, get_sec
 
 class AuthenticationError(ValueError):
     """Raised when username/password authentication fails."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason_category: str = "invalid_credentials",
+        is_admin_account: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.reason_category = reason_category
+        self.is_admin_account = bool(is_admin_account)
 
 
 class AuthorizationError(ValueError):
@@ -79,9 +90,14 @@ def build_user_context(
 
 
 def authenticate_dashboard_user(username: str, password: str) -> DashboardUserContext:
-    user = authenticate_user(username.strip(), password)
+    authentication = authenticate_user_with_result(username.strip(), password)
+    user = authentication.user
     if user is None:
-        raise AuthenticationError("Neplatne prihlasovaci udaje.")
+        raise AuthenticationError(
+            "Neplatne prihlasovaci udaje.",
+            reason_category=authentication.reason_category,
+            is_admin_account=authentication.is_admin_account,
+        )
 
     login_time = utc_now_naive()
     update_last_login(user.uzivatel, login_time)
@@ -152,7 +168,10 @@ def change_dashboard_user_password(
     new_password: str,
 ) -> None:
     if not verify_user_password(username, current_password):
-        raise AuthenticationError("Soucasne heslo neni spravne.")
+        raise AuthenticationError(
+            "Soucasne heslo neni spravne.",
+            reason_category="invalid_current_password",
+        )
     if len(new_password) < 8:
         raise UserUpdateError("Nove heslo musi mit alespon 8 znaku.")
     update_password(username, new_password)

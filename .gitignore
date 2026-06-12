@@ -13,6 +13,7 @@ npm-debug.log*
 .conv/
 
 core/scheduler/logs/
+services/api/logs/
 core/scheduler/locks/scheduler_process.lock
 core/scheduler/data/*.parquet
 data/*.parquet

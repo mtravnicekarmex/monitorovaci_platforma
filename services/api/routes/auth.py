@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials
 
 from app.dashboard_session import DASHBOARD_SESSION_COOKIE_NAME
+from services.api.core.auth_audit import auth_audit_service
 from services.api.core.dependencies import bearer_scheme, get_current_user
+from services.api.core.login_throttle import get_login_client_ip, login_attempt_limiter
 from services.api.core.tokens import TokenError, create_access_token, decode_access_token
 from services.api.schemas.auth import LoginRequest, TokenResponse, UserProfileResponse
 from services.api.schemas.auth import EmailUpdateRequest, PasswordChangeRequest, UsersExistResponse
@@ -23,6 +25,8 @@ from services.api.services.dashboard_auth import (
 
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+INVALID_LOGIN_DETAIL = "Neplatne prihlasovaci udaje."
+THROTTLED_LOGIN_DETAIL = "Prihlaseni je docasne omezeno. Zkuste to pozdeji."
 
 
 def _profile_from_context(user_context: DashboardUserContext) -> UserProfileResponse:
@@ -47,7 +51,21 @@ def users_exist() -> UsersExistResponse:
     description="Přihlášení uživatele. Vrací JWT access token a profil uživatele. "
     "Token je platný po dobu nastavenou v API_TOKEN_EXPIRE_MINUTES.",
 )
-def login(payload: LoginRequest) -> TokenResponse:
+def login(payload: LoginRequest, request: Request) -> TokenResponse:
+    client_ip = get_login_client_ip(request)
+    retry_after = login_attempt_limiter.retry_after(payload.username, client_ip)
+    if retry_after:
+        auth_audit_service.record_login_throttled(
+            username=payload.username,
+            source_ip=client_ip,
+            retry_after=retry_after,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=THROTTLED_LOGIN_DETAIL,
+            headers={"Retry-After": str(retry_after)},
+        )
+
     try:
         user_context = authenticate_dashboard_user(payload.username, payload.password)
         access_token, expires_at = create_access_token(
@@ -55,16 +73,47 @@ def login(payload: LoginRequest) -> TokenResponse:
             token_version=user_context.token_version,
         )
     except AuthenticationError as exc:
+        failure_status = login_attempt_limiter.register_failure_status(
+            payload.username,
+            client_ip,
+        )
+        auth_audit_service.record_login_failure(
+            username=payload.username,
+            source_ip=client_ip,
+            reason=exc.reason_category,
+            is_admin_account=exc.is_admin_account,
+            failure_status=failure_status,
+        )
+        if failure_status.retry_after:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=THROTTLED_LOGIN_DETAIL,
+                headers={"Retry-After": str(failure_status.retry_after)},
+            ) from exc
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(exc),
+            detail=INVALID_LOGIN_DETAIL,
         ) from exc
     except TokenError as exc:
+        auth_audit_service.record_security_event(
+            event_type="login",
+            result="error",
+            reason="token_issue_failed",
+            actor_username=payload.username,
+            target_username=payload.username,
+            source_ip=client_ip,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
         ) from exc
 
+    login_attempt_limiter.register_success(payload.username)
+    auth_audit_service.record_login_success(
+        username=user_context.username,
+        source_ip=client_ip,
+        is_admin=user_context.is_admin,
+    )
     return TokenResponse(
         access_token=access_token,
         expires_at=expires_at,
@@ -168,6 +217,7 @@ def update_my_email(
 )
 def change_my_password(
     payload: PasswordChangeRequest,
+    request: Request,
     current_user: DashboardUserContext = Depends(get_current_user),
 ) -> Response:
     try:
@@ -177,16 +227,49 @@ def change_my_password(
             payload.new_password,
         )
     except AuthenticationError as exc:
+        auth_audit_service.record_security_event(
+            event_type="password_change",
+            result="failure",
+            reason=exc.reason_category,
+            actor_username=current_user.username,
+            target_username=current_user.username,
+            source_ip=get_login_client_ip(request),
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),
         ) from exc
     except UserUpdateError as exc:
+        auth_audit_service.record_security_event(
+            event_type="password_change",
+            result="failure",
+            reason="password_policy_rejected",
+            actor_username=current_user.username,
+            target_username=current_user.username,
+            source_ip=get_login_client_ip(request),
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
 
+    client_ip = get_login_client_ip(request)
+    auth_audit_service.record_security_event(
+        event_type="password_change",
+        result="success",
+        reason="self_service",
+        actor_username=current_user.username,
+        target_username=current_user.username,
+        source_ip=client_ip,
+    )
+    auth_audit_service.record_security_event(
+        event_type="token_revocation",
+        result="success",
+        reason="password_change",
+        actor_username=current_user.username,
+        target_username=current_user.username,
+        source_ip=client_ip,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -196,6 +279,17 @@ def change_my_password(
     summary="User logout",
     description="Odhlášení uživatele. Zruší platnost tokenu.",
 )
-def logout(current_user: DashboardUserContext = Depends(get_current_user)) -> Response:
+def logout(
+    request: Request,
+    current_user: DashboardUserContext = Depends(get_current_user),
+) -> Response:
     logout_dashboard_user(current_user.username)
+    auth_audit_service.record_security_event(
+        event_type="token_revocation",
+        result="success",
+        reason="logout",
+        actor_username=current_user.username,
+        target_username=current_user.username,
+        source_ip=get_login_client_ip(request),
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

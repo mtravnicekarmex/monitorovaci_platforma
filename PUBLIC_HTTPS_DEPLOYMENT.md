@@ -31,7 +31,68 @@ Tailscale Serve zustane behem pripravy a po nasazeni jako neveřejny servisni a 
 - Caddy je nainstalovan v `C:\Program Files\Caddy`.
 - Aktivni konfigurace je `C:\Program Files\Caddy\Caddyfile`.
 - Caddy zprostredkovava `/api/*` do FastAPI a ostatni provoz do Streamlit.
+- Verejna stranka zobrazuje primo standardni Streamlit login bez druheho
+  browser Basic Auth dialogu.
+- FastAPI omezuje neuspesne pokusy na `/api/v1/auth/login` podle uctu a
+  duveryhodne klientske IP.
 - Tailscale Serve poskytuje funkcni soukromy HTTPS pristup.
+- `start_api_dashboard.bat` spousti Windows Planovac uloh pri spusteni systemu.
+  Procesy se proto obnovi bez prihlaseni uzivatele do Windows.
+
+## Spousteni a obnova procesu
+
+Produkci spousti Windows Planovac uloh:
+
+- Program: `start_api_dashboard.bat`
+- Aktivacni udalost: `Pri spusteni systemu`
+- Ucel: spustit FastAPI, Streamlit, scheduler a Caddy bez nutnosti
+  interaktivniho prihlaseni uzivatele.
+
+Procesy bezici z teto naplanovane ulohy jsou v neinteraktivni relaci. Jejich
+konzolova okna nejsou pozdeji dostupna pro beznou obsluhu. Soucasny podporovany
+postup pro obnoveni cele sady procesu je restart cele Windows stanice.
+
+Provozni pravidla:
+
+1. Nespoustet rucne dalsi kopii `start_api_dashboard.bat`, pokud planovana sada
+   procesu stale bezi.
+2. Pri zmene launcheru nebo jeho startovacich argumentu pocitat s restartem
+   stanice, aby Planovac uloh spustil novou konfiguraci.
+3. Pred kazdym restartem zapsat do `SESSION_NOTES.md` predrestartovy handoff
+   podle sablony nize.
+4. Po restartu vzdy overit FastAPI, Streamlit, scheduler, Caddy, listenery a
+   verejne HTTPS podle restart checklistu.
+5. Samostatne ukoncovani a znovuspousteni produkcnich procesu nepovazovat za
+   podporovany recovery postup, dokud nebude provozni model zmenen.
+
+### Povinny predrestartovy handoff
+
+Pred restartem se musi zapsat:
+
+1. Datum a cas, duvod restartu a aktualni cil prace.
+2. Co je dokonceno, co zustava otevrene a co ma dalsi relace udelat jako prvni.
+3. `git status --short`, relevantni zmenene soubory a informace, zda jsou zmeny
+   nasazene do runtime umisteni.
+4. Citlive nebo provozni soubory, ktere se nesmi tisknout, menit, mazat ani
+   commitovat.
+5. Ocekavane procesy po restartu:
+   - FastAPI/Uvicorn
+   - Streamlit
+   - scheduler `main.py`
+   - Caddy
+6. Ocekavane listenery:
+   - FastAPI `127.0.0.1:8000`
+   - Streamlit `127.0.0.1:8001`
+   - Caddy TCP `80`, `443`
+   - Caddy admin `127.0.0.1:2019`
+7. Ocekavany scheduler lock, heartbeat, posledni/nejblizsi job a stav metrik.
+8. Ocekavanou Caddy konfiguraci, shodu tracked/runtime souboru a verejne
+   smerovani.
+9. Presne post-restart kontroly a ocekavane HTTP statusy.
+10. Kontroly specificke pro zmenu, kvuli ktere se restart provadi.
+
+Restart se nema zahajit ani doporucit, dokud tento handoff neni zapsany.
+Po restartu se do `SESSION_NOTES.md` doplni skutecny stav a vsechny odchylky.
 
 ## Bezpecnostni pravidla
 
@@ -42,6 +103,9 @@ Tailscale Serve zustane behem pripravy a po nasazeni jako neveřejny servisni a 
 - Uvicorn nesmi byt ve verejnem provozu spusten s `--reload`.
 - Pred zverejnenim se musi overit hesla a ochrana prihlasovaciho endpointu.
 - Pri kazdem kroku musi zustat funkcni Tailscale jako zalozni pristup.
+- Uvicorn prijima forwarded klientskou IP pouze od Caddy na `127.0.0.1`.
+- Aplikace necte raw `X-Forwarded-For`; pouziva klientskou IP z duveryhodneho
+  request scope.
 
 ## Checklist
 
@@ -65,7 +129,7 @@ Je znam konecny verejny hostname a mame pristup k jeho DNS zone.
 - [ ] Odstranit `--reload` ze spousteni Uvicorn.
 - [ ] Overit, ze `.env` a dalsi soubory se secrets nejsou verzovane ani verejne dostupne.
 - [ ] Overit silna hesla vsech aktivnich dashboard uzivatelu.
-- [ ] Doplnit omezeni pokusu o prihlaseni nebo jinou ochranu proti hrube sile.
+- [x] Doplnit omezeni pokusu o prihlaseni nebo jinou ochranu proti hrube sile.
 - [ ] Zkontrolovat delku prihlasovaci relace/tokenů pro verejny provoz.
 - [ ] Overit, ze administracni a datove endpointy vyzaduji spravne opravneni.
 
@@ -180,24 +244,80 @@ Verejny pristup je mozny pouze pres HTTPS na konecnem hostname.
 
 ### 8. Provozni dokonceni
 
-- [ ] Overit automaticky start Caddy, FastAPI, Streamlit a scheduleru po restartu.
-- [ ] Overit obnoveni dashboardu po restartu SERVER4A.
+- [x] Overit automaticky start Caddy, FastAPI, Streamlit a scheduleru po restartu.
+- [x] Overit obnoveni dashboardu po restartu SERVER4A.
 - [ ] Zavest zalohovani Caddy datoveho adresare a lokalni konfigurace.
 - [ ] Zavest kontrolu dostupnosti HTTPS endpointu.
 - [ ] Zkontrolovat a pravidelne aktualizovat Caddy, Tailscale a Python zavislosti.
-- [ ] Zdokumentovat navratovy postup pri vypadku verejneho HTTPS.
+- [x] Zdokumentovat navratovy postup pri vypadku verejneho HTTPS.
 
 ## Navratovy postup
 
 Pokud verejne HTTPS po zmene nefunguje:
 
 1. Pouzit Tailscale Serve pro servisni pristup.
-2. Obnovit posledni validni `C:\Program Files\Caddy\Caddyfile`.
-3. Validovat konfiguraci pres `C:\Program Files\Caddy\caddy.exe`.
-4. Reloadovat Caddy pres admin endpoint `127.0.0.1:2019`.
-5. Zkontrolovat, ze FastAPI bezi na `127.0.0.1:8000`.
-6. Zkontrolovat, ze Streamlit bezi na `127.0.0.1:8001`.
-7. Docasny port `8080` odstranit az po potvrzeni funkcniho HTTPS.
+2. Pokud je problem pouze v Caddy konfiguraci, obnovit posledni validni
+   `C:\Program Files\Caddy\Caddyfile`, validovat ji a reloadovat Caddy pres
+   admin endpoint `127.0.0.1:2019`.
+3. Pokud je nutne obnovit aplikacni procesy nebo celou runtime sadu,
+   restartovat Windows stanici. Toto je soucasny podporovany recovery postup.
+4. Po restartu zkontrolovat FastAPI na `127.0.0.1:8000`, Streamlit na
+   `127.0.0.1:8001`, scheduler heartbeat, Caddy listenery a verejne HTTPS.
+5. Nespoustet rucne druhou sadu procesu vedle procesu spustenych Planovacem
+   uloh.
+
+## Ochrana prihlaseni
+
+FastAPI omezuje `/api/v1/auth/login` soucasne podle normalizovaneho
+uzivatelskeho jmena a klientské IP. Po peti neuspesnych pokusech pro jeden ucet
+zacina docasny lockout 30 sekund a pri dalsich selhanich roste az na 15 minut.
+Po dvaceti neuspesnych pokusech z jedne IP behem 15 minut se IP docasne blokuje
+na 15 minut.
+
+Caddy jiz nevyzaduje druhou sadu prihlasovacich udaju. Soubory
+`C:\ProgramData\monitorovaci_platforma\caddy-dashboard-auth.env` a
+`C:\ProgramData\monitorovaci_platforma\dashboard-proxy-credentials.txt` jsou
+vyrazene z provozu, ale nadale se povazuji za citlive. Nesmi se tisknout,
+commitovat ani mazat bez samostatneho schvaleni.
+
+### Authentication audit log
+
+FastAPI zapisuje autentizacni a uctove bezpecnostni udalosti jako JSONL do:
+
+```text
+C:\ProgramData\monitorovaci_platforma\logs\auth_audit.jsonl
+```
+
+Soubor se denne rotuje a standardne uchovava 90 zaloh. Cestu a retenci lze
+zmenit pres `AUTH_AUDIT_LOG_PATH` a `AUTH_AUDIT_RETENTION_DAYS`. Adresar musi
+zustat mimo verejne servirovane cesty a musi dedit omezeny ACL ProgramData.
+
+Audit obsahuje normalizovany identifikator uctu, duveryhodnou zdrojovou IP,
+vysledek, kategorii duvodu a bezpecne citace. Nesmi obsahovat hesla, bearer
+tokeny ani hodnoty cookies. Alert zaznamy se severity `warning` vznikaji pri:
+
+- vstupu uctu do lockoutu po 5 neuspesnych pokusech,
+- IP lockoutu po 20 neuspesnych pokusech napric ucty,
+- 3 neuspesnych pokusech na administratorsky ucet behem 15 minut.
+
+Nasazeni tracked konfigurace do `C:\Program Files\Caddy` se provadi z
+elevovaneho PowerShellu:
+
+```powershell
+.\scripts\deploy_caddy_runtime.ps1
+```
+
+Skript pred kopii validuje konfiguraci, vytvori timestampovanou zalohu a pri
+selhani reloadu obnovi predchozi runtime konfiguraci.
+
+Rollback:
+
+1. Obnovit posledni validni zalohu `Caddyfile`.
+2. Validovat a reloadovat Caddy.
+3. Overit dashboard HTTP 200 a FastAPI HTTP 401 na chranene API trase bez
+   bearer tokenu.
+4. Overit, ze neuspesne login pokusy vraceji generickou chybu a po limitu HTTP
+   429 s `Retry-After`.
 
 ## Prvni dalsi krok
 

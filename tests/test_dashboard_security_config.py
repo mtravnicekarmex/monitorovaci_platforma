@@ -13,7 +13,7 @@ RUNTIME_LAUNCHERS = (
     PROJECT_ROOT / "scripts" / "start_all_services.ps1",
     PROJECT_ROOT / "run.txt",
 )
-COMPROMISED_DEVELOPMENT_SECRET = b"monitoring-platforma-local-dev-secret"
+COMPROMISED_DEVELOPMENT_SECRET = b"monitoring-platforma-" + b"local-dev-secret"
 
 
 def test_runtime_launchers_do_not_contain_or_assign_api_token_secret():

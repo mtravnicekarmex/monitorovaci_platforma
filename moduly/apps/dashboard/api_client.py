@@ -74,6 +74,7 @@ def _request(
     json_payload: dict[str, object] | None = None,
     query_params: dict[str, object] | None = None,
     params: dict[str, object] | None = None,
+    extra_headers: dict[str, str] | None = None,
 ) -> requests.Response:
     resolved_query_params: dict[str, object] | None
     if query_params is None:
@@ -83,11 +84,15 @@ def _request(
     else:
         resolved_query_params = {**params, **query_params}
 
+    request_headers = _headers(access_token)
+    if extra_headers:
+        request_headers.update(extra_headers)
+
     try:
         response = requests.request(
             method=method,
             url=_build_url(path),
-            headers=_headers(access_token),
+            headers=request_headers,
             json=json_payload,
             params=resolved_query_params,
             timeout=DEFAULT_TIMEOUT_SECONDS,
@@ -118,7 +123,17 @@ def any_dashboard_users_exist() -> bool:
     return bool(payload.get("users_exist"))
 
 
-def login(username: str, password: str) -> DashboardSessionPayload:
+def login(
+    username: str,
+    password: str,
+    *,
+    client_ip: str | None = None,
+) -> DashboardSessionPayload:
+    extra_headers = (
+        {"X-Dashboard-Client-IP": client_ip}
+        if client_ip
+        else None
+    )
     response = _request(
         "POST",
         "/api/v1/auth/login",
@@ -126,6 +141,7 @@ def login(username: str, password: str) -> DashboardSessionPayload:
             "username": username,
             "password": password,
         },
+        extra_headers=extra_headers,
     )
     payload = response.json()
     return DashboardSessionPayload(

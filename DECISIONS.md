@@ -339,3 +339,144 @@ Implications:
 - FastAPI startup fails when the secret is missing or remains set to the documented placeholder.
 - Rotating the secret invalidates every bearer token signed with the previous value.
 - Regression tests must prevent fixed API signing secrets from returning to tracked launchers.
+
+## DEC-023: Public Login Has A Temporary Caddy Authentication Gate
+
+Date: 2026-06-12
+
+Decision: Until application-level login throttling is complete, Caddy requires
+a temporary shared authentication gate for the Streamlit surface and the
+public `/api/v1/auth/login` endpoint.
+
+Rationale: The dashboard must remain available through its public hostname,
+but unrestricted automated login attempts should not reach the application.
+Stable corporate client IP ranges were not available, and switching to
+Tailscale-only access would remove the supported public entry point.
+
+Implications:
+
+- Other `/api/*` routes are not placed behind Caddy Basic Auth because they
+  use FastAPI Bearer tokens in the same HTTP `Authorization` header.
+- The gate username and bcrypt hash are loaded from
+  `C:\ProgramData\monitorovaci_platforma\caddy-dashboard-auth.env`.
+- The plaintext credential handoff is stored separately under ProgramData with
+  restrictive Windows ACL and must never be committed or printed in logs.
+- `scripts/deploy_caddy_runtime.ps1` validates, backs up, deploys, and reloads
+  the tracked Caddy configuration from an elevated PowerShell session.
+- Tailscale remains the emergency access path.
+- Remove the temporary gate only after login throttling and abuse protection
+  are implemented and verified.
+
+## DEC-024: Application Login Throttling Replaces The Caddy Gate
+
+Date: 2026-06-12
+
+Supersedes: DEC-023
+
+Decision: The temporary Caddy Basic Auth gate is removed. The public Streamlit
+page uses the normal dashboard login form, while FastAPI rate-limits
+`/api/v1/auth/login` by normalized account identifier and trusted client IP.
+
+Rationale: The second browser authentication prompt used unrelated credentials,
+prevented dashboard administrator credentials from working at the first prompt,
+and made the supported login flow confusing. Application-level throttling now
+provides abuse protection at the actual authentication boundary.
+
+Implications:
+
+- Caddy no longer loads `DASHBOARD_GATE_USERNAME` or
+  `DASHBOARD_GATE_PASSWORD_HASH`.
+- Account failures trigger increasing temporary lockouts; IP failures also have
+  a bounded temporary limit across different account identifiers.
+- Unknown, inactive, and incorrect-password attempts return the same generic
+  authentication response and perform password-hash work.
+- Uvicorn trusts proxy headers only from `127.0.0.1`; the login route uses
+  `request.client.host` and does not parse raw forwarded headers.
+- Throttle state is process-local and resets when FastAPI restarts. The current
+  production topology uses one API worker.
+- The retired ProgramData gate credential files remain sensitive artifacts and
+  must not be printed or deleted without explicit approval.
+
+## DEC-025: Production Runtime Starts Through Windows Task Scheduler
+
+Date: 2026-06-12
+
+Decision: On the Windows production workstation, Windows Task Scheduler starts
+`start_api_dashboard.bat` with the trigger `At system startup`. The current
+supported method for renewing the complete FastAPI, Streamlit, scheduler, and
+Caddy process set is a full workstation restart.
+
+Rationale: The processes must recover after any workstation restart without
+requiring an interactive user login. Processes launched by the scheduled task
+run in a non-interactive session, so their console windows are not available
+for later operational control.
+
+Implications:
+
+- Production startup does not depend on a user signing into Windows.
+- Agents must not assume they can access, close, or recreate the scheduled
+  process consoles from an interactive session.
+- When a launcher change or complete process renewal is required, plan for a
+  full workstation restart and the corresponding post-restart verification.
+- Avoid starting duplicate FastAPI, Streamlit, scheduler, or Caddy instances
+  manually while the scheduled runtime is active.
+- A future migration to Windows services or separately controllable scheduled
+  tasks requires an explicit operational decision and documented rollback.
+
+## DEC-026: Every Workstation Restart Requires A Written Handoff
+
+Date: 2026-06-12
+
+Decision: Before every Windows workstation restart, the active session must
+write a dated restart handoff to `SESSION_NOTES.md`. The handoff must record the
+current work/conversation state and the expected runtime state after restart.
+
+Rationale: A workstation restart is the supported way to renew the production
+process set, but it also removes access to the active process state and can
+interrupt unfinished work. A concrete handoff allows the next session to
+continue without reconstructing assumptions or exposing the system to
+incomplete post-restart verification.
+
+Implications:
+
+- The pre-restart handoff records the reason for restart, completed work,
+  pending work, changed/uncommitted files, deployment state, known risks, and
+  sensitive files that must remain untouched.
+- It records expected FastAPI, Streamlit, scheduler, and Caddy processes,
+  loopback/public listeners, configuration paths, and relevant scheduled-task
+  behavior.
+- It defines exact post-restart checks, including health endpoints, scheduler
+  lock/heartbeat/job status, Caddy configuration/hash/listeners, HTTPS routing,
+  authentication behavior, and checks specific to the change that triggered
+  the restart.
+- A restart must not be initiated or requested before the handoff is written
+  and reviewed for completeness.
+- After restart, the verification result is appended to `SESSION_NOTES.md`,
+  including deviations from the expected state.
+
+## DEC-027: Authentication Security Events Use A Protected Audit Log
+
+Date: 2026-06-12
+
+Decision: FastAPI authentication and account-security events are recorded as
+structured JSONL outside the dashboard response surface, under
+`C:\ProgramData\monitorovaci_platforma\logs\auth_audit.jsonl` by default.
+
+Rationale: Successful and failed authentication, token revocation, password
+changes, role changes, and activation changes must be retained for incident
+investigation without exposing credentials or operational logs to dashboard
+users.
+
+Implications:
+
+- Audit records contain UTC timestamp, normalized account identifiers, trusted
+  source IP, result, reason category, and bounded security counters.
+- Passwords, bearer tokens, and cookie values are never accepted as audit
+  fields.
+- The log rotates daily and retains 90 backups unless explicitly configured
+  otherwise.
+- Warning events are emitted at the account lockout threshold, the IP
+  password-spray threshold, and after three administrator-account failures in
+  15 minutes.
+- Audit write failures must not change authentication responses or expose log
+  content to clients.

@@ -6,9 +6,9 @@ from moduly.apps.dashboard.api_client import DashboardApiError, DashboardSession
 
 
 class FakeStreamlit:
-    def __init__(self, cookies=None):
+    def __init__(self, cookies=None, headers=None):
         self.session_state = {}
-        self.context = SimpleNamespace(cookies=cookies or {})
+        self.context = SimpleNamespace(cookies=cookies or {}, headers=headers or {})
         self.html_calls = []
 
     def html(self, body, *, unsafe_allow_javascript=False):
@@ -86,6 +86,29 @@ def test_login_schedules_cookie_sync_for_navigation_reruns(monkeypatch):
     assert fake_st.session_state["auth_cookie_sync_runs_remaining"] == 0
 
 
+def test_login_forwards_browser_ip_from_streamlit_context(monkeypatch):
+    fake_st = FakeStreamlit(headers={"X-Forwarded-For": "203.0.113.99, 127.0.0.1"})
+    monkeypatch.setattr(auth, "st", fake_st)
+    captured = {}
+
+    def fake_login(username, password, *, client_ip=None):
+        captured.update(username=username, password=password, client_ip=client_ip)
+        return DashboardSessionPayload(
+            access_token="new-token",
+            expires_at="2026-06-11T18:00:00",
+            user=_user_payload(),
+        )
+
+    monkeypatch.setattr(auth, "api_login", fake_login)
+
+    assert auth.login("tester", "secret") is True
+    assert captured == {
+        "username": "tester",
+        "password": "secret",
+        "client_ip": "203.0.113.99",
+    }
+
+
 def test_api_outage_does_not_delete_persisted_cookie(monkeypatch):
     fake_st = FakeStreamlit({DASHBOARD_SESSION_COOKIE_NAME: "persisted-token"})
     monkeypatch.setattr(auth, "st", fake_st)
@@ -97,4 +120,3 @@ def test_api_outage_does_not_delete_persisted_cookie(monkeypatch):
 
     assert auth.restore_auth_state_from_browser_cookie() is False
     assert fake_st.session_state["auth_cookie_clear_pending"] is False
-

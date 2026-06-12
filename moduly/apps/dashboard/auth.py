@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 from pathlib import Path
 import sys
@@ -28,6 +29,9 @@ from moduly.apps.dashboard.navigation_config import (
     get_page_definition_by_path,
     get_section_definition,
 )
+
+
+LOGIN_CLIENT_IP_FORWARDING_ENABLED = True
 
 
 def init_auth_state() -> None:
@@ -184,6 +188,18 @@ def current_username() -> str:
     return str(st.session_state["auth_user"])
 
 
+def _get_dashboard_client_ip() -> str | None:
+    headers = getattr(st.context, "headers", {})
+    forwarded_for = str(headers.get("X-Forwarded-For", "") or "")
+    candidate = forwarded_for.split(",", 1)[0].strip()
+    if not candidate:
+        return None
+    try:
+        return ipaddress.ip_address(candidate).compressed
+    except ValueError:
+        return None
+
+
 def is_admin() -> bool:
     init_auth_state()
     return bool(st.session_state["auth_is_admin"])
@@ -258,7 +274,11 @@ def apply_authenticated_user(
 
 
 def login(username: str, password: str) -> bool:
-    session_payload = api_login(username, password)
+    client_ip = _get_dashboard_client_ip()
+    if client_ip:
+        session_payload = api_login(username, password, client_ip=client_ip)
+    else:
+        session_payload = api_login(username, password)
     apply_authenticated_user(
         session_payload.user,
         access_token=session_payload.access_token,

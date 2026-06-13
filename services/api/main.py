@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
+from contextlib import suppress
+import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from moduly.apps.dashboard.database.db_init import ensure_dashboard_tables
 from services.api.core.config import get_api_settings
+from services.api.core.runtime_state import api_readiness
 from services.api.routes.admin import router as admin_router
 from services.api.routes.auth import router as auth_router
 from services.api.routes.health import router as health_router
@@ -20,12 +24,44 @@ from services.api.routes.web_search import router as web_search_router
 
 
 settings = get_api_settings()
+logger = logging.getLogger(__name__)
+DATABASE_INIT_RETRY_SECONDS = 30
+
+
+async def initialize_dashboard_tables_until_ready() -> None:
+    api_readiness.mark_not_ready()
+    while True:
+        try:
+            await asyncio.to_thread(ensure_dashboard_tables)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            api_readiness.mark_not_ready()
+            logger.warning(
+                "Dashboard database initialization failed; "
+                "error_type=%s; retrying in %s seconds.",
+                type(exc).__name__,
+                DATABASE_INIT_RETRY_SECONDS,
+            )
+            await asyncio.sleep(DATABASE_INIT_RETRY_SECONDS)
+        else:
+            api_readiness.mark_ready()
+            logger.info("Dashboard database initialization completed.")
+            return
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    ensure_dashboard_tables()
-    yield
+    initialization_task = asyncio.create_task(
+        initialize_dashboard_tables_until_ready()
+    )
+    try:
+        yield
+    finally:
+        initialization_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await initialization_task
+        api_readiness.mark_not_ready()
 
 
 app = FastAPI(

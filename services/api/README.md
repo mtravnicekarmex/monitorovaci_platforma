@@ -62,8 +62,8 @@ Automaticky generovaná dokumentace je dostupná na:
 #### Health
 | Metoda | Cesta | Popis |
 |--------|-------|-------|
-| GET | `/health/live` | Liveness check |
-| GET | `/health/ready` | Readiness check |
+| GET | `/health/live` | Process liveness; does not wait for database initialization |
+| GET | `/health/ready` | HTTP 200 after database initialization, otherwise HTTP 503 |
 | GET | `/health/scheduler` | Stav scheduleru (admin) |
 
 #### Auth

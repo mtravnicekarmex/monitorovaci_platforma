@@ -600,3 +600,131 @@ Implications:
   changes do not revoke sessions.
 - Logout explicitly deletes both the current and legacy cookies and clears
   origin cache and storage without requesting domain-wide cookie clearing.
+
+## DEC-032: FastAPI Liveness Is Independent Of Database Readiness
+
+Date: 2026-06-13
+
+Decision: FastAPI completes application startup and exposes `/health/live`
+without waiting for PostgreSQL dashboard-table initialization. Database
+initialization runs in a background retry task, and `/health/ready` returns
+HTTP 503 until initialization succeeds.
+
+Rationale: The production launcher waits for FastAPI liveness before starting
+Streamlit and Caddy. A synchronous database bootstrap in the FastAPI lifespan
+made a PostgreSQL network outage prevent all three public runtime surfaces from
+starting after a workstation restart, even though liveness itself does not
+require database access.
+
+Implications:
+
+- `/health/live` reports whether the API process can serve requests and remains
+  independent of database availability.
+- `/health/ready` reports whether startup database initialization completed.
+- Failed initialization attempts are retried without blocking the event loop or
+  exposing raw connection details in the retry log.
+- Authentication and data routes can remain unavailable while readiness is
+  HTTP 503; callers must not interpret liveness as database readiness.
+- The launcher can continue to start Streamlit and Caddy after API liveness is
+  established, while readiness continues to expose the database outage.
+
+## DEC-033: Scheduler Availability Alerts Contain Only Service Names
+
+Date: 2026-06-13
+
+Decision: Before each scheduled database job performs its database preflight,
+the scheduler checks local API liveness, Streamlit health, and the Caddy admin
+listener. Availability alert emails contain only the standardized
+`Nedostupnost ...` service messages and no operational diagnostics.
+
+Rationale: Availability alerts must be immediately readable and must not expose
+connection errors, URLs, job identifiers, timestamps, stack traces, or other
+runtime details. Technical diagnostics remain in protected scheduler logs.
+
+Implications:
+
+- PostgreSQL and MSSQL failures still prevent the scheduled data job from
+  starting.
+- Database alert email content is limited to `Nedostupnost POSTGRES` and/or
+  `Nedostupnost MSSQL`.
+- Runtime alert email content is limited to `Nedostupnost API`,
+  `Nedostupnost DASHBOARD`, and/or `Nedostupnost CADDY`.
+- Runtime failures do not block database jobs.
+- Runtime probes are retried once to avoid alerts for a short reload.
+- A runtime service alerts only on transition to unavailable; it may alert
+  again after it recovers and subsequently becomes unavailable.
+- `RUNTIME_ERROR_RECIPIENTS` is optional and falls back to
+  `DATABASE_ERROR_RECIPIENTS`.
+
+## DEC-034: Scheduler Alert Detail Depends On Active Admin Assignment
+
+Date: 2026-06-13
+
+Clarifies: DEC-033
+
+Decision: Operational scheduler alerts select their content separately for
+each recipient. A recipient email assigned to an active dashboard admin
+account receives technical details. Every other recipient receives only the
+brief alert text defined by DEC-033.
+
+Rationale: Administrators need diagnostic context for incident response, while
+non-admin recipients should receive a minimal operational notification without
+internal targets, exception reasons, job identifiers, or timestamps.
+
+Implications:
+
+- The rule applies to scheduler job failure/misfire alerts, database
+  availability alerts, and API/dashboard/Caddy availability alerts.
+- Email matching is trimmed and case-insensitive.
+- Admin classification requires both `is_admin=true` and `is_active=true`.
+- The scheduler refreshes a local cache after a successful PostgreSQL
+  preflight query. The cache stores only SHA-256 email hashes, never plaintext
+  email addresses.
+- The cache expires after 24 hours. Missing, invalid, stale, or unavailable
+  classification fails closed to the brief non-admin alert.
+- Technical details may include job or service identity, detection time,
+  checked target, and sanitized exception reason. They must never include
+  passwords, bearer tokens, cookies, signing secrets, or raw credentials.
+- Domain measurement notifications and scheduled report emails keep their
+  existing content rules and are not changed by this decision.
+
+## DEC-035: Database Availability Alerts Use Local SQLite Transitions
+
+Date: 2026-06-13
+
+Decision: `quarter_hour_job` persists PostgreSQL and MSSQL availability in a
+local SQLite database and sends database availability emails only for state
+transitions. It sends one alert on transition to unavailable and one recovery
+summary on transition back to available.
+
+Rationale: Stateless database preflight alerting sent the same outage email
+every quarter-hour while a database remained unavailable. A local store remains
+available during PostgreSQL/MSSQL outages and preserves incident state across
+scheduler and workstation restarts.
+
+Implications:
+
+- The runtime database is
+  `core/scheduler/data/database_availability.sqlite3` and is ignored by Git.
+- `database_availability_state` stores current service state, first observed
+  outage time, latest check, latest sanitized reason, and failed-check count.
+- `database_availability_events` stores transition events and delivery state.
+  Delivered events remain as a small incident history; only transitions create
+  rows.
+- Initial availability creates baseline state without a recovery email.
+  Initial unavailability creates one outage event.
+- Repeated unavailable checks update state without creating another event or
+  email.
+- Recovery email content includes the first failed observation, first
+  successful observation, and observed duration for each recovered database.
+- Active admin recipients additionally receive the latest sanitized technical
+  reason and failed-check count according to DEC-034.
+- Transition events remain pending after failed email delivery and are retried
+  by a later `quarter_hour_job`.
+- Other scheduled jobs continue to skip when database preflight fails, but
+  they do not record transitions or send database availability emails.
+- SQLite registry failures are logged and do not change database-job preflight
+  results. They suppress transition email handling rather than falling back to
+  repeated stateless alerts.
+- Incident boundaries have quarter-hour scheduler resolution and represent
+  observation times, not exact database or network transition times.

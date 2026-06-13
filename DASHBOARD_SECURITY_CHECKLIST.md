@@ -426,6 +426,26 @@ Current operational constraint documented on 2026-06-12:
 - Do not initiate or request the restart until the handoff is complete. After
   restart, append actual verification results and any deviations.
 
+Startup resilience correction on 2026-06-13:
+
+- Diff review confirmed that P1.3-P1.9 did not introduce the synchronous
+  `ensure_dashboard_tables()` FastAPI lifespan call or the API liveness gate in
+  the launcher. Those behaviors predated the security checklist.
+- The cold-start failure was caused by their interaction: PostgreSQL was
+  unavailable, FastAPI never exposed liveness, and the launcher therefore did
+  not start Streamlit or Caddy.
+- FastAPI now exposes liveness independently, retries dashboard database
+  initialization in the background, and returns HTTP 503 from readiness until
+  initialization succeeds.
+- The focused startup, authentication, session, map, Caddy, and security suite
+  passed 57 tests. Live verification during the continuing database outage
+  returned HTTP 200 for liveness and HTTP 503 for readiness.
+- Scheduler availability alerts were subsequently restricted to service-name
+  messages only. Database alert emails contain only `Nedostupnost POSTGRES`
+  and/or `Nedostupnost MSSQL`; runtime alert emails contain only
+  `Nedostupnost API`, `Nedostupnost DASHBOARD`, and/or
+  `Nedostupnost CADDY`. Diagnostic details remain in protected logs.
+
 Completion criteria:
 
 - Production starts without development reload behavior and with a reproducible dependency set.

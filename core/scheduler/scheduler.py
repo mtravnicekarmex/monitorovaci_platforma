@@ -6,11 +6,17 @@ Tento modul obsahuje implementace jednotlivých jobů a registraci do APSchedule
 """
 
 import html
+import hashlib
 import os
+import re
+import socket
 import sys
+import urllib.request
 from datetime import datetime
 from dataclasses import dataclass
 from functools import wraps
+from itertools import groupby
+from zoneinfo import ZoneInfo
 from moduly.mereni.vodomery.SCVK.SCVK_to_database import SCVK_save_to_database_all
 from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_to_database import SOFTLINK_to_database_mereni
 from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_data_z_dotazu import SOFTLINK_dotaz
@@ -30,6 +36,11 @@ from app.channels.email import send_email_outlook
 from app.czech_business_calendar import is_last_czech_business_day
 from app.time_utils import prague_today, utc_now_naive
 from core.scheduler.job_schedule import SCHEDULER_TIMEZONE_NAME, get_scheduler_job_specs
+from core.scheduler.database_availability_state import (
+    DatabaseAvailabilityEvent,
+    DatabaseAvailabilityObservation,
+    DatabaseAvailabilityStore,
+)
 from core.scheduler.metrics import SCHEDULER_HEARTBEAT_TTL_SECONDS, get_metrics_store
 from decouple import config
 from moduly.mereni.vodomery.database.vodomery_db_vse import vodomery_db_import
@@ -89,13 +100,46 @@ SCHEDULER_DIR = Path(__file__).resolve().parent
 SCHEDULER_LOGS_DIR = SCHEDULER_DIR / "logs"
 SCHEDULER_LOCKS_DIR = SCHEDULER_DIR / "locks"
 SCHEDULER_LOG_PATH = SCHEDULER_LOGS_DIR / "scheduler.log"
+ADMIN_ALERT_EMAIL_CACHE_PATH = SCHEDULER_LOGS_DIR / "admin_alert_email_hashes.json"
+ADMIN_ALERT_EMAIL_CACHE_MAX_AGE_SECONDS = 24 * 60 * 60
 SCHEDULER_MISFIRE_GRACE_SECONDS = config("SCHEDULER_MISFIRE_GRACE_SECONDS", default=900, cast=int)
 DATABASE_ERROR_RECIPIENTS_ENV_KEY = "DATABASE_ERROR_RECIPIENTS"
+RUNTIME_ERROR_RECIPIENTS_ENV_KEY = "RUNTIME_ERROR_RECIPIENTS"
+DATABASE_AVAILABILITY_MONITOR_JOB_ID = "quarter_hour_job"
 DATABASE_AVAILABILITY_CHECKS = (
     ("postgres", "PostgreSQL", ENGINE_PG),
     ("mssql", "MS SQL", ENGINE_MS),
 )
 DATABASE_AVAILABILITY_QUERY = text("SELECT 1")
+ACTIVE_ADMIN_EMAIL_QUERY = text(
+    'SELECT email FROM dashboard."Streamlit_Users" '
+    "WHERE is_admin IS TRUE AND is_active IS TRUE "
+    "AND email IS NOT NULL AND btrim(email) <> ''"
+)
+RUNTIME_HTTP_TIMEOUT_SECONDS = 2
+RUNTIME_TCP_TIMEOUT_SECONDS = 2
+RUNTIME_CHECK_ATTEMPTS = 2
+RUNTIME_CHECK_RETRY_DELAY_SECONDS = 1
+_ADMIN_ALERT_EMAIL_CACHE_GUARD = threading.Lock()
+_ALERT_URI_CREDENTIALS_PATTERN = re.compile(
+    r"(?P<scheme>[a-z][a-z0-9+.-]*://)(?P<credentials>[^/@\s]+)@",
+    flags=re.IGNORECASE,
+)
+_ALERT_SECRET_ASSIGNMENT_PATTERN = re.compile(
+    r"(?P<key>\b(?:password|passwd|pwd|token|secret)\b\s*[=:]\s*)"
+    r"(?P<value>[^\s;,]+)",
+    flags=re.IGNORECASE,
+)
+RUNTIME_AVAILABILITY_CHECKS = (
+    ("api", "Nedostupnost API", "http", "http://127.0.0.1:8000/health/live"),
+    (
+        "dashboard",
+        "Nedostupnost DASHBOARD",
+        "http",
+        "http://127.0.0.1:8001/_stcore/health",
+    ),
+    ("caddy", "Nedostupnost CADDY", "tcp", ("127.0.0.1", 2019)),
+)
 
 
 def setup_logging(*, enable_file: bool = False):
@@ -182,6 +226,14 @@ class DatabaseCheckFailure:
 
 
 @dataclass(frozen=True)
+class RuntimeCheckFailure:
+    key: str
+    alert_text: str
+    target: str = ""
+    reason: str = ""
+
+
+@dataclass(frozen=True)
 class _ProcessLockHandle:
     lock_name: str
     lock_path: Path
@@ -235,6 +287,20 @@ def _format_scheduler_reason(error) -> str | None:
     return type(error).__name__
 
 
+def _sanitize_alert_technical_text(value: object) -> str:
+    text_value = str(value or "").strip()
+    if not text_value:
+        return ""
+    text_value = _ALERT_URI_CREDENTIALS_PATTERN.sub(
+        lambda match: f"{match.group('scheme')}***@",
+        text_value,
+    )
+    return _ALERT_SECRET_ASSIGNMENT_PATTERN.sub(
+        lambda match: f"{match.group('key')}***",
+        text_value,
+    )
+
+
 def _format_scheduler_time(value) -> str:
     if value is None:
         return "-"
@@ -278,6 +344,114 @@ def _format_database_availability_failures(failures: tuple[DatabaseCheckFailure,
     )
 
 
+def _normalize_alert_email(value: object) -> str:
+    return str(value or "").strip().casefold()
+
+
+def _hash_alert_email(value: object) -> str:
+    normalized_email = _normalize_alert_email(value)
+    if not normalized_email:
+        return ""
+    return hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()
+
+
+def _write_active_admin_email_cache(email_values) -> frozenset[str]:
+    email_hashes = frozenset(
+        email_hash
+        for email_hash in (_hash_alert_email(value) for value in email_values)
+        if email_hash
+    )
+    payload = {
+        "version": 1,
+        "refreshed_at_epoch": time.time(),
+        "admin_email_hashes": sorted(email_hashes),
+    }
+
+    with _ADMIN_ALERT_EMAIL_CACHE_GUARD:
+        ADMIN_ALERT_EMAIL_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = ADMIN_ALERT_EMAIL_CACHE_PATH.with_suffix(".tmp")
+        temp_path.write_text(
+            json.dumps(payload, ensure_ascii=True, indent=2),
+            encoding="utf-8",
+        )
+        temp_path.replace(ADMIN_ALERT_EMAIL_CACHE_PATH)
+
+    return email_hashes
+
+
+def _refresh_active_admin_email_cache(connection) -> frozenset[str]:
+    rows = connection.execute(ACTIVE_ADMIN_EMAIL_QUERY)
+    return _write_active_admin_email_cache(
+        row[0]
+        for row in rows
+        if row and row[0]
+    )
+
+
+def _load_cached_active_admin_email_hashes() -> frozenset[str]:
+    with _ADMIN_ALERT_EMAIL_CACHE_GUARD:
+        try:
+            payload = json.loads(
+                ADMIN_ALERT_EMAIL_CACHE_PATH.read_text(encoding="utf-8")
+            )
+        except FileNotFoundError:
+            return frozenset()
+        except (OSError, ValueError, TypeError):
+            logger.warning("ADMIN ALERT RECIPIENT CACHE INVALID")
+            return frozenset()
+
+    try:
+        refreshed_at_epoch = float(payload["refreshed_at_epoch"])
+        cache_age_seconds = time.time() - refreshed_at_epoch
+        raw_hashes = payload["admin_email_hashes"]
+    except (KeyError, TypeError, ValueError):
+        logger.warning("ADMIN ALERT RECIPIENT CACHE INVALID")
+        return frozenset()
+
+    if cache_age_seconds < 0 or cache_age_seconds > ADMIN_ALERT_EMAIL_CACHE_MAX_AGE_SECONDS:
+        logger.warning("ADMIN ALERT RECIPIENT CACHE STALE")
+        return frozenset()
+    if not isinstance(raw_hashes, list):
+        logger.warning("ADMIN ALERT RECIPIENT CACHE INVALID")
+        return frozenset()
+
+    valid_hashes = frozenset(
+        str(value).lower()
+        for value in raw_hashes
+        if isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdefABCDEF" for character in value)
+    )
+    if len(valid_hashes) != len(raw_hashes):
+        logger.warning("ADMIN ALERT RECIPIENT CACHE INVALID")
+        return frozenset()
+    return valid_hashes
+
+
+def _recipient_is_active_admin(
+    recipient: str,
+    admin_email_hashes: frozenset[str],
+) -> bool:
+    recipient_hash = _hash_alert_email(recipient)
+    return bool(recipient_hash and recipient_hash in admin_email_hashes)
+
+
+def _database_alert_texts(
+    failures: tuple[DatabaseCheckFailure, ...],
+) -> tuple[str, ...]:
+    alert_text_by_key = {
+        "postgres": "Nedostupnost POSTGRES",
+        "mssql": "Nedostupnost MSSQL",
+    }
+    return tuple(
+        dict.fromkeys(
+            alert_text_by_key[failure.key]
+            for failure in failures
+            if failure.key in alert_text_by_key
+        )
+    )
+
+
 class DatabaseAvailabilityError(SchedulerContextError):
     def __init__(self, failures: tuple[DatabaseCheckFailure, ...]) -> None:
         self.failures = tuple(failures)
@@ -296,8 +470,18 @@ def check_database_availability() -> None:
         try:
             with engine.connect() as connection:
                 connection.execute(DATABASE_AVAILABILITY_QUERY)
+                if key == "postgres":
+                    try:
+                        _refresh_active_admin_email_cache(connection)
+                    except Exception as cache_error:
+                        logger.warning(
+                            "ADMIN ALERT RECIPIENT CACHE REFRESH FAILED | reason=%s",
+                            _format_scheduler_reason(cache_error),
+                        )
         except Exception as exc:
-            reason = _format_scheduler_reason(exc) or type(exc).__name__
+            reason = _sanitize_alert_technical_text(
+                _format_scheduler_reason(exc) or type(exc).__name__
+            )
             failures.append(DatabaseCheckFailure(key=key, label=label, reason=reason))
             logger.error(
                 "DATABASE CHECK FAILED | db=%s | reason=%s",
@@ -313,6 +497,76 @@ def check_database_availability() -> None:
         "DATABASE CHECK OK | targets=%s",
         ",".join(label for _, label, _ in DATABASE_AVAILABILITY_CHECKS),
     )
+
+
+def _check_http_endpoint(url: str) -> None:
+    with urllib.request.urlopen(url, timeout=RUNTIME_HTTP_TIMEOUT_SECONDS) as response:
+        status_code = int(getattr(response, "status", response.getcode()))
+        if status_code < 200 or status_code >= 300:
+            raise RuntimeError(f"HTTP {status_code}")
+
+
+def _check_tcp_listener(address: tuple[str, int]) -> None:
+    with socket.create_connection(address, timeout=RUNTIME_TCP_TIMEOUT_SECONDS):
+        return
+
+
+def check_runtime_availability() -> tuple[RuntimeCheckFailure, ...]:
+    failures: list[RuntimeCheckFailure] = []
+
+    for key, alert_text, check_kind, target in RUNTIME_AVAILABILITY_CHECKS:
+        last_error = None
+        for attempt in range(RUNTIME_CHECK_ATTEMPTS):
+            try:
+                if check_kind == "http":
+                    _check_http_endpoint(str(target))
+                elif check_kind == "tcp":
+                    _check_tcp_listener(target)
+                else:
+                    raise ValueError(f"Unsupported runtime check kind: {check_kind}")
+                last_error = None
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt + 1 < RUNTIME_CHECK_ATTEMPTS:
+                    time.sleep(RUNTIME_CHECK_RETRY_DELAY_SECONDS)
+
+        if last_error is not None:
+            failures.append(
+                RuntimeCheckFailure(
+                    key=key,
+                    alert_text=alert_text,
+                    target=_format_runtime_check_target(target),
+                    reason=_sanitize_alert_technical_text(
+                        _format_scheduler_reason(last_error)
+                        or type(last_error).__name__
+                    ),
+                )
+            )
+            logger.error(
+                "RUNTIME CHECK FAILED | service=%s | reason=%s",
+                key,
+                _format_scheduler_reason(last_error),
+                exc_info=(
+                    type(last_error),
+                    last_error,
+                    last_error.__traceback__,
+                ),
+            )
+
+    if not failures:
+        logger.info(
+            "RUNTIME CHECK OK | targets=%s",
+            ",".join(key for key, _, _, _ in RUNTIME_AVAILABILITY_CHECKS),
+        )
+
+    return tuple(failures)
+
+
+def _format_runtime_check_target(target) -> str:
+    if isinstance(target, tuple) and len(target) == 2:
+        return f"{target[0]}:{target[1]}"
+    return str(target)
 
 
 def _build_scheduler_alert_body(
@@ -391,21 +645,33 @@ def _send_scheduler_alert(
     reason: str | None = None,
     targets: tuple[str, ...] = (),
 ) -> None:
-    body = _build_scheduler_alert_body(
-        job_id=job_id,
-        status_text=status_text,
-        description=description,
-        scheduled_time=scheduled_time,
-        reason=reason,
-        targets=targets,
+    recipient = config("MY_EMAIL")
+    admin_email_hashes = _load_cached_active_admin_email_hashes()
+    include_technical_details = _recipient_is_active_admin(
+        recipient,
+        admin_email_hashes,
     )
+    if include_technical_details:
+        body = _build_scheduler_alert_body(
+            job_id=job_id,
+            status_text=status_text,
+            description=description,
+            scheduled_time=scheduled_time,
+            reason=_sanitize_alert_technical_text(reason),
+            targets=tuple(
+                _sanitize_alert_technical_text(target)
+                for target in targets
+            ),
+        )
+    else:
+        body = description
 
     send_email_outlook(
-        email_receiver=config('MY_EMAIL'),
+        email_receiver=recipient,
         sender_alias=config('O_EMAIL_ALARM'),
         subject=f"[ALERT] Scheduler | {job_id} | {status_text.upper()}",
         body=body,
-        is_html=True,
+        is_html=include_technical_details,
     )
 
 
@@ -419,11 +685,21 @@ def _load_database_error_recipients() -> tuple[str, ...]:
     )
 
 
+def _load_runtime_error_recipients() -> tuple[str, ...]:
+    raw_recipients = str(config(RUNTIME_ERROR_RECIPIENTS_ENV_KEY, default="") or "").strip()
+    if not raw_recipients:
+        return _load_database_error_recipients()
+    return filter_placeholder_recipients(
+        _normalize_alert_targets(raw_recipients.split(",")),
+        context_label=RUNTIME_ERROR_RECIPIENTS_ENV_KEY,
+    )
+
+
 def _send_database_availability_alert(
     failures: tuple[DatabaseCheckFailure, ...],
     *,
     job_id: str,
-) -> None:
+) -> bool:
     recipients = _load_database_error_recipients()
     if not recipients:
         logger.warning(
@@ -431,35 +707,233 @@ def _send_database_availability_alert(
             job_id,
             DATABASE_ERROR_RECIPIENTS_ENV_KEY,
         )
-        return
+        return False
 
-    failure_summary = _format_database_availability_failures(failures)
-    body = _build_scheduler_alert_body(
+    alert_texts = _database_alert_texts(failures)
+    if not alert_texts:
+        return False
+    subject = f"[ALERT] {' / '.join(alert_texts)}"
+    brief_body = "\n".join(alert_texts)
+    detailed_body = _build_database_availability_detail_body(
+        failures,
         job_id=job_id,
-        status_text="Databaze NEDOSTUPNA",
-        description="Preflight kontrola databazi pred spustenim jobu selhala. Job nebyl spusten.",
-        scheduled_time=None,
-        reason=failure_summary,
-        targets=tuple(failure.label for failure in failures),
+        brief_body=brief_body,
     )
+    admin_email_hashes = _load_cached_active_admin_email_hashes()
 
     for recipient in recipients:
+        include_technical_details = _recipient_is_active_admin(
+            recipient,
+            admin_email_hashes,
+        )
         send_email_outlook(
             email_receiver=recipient,
             sender_alias=config("O_EMAIL_ALARM", default=None),
-            subject=f"[ALERT] Databaze | {job_id} | NEDOSTUPNA",
-            body=body,
-            is_html=True,
+            subject=subject,
+            body=detailed_body if include_technical_details else brief_body,
+            is_html=False,
         )
+    return True
+
+
+def _send_database_recovery_alert(
+    events: tuple[DatabaseAvailabilityEvent, ...],
+    *,
+    job_id: str,
+) -> bool:
+    recipients = _load_database_error_recipients()
+    if not recipients:
+        logger.warning(
+            "DATABASE RECOVERY ALERT SKIPPED | id=%s | env=%s not configured",
+            job_id,
+            DATABASE_ERROR_RECIPIENTS_ENV_KEY,
+        )
+        return False
+    if not events:
+        return False
+
+    restored_texts = tuple(
+        f"Obnovena dostupnost {_database_service_alert_name(event.service_key)}"
+        for event in events
+    )
+    subject = f"[INFO] {' / '.join(restored_texts)}"
+    brief_body = _build_database_recovery_body(
+        events,
+        include_technical_details=False,
+        job_id=job_id,
+    )
+    detailed_body = _build_database_recovery_body(
+        events,
+        include_technical_details=True,
+        job_id=job_id,
+    )
+    admin_email_hashes = _load_cached_active_admin_email_hashes()
+
+    for recipient in recipients:
+        include_technical_details = _recipient_is_active_admin(
+            recipient,
+            admin_email_hashes,
+        )
+        send_email_outlook(
+            email_receiver=recipient,
+            sender_alias=config("O_EMAIL_ALARM", default=None),
+            subject=subject,
+            body=detailed_body if include_technical_details else brief_body,
+            is_html=False,
+        )
+    return True
+
+
+def _send_runtime_availability_alert(
+    failures: tuple[RuntimeCheckFailure, ...],
+) -> bool:
+    recipients = _load_runtime_error_recipients()
+    if not recipients:
+        logger.warning(
+            "RUNTIME ALERT SKIPPED | env=%s or %s not configured",
+            RUNTIME_ERROR_RECIPIENTS_ENV_KEY,
+            DATABASE_ERROR_RECIPIENTS_ENV_KEY,
+        )
+        return False
+
+    alert_texts = tuple(
+        dict.fromkeys(failure.alert_text for failure in failures)
+    )
+    if not alert_texts:
+        return False
+    subject = f"[ALERT] {' / '.join(alert_texts)}"
+    brief_body = "\n".join(alert_texts)
+    detailed_body = _build_runtime_availability_detail_body(
+        failures,
+        brief_body=brief_body,
+    )
+    admin_email_hashes = _load_cached_active_admin_email_hashes()
+
+    for recipient in recipients:
+        include_technical_details = _recipient_is_active_admin(
+            recipient,
+            admin_email_hashes,
+        )
+        send_email_outlook(
+            email_receiver=recipient,
+            sender_alias=config("O_EMAIL_ALARM", default=None),
+            subject=subject,
+            body=detailed_body if include_technical_details else brief_body,
+            is_html=False,
+        )
+    return True
+
+
+def _build_database_availability_detail_body(
+    failures: tuple[DatabaseCheckFailure, ...],
+    *,
+    job_id: str,
+    brief_body: str,
+) -> str:
+    detail_lines = [
+        brief_body,
+        "",
+        "Technicke detaily",
+        f"Job: {job_id}",
+        f"Detekovano: {_format_scheduler_time(datetime.now().astimezone())}",
+    ]
+    detail_lines.extend(
+        f"{failure.label}: {failure.reason}"
+        for failure in failures
+    )
+    return "\n".join(detail_lines)
+
+
+def _database_service_alert_name(service_key: str) -> str:
+    return {
+        "postgres": "POSTGRES",
+        "mssql": "MSSQL",
+    }.get(service_key, service_key.upper())
+
+
+def _format_database_event_time(value: datetime) -> str:
+    return value.astimezone(
+        ZoneInfo(SCHEDULER_TIMEZONE_NAME)
+    ).strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def _format_database_outage_duration(
+    started_at: datetime,
+    ended_at: datetime,
+) -> str:
+    total_seconds = max(0, int((ended_at - started_at).total_seconds()))
+    days, remainder = divmod(total_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts = []
+    if days:
+        parts.append(f"{days} d")
+    if hours or days:
+        parts.append(f"{hours} h")
+    if minutes or hours or days:
+        parts.append(f"{minutes} min")
+    parts.append(f"{seconds} s")
+    return " ".join(parts)
+
+
+def _build_database_recovery_body(
+    events: tuple[DatabaseAvailabilityEvent, ...],
+    *,
+    include_technical_details: bool,
+    job_id: str,
+) -> str:
+    sections = []
+    for event in events:
+        ended_at = event.outage_ended_at or event.occurred_at
+        lines = [
+            f"Dostupnost {_database_service_alert_name(event.service_key)} obnovena",
+            f"Nedostupnost od: {_format_database_event_time(event.outage_started_at)}",
+            f"Dostupnost od: {_format_database_event_time(ended_at)}",
+            (
+                "Doba nedostupnosti: "
+                f"{_format_database_outage_duration(event.outage_started_at, ended_at)}"
+            ),
+        ]
+        if include_technical_details:
+            lines.extend(
+                (
+                    f"Job: {job_id}",
+                    f"Pocet neuspesnych kontrol: {event.failed_check_count}",
+                    f"Posledni duvod: {event.reason or '-'}",
+                )
+            )
+        sections.append("\n".join(lines))
+    return "\n\n".join(sections)
+
+
+def _build_runtime_availability_detail_body(
+    failures: tuple[RuntimeCheckFailure, ...],
+    *,
+    brief_body: str,
+) -> str:
+    detail_lines = [
+        brief_body,
+        "",
+        "Technicke detaily",
+        f"Detekovano: {_format_scheduler_time(datetime.now().astimezone())}",
+    ]
+    for failure in failures:
+        details = [failure.alert_text]
+        if failure.target:
+            details.append(f"cil={failure.target}")
+        if failure.reason:
+            details.append(f"duvod={failure.reason}")
+        detail_lines.append(" | ".join(details))
+    return "\n".join(detail_lines)
 
 
 def _deliver_database_availability_alert(
     failures: tuple[DatabaseCheckFailure, ...],
     *,
     job_id: str,
-) -> None:
+) -> bool:
     try:
-        _send_database_availability_alert(failures, job_id=job_id)
+        return _send_database_availability_alert(failures, job_id=job_id)
     except Exception as alert_error:
         logger.error(
             "DATABASE ALERT FAILED | id=%s | reason=%s",
@@ -467,6 +941,38 @@ def _deliver_database_availability_alert(
             _format_scheduler_reason(alert_error),
             exc_info=True,
         )
+        return False
+
+
+def _deliver_database_recovery_alert(
+    events: tuple[DatabaseAvailabilityEvent, ...],
+    *,
+    job_id: str,
+) -> bool:
+    try:
+        return _send_database_recovery_alert(events, job_id=job_id)
+    except Exception as alert_error:
+        logger.error(
+            "DATABASE RECOVERY ALERT FAILED | id=%s | reason=%s",
+            job_id,
+            _format_scheduler_reason(alert_error),
+            exc_info=True,
+        )
+        return False
+
+
+def _deliver_runtime_availability_alert(
+    failures: tuple[RuntimeCheckFailure, ...],
+) -> bool:
+    try:
+        return _send_runtime_availability_alert(failures)
+    except Exception as alert_error:
+        logger.error(
+            "RUNTIME ALERT FAILED | reason=%s",
+            _format_scheduler_reason(alert_error),
+            exc_info=True,
+        )
+        return False
 
 
 def _deliver_scheduler_alert(**kwargs) -> None:
@@ -695,11 +1201,104 @@ def locked_job(*decorator_args):
     return lambda fn: _build_locked_job(fn, decorator_args)
 
 
+def _database_availability_observations(
+    failures: tuple[DatabaseCheckFailure, ...],
+) -> tuple[DatabaseAvailabilityObservation, ...]:
+    failure_by_key = {failure.key: failure for failure in failures}
+    return tuple(
+        DatabaseAvailabilityObservation(
+            service_key=key,
+            service_label=label,
+            is_available=key not in failure_by_key,
+            reason=(
+                failure_by_key[key].reason
+                if key in failure_by_key
+                else None
+            ),
+        )
+        for key, label, _engine in DATABASE_AVAILABILITY_CHECKS
+    )
+
+
+def _database_failures_from_events(
+    events: tuple[DatabaseAvailabilityEvent, ...],
+) -> tuple[DatabaseCheckFailure, ...]:
+    return tuple(
+        DatabaseCheckFailure(
+            key=event.service_key,
+            label=event.service_label,
+            reason=event.reason or "database unavailable",
+        )
+        for event in events
+    )
+
+
+def _record_and_deliver_database_availability_transitions(
+    failures: tuple[DatabaseCheckFailure, ...],
+    *,
+    job_id: str,
+) -> None:
+    store = DatabaseAvailabilityStore()
+    try:
+        store.record_observations(
+            _database_availability_observations(failures)
+        )
+        pending_events = store.load_pending_events()
+    except Exception as state_error:
+        logger.error(
+            "DATABASE AVAILABILITY STATE FAILED | id=%s | reason=%s",
+            job_id,
+            _format_scheduler_reason(state_error),
+            exc_info=True,
+        )
+        return
+
+    for event_type, grouped_events in groupby(
+        pending_events,
+        key=lambda event: event.event_type,
+    ):
+        events = tuple(grouped_events)
+        if event_type == "unavailable":
+            delivered = _deliver_database_availability_alert(
+                _database_failures_from_events(events),
+                job_id=job_id,
+            )
+        elif event_type == "recovered":
+            delivered = _deliver_database_recovery_alert(
+                events,
+                job_id=job_id,
+            )
+        else:
+            logger.error(
+                "DATABASE AVAILABILITY EVENT INVALID | id=%s | type=%s",
+                job_id,
+                event_type,
+            )
+            delivered = False
+
+        if not delivered:
+            continue
+        try:
+            store.mark_events_delivered(event.id for event in events)
+        except Exception as state_error:
+            logger.error(
+                "DATABASE AVAILABILITY DELIVERY STATE FAILED | id=%s | reason=%s",
+                job_id,
+                _format_scheduler_reason(state_error),
+                exc_info=True,
+            )
+
+
 def _run_database_preflight_or_skip(job_id: str) -> SkippedJobResult | None:
+    _run_runtime_availability_monitor()
     try:
         safe_call(check_database_availability)
     except DatabaseAvailabilityError as exc:
-        _deliver_database_availability_alert(exc.failures, job_id=job_id)
+        if job_id == DATABASE_AVAILABILITY_MONITOR_JOB_ID:
+            _record_and_deliver_database_availability_transitions(
+                exc.failures,
+                job_id=job_id,
+            )
         logger.warning(
             "JOB SKIPPED | id=%s | reason=database_unavailable | failures=%s",
             job_id,
@@ -707,6 +1306,11 @@ def _run_database_preflight_or_skip(job_id: str) -> SkippedJobResult | None:
         )
         return SkippedJobResult(reason="database_unavailable", lock_names=(job_id,))
 
+    if job_id == DATABASE_AVAILABILITY_MONITOR_JOB_ID:
+        _record_and_deliver_database_availability_transitions(
+            (),
+            job_id=job_id,
+        )
     return None
 
 
@@ -1522,6 +2126,41 @@ def _run_main_scheduler_loop():
 _LOCK_REGISTRY_GUARD = threading.Lock()
 _JOB_LOCKS = {}
 _SCHEDULER_INSTANCE = None
+_RUNTIME_MONITOR_GUARD = threading.Lock()
+_RUNTIME_ALERTED_FAILURE_KEYS: set[str] = set()
+
+
+def _run_runtime_availability_monitor() -> None:
+    global _RUNTIME_ALERTED_FAILURE_KEYS
+
+    with _RUNTIME_MONITOR_GUARD:
+        try:
+            failures = check_runtime_availability()
+        except Exception as exc:
+            logger.error(
+                "RUNTIME CHECK FAILED | service=monitor | reason=%s",
+                _format_scheduler_reason(exc),
+                exc_info=True,
+            )
+            return
+
+        current_failure_keys = {failure.key for failure in failures}
+        new_failures = tuple(
+            failure
+            for failure in failures
+            if failure.key not in _RUNTIME_ALERTED_FAILURE_KEYS
+        )
+
+        if new_failures:
+            if _deliver_runtime_availability_alert(new_failures):
+                _RUNTIME_ALERTED_FAILURE_KEYS = current_failure_keys
+            else:
+                _RUNTIME_ALERTED_FAILURE_KEYS.intersection_update(
+                    current_failure_keys
+                )
+            return
+
+        _RUNTIME_ALERTED_FAILURE_KEYS = current_failure_keys
 
 
 def _sanitize_lock_name(lock_name: str) -> str:

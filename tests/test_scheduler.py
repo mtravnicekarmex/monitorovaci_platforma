@@ -135,6 +135,23 @@ def test_safe_call_records_success_metrics(monkeypatch, fake_metrics_store):
     assert [job_id for job_id, _ in fake_metrics_store.success_calls] == ["ok"]
 
 
+def test_alert_technical_text_redacts_common_secret_forms():
+    source = (
+        "postgresql://user:password@server/db "
+        "password=hunter2 token:abc123 secret=value"
+    )
+
+    sanitized = scheduler._sanitize_alert_technical_text(source)
+
+    assert "user:password" not in sanitized
+    assert "hunter2" not in sanitized
+    assert "abc123" not in sanitized
+    assert "secret=value" not in sanitized
+    assert "postgresql://***@server/db" in sanitized
+    assert "password=***" in sanitized
+    assert "token:***" in sanitized
+
+
 def test_job_error_listener_sends_readable_alert(monkeypatch, fake_metrics_store):
     fake_logger = FakeLogger()
     sent_email = {}
@@ -145,6 +162,11 @@ def test_job_error_listener_sends_readable_alert(monkeypatch, fake_metrics_store
         scheduler,
         "send_email_outlook",
         lambda **kwargs: sent_email.update(kwargs),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_load_cached_active_admin_email_hashes",
+        lambda: frozenset({scheduler._hash_alert_email("alarm@example.com")}),
     )
 
     event = SimpleNamespace(
@@ -176,6 +198,43 @@ def test_job_error_listener_sends_readable_alert(monkeypatch, fake_metrics_store
     assert "Cile" in sent_email["body"]
     assert "background:#ffffff" in sent_email["body"]
     assert "color:#1f2328" in sent_email["body"]
+
+
+def test_scheduler_alert_uses_brief_body_for_non_admin_recipient(monkeypatch):
+    sent_email = {}
+
+    monkeypatch.setattr(
+        scheduler,
+        "config",
+        lambda key: {
+            "MY_EMAIL": "operator@example.com",
+            "O_EMAIL_ALARM": "alarm@example.com",
+        }[key],
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_load_cached_active_admin_email_hashes",
+        lambda: frozenset(),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "send_email_outlook",
+        lambda **kwargs: sent_email.update(kwargs),
+    )
+
+    scheduler._send_scheduler_alert(
+        job_id="daily_job",
+        status_text="spadl",
+        description="Job scheduleru skoncil chybou.",
+        scheduled_time=datetime.datetime(2026, 6, 13, 12, 0),
+        reason="database password leaked",
+        targets=("sensitive-target",),
+    )
+
+    assert sent_email["body"] == "Job scheduleru skoncil chybou."
+    assert sent_email["is_html"] is False
+    assert "database password leaked" not in sent_email["body"]
+    assert "sensitive-target" not in sent_email["body"]
 
 
 def test_job_success_listener_records_skipped_and_success(monkeypatch, fake_metrics_store):
@@ -282,6 +341,11 @@ def test_check_database_availability_raises_for_unavailable_database(monkeypatch
     monkeypatch.setattr(scheduler, "logger", fake_logger)
     monkeypatch.setattr(
         scheduler,
+        "_refresh_active_admin_email_cache",
+        lambda _connection: frozenset(),
+    )
+    monkeypatch.setattr(
+        scheduler,
         "DATABASE_AVAILABILITY_CHECKS",
         (
             ("postgres", "PostgreSQL", FakeEngine()),
@@ -302,6 +366,52 @@ def test_check_database_availability_raises_for_unavailable_database(monkeypatch
         "DATABASE CHECK FAILED | db=mssql | reason=login timeout" in message
         for level, message in fake_logger.records
         if level == "error"
+    )
+
+
+def test_admin_email_cache_refresh_failure_does_not_fail_database_preflight(monkeypatch):
+    fake_logger = FakeLogger()
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return None
+
+        def execute(self, query):
+            assert query is scheduler.DATABASE_AVAILABILITY_QUERY
+
+    class FakeEngine:
+        def connect(self):
+            return FakeConnection()
+
+    monkeypatch.setattr(scheduler, "logger", fake_logger)
+    monkeypatch.setattr(
+        scheduler,
+        "DATABASE_AVAILABILITY_CHECKS",
+        (
+            ("postgres", "PostgreSQL", FakeEngine()),
+            ("mssql", "MS SQL", FakeEngine()),
+        ),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_refresh_active_admin_email_cache",
+        lambda _connection: (_ for _ in ()).throw(OSError("cache unavailable")),
+    )
+
+    scheduler.check_database_availability()
+
+    assert any(
+        "ADMIN ALERT RECIPIENT CACHE REFRESH FAILED" in message
+        for level, message in fake_logger.records
+        if level == "warning"
+    )
+    assert any(
+        "DATABASE CHECK OK" in message
+        for level, message in fake_logger.records
+        if level == "info"
     )
 
 
@@ -326,6 +436,11 @@ def test_database_availability_alert_uses_database_error_recipients(monkeypatch)
         "send_email_outlook",
         lambda **kwargs: sent_messages.append(kwargs),
     )
+    monkeypatch.setattr(
+        scheduler,
+        "_load_cached_active_admin_email_hashes",
+        lambda: frozenset(),
+    )
 
     scheduler._send_database_availability_alert(failures, job_id="quarter_hour_job")
 
@@ -334,14 +449,408 @@ def test_database_availability_alert_uses_database_error_recipients(monkeypatch)
         "second@armex.cz",
     ]
     assert all(message["sender_alias"] == "alarm@armex.cz" for message in sent_messages)
-    assert sent_messages[0]["subject"] == "[ALERT] Databaze | quarter_hour_job | NEDOSTUPNA"
-    assert "Preflight kontrola databazi" in sent_messages[0]["body"]
-    assert "PostgreSQL: connection refused" in sent_messages[0]["body"]
+    assert sent_messages[0]["subject"] == "[ALERT] Nedostupnost POSTGRES"
+    assert sent_messages[0]["body"] == "Nedostupnost POSTGRES"
+    assert sent_messages[0]["is_html"] is False
+    assert "quarter_hour_job" not in sent_messages[0]["subject"]
+    assert "connection refused" not in sent_messages[0]["body"]
+
+
+def test_database_availability_alert_lists_only_unavailable_databases(monkeypatch):
+    sent_messages = []
+    failures = (
+        scheduler.DatabaseCheckFailure(
+            key="postgres",
+            label="PostgreSQL",
+            reason="connection refused",
+        ),
+        scheduler.DatabaseCheckFailure(
+            key="mssql",
+            label="MS SQL",
+            reason="login timeout",
+        ),
+    )
+    values = {
+        "DATABASE_ERROR_RECIPIENTS": "ops@armex.cz",
+        "O_EMAIL_ALARM": "alarm@armex.cz",
+    }
+
+    monkeypatch.setattr(scheduler, "config", lambda key, default="": values.get(key, default))
+    monkeypatch.setattr(
+        scheduler,
+        "send_email_outlook",
+        lambda **kwargs: sent_messages.append(kwargs),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_load_cached_active_admin_email_hashes",
+        lambda: frozenset(),
+    )
+
+    scheduler._send_database_availability_alert(failures, job_id="daily_job")
+
+    assert sent_messages == [
+        {
+            "email_receiver": "ops@armex.cz",
+            "sender_alias": "alarm@armex.cz",
+            "subject": "[ALERT] Nedostupnost POSTGRES / Nedostupnost MSSQL",
+            "body": "Nedostupnost POSTGRES\nNedostupnost MSSQL",
+            "is_html": False,
+        }
+    ]
+
+
+def test_database_availability_alert_adds_details_only_for_active_admin(monkeypatch):
+    sent_messages = []
+    failures = (
+        scheduler.DatabaseCheckFailure(
+            key="postgres",
+            label="PostgreSQL",
+            reason="connection refused",
+        ),
+    )
+    values = {
+        "DATABASE_ERROR_RECIPIENTS": "ADMIN@ARMEX.CZ, operator@armex.cz",
+        "O_EMAIL_ALARM": "alarm@armex.cz",
+    }
+
+    monkeypatch.setattr(scheduler, "config", lambda key, default="": values.get(key, default))
+    monkeypatch.setattr(
+        scheduler,
+        "_load_cached_active_admin_email_hashes",
+        lambda: frozenset({scheduler._hash_alert_email("admin@armex.cz")}),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "send_email_outlook",
+        lambda **kwargs: sent_messages.append(kwargs),
+    )
+
+    scheduler._send_database_availability_alert(failures, job_id="daily_job")
+
+    admin_message, operator_message = sent_messages
+    assert admin_message["email_receiver"] == "ADMIN@ARMEX.CZ"
+    assert "Technicke detaily" in admin_message["body"]
+    assert "Job: daily_job" in admin_message["body"]
+    assert "PostgreSQL: connection refused" in admin_message["body"]
+    assert operator_message["body"] == "Nedostupnost POSTGRES"
+    assert "connection refused" not in operator_message["body"]
+
+
+def test_database_recovery_alert_summarizes_outage_for_all_recipients(monkeypatch):
+    sent_messages = []
+    outage_started_at = datetime.datetime(
+        2026,
+        6,
+        13,
+        8,
+        5,
+        tzinfo=datetime.timezone.utc,
+    )
+    outage_ended_at = datetime.datetime(
+        2026,
+        6,
+        13,
+        10,
+        35,
+        tzinfo=datetime.timezone.utc,
+    )
+    events = (
+        scheduler.DatabaseAvailabilityEvent(
+            id=1,
+            service_key="postgres",
+            service_label="PostgreSQL",
+            event_type="recovered",
+            occurred_at=outage_ended_at,
+            outage_started_at=outage_started_at,
+            outage_ended_at=outage_ended_at,
+            reason="connection refused",
+            failed_check_count=10,
+        ),
+    )
+    values = {
+        "DATABASE_ERROR_RECIPIENTS": "admin@armex.cz, operator@armex.cz",
+        "O_EMAIL_ALARM": "alarm@armex.cz",
+    }
+
+    monkeypatch.setattr(scheduler, "config", lambda key, default="": values.get(key, default))
+    monkeypatch.setattr(
+        scheduler,
+        "_load_cached_active_admin_email_hashes",
+        lambda: frozenset({scheduler._hash_alert_email("admin@armex.cz")}),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "send_email_outlook",
+        lambda **kwargs: sent_messages.append(kwargs),
+    )
+
+    delivered = scheduler._send_database_recovery_alert(
+        events,
+        job_id="quarter_hour_job",
+    )
+
+    assert delivered is True
+    admin_message, operator_message = sent_messages
+    assert admin_message["subject"] == "[INFO] Obnovena dostupnost POSTGRES"
+    assert "Nedostupnost od: 2026-06-13 10:05:00 CEST" in admin_message["body"]
+    assert "Dostupnost od: 2026-06-13 12:35:00 CEST" in admin_message["body"]
+    assert "Doba nedostupnosti: 2 h 30 min 0 s" in admin_message["body"]
+    assert "Pocet neuspesnych kontrol: 10" in admin_message["body"]
+    assert "Posledni duvod: connection refused" in admin_message["body"]
+    assert "Job: quarter_hour_job" in admin_message["body"]
+    assert "Doba nedostupnosti: 2 h 30 min 0 s" in operator_message["body"]
+    assert "Pocet neuspesnych kontrol" not in operator_message["body"]
+    assert "connection refused" not in operator_message["body"]
+
+
+def test_active_admin_email_cache_stores_only_hashes(monkeypatch, tmp_path):
+    cache_path = tmp_path / "admin-alert-cache.json"
+
+    class FakeConnection:
+        def execute(self, query):
+            assert query is scheduler.ACTIVE_ADMIN_EMAIL_QUERY
+            return [
+                ("Admin@Armex.cz",),
+                ("second-admin@armex.cz",),
+                (None,),
+            ]
+
+    monkeypatch.setattr(scheduler, "ADMIN_ALERT_EMAIL_CACHE_PATH", cache_path)
+
+    refreshed_hashes = scheduler._refresh_active_admin_email_cache(FakeConnection())
+    cached_hashes = scheduler._load_cached_active_admin_email_hashes()
+    raw_cache = cache_path.read_text(encoding="utf-8")
+
+    assert refreshed_hashes == cached_hashes
+    assert scheduler._hash_alert_email("admin@armex.cz") in cached_hashes
+    assert scheduler._hash_alert_email("SECOND-ADMIN@ARMEX.CZ") in cached_hashes
+    assert "Admin@Armex.cz" not in raw_cache
+    assert "second-admin@armex.cz" not in raw_cache
+
+
+def test_stale_admin_email_cache_fails_closed(monkeypatch, tmp_path):
+    cache_path = tmp_path / "admin-alert-cache.json"
+    cache_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "refreshed_at_epoch": 1,
+                "admin_email_hashes": [
+                    scheduler._hash_alert_email("admin@armex.cz")
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(scheduler, "ADMIN_ALERT_EMAIL_CACHE_PATH", cache_path)
+    monkeypatch.setattr(scheduler.time, "time", lambda: 1000000)
+
+    assert scheduler._load_cached_active_admin_email_hashes() == frozenset()
+
+
+def test_check_runtime_availability_returns_only_failed_services(monkeypatch):
+    http_calls = []
+    tcp_calls = []
+
+    def fake_http_check(url):
+        http_calls.append(url)
+        if "8001" in url:
+            raise OSError("connection refused")
+
+    def fake_tcp_check(address):
+        tcp_calls.append(address)
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(scheduler, "_check_http_endpoint", fake_http_check)
+    monkeypatch.setattr(scheduler, "_check_tcp_listener", fake_tcp_check)
+    monkeypatch.setattr(scheduler, "RUNTIME_CHECK_ATTEMPTS", 1)
+
+    failures = scheduler.check_runtime_availability()
+
+    assert failures == (
+        scheduler.RuntimeCheckFailure(
+            key="dashboard",
+            alert_text="Nedostupnost DASHBOARD",
+            target="http://127.0.0.1:8001/_stcore/health",
+            reason="connection refused",
+        ),
+        scheduler.RuntimeCheckFailure(
+            key="caddy",
+            alert_text="Nedostupnost CADDY",
+            target="127.0.0.1:2019",
+            reason="connection refused",
+        ),
+    )
+    assert http_calls == [
+        "http://127.0.0.1:8000/health/live",
+        "http://127.0.0.1:8001/_stcore/health",
+    ]
+    assert tcp_calls == [("127.0.0.1", 2019)]
+
+
+def test_runtime_check_ignores_one_transient_failure(monkeypatch):
+    api_attempts = []
+
+    def fake_http_check(url):
+        if "8000" not in url:
+            return
+        api_attempts.append(url)
+        if len(api_attempts) == 1:
+            raise TimeoutError("temporary reload")
+
+    monkeypatch.setattr(scheduler, "_check_http_endpoint", fake_http_check)
+    monkeypatch.setattr(scheduler, "_check_tcp_listener", lambda _address: None)
+    monkeypatch.setattr(scheduler, "RUNTIME_CHECK_RETRY_DELAY_SECONDS", 0)
+
+    assert scheduler.check_runtime_availability() == ()
+    assert len(api_attempts) == 2
+
+
+def test_runtime_availability_alert_contains_no_probe_details(monkeypatch):
+    sent_messages = []
+    failures = (
+        scheduler.RuntimeCheckFailure(
+            key="api",
+            alert_text="Nedostupnost API",
+        ),
+        scheduler.RuntimeCheckFailure(
+            key="caddy",
+            alert_text="Nedostupnost CADDY",
+        ),
+    )
+    values = {
+        "RUNTIME_ERROR_RECIPIENTS": "ops@armex.cz",
+        "DATABASE_ERROR_RECIPIENTS": "database@armex.cz",
+        "O_EMAIL_ALARM": "alarm@armex.cz",
+    }
+
+    monkeypatch.setattr(scheduler, "config", lambda key, default="": values.get(key, default))
+    monkeypatch.setattr(
+        scheduler,
+        "send_email_outlook",
+        lambda **kwargs: sent_messages.append(kwargs),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_load_cached_active_admin_email_hashes",
+        lambda: frozenset(),
+    )
+
+    delivered = scheduler._send_runtime_availability_alert(failures)
+
+    assert delivered is True
+    assert sent_messages == [
+        {
+            "email_receiver": "ops@armex.cz",
+            "sender_alias": "alarm@armex.cz",
+            "subject": "[ALERT] Nedostupnost API / Nedostupnost CADDY",
+            "body": "Nedostupnost API\nNedostupnost CADDY",
+            "is_html": False,
+        }
+    ]
+
+
+def test_runtime_availability_alert_adds_details_only_for_active_admin(monkeypatch):
+    sent_messages = []
+    failures = (
+        scheduler.RuntimeCheckFailure(
+            key="api",
+            alert_text="Nedostupnost API",
+            target="http://127.0.0.1:8000/health/live",
+            reason="HTTP 503",
+        ),
+    )
+    values = {
+        "RUNTIME_ERROR_RECIPIENTS": "admin@armex.cz, operator@armex.cz",
+        "DATABASE_ERROR_RECIPIENTS": "database@armex.cz",
+        "O_EMAIL_ALARM": "alarm@armex.cz",
+    }
+
+    monkeypatch.setattr(scheduler, "config", lambda key, default="": values.get(key, default))
+    monkeypatch.setattr(
+        scheduler,
+        "_load_cached_active_admin_email_hashes",
+        lambda: frozenset({scheduler._hash_alert_email("admin@armex.cz")}),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "send_email_outlook",
+        lambda **kwargs: sent_messages.append(kwargs),
+    )
+
+    delivered = scheduler._send_runtime_availability_alert(failures)
+
+    assert delivered is True
+    admin_message, operator_message = sent_messages
+    assert "Technicke detaily" in admin_message["body"]
+    assert "cil=http://127.0.0.1:8000/health/live" in admin_message["body"]
+    assert "duvod=HTTP 503" in admin_message["body"]
+    assert operator_message["body"] == "Nedostupnost API"
+    assert "HTTP 503" not in operator_message["body"]
+
+
+def test_runtime_monitor_alerts_once_until_service_recovers(monkeypatch):
+    delivered_alerts = []
+    failure = scheduler.RuntimeCheckFailure(
+        key="dashboard",
+        alert_text="Nedostupnost DASHBOARD",
+    )
+    check_results = iter(((failure,), (failure,), (), (failure,)))
+
+    monkeypatch.setattr(
+        scheduler,
+        "check_runtime_availability",
+        lambda: next(check_results),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_deliver_runtime_availability_alert",
+        lambda failures: delivered_alerts.append(failures) or True,
+    )
+    monkeypatch.setattr(scheduler, "_RUNTIME_ALERTED_FAILURE_KEYS", set())
+
+    scheduler._run_runtime_availability_monitor()
+    scheduler._run_runtime_availability_monitor()
+    scheduler._run_runtime_availability_monitor()
+    scheduler._run_runtime_availability_monitor()
+
+    assert delivered_alerts == [(failure,), (failure,)]
+
+
+def test_database_preflight_checks_runtime_before_databases(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        scheduler,
+        "_run_runtime_availability_monitor",
+        lambda: calls.append("runtime"),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "safe_call",
+        lambda fn, *args, **kwargs: calls.append(fn.__name__),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_record_and_deliver_database_availability_transitions",
+        lambda failures, *, job_id: calls.append(
+            ("database_state", failures, job_id)
+        ),
+    )
+
+    assert scheduler._run_database_preflight_or_skip("quarter_hour_job") is None
+    assert calls == [
+        "runtime",
+        "check_database_availability",
+        ("database_state", (), "quarter_hour_job"),
+    ]
 
 
 def test_quarter_hour_job_skips_and_alerts_when_database_unavailable(monkeypatch):
     calls = []
-    delivered_alerts = []
+    recorded_transitions = []
     failures = (
         scheduler.DatabaseCheckFailure(
             key="mssql",
@@ -361,20 +870,120 @@ def test_quarter_hour_job_skips_and_alerts_when_database_unavailable(monkeypatch
         raise AssertionError(f"Unexpected quarter-hour step: {fn.__name__}")
 
     monkeypatch.setattr(scheduler, "check_database_availability", fake_check_database_availability)
+    monkeypatch.setattr(scheduler, "_run_runtime_availability_monitor", lambda: None)
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(
         scheduler,
-        "_deliver_database_availability_alert",
-        lambda failures_arg, *, job_id: delivered_alerts.append((failures_arg, job_id)),
+        "_record_and_deliver_database_availability_transitions",
+        lambda failures_arg, *, job_id: recorded_transitions.append(
+            (failures_arg, job_id)
+        ),
     )
 
-    result = scheduler.quarter_hour_job()
+    result = scheduler.quarter_hour_job.__scheduler_unlocked_fn__()
 
     assert calls == ["fake_check_database_availability"]
     assert isinstance(result, scheduler.SkippedJobResult)
     assert result.reason == "database_unavailable"
     assert result.lock_names == ("quarter_hour_job",)
-    assert delivered_alerts == [(failures, "quarter_hour_job")]
+    assert recorded_transitions == [(failures, "quarter_hour_job")]
+
+
+def test_non_quarter_hour_database_failure_does_not_emit_transition_alert(monkeypatch):
+    failures = (
+        scheduler.DatabaseCheckFailure(
+            key="postgres",
+            label="PostgreSQL",
+            reason="connection refused",
+        ),
+    )
+    database_error = scheduler.DatabaseAvailabilityError(failures)
+    transition_calls = []
+
+    monkeypatch.setattr(scheduler, "_run_runtime_availability_monitor", lambda: None)
+    monkeypatch.setattr(
+        scheduler,
+        "safe_call",
+        lambda fn, *args, **kwargs: (_ for _ in ()).throw(database_error),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_record_and_deliver_database_availability_transitions",
+        lambda *args, **kwargs: transition_calls.append((args, kwargs)),
+    )
+
+    result = scheduler._run_database_preflight_or_skip("hourly_job")
+
+    assert result == scheduler.SkippedJobResult(
+        reason="database_unavailable",
+        lock_names=("hourly_job",),
+    )
+    assert transition_calls == []
+
+
+def test_database_transition_monitor_alerts_once_and_then_sends_recovery(
+    monkeypatch,
+    tmp_path,
+):
+    store = scheduler.DatabaseAvailabilityStore(
+        tmp_path / "database-availability.sqlite3"
+    )
+    outage_deliveries = []
+    recovery_deliveries = []
+    failures = (
+        scheduler.DatabaseCheckFailure(
+            key="postgres",
+            label="PostgreSQL",
+            reason="connection refused",
+        ),
+    )
+
+    monkeypatch.setattr(scheduler, "DatabaseAvailabilityStore", lambda: store)
+    monkeypatch.setattr(
+        scheduler,
+        "DATABASE_AVAILABILITY_CHECKS",
+        (
+            ("postgres", "PostgreSQL", object()),
+            ("mssql", "MS SQL", object()),
+        ),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_deliver_database_availability_alert",
+        lambda failures_arg, *, job_id: (
+            outage_deliveries.append((failures_arg, job_id)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_deliver_database_recovery_alert",
+        lambda events, *, job_id: (
+            recovery_deliveries.append((events, job_id)) or True
+        ),
+    )
+
+    scheduler._record_and_deliver_database_availability_transitions(
+        failures,
+        job_id="quarter_hour_job",
+    )
+    scheduler._record_and_deliver_database_availability_transitions(
+        failures,
+        job_id="quarter_hour_job",
+    )
+    scheduler._record_and_deliver_database_availability_transitions(
+        (),
+        job_id="quarter_hour_job",
+    )
+
+    assert len(outage_deliveries) == 1
+    assert outage_deliveries[0] == (failures, "quarter_hour_job")
+    assert len(recovery_deliveries) == 1
+    recovery_events, recovery_job_id = recovery_deliveries[0]
+    assert recovery_job_id == "quarter_hour_job"
+    assert len(recovery_events) == 1
+    assert recovery_events[0].service_key == "postgres"
+    assert recovery_events[0].event_type == "recovered"
+    assert store.load_pending_events() == ()
 
 
 @pytest.mark.parametrize("job_id", [job_spec.id for job_spec in get_scheduler_job_specs()])
@@ -608,6 +1217,11 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
 
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "check_database_availability", fake_check_database_availability)
+    monkeypatch.setattr(
+        scheduler,
+        "_record_and_deliver_database_availability_transitions",
+        lambda failures, *, job_id: None,
+    )
     monkeypatch.setattr(scheduler, "vodomery_db_import", fake_import)
     monkeypatch.setattr(scheduler, "get_runtime_model_version", fake_get_runtime_model_version)
     monkeypatch.setattr(scheduler, "get_candidate_model_versions", lambda: (1, 2))
@@ -622,7 +1236,7 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
     monkeypatch.setattr(scheduler, "process_plynomery_alerts", fake_process_plynomery_alerts)
     monkeypatch.setattr(scheduler, "manometry_db_import", fake_manometry_import)
 
-    scheduler.quarter_hour_job()
+    scheduler.quarter_hour_job.__scheduler_unlocked_fn__()
 
     assert [name for name, _, _ in calls] == [
         "fake_check_database_availability",

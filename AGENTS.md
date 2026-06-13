@@ -37,6 +37,8 @@ At the end of every substantive session:
 - `core/scheduler/job_schedule.py`: single source of truth for APScheduler cron schedules.
 - `core/scheduler/scheduler.py`: scheduler execution, locks, metrics, manual run specs, and alert emails.
 - `core/scheduler/metrics.py`: scheduler metrics persistence in `core/scheduler/logs/scheduler_metrics.json`.
+- `core/scheduler/database_availability_state.py`: local SQLite state and
+  transition-event persistence for PostgreSQL/MSSQL availability.
 - `services/api/main.py`: FastAPI application entry point and router registration.
 - `services/api/core/config.py`: FastAPI runtime settings, including token and CORS configuration.
 - `services/api/core/tokens.py`: custom HMAC bearer token implementation.
@@ -100,6 +102,9 @@ Known hygiene topics to handle only after explicit approval:
 - `dbo` contains source or legacy operational tables, including some MSSQL-related structures.
 - `evidence` contains QGIS/evidence device metadata.
 - FastAPI should be the preferred boundary for new external or frontend-facing capabilities.
+- FastAPI liveness must not depend on database availability. Dashboard table
+  initialization runs as a background retry task; `/health/ready` returns HTTP
+  503 until that initialization succeeds.
 - Streamlit remains the active dashboard unless a task explicitly targets the experimental Next.js area.
 - Shared behavior should live in modules/services, not in duplicated page logic.
 - `Mapove podklady` uses general FastAPI map endpoints and admin-configured metadata in `dashboard.Map_Layers`.
@@ -175,6 +180,31 @@ SmartFuelPass intervals use start/end UTC/source semantics. Do not simplify time
 - Avoid adding schedule definitions directly inside feature modules.
 - When changing scheduler behavior, run targeted scheduler tests and check manual-run compatibility.
 - Dashboard refreshes tied to `quarter_hour_job` must derive its exact run minutes from the central scheduler specification and refresh after those slots; do not assume regular 15-minute spacing.
+- Scheduled database jobs check API, Streamlit dashboard, and Caddy availability
+  before the database preflight. Runtime outages do not stop the data job, but
+  send one transition alert per unavailable service until it recovers.
+- Scheduler alert content is selected per recipient. An address assigned to an
+  active dashboard admin account receives technical details; all other
+  recipients receive only the existing brief description. Database brief
+  alerts contain only `Nedostupnost POSTGRES` and/or `Nedostupnost MSSQL`.
+  Runtime brief alerts contain only `Nedostupnost API`,
+  `Nedostupnost DASHBOARD`, and/or `Nedostupnost CADDY`.
+- Admin-recipient classification uses a short-lived local cache of SHA-256
+  email hashes refreshed after successful PostgreSQL preflight checks. Missing,
+  invalid, or stale classification must fail closed to the brief alert.
+- Only `quarter_hour_job` records PostgreSQL/MSSQL availability transitions in
+  local SQLite under `core/scheduler/data/database_availability.sqlite3`.
+  Send one alert when a database first becomes unavailable, suppress repeated
+  outage emails, and send one recovery summary after the first successful
+  check. Other scheduled jobs still skip on failed database preflight but do
+  not emit database availability emails.
+- Recovery summaries report the first failed and first successful
+  `quarter_hour_job` observations and the observed outage duration. These times
+  are scheduler observation boundaries, not exact network-transition times.
+- Pending SQLite transition events are marked delivered only after successful
+  email delivery. SQLite failures must not fail or unblock the data job; log
+  them and suppress database availability email rather than reverting to
+  repeated stateless alerts.
 
 Known job families:
 

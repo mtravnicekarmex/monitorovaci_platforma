@@ -16,6 +16,7 @@ core/scheduler/logs/
 services/api/logs/
 core/scheduler/locks/scheduler_process.lock
 core/scheduler/data/*.parquet
+core/scheduler/data/*.sqlite3*
 data/*.parquet
 scheduler.log
 

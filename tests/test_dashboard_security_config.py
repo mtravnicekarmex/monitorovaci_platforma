@@ -38,23 +38,24 @@ def test_runtime_launchers_do_not_contain_or_assign_api_token_secret():
 
 
 def test_compromised_development_secret_is_absent_from_tracked_files():
-    output = subprocess.check_output(
-        ["git", "ls-files", "-z"],
+    result = subprocess.run(
+        [
+            "git",
+            "grep",
+            "--cached",
+            "-l",
+            "-F",
+            COMPROMISED_DEVELOPMENT_SECRET.decode("ascii"),
+            "--",
+            ".",
+        ],
         cwd=PROJECT_ROOT,
+        capture_output=True,
+        check=False,
     )
-    tracked_paths = [
-        PROJECT_ROOT / raw_path.decode("utf-8")
-        for raw_path in output.split(b"\0")
-        if raw_path
-    ]
 
-    matching_paths = [
-        path.relative_to(PROJECT_ROOT)
-        for path in tracked_paths
-        if path.is_file() and COMPROMISED_DEVELOPMENT_SECRET in path.read_bytes()
-    ]
-
-    assert matching_paths == []
+    assert result.returncode == 1
+    assert result.stdout == b""
 
 
 def test_vendored_leaflet_assets_match_reviewed_release_hashes():

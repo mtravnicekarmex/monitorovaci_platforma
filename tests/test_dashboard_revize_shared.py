@@ -21,14 +21,17 @@ from moduly.apps.dashboard.revize_shared import (
     build_link_uri,
     calculate_revize_valid_until,
     classify_revize_status,
-    create_revize_record,
     filter_revize_dataframe,
     load_revize_record_values,
     normalize_revize_payload,
     parse_revize_linked_device_ids,
     prepare_revize_dataframe,
-    update_revize_record,
     validate_revize_linked_devices,
+)
+from services.api.services import revize_admin
+from services.api.services.revize_admin import (
+    create_revize_admin,
+    update_revize_admin,
 )
 
 
@@ -391,6 +394,10 @@ def _minimal_revize_record(**overrides):
     return SimpleNamespace(**record)
 
 
+def _admin_user():
+    return SimpleNamespace(is_admin=True)
+
+
 def test_load_revize_record_values_includes_linked_device_types(monkeypatch):
     record = _minimal_revize_record()
     linked_rows = [
@@ -414,15 +421,19 @@ def test_load_revize_record_values_includes_linked_device_types(monkeypatch):
     assert session.close_count == 1
 
 
-def test_create_revize_record_validates_links_before_flush(monkeypatch):
+def test_create_revize_admin_validates_links_before_flush(monkeypatch):
     session = _FakeCreateSession(
         table_info={"table_exists": False, "has_fid": False, "has_budova": False},
         device_rows=[],
     )
-    monkeypatch.setattr(revize_shared, "get_session_pg", lambda: session)
+    monkeypatch.setattr(revize_admin, "get_session_pg", lambda: session)
 
     with pytest.raises(RevizeLinkedDeviceValidationError):
-        create_revize_record(_minimal_revize_payload(typ_zarizeni="NEEXISTUJE"), linked_device_ids=[10])
+        create_revize_admin(
+            _admin_user(),
+            payload=_minimal_revize_payload(typ_zarizeni="NEEXISTUJE"),
+            linked_device_ids=[10],
+        )
 
     assert session.added_records == []
     assert session.flush_count == 0
@@ -431,16 +442,20 @@ def test_create_revize_record_validates_links_before_flush(monkeypatch):
     assert session.close_count == 1
 
 
-def test_create_revize_record_rejects_duplicate_before_flush(monkeypatch):
+def test_create_revize_admin_rejects_duplicate_before_flush(monkeypatch):
     session = _FakeCreateSession(
         table_info={"table_exists": True, "has_fid": True, "has_budova": True},
         device_rows=[],
         duplicate_id=42,
     )
-    monkeypatch.setattr(revize_shared, "get_session_pg", lambda: session)
+    monkeypatch.setattr(revize_admin, "get_session_pg", lambda: session)
 
     with pytest.raises(ValueError, match="uz existuje"):
-        create_revize_record(_minimal_revize_payload(), linked_device_ids=[])
+        create_revize_admin(
+            _admin_user(),
+            payload=_minimal_revize_payload(),
+            linked_device_ids=[],
+        )
 
     assert session.added_records == []
     assert session.flush_count == 0
@@ -449,7 +464,7 @@ def test_create_revize_record_rejects_duplicate_before_flush(monkeypatch):
     assert session.close_count == 1
 
 
-def test_update_revize_record_validates_links_before_mutating_record(monkeypatch):
+def test_update_revize_admin_validates_links_before_mutating_record(monkeypatch):
     record = SimpleNamespace(
         id=1,
         budova="F",
@@ -461,10 +476,15 @@ def test_update_revize_record_validates_links_before_mutating_record(monkeypatch
         device_rows=[],
         records={1: record},
     )
-    monkeypatch.setattr(revize_shared, "get_session_pg", lambda: session)
+    monkeypatch.setattr(revize_admin, "get_session_pg", lambda: session)
 
     with pytest.raises(RevizeLinkedDeviceValidationError):
-        update_revize_record(1, _minimal_revize_payload(typ_zarizeni="NEEXISTUJE"), linked_device_ids=[10])
+        update_revize_admin(
+            _admin_user(),
+            revize_id=1,
+            payload=_minimal_revize_payload(typ_zarizeni="NEEXISTUJE"),
+            linked_device_ids=[10],
+        )
 
     assert record.typ_zarizeni == "HYDRANTY"
     assert record.soubor == r"P:\revize\puvodni.pdf"
@@ -475,7 +495,7 @@ def test_update_revize_record_validates_links_before_mutating_record(monkeypatch
     assert session.close_count == 1
 
 
-def test_update_revize_record_rejects_duplicate_before_mutating_record(monkeypatch):
+def test_update_revize_admin_rejects_duplicate_before_mutating_record(monkeypatch):
     record = SimpleNamespace(
         id=1,
         budova="F",
@@ -488,10 +508,15 @@ def test_update_revize_record_rejects_duplicate_before_mutating_record(monkeypat
         duplicate_id=42,
         records={1: record},
     )
-    monkeypatch.setattr(revize_shared, "get_session_pg", lambda: session)
+    monkeypatch.setattr(revize_admin, "get_session_pg", lambda: session)
 
     with pytest.raises(ValueError, match="uz existuje"):
-        update_revize_record(1, _minimal_revize_payload(), linked_device_ids=[])
+        update_revize_admin(
+            _admin_user(),
+            revize_id=1,
+            payload=_minimal_revize_payload(),
+            linked_device_ids=[],
+        )
 
     assert record.soubor == r"P:\revize\puvodni.pdf"
     assert session.delete_count == 0
@@ -501,7 +526,7 @@ def test_update_revize_record_rejects_duplicate_before_mutating_record(monkeypat
     assert session.close_count == 1
 
 
-def test_update_revize_record_replaces_links_after_successful_validation(monkeypatch):
+def test_update_revize_admin_replaces_links_after_successful_validation(monkeypatch):
     record = SimpleNamespace(
         id=1,
         budova="F",
@@ -517,9 +542,14 @@ def test_update_revize_record_replaces_links_after_successful_validation(monkeyp
         ],
         records={1: record},
     )
-    monkeypatch.setattr(revize_shared, "get_session_pg", lambda: session)
+    monkeypatch.setattr(revize_admin, "get_session_pg", lambda: session)
 
-    update_revize_record(1, _minimal_revize_payload(), linked_device_ids=[10, 11])
+    update_revize_admin(
+        _admin_user(),
+        revize_id=1,
+        payload=_minimal_revize_payload(),
+        linked_device_ids=[10, 11],
+    )
 
     assert record.soubor == r"P:\revize\hydranty.pdf"
     assert record.typ_zarizeni == "HYDRANTY"

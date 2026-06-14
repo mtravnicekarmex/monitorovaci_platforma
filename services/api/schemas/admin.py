@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -107,6 +107,31 @@ class AdminMapLayerCreateRequest(BaseModel):
 
 class AdminMapLayerUpdateRequest(AdminMapLayerCreateRequest):
     layer_id: str | None = Field(default=None, max_length=100, exclude=True)
+
+
+class AdminRevizeMutationRequest(BaseModel):
+    budova: str = Field(min_length=1, max_length=50)
+    datum: date
+    delka_platnosti: int = Field(ge=1, le=99)
+    typ_zarizeni: str = Field(min_length=1, max_length=100)
+    nazev_revize: str | None = Field(default=None, max_length=255)
+    dodavatel: str | None = Field(default=None, max_length=200)
+    servisni_smlouva: str | None = Field(default=None, max_length=500)
+    soubor: str | None = Field(default=None, max_length=500)
+    poznamka: str | None = None
+    linked_device_ids: list[int] = Field(default_factory=list)
+
+
+class AdminRevizeMutationResponse(BaseModel):
+    id: int
+
+
+class AdminDeviceMutationRequest(BaseModel):
+    fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class AdminDeviceUpdateRequest(AdminDeviceMutationRequest):
+    primary_key_value: Any
 
 
 class SchedulerJobHealth(BaseModel):

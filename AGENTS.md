@@ -102,6 +102,11 @@ Known hygiene topics to handle only after explicit approval:
 - `dbo` contains source or legacy operational tables, including some MSSQL-related structures.
 - `evidence` contains QGIS/evidence device metadata.
 - FastAPI should be the preferred boundary for new external or frontend-facing capabilities.
+- Browser-initiated privileged writes must execute through authenticated
+  FastAPI services. Revision and device-list mutations use
+  `/api/v1/admin/revize` and `/api/v1/admin/devices/{meter_key}` with both
+  route-level and service-level admin checks; do not restore direct
+  PostgreSQL/MSSQL writes in Streamlit pages or shared UI modules.
 - FastAPI liveness must not depend on database availability. Dashboard table
   initialization runs as a background retry task; `/health/ready` returns HTTP
   503 until that initialization succeeds.

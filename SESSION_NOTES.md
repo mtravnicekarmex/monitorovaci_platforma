@@ -3407,3 +3407,422 @@ Accepted gaps:
   the passing regression tests.
 - No database recovery occurred, so recovery-event and recovery-email
   behavior was not exercised in production.
+
+### 2026-06-13 12:30 CEST - Pre-restart SQLite persistence handoff
+
+Reason for restart:
+- The user explicitly requested saving the current state and restarting the
+  workstation.
+- Verify that the SQLite database availability state survives another full
+  workstation restart and continues suppressing duplicate outage alerts.
+
+Current task/conversation state:
+- Completed: verified the 2026-06-13 11:49 cold start, complete public
+  runtime recovery, and two post-restart database-unavailable observations.
+- Completed: SQLite contains one delivered `unavailable` event for
+  PostgreSQL and one for MSSQL; the second failed observation incremented
+  counters without creating another event.
+- Pending: restart the workstation and verify runtime recovery plus SQLite
+  persistence across the second restart.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`,
+  `SESSION_NOTES.md`, and this handoff, then run
+  `git status --short --untracked-files=all`.
+
+Working tree and deployment:
+- `HEAD`, `origin/master`, and `origin/HEAD` are
+  `f18111e22c6231b7449b362cb53b6d87303bde07`.
+- Commit `f18111e` contains the non-blocking FastAPI startup,
+  recipient-specific scheduler alerts, SQLite database availability
+  transitions, tests, and documentation.
+- The working tree was clean before adding this handoff. After this entry,
+  only `SESSION_NOTES.md` is expected to be modified.
+- The production processes are running from the committed implementation.
+- Tracked and runtime Caddyfile SHA-256 values are equal at
+  `F41D3B31EA03308CB4345B1D11F0488B11D1FE527CBF135B0E1E166E5E7BC9BE`.
+- The focused scheduler, SQLite, API startup, Caddy, and security suite passed
+  all 68 tests during the preceding post-restart verification.
+
+Pre-restart runtime state:
+- Workstation boot time is 2026-06-13 11:49:11 CEST.
+- Scheduled task `API_dashboard_caddy` is `Ready`; its 11:49:21 run completed
+  with result `0`.
+- FastAPI listens on `127.0.0.1:8000`, Streamlit on `127.0.0.1:8001`, and
+  one Caddy process owns ports 80/443 plus `127.0.0.1:2019`.
+- Tailscale interface-specific port 443 listeners are also present as
+  expected.
+- FastAPI live returns HTTP 200, FastAPI ready returns HTTP 503, Streamlit
+  health returns HTTP 200, and the Caddy admin endpoint returns HTTP 200.
+- Explicit-loopback hostname routing returns HTTP 308 for HTTP, HTTP 200 for
+  the HTTPS dashboard, and HTTP 401 for the protected API, map image without
+  its session cookie, and session refresh without Bearer authentication.
+- PostgreSQL `server2a:5432` and MSSQL `server2a:1433` are both unreachable.
+- The scheduler process lock is held. The latest observed heartbeat was
+  2026-06-13 12:24:28 CEST, within the configured 300-second TTL.
+- The latest `quarter_hour_job` completed at 12:18:30 as
+  `skipped (database_unavailable)`; the next observed run was scheduled for
+  12:35:05.
+
+SQLite state before restart:
+- `core/scheduler/data/database_availability.sqlite3` exists and its integrity
+  check is `ok`.
+- Both `postgres` and `mssql` are stored as unavailable with a common first
+  failed observation at 2026-06-13 12:07:30 CEST.
+- Both services have `failed_check_count=2`.
+- Exactly two transition events exist: one `unavailable` event for each
+  database. Both are delivered and none are pending.
+- `core/scheduler/logs/admin_alert_email_hashes.json` does not exist because
+  PostgreSQL has not been available for an active-admin cache refresh.
+- If both databases remain unavailable after restart, the first subsequent
+  `quarter_hour_job` must preserve the original outage start, increment both
+  failed-check counters to 3 or higher, leave the event count at 2, and send
+  no duplicate outage alert.
+- If a database recovers, exactly one `recovered` event should be created for
+  that database and its recovery summary should use the preserved outage
+  start.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, or commit the ignored local `.env`, API signing
+  secret, email credentials, dashboard credentials, cookies, bearer tokens,
+  authentication audit records, actual operational recipient addresses, or
+  raw SQLite reason values.
+- Do not inspect or change SmartFuelPass browser/session artifacts.
+
+Expected processes and listeners after restart:
+- Scheduled task `API_dashboard_caddy` runs at system startup and completes
+  with result `0`.
+- One FastAPI/Uvicorn runtime owns `127.0.0.1:8000`.
+- One Streamlit runtime owns `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py` and holds `scheduler_process`.
+- One Caddy runtime owns ports 80/443 plus `127.0.0.1:2019`.
+- Tailscale interface-specific port 443 listeners may remain in addition.
+
+Expected application state:
+- FastAPI `/health/live`: HTTP 200.
+- FastAPI `/health/ready`: HTTP 503 while PostgreSQL initialization remains
+  pending; HTTP 200 after successful initialization.
+- Streamlit `/_stcore/health`: HTTP 200.
+- Caddy admin endpoint: HTTP 200.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- HTTPS dashboard: HTTP 200.
+- Protected API, map image without cookie, and session refresh without Bearer:
+  HTTP 401.
+- Scheduler lock and heartbeat remain active.
+- Database jobs remain skipped while either required database is unavailable.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task result, process tree, and exactly one
+  expected runtime listener per service.
+- Confirm API live/ready semantics, Streamlit health, and Caddy admin health.
+- Confirm tracked/runtime Caddyfile hash equality and run `caddy validate`.
+- Confirm HTTP redirect, HTTPS dashboard, protected API, map image, and
+  session refresh status codes through explicit-loopback hostname routing.
+- Recheck TCP connectivity to `server2a:5432` and `server2a:1433` without
+  printing credentials.
+- Confirm scheduler process lock, heartbeat age, latest/next job state, and at
+  least one completed post-restart `quarter_hour_job`.
+- Confirm SQLite integrity and persistence of the original outage start,
+  delivered event count, pending count, and failed-check counters without
+  printing raw reasons.
+- If databases remain unavailable, confirm the event count remains 2 after a
+  post-restart failed check and counters increase without another alert.
+- If a database recovers, verify one recovery event and summary interval.
+- Run the focused 68-test suite, Python compilation, imports,
+  `git diff --check`, and final `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with all deviations.
+
+Known risks or accepted gaps:
+- Both database network endpoints are unavailable immediately before restart.
+- API readiness and scheduled database work are therefore expected to remain
+  degraded until database connectivity returns.
+- The received outage email body was not inspected directly in a mailbox.
+
+### 2026-06-13 20:34 CEST - Post-restart SQLite persistence verification
+
+Scope:
+- Verified the production cold start after the workstation boot at
+  2026-06-13 12:32:01 CEST.
+- Verified runtime recovery and SQLite outage-state persistence across the
+  second workstation restart.
+
+Startup and runtime:
+- Scheduled task `API_dashboard_caddy` ran at 12:32:11 and completed with
+  result `0`; its final state was `Ready`.
+- FastAPI listened on `127.0.0.1:8000`, Streamlit on `127.0.0.1:8001`, and
+  one Caddy process owned ports 80/443 plus `127.0.0.1:2019`.
+- FastAPI live returned HTTP 200, FastAPI ready returned HTTP 503, Streamlit
+  health returned HTTP 200, and the Caddy admin endpoint returned HTTP 200.
+- Explicit-loopback hostname routing returned HTTP 308 for HTTP, HTTP 200 for
+  the HTTPS dashboard, and HTTP 401 for the protected API, map image without
+  its session cookie, and session refresh without Bearer authentication.
+- Tracked and runtime Caddyfile SHA-256 values remained equal at
+  `F41D3B31EA03308CB4345B1D11F0488B11D1FE527CBF135B0E1E166E5E7BC9BE`;
+  `caddy validate` reported a valid configuration.
+
+Database, scheduler, and SQLite:
+- PostgreSQL `server2a:5432` and MSSQL `server2a:1433` remained unreachable.
+- The scheduler process lock was held and its heartbeat was current.
+- The latest checked `quarter_hour_job` completed at 20:18:30 as
+  `skipped (database_unavailable)`; its next run was scheduled for 20:35:05.
+- SQLite integrity was `ok`. The original outage start remained
+  2026-06-13 12:07:30 CEST for both databases.
+- Both failed-check counters increased from 2 before restart to 34.
+- The event registry still contained exactly two delivered `unavailable`
+  events, one per database, with no pending or recovery events. No duplicate
+  outage transition was created after restart.
+- The active-admin email hash cache remained absent because PostgreSQL was
+  unavailable, so recipient classification continued to fail closed.
+
+Verification:
+- The focused scheduler, SQLite, API startup, Caddy, and security suite passed
+  all 68 tests.
+- Python compilation and scheduler/FastAPI imports passed.
+- `git diff --check` passed with only the existing line-ending warning for
+  `SESSION_NOTES.md`.
+- `HEAD` and `origin/master` both remained
+  `f18111e22c6231b7449b362cb53b6d87303bde07`.
+
+Accepted gaps:
+- No database recovery occurred, so production recovery-event and
+  recovery-email behavior remains unexercised.
+- No mailbox was opened and no authenticated browser session was used.
+
+### 2026-06-14 09:50 CEST - Pre-restart healthy-database handoff
+
+Reason for restart:
+- The user explicitly requested saving the current state and restarting the
+  workstation.
+- Renew the complete production runtime through the supported Windows startup
+  task and verify cold start while PostgreSQL and MSSQL are available.
+
+Current task/conversation state:
+- Completed: verified current FastAPI, Streamlit, scheduler, Caddy, database,
+  routing, authentication-boundary, and SQLite transition state.
+- Completed: confirmed that the previously unavailable PostgreSQL and MSSQL
+  services recovered and that both recovery events were delivered.
+- Pending: restart the workstation and perform full post-restart verification.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`,
+  `SESSION_NOTES.md`, and this handoff, then run
+  `git status --short --untracked-files=all`.
+
+Working tree and deployment:
+- `HEAD`, `origin/master`, and `origin/HEAD` are
+  `f18111e22c6231b7449b362cb53b6d87303bde07`.
+- Before this handoff, modified tracked files were `SESSION_NOTES.md` and the
+  sensitive runtime file `data/smartfuelpass/session_cookies.json`.
+- The `SESSION_NOTES.md` changes contain the previous restart handoff and
+  post-restart verification plus this new handoff.
+- The SmartFuelPass cookie file was not opened, changed, reverted, or staged
+  during this session.
+- The production processes run the committed implementation.
+- Tracked and runtime Caddyfile SHA-256 values are equal at
+  `F41D3B31EA03308CB4345B1D11F0488B11D1FE527CBF135B0E1E166E5E7BC9BE`.
+- Runtime Caddy configuration validated successfully.
+- The focused 68-test suite last passed on 2026-06-13 at the preceding
+  post-restart verification. No source code changed afterward.
+
+Pre-restart runtime state:
+- Workstation boot time is 2026-06-13 12:32:01 CEST.
+- Scheduled task `API_dashboard_caddy` is `Ready`; its 2026-06-13 12:32:11
+  run completed with result `0`.
+- FastAPI listens on `127.0.0.1:8000`, Streamlit on `127.0.0.1:8001`, and
+  one Caddy process owns ports 80/443 plus `127.0.0.1:2019`.
+- Tailscale interface-specific port 443 listeners are also present as
+  expected.
+- FastAPI live and ready both return HTTP 200. Streamlit health and the Caddy
+  admin endpoint also return HTTP 200.
+- Explicit-loopback hostname routing returns HTTP 308 for HTTP, HTTP 200 for
+  the HTTPS dashboard, and HTTP 401 for the protected API, map image without
+  its session cookie, and session refresh without Bearer authentication.
+- PostgreSQL `server2a:5432` and MSSQL `server2a:1433` are both reachable.
+- The scheduler process lock is held. Its latest observed heartbeat was
+  2026-06-14 09:47:19 CEST, within the configured 300-second TTL.
+- The latest `quarter_hour_job` completed successfully at
+  2026-06-14 09:47:08 CEST; the next observed run was scheduled for 10:05:05.
+
+SQLite and alert state before restart:
+- `core/scheduler/data/database_availability.sqlite3` exists and its integrity
+  check is `ok`.
+- Both `postgres` and `mssql` are stored as available, with no active outage
+  start and `failed_check_count=0`.
+- Exactly four transition events exist: one delivered `unavailable` and one
+  delivered `recovered` event for each database. No event is pending.
+- The outage was first observed on 2026-06-13 12:07:30 CEST and recovery was
+  first observed on 2026-06-13 21:35:05 CEST after 38 failed observations.
+- `core/scheduler/logs/admin_alert_email_hashes.json` exists after successful
+  PostgreSQL preflight checks. Do not print its hash values.
+- If both databases remain available after restart, the first subsequent
+  `quarter_hour_job` must leave the event count at four, keep both services
+  available, and send no database transition alert.
+- If either database becomes unavailable, exactly one new `unavailable`
+  transition should be created for that service.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, revert, stage, or commit the modified
+  `data/smartfuelpass/session_cookies.json` without explicit user approval.
+- Do not print, change, delete, or commit the ignored local `.env`, API
+  signing secret, email credentials, dashboard credentials, cookies, bearer
+  tokens, authentication audit records, operational recipient addresses, raw
+  SQLite reason values, or admin email hash-cache values.
+- Do not inspect or change other SmartFuelPass browser/session artifacts.
+
+Expected processes and listeners after restart:
+- Scheduled task `API_dashboard_caddy` runs at system startup and completes
+  with result `0`.
+- One FastAPI/Uvicorn runtime owns `127.0.0.1:8000`.
+- One Streamlit runtime owns `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py` and holds `scheduler_process`.
+- One Caddy runtime owns ports 80/443 plus `127.0.0.1:2019`.
+- Tailscale interface-specific port 443 listeners may remain in addition.
+
+Expected application state:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL
+  remains available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- HTTPS dashboard: HTTP 200.
+- Protected API, map image without cookie, and session refresh without Bearer:
+  HTTP 401.
+- PostgreSQL and MSSQL TCP checks remain reachable.
+- Scheduler lock and heartbeat remain active, and database jobs run normally.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task result, process tree, and exactly one
+  expected runtime listener per service.
+- Confirm API live/ready semantics, Streamlit health, and Caddy admin health.
+- Confirm tracked/runtime Caddyfile hash equality and run `caddy validate`.
+- Confirm HTTP redirect, HTTPS dashboard, protected API, map image, and
+  session refresh status codes through explicit-loopback hostname routing.
+- Recheck TCP connectivity to `server2a:5432` and `server2a:1433` without
+  printing credentials.
+- Confirm scheduler process lock, heartbeat age, latest/next job state, and at
+  least one completed post-restart `quarter_hour_job`.
+- Confirm SQLite integrity, both available service states, four delivered
+  transition events, no pending event, and no duplicate recovery event.
+- Confirm the admin email hash cache exists without printing its values.
+- Run the focused 68-test suite, Python compilation, imports,
+  `git diff --check`, and final `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with all deviations.
+
+Known risks or accepted gaps:
+- The modified SmartFuelPass cookie file is an existing sensitive runtime
+  change and must remain untouched.
+- A database or network outage during restart can make API readiness return
+  HTTP 503 and cause scheduled database jobs to skip until connectivity
+  recovers.
+- No mailbox was opened and no authenticated browser session was used.
+
+### 2026-06-14 10:06 CEST - Post-restart healthy-database verification
+
+Scope:
+- Verified the production cold start after the workstation boot at
+  2026-06-14 09:56:55 CEST.
+- Verified the complete runtime and the first post-restart
+  `quarter_hour_job` while PostgreSQL and MSSQL were available.
+
+Startup and runtime:
+- Scheduled task `API_dashboard_caddy` ran at 09:57:05 and completed with
+  result `0`; its final state was `Ready`.
+- FastAPI listened on `127.0.0.1:8000`, Streamlit on `127.0.0.1:8001`, and
+  one Caddy process owned ports 80/443 plus `127.0.0.1:2019`.
+- Tailscale interface-specific port 443 listeners were also present as
+  expected.
+- FastAPI live and ready, Streamlit health, and the Caddy admin endpoint all
+  returned HTTP 200.
+- Explicit-loopback hostname routing returned HTTP 308 for HTTP, HTTP 200 for
+  the HTTPS dashboard, and HTTP 401 for the protected API, map image without
+  its session cookie, and session refresh without Bearer authentication.
+- Tracked and runtime Caddyfile SHA-256 values remained equal at
+  `F41D3B31EA03308CB4345B1D11F0488B11D1FE527CBF135B0E1E166E5E7BC9BE`;
+  `caddy validate` reported a valid configuration.
+
+Database, scheduler, and SQLite:
+- PostgreSQL `server2a:5432` and MSSQL `server2a:1433` were reachable.
+- The scheduler process lock was held and the heartbeat remained within its
+  configured 300-second TTL.
+- The first post-restart `quarter_hour_job` completed successfully at
+  10:05:08; its next run was scheduled for 10:16:05.
+- SQLite integrity was `ok`. PostgreSQL and MSSQL remained stored as
+  available, with no active outage and zero failed checks.
+- The event registry remained at exactly four delivered events: one
+  `unavailable` and one `recovered` event for each database. No event was
+  pending and no duplicate recovery event was created.
+- The active-admin email hash cache existed and was refreshed by the
+  successful post-restart database preflight; its values were not printed.
+
+Verification:
+- The focused scheduler, SQLite, API startup, Caddy, and security suite passed
+  all 68 tests.
+- Python compilation and scheduler/FastAPI imports passed.
+- `git diff --check` passed with only the existing line-ending warning for
+  `SESSION_NOTES.md`.
+- `HEAD` and `origin/master` both remained
+  `f18111e22c6231b7449b362cb53b6d87303bde07`.
+- Final working-tree entries remained the expected modified
+  `SESSION_NOTES.md` and sensitive
+  `data/smartfuelpass/session_cookies.json`; no unexpected file appeared.
+
+Accepted gaps:
+- No mailbox was opened and no authenticated browser session was used.
+- Process command lines from the non-interactive scheduled-task session were
+  not visible, so service identity was confirmed through listener ownership,
+  health checks, scheduler metrics, and the held scheduler process lock.
+
+### 2026-06-14 10:44 CEST - P1.10 privileged write authorization
+
+Scope:
+- Completed dashboard security checklist item P1.10.
+- Inventoried browser-facing PostgreSQL/MSSQL mutations and moved revision and
+  device-list writes behind FastAPI admin authorization.
+
+Changed:
+- Added admin revision create/update services and endpoints under
+  `/api/v1/admin/revize`.
+- Added admin device create/update services and endpoints under
+  `/api/v1/admin/devices/{meter_key}`.
+- Added dashboard API client methods with date/decimal serialization.
+- Replaced direct PostgreSQL writes in the revision page and shared revision
+  module with bearer-authenticated API calls.
+- Replaced direct MSSQL writes in the shared device-list module with
+  bearer-authenticated API calls.
+- Added route-dependency, service-level authorization, API-client, persistence,
+  and no-direct-Streamlit-write regression tests.
+- Added DEC-036 and updated the security checklist and operating context.
+
+Inventory findings:
+- User administration, self-service account changes, map-layer
+  administration, scheduler controls, web-search mutations, and alerting
+  mutations already use authenticated FastAPI operations.
+- Dashboard report pages use read-only database queries and browser download
+  generation.
+- Revision file actions read, preview, download, or open existing targets; no
+  browser-triggered server-side file write/delete operation was found.
+- Revision Excel imports are batch/off-dashboard workflows and are not exposed
+  as Streamlit mutations.
+- Database bootstrap, authentication persistence, scheduler jobs, trusted CLI
+  operations, and batch imports remain separate non-browser write surfaces.
+
+Verified:
+- Focused P1.10 suite passed all 42 tests.
+- Broader authentication, session, password, security, navigation, startup,
+  map, revision, and device suite passed all 136 tests.
+- Full suite passed 525 of 527 tests. The two failures are the previously
+  documented unrelated failures in `tests/test_vodomery_reports.py`.
+- Changed modules compiled; FastAPI and dashboard modules imported.
+- Live FastAPI OpenAPI exposed all four new operations with `HTTPBearer`
+  security.
+- Live unauthenticated revision and device creation requests returned HTTP
+  401 without opening a mutation path.
+- FastAPI live/ready and Streamlit health remained HTTP 200.
+- `git diff --check` passed with only existing line-ending warnings.
+
+Not verified:
+- No authenticated production revision or device record was created or
+  changed, because doing so would mutate operational data.
+- A real non-admin bearer token was not used against production; HTTP 403 and
+  pre-database rejection are covered by dependency and service regression
+  tests.
+- No external-network verification was performed.
+
+Working tree:
+- Existing modified `data/smartfuelpass/session_cookies.json` remained
+  untouched and must not be staged or committed without explicit approval.

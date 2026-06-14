@@ -9,6 +9,11 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from moduly.apps.dashboard import device_list_shared
 from moduly.mereni.elektromery.database.models import Elektromer_areal_Zarizeni
 from moduly.mereni.manometry.database.models import Manometr_areal_Zarizeni
+from services.api.services.dashboard_auth import AuthorizationError
+from services.api.services.device_admin import (
+    create_device_admin,
+    update_device_admin,
+)
 
 
 def test_build_create_fields_skips_auto_primary_key():
@@ -48,14 +53,23 @@ def test_coerce_form_value_rejects_invalid_required_value():
         device_list_shared._coerce_form_value(Manometr_areal_Zarizeni, "seriove_cislo", "")
 
 
-def test_create_device_record_requires_admin():
-    with pytest.raises(PermissionError):
-        device_list_shared.create_device_record("vodomery", {}, user_is_admin=False)
+def test_create_device_admin_requires_admin():
+    with pytest.raises(AuthorizationError):
+        create_device_admin(
+            type("User", (), {"is_admin": False})(),
+            meter_key="vodomery",
+            form_values={},
+        )
 
 
-def test_update_device_record_requires_admin():
-    with pytest.raises(PermissionError):
-        device_list_shared.update_device_record("vodomery", "V-1", {}, user_is_admin=False)
+def test_update_device_admin_requires_admin():
+    with pytest.raises(AuthorizationError):
+        update_device_admin(
+            type("User", (), {"is_admin": False})(),
+            meter_key="vodomery",
+            primary_key_value="V-1",
+            form_values={},
+        )
 
 
 def test_full_dataframe_height_scales_with_visible_rows():

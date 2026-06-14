@@ -11,7 +11,6 @@ import webbrowser
 
 import pandas as pd
 import streamlit as st
-from sqlalchemy.exc import SQLAlchemyError
 
 from app.time_utils import prague_today
 
@@ -20,7 +19,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from moduly.apps.dashboard.auth import is_admin, require_page_access
+from moduly.apps.dashboard.api_client import (
+    DashboardApiError,
+    create_admin_revize,
+    update_admin_revize,
+)
+from moduly.apps.dashboard.auth import get_auth_token, is_admin, require_page_access
 from moduly.apps.dashboard.device_list_shared import _full_dataframe_height
 from moduly.apps.dashboard.revize_shared import (
     REVIZE_BUILDING_OPTIONS,
@@ -29,7 +33,6 @@ from moduly.apps.dashboard.revize_shared import (
     REVIZE_STATUS_OPTIONS,
     build_revize_metrics,
     calculate_revize_valid_until,
-    create_revize_record,
     filter_revize_dataframe,
     load_evidence_device_type_options,
     load_revize_rows,
@@ -37,7 +40,6 @@ from moduly.apps.dashboard.revize_shared import (
     normalize_revize_payload,
     parse_revize_linked_device_ids,
     prepare_revize_dataframe,
-    update_revize_record,
 )
 from moduly.apps.dashboard.vodomery_shared import render_page_styles
 
@@ -820,17 +822,28 @@ def _render_revize_form(
             soubor=soubor,
             poznamka=poznamka,
         )
+        access_token = get_auth_token()
+        if not access_token:
+            raise DashboardApiError("Chybi bearer token pro dashboard API.")
         if is_edit:
-            update_revize_record(int(record_values["id"]), payload, linked_device_ids=linked_device_ids)
+            update_admin_revize(
+                access_token,
+                int(record_values["id"]),
+                payload,
+                linked_device_ids,
+            )
             _clear_revize_cache_and_rerun("Revize byla upravena.")
             return
-        create_revize_record(payload, linked_device_ids=linked_device_ids)
+        create_admin_revize(
+            access_token,
+            payload,
+            linked_device_ids,
+        )
         _clear_revize_cache_and_rerun("Revize byla obnovena." if is_renew else "Nová revize byla uložena.")
     except ValueError as exc:
         st.warning(str(exc))
-    except SQLAlchemyError as exc:
-        st.error("Revizi se nepodarilo ulozit do PostgreSQL.")
-        st.exception(exc)
+    except DashboardApiError as exc:
+        st.error(str(exc))
 
 
 def render_revize_edit_controls(

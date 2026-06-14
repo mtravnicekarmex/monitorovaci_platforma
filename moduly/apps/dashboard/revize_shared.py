@@ -11,7 +11,6 @@ import sys
 import pandas as pd
 import streamlit as st
 from sqlalchemy import func, text
-from sqlalchemy.exc import IntegrityError
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -370,60 +369,6 @@ def validate_revize_linked_devices(
     return normalized_device_ids
 
 
-def _format_date_for_message(value: object) -> str:
-    if isinstance(value, datetime.datetime):
-        return value.date().strftime("%d.%m.%Y")
-    if isinstance(value, datetime.date):
-        return value.strftime("%d.%m.%Y")
-    return str(value or "-")
-
-
-def _format_revize_duplicate_message(payload: dict[str, object]) -> str:
-    building = payload.get("budova") or "-"
-    revision_date = _format_date_for_message(payload.get("datum"))
-    file_value = payload.get("soubor") or "bez souboru"
-    return f"Revize pro budovu {building}, datum {revision_date} a soubor {file_value} uz existuje."
-
-
-def _find_duplicate_revize_id(
-    session,
-    payload: dict[str, object],
-    *,
-    exclude_revize_id: int | None = None,
-) -> int | None:
-    statement = session.query(Revize.id).filter(
-        Revize.budova == payload.get("budova"),
-        Revize.datum == payload.get("datum"),
-    )
-    if exclude_revize_id is not None:
-        statement = statement.filter(Revize.id != int(exclude_revize_id))
-
-    soubor = payload.get("soubor")
-    if soubor is None:
-        statement = statement.filter(Revize.soubor.is_(None))
-    else:
-        statement = statement.filter(Revize.soubor == soubor)
-
-    result = statement.first()
-    if result is None:
-        return None
-    return int(result[0])
-
-
-def _raise_if_duplicate_revize(
-    session,
-    payload: dict[str, object],
-    *,
-    exclude_revize_id: int | None = None,
-) -> None:
-    if _find_duplicate_revize_id(session, payload, exclude_revize_id=exclude_revize_id) is not None:
-        raise ValueError(_format_revize_duplicate_message(payload))
-
-
-def _is_revize_unique_constraint_error(exc: IntegrityError) -> bool:
-    return "uq_revize_budova_datum_soubor" in str(exc.orig or exc)
-
-
 def _revize_to_dict(record: Revize) -> dict[str, object]:
     return {
         "id": record.id,
@@ -646,128 +591,6 @@ def load_revize_record_values(revize_id: int) -> dict[str, object] | None:
         values["linked_device_types"] = linked_device_types
         values["linked_device_type"] = linked_device_types[0] if len(linked_device_types) == 1 else None
         return values
-    finally:
-        session.close()
-
-
-def _replace_revize_device_links(
-    session,
-    *,
-    revize_id: int,
-    budova: object,
-    typ_zarizeni: object,
-    linked_device_ids: Iterable[int] | None,
-) -> None:
-    normalized_device_ids = validate_revize_linked_devices(
-        session,
-        budova=budova,
-        typ_zarizeni=typ_zarizeni,
-        linked_device_ids=linked_device_ids,
-    )
-    _write_revize_device_links(
-        session,
-        revize_id=revize_id,
-        typ_zarizeni=typ_zarizeni,
-        normalized_device_ids=normalized_device_ids,
-    )
-
-
-def _write_revize_device_links(
-    session,
-    *,
-    revize_id: int,
-    typ_zarizeni: object,
-    normalized_device_ids: Iterable[int],
-) -> None:
-    normalized_type = _clean_optional_text(typ_zarizeni, max_length=100)
-
-    session.query(Revize_zarizeni).filter(Revize_zarizeni.revize_id == int(revize_id)).delete(
-        synchronize_session=False
-    )
-    if not normalized_device_ids:
-        return
-
-    session.add_all(
-        Revize_zarizeni(
-            revize_id=int(revize_id),
-            typ_zarizeni=normalized_type,
-            zarizeni_id=device_id,
-        )
-        for device_id in normalized_device_ids
-    )
-
-
-def create_revize_record(payload: dict[str, object], linked_device_ids: Iterable[int] | None = None) -> int:
-    session = get_session_pg()
-    try:
-        normalized_device_ids = validate_revize_linked_devices(
-            session,
-            budova=payload.get("budova"),
-            typ_zarizeni=payload.get("typ_zarizeni"),
-            linked_device_ids=linked_device_ids,
-        )
-        _raise_if_duplicate_revize(session, payload)
-        record = Revize(**payload)
-        session.add(record)
-        session.flush()
-        _write_revize_device_links(
-            session,
-            revize_id=int(record.id),
-            typ_zarizeni=payload.get("typ_zarizeni"),
-            normalized_device_ids=normalized_device_ids,
-        )
-        session.commit()
-        return int(record.id)
-    except IntegrityError as exc:
-        session.rollback()
-        if _is_revize_unique_constraint_error(exc):
-            raise ValueError(_format_revize_duplicate_message(payload)) from exc
-        raise
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
-
-
-def update_revize_record(
-    revize_id: int,
-    payload: dict[str, object],
-    linked_device_ids: Iterable[int] | None = None,
-) -> None:
-    session = get_session_pg()
-    try:
-        record = session.get(Revize, int(revize_id))
-        if record is None:
-            raise ValueError(f"Revize s ID {revize_id} nebyla nalezena.")
-
-        normalized_device_ids = None
-        if linked_device_ids is not None:
-            normalized_device_ids = validate_revize_linked_devices(
-                session,
-                budova=payload.get("budova"),
-                typ_zarizeni=payload.get("typ_zarizeni"),
-                linked_device_ids=linked_device_ids,
-            )
-        _raise_if_duplicate_revize(session, payload, exclude_revize_id=int(revize_id))
-        for field, value in payload.items():
-            setattr(record, field, value)
-        if normalized_device_ids is not None:
-            _write_revize_device_links(
-                session,
-                revize_id=int(revize_id),
-                typ_zarizeni=payload.get("typ_zarizeni"),
-                normalized_device_ids=normalized_device_ids,
-            )
-        session.commit()
-    except IntegrityError as exc:
-        session.rollback()
-        if _is_revize_unique_constraint_error(exc):
-            raise ValueError(_format_revize_duplicate_message(payload)) from exc
-        raise
-    except Exception:
-        session.rollback()
-        raise
     finally:
         session.close()
 

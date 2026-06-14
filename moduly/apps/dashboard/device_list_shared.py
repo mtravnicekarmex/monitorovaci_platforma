@@ -8,10 +8,14 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 from sqlalchemy import BigInteger, Boolean, DateTime, Float, Integer, Numeric
-from sqlalchemy.exc import SQLAlchemyError
 
 from core.db.connect import get_session_ms
-from moduly.apps.dashboard.auth import get_allowed_devices, is_admin
+from moduly.apps.dashboard.api_client import (
+    DashboardApiError,
+    create_admin_device,
+    update_admin_device,
+)
+from moduly.apps.dashboard.auth import get_allowed_devices, get_auth_token, is_admin
 from moduly.apps.dashboard.vodomery_shared import render_page_styles
 from moduly.mereni.elektromery.database.models import Elektromer_areal_Zarizeni
 from moduly.mereni.kalorimetry.database.models import Kalorimetr_areal_Zarizeni
@@ -401,61 +405,6 @@ def load_device_record_values(
     }
 
 
-def create_device_record(meter_key: str, form_values: dict[str, object], *, user_is_admin: bool) -> None:
-    if not user_is_admin:
-        raise PermissionError("Nové zařízení může vytvořit pouze admin.")
-
-    config = DEVICE_LIST_CONFIGS[meter_key]
-    fields = build_create_fields(config)
-    payload = {
-        field.attr: _coerce_form_value(config.model, field.attr, form_values.get(field.attr))
-        for field in fields
-    }
-
-    session = get_session_ms()
-    try:
-        session.add(config.model(**payload))
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
-
-
-def update_device_record(
-    meter_key: str,
-    primary_key_value: object,
-    form_values: dict[str, object],
-    *,
-    user_is_admin: bool,
-) -> None:
-    if not user_is_admin:
-        raise PermissionError("Zařízení může upravit pouze admin.")
-
-    config = DEVICE_LIST_CONFIGS[meter_key]
-    primary_key_attr = _primary_key_attr(config.model)
-    fields = build_edit_fields(config)
-    payload = {
-        field.attr: _coerce_form_value(config.model, field.attr, form_values.get(field.attr))
-        for field in fields
-    }
-
-    session = get_session_ms()
-    try:
-        record = session.get(config.model, primary_key_value)
-        if record is None:
-            raise ValueError(f"Záznam s {primary_key_attr}={primary_key_value} nebyl nalezen.")
-        for attr, value in payload.items():
-            setattr(record, attr, value)
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
-
-
 def _render_create_device_form(meter_key: str, user_is_admin: bool) -> None:
     config = DEVICE_LIST_CONFIGS[meter_key]
     fields = build_create_fields(config)
@@ -478,14 +427,12 @@ def _render_create_device_form(meter_key: str, user_is_admin: bool) -> None:
         return
 
     try:
-        create_device_record(meter_key, form_values, user_is_admin=user_is_admin)
-    except PermissionError as exc:
+        access_token = get_auth_token()
+        if not access_token:
+            raise DashboardApiError("Chybi bearer token pro dashboard API.")
+        create_admin_device(access_token, meter_key, form_values)
+    except DashboardApiError as exc:
         st.error(str(exc))
-    except ValueError as exc:
-        st.warning(str(exc))
-    except SQLAlchemyError as exc:
-        st.error("Novou položku se nepodařilo uložit do MS SQL.")
-        st.exception(exc)
     else:
         load_device_list.clear()
         st.session_state[f"{meter_key}_device_list_create_open"] = False
@@ -543,14 +490,17 @@ def _render_edit_device_form(
         return
 
     try:
-        update_device_record(meter_key, primary_key_value, form_values, user_is_admin=user_is_admin)
-    except PermissionError as exc:
+        access_token = get_auth_token()
+        if not access_token:
+            raise DashboardApiError("Chybi bearer token pro dashboard API.")
+        update_admin_device(
+            access_token,
+            meter_key,
+            primary_key_value,
+            form_values,
+        )
+    except DashboardApiError as exc:
         st.error(str(exc))
-    except ValueError as exc:
-        st.warning(str(exc))
-    except SQLAlchemyError as exc:
-        st.error("Změny se nepodařilo uložit do MS SQL.")
-        st.exception(exc)
     else:
         _clear_device_list_caches()
         st.session_state[f"{meter_key}_device_list_edit_open"] = False

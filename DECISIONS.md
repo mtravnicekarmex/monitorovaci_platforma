@@ -728,3 +728,31 @@ Implications:
   repeated stateless alerts.
 - Incident boundaries have quarter-hour scheduler resolution and represent
   observation times, not exact database or network transition times.
+
+## DEC-036: Privileged Dashboard Writes Use FastAPI Admin Boundaries
+
+Date: 2026-06-14
+
+Decision: Browser-initiated privileged mutations execute through authenticated
+FastAPI operations with an admin authorization decision in both the route
+dependency and the service function. Streamlit must not write revision or
+device-administration records directly to PostgreSQL or MSSQL.
+
+Rationale: Disabling controls for non-admin users is not an authorization
+boundary. Direct Streamlit database helpers could be invoked without the API
+role check and coupled browser-facing code to privileged database sessions.
+
+Implications:
+
+- Revision create/update operations use `/api/v1/admin/revize`.
+- Water, gas, electricity, heat-meter, and pressure-device create/update
+  operations use `/api/v1/admin/devices/{meter_key}`.
+- Admin services reject non-admin contexts before opening a database session.
+- Streamlit may retain read-only queries where already established, but new
+  browser-facing mutations must use FastAPI.
+- Local batch imports, scheduler jobs, database bootstrap, and trusted CLI
+  administration remain separate non-browser execution surfaces and must keep
+  their own explicit operational controls.
+- Regression tests must verify route dependencies, service-level rejection,
+  and absence of direct commits in the active revision/device Streamlit
+  modules.

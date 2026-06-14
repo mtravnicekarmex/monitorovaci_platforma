@@ -354,16 +354,51 @@ Completion criteria:
 
 ### 10. Move all privileged writes behind server-side authorization
 
-- [ ] Inventory Streamlit modules that write directly to PostgreSQL or MSSQL.
-- [ ] Move privileged revision writes behind authenticated FastAPI endpoints.
-- [ ] Enforce admin access inside the service/API operation, not only through disabled UI controls.
-- [ ] Review device administration, imports, reports, and file operations for the same pattern.
-- [ ] Add negative tests proving non-admin users cannot invoke write functions directly.
+- [x] Inventory Streamlit modules that write directly to PostgreSQL or MSSQL.
+- [x] Move privileged revision writes behind authenticated FastAPI endpoints.
+- [x] Enforce admin access inside the service/API operation, not only through disabled UI controls.
+- [x] Review device administration, imports, reports, and file operations for the same pattern.
+- [x] Add negative tests proving non-admin users cannot invoke write functions directly.
 
-Known initial finding:
+Completed on 2026-06-14:
 
-- `moduly/apps/dashboard/pages/28_revize.py`
-- `moduly/apps/dashboard/revize_shared.py`
+- Revision creation and update now use authenticated admin endpoints under
+  `/api/v1/admin/revize`; the Streamlit revision page no longer opens a
+  PostgreSQL write session.
+- Device creation and update for water, gas, electricity, heat, and pressure
+  meters now use authenticated admin endpoints under
+  `/api/v1/admin/devices/{meter_key}`; the shared Streamlit device-list module
+  no longer opens an MSSQL write session.
+- Both API services call `require_admin_access()` before payload processing or
+  database-session creation. The route layer independently requires
+  `get_current_admin_user`.
+- Server-side revision validation still checks required fields, duplicate
+  revisions, evidence-table existence, linked device IDs, and building
+  consistency before committing.
+- Server-side device writes accept only fields configured for the selected
+  meter type and preserve existing SQLAlchemy type coercion and required-field
+  validation.
+- Existing user administration, password/profile changes, map-layer
+  administration, scheduler controls, web-search mutation, and alerting
+  mutation paths were already behind authenticated FastAPI operations.
+- Dashboard report modules perform read-only database queries and generate
+  browser downloads. Revision file operations only read, preview, download, or
+  request an operating-system open action; no browser-triggered server-side
+  file mutation was found.
+- Revision Excel import modules remain batch/off-dashboard workflows and are
+  not exposed as browser-invokable Streamlit mutations.
+- Negative tests verify that non-admin service calls fail before a PostgreSQL
+  or MSSQL session is opened, every new route declares the admin dependency,
+  and active Streamlit revision/device modules no longer define direct write
+  functions or commits.
+- Focused P1.10 tests passed 42 tests; the broader authentication, session,
+  navigation, map, startup, revision, and device suite passed 136 tests.
+- The complete suite passed 525 of 527 tests. The two remaining failures are
+  the previously documented unrelated failures in
+  `tests/test_vodomery_reports.py`.
+- Live OpenAPI exposed all four mutation operations with `HTTPBearer`
+  security. Unauthenticated revision and device creation requests returned
+  HTTP 401, while FastAPI live/ready and Streamlit health remained HTTP 200.
 
 Completion criteria:
 

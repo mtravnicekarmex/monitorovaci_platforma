@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import datetime
+from decimal import Decimal
 from pathlib import Path
 import sys
 
@@ -275,6 +277,87 @@ def delete_admin_map_layer(access_token: str, layer_id: str) -> None:
         "DELETE",
         f"/api/v1/admin/map-layers/{layer_id}",
         access_token=access_token,
+    )
+
+
+def _json_compatible(value: object) -> object:
+    if isinstance(value, (datetime.date, datetime.datetime)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, dict):
+        return {str(key): _json_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_compatible(item) for item in value]
+    return value
+
+
+def create_admin_revize(
+    access_token: str,
+    payload: dict[str, object],
+    linked_device_ids: list[int],
+) -> int:
+    response = _request(
+        "POST",
+        "/api/v1/admin/revize",
+        access_token=access_token,
+        json_payload=_json_compatible(
+            {
+                **payload,
+                "linked_device_ids": linked_device_ids,
+            }
+        ),
+    )
+    return int(response.json()["id"])
+
+
+def update_admin_revize(
+    access_token: str,
+    revize_id: int,
+    payload: dict[str, object],
+    linked_device_ids: list[int],
+) -> int:
+    response = _request(
+        "PATCH",
+        f"/api/v1/admin/revize/{int(revize_id)}",
+        access_token=access_token,
+        json_payload=_json_compatible(
+            {
+                **payload,
+                "linked_device_ids": linked_device_ids,
+            }
+        ),
+    )
+    return int(response.json()["id"])
+
+
+def create_admin_device(
+    access_token: str,
+    meter_key: str,
+    form_values: dict[str, object],
+) -> None:
+    _request(
+        "POST",
+        f"/api/v1/admin/devices/{meter_key}",
+        access_token=access_token,
+        json_payload={"fields": _json_compatible(form_values)},
+    )
+
+
+def update_admin_device(
+    access_token: str,
+    meter_key: str,
+    primary_key_value: object,
+    form_values: dict[str, object],
+) -> None:
+    _request(
+        "PATCH",
+        f"/api/v1/admin/devices/{meter_key}",
+        access_token=access_token,
+        json_payload={
+            "primary_key_value": _json_compatible(primary_key_value),
+            "fields": _json_compatible(form_values),
+        },
     )
 
 

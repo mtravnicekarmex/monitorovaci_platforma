@@ -6,11 +6,15 @@ from services.api.core.auth_audit import auth_audit_service
 from services.api.core.dependencies import get_current_admin_user
 from services.api.core.login_throttle import get_login_client_ip
 from services.api.schemas.admin import (
+    AdminDeviceMutationRequest,
     AdminDeviceOptionsResponse,
+    AdminDeviceUpdateRequest,
     AdminMapLayerCreateRequest,
     AdminMapLayerRecord,
     AdminMapLayersResponse,
     AdminMapLayerUpdateRequest,
+    AdminRevizeMutationRequest,
+    AdminRevizeMutationResponse,
     AdminUserCreateRequest,
     AdminUserRecord,
     AdminUsersResponse,
@@ -25,6 +29,7 @@ from services.api.services.dashboard_admin import (
     update_admin_user,
 )
 from services.api.services.dashboard_auth import DashboardUserContext
+from services.api.services.device_admin import create_device_admin, update_device_admin
 from services.api.services.map_layers import (
     MapLayerOperationError,
     create_map_layer_admin,
@@ -32,6 +37,7 @@ from services.api.services.map_layers import (
     list_map_layers_admin,
     update_map_layer_admin,
 )
+from services.api.services.revize_admin import create_revize_admin, update_revize_admin
 
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
@@ -322,6 +328,110 @@ def delete_map_layer(
     try:
         delete_map_layer_admin(current_user, layer_id=layer_id)
     except MapLayerOperationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/revize",
+    response_model=AdminRevizeMutationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create revision record",
+    description="Vytvori revizi a vazby na zarizeni. Vyzaduje admin opravneni.",
+)
+def create_revize(
+    payload: AdminRevizeMutationRequest,
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> AdminRevizeMutationResponse:
+    values = payload.model_dump(exclude={"linked_device_ids"})
+    try:
+        revize_id = create_revize_admin(
+            current_user,
+            payload=values,
+            linked_device_ids=payload.linked_device_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return AdminRevizeMutationResponse(id=revize_id)
+
+
+@router.patch(
+    "/revize/{revize_id}",
+    response_model=AdminRevizeMutationResponse,
+    summary="Update revision record",
+    description="Aktualizuje revizi a jeji vazby na zarizeni. Vyzaduje admin opravneni.",
+)
+def update_revize(
+    revize_id: int,
+    payload: AdminRevizeMutationRequest,
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> AdminRevizeMutationResponse:
+    values = payload.model_dump(exclude={"linked_device_ids"})
+    try:
+        updated_id = update_revize_admin(
+            current_user,
+            revize_id=revize_id,
+            payload=values,
+            linked_device_ids=payload.linked_device_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return AdminRevizeMutationResponse(id=updated_id)
+
+
+@router.post(
+    "/devices/{meter_key}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Create device record",
+    description="Vytvori zaznam zarizeni v provozni databazi. Vyzaduje admin opravneni.",
+)
+def create_device(
+    meter_key: str,
+    payload: AdminDeviceMutationRequest,
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> Response:
+    try:
+        create_device_admin(
+            current_user,
+            meter_key=meter_key,
+            form_values=payload.fields,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch(
+    "/devices/{meter_key}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Update device record",
+    description="Aktualizuje zaznam zarizeni v provozni databazi. Vyzaduje admin opravneni.",
+)
+def update_device(
+    meter_key: str,
+    payload: AdminDeviceUpdateRequest,
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> Response:
+    try:
+        update_device_admin(
+            current_user,
+            meter_key=meter_key,
+            primary_key_value=payload.primary_key_value,
+            form_values=payload.fields,
+        )
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),

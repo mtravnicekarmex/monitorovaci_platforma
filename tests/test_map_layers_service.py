@@ -8,6 +8,7 @@ from services.api.services.map_layers import (
     _load_layer_filter_options,
     _normalize_requested_filters,
     load_map_feature_image_file,
+    load_requested_map_features,
     load_requested_map_filter_options,
     list_map_layers_admin,
     list_map_layer_catalog,
@@ -98,19 +99,29 @@ def test_user_can_access_device_layer_only_with_section_and_devices():
 
 
 def test_map_layer_catalog_filters_unavailable_device_layers(monkeypatch):
-    current_user = SimpleNamespace(
+    restricted_user = SimpleNamespace(
         is_admin=False,
         allowed_sections=(),
         allowed_devices=(),
+    )
+    allowed_user = SimpleNamespace(
+        is_admin=False,
+        allowed_sections=("vodomery",),
+        allowed_devices=("V-1",),
     )
     monkeypatch.setattr(
         "services.api.services.map_layers.list_enabled_map_layer_configs",
         lambda _layer_ids=None: [BUDOVY_MAP_LAYER, VODOMERY_MAP_LAYER],
     )
 
-    catalog = list_map_layer_catalog(current_user)
+    restricted_catalog = list_map_layer_catalog(restricted_user)
+    allowed_catalog = list_map_layer_catalog(allowed_user)
 
-    assert [layer["layer_id"] for layer in catalog] == ["budovy"]
+    assert [layer["layer_id"] for layer in restricted_catalog] == ["budovy"]
+    assert [layer["layer_id"] for layer in allowed_catalog] == [
+        "budovy",
+        "vodomery",
+    ]
 
 
 def test_normalize_requested_filters_accepts_source_column_and_property_alias():
@@ -193,6 +204,24 @@ def test_load_requested_map_filter_options_rejects_unavailable_device_layer(monk
         load_requested_map_filter_options(current_user, [{"layer_id": "vodomery", "filters": {}}])
 
 
+def test_load_requested_map_features_rejects_unavailable_device_layer(monkeypatch):
+    current_user = SimpleNamespace(
+        is_admin=False,
+        allowed_sections=(),
+        allowed_devices=(),
+    )
+    monkeypatch.setattr(
+        "services.api.services.map_layers.list_enabled_map_layer_configs",
+        lambda _layer_ids=None: [VODOMERY_MAP_LAYER],
+    )
+
+    with pytest.raises(AuthorizationError):
+        load_requested_map_features(
+            current_user,
+            [{"layer_id": "vodomery", "filters": {}}],
+        )
+
+
 def test_load_layer_filter_options_returns_source_filter_keys_when_no_allowed_devices(monkeypatch):
     current_user = SimpleNamespace(
         is_admin=False,
@@ -220,6 +249,52 @@ def test_load_layer_filter_options_returns_source_filter_keys_when_no_allowed_de
             "identifikace": [],
         },
     }
+
+
+def test_map_filter_queries_restrict_options_to_assigned_devices(monkeypatch):
+    captured_params = []
+
+    class _Result:
+        def all(self):
+            return []
+
+    class _Session:
+        def execute(self, _statement, params):
+            captured_params.append(params)
+            return _Result()
+
+        def close(self):
+            pass
+
+    current_user = SimpleNamespace(
+        is_admin=False,
+        allowed_sections=("vodomery",),
+        allowed_devices=("V-1",),
+    )
+    required_columns = {
+        VODOMERY_MAP_LAYER.geometry_column,
+        VODOMERY_MAP_LAYER.identifier_column,
+        *VODOMERY_MAP_LAYER.filter_columns,
+    }
+    monkeypatch.setattr(
+        "services.api.services.map_layers._table_columns",
+        lambda _schema, _table: required_columns,
+    )
+    monkeypatch.setattr(
+        "services.api.services.map_layers.get_session_pg",
+        lambda: _Session(),
+    )
+
+    response = _load_layer_filter_options(
+        current_user,
+        VODOMERY_MAP_LAYER,
+        {"identifikace": ["V-2"]},
+    )
+
+    assert len(captured_params) == len(VODOMERY_MAP_LAYER.filter_columns)
+    assert all(params["identifiers"] == ("V-1",) for params in captured_params)
+    assert any(params.get("filter_0") == ("V-2",) for params in captured_params)
+    assert response["layer_id"] == "vodomery"
 
 
 def test_load_map_feature_image_file_rejects_device_outside_allowed_identifiers(monkeypatch):

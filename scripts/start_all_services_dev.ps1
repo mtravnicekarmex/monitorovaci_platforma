@@ -6,52 +6,36 @@ param(
 $ErrorActionPreference = "Stop"
 
 $resolvedProjectRoot = (Resolve-Path $ProjectRoot).Path
-$pythonExe = Join-Path $resolvedProjectRoot ".venv-production\Scripts\python.exe"
-$verifyScript = Join-Path $resolvedProjectRoot "scripts\verify_production_environment.py"
-$logRunner = Join-Path $resolvedProjectRoot "scripts\run_with_rotating_log.py"
+$pythonExe = Join-Path $resolvedProjectRoot ".venv\Scripts\python.exe"
 
-foreach ($requiredPath in @($pythonExe, $verifyScript, $logRunner)) {
-    if (-not (Test-Path -LiteralPath $requiredPath)) {
-        throw "Required production file was not found: $requiredPath"
-    }
-}
-
-& $pythonExe $verifyScript
-if ($LASTEXITCODE -ne 0) {
-    throw "Production environment does not match requirements-production.lock.txt."
+if (-not (Test-Path $pythonExe)) {
+    throw "Development environment was not found at '$pythonExe'."
 }
 
 $services = @(
     @{
-        Name = "Monitoring API"
+        Name = "Monitoring API Dev"
         Arguments = @(
-            $logRunner, "--log-name", "api", "--", $pythonExe,
             "-m", "uvicorn", "services.api.main:app",
             "--host", "127.0.0.1",
             "--port", "8000",
-            "--workers", "1",
+            "--reload",
             "--proxy-headers",
             "--forwarded-allow-ips", "127.0.0.1"
         )
-        Environment = @{}
     },
     @{
-        Name = "Monitoring Dashboard"
+        Name = "Monitoring Dashboard Dev"
         Arguments = @(
-            $logRunner, "--log-name", "dashboard", "--", $pythonExe,
             "-m", "streamlit", "run", "moduly\apps\dashboard\login.py",
             "--server.address", "127.0.0.1",
             "--server.port", "8001",
             "--server.headless", "true"
         )
-        Environment = @{
-            DASHBOARD_API_BASE_URL = "http://127.0.0.1:8000"
-        }
     },
     @{
-        Name = "Monitoring Scheduler"
+        Name = "Monitoring Scheduler Dev"
         Arguments = @("main.py")
-        Environment = @{}
     }
 )
 
@@ -61,9 +45,14 @@ foreach ($service in $services) {
         continue
     }
 
+    $environment = if ($service.Name -eq "Monitoring Dashboard Dev") {
+        @{ DASHBOARD_API_BASE_URL = "http://127.0.0.1:8000" }
+    } else {
+        @{}
+    }
     $previousEnvironment = @{}
     try {
-        foreach ($item in $service.Environment.GetEnumerator()) {
+        foreach ($item in $environment.GetEnumerator()) {
             $existing = Get-Item -Path "Env:$($item.Key)" -ErrorAction SilentlyContinue
             $previousEnvironment[$item.Key] = if ($null -eq $existing) {
                 $null
@@ -77,7 +66,6 @@ foreach ($service in $services) {
             -FilePath $pythonExe `
             -ArgumentList $service.Arguments `
             -WorkingDirectory $resolvedProjectRoot `
-            -WindowStyle Hidden `
             -PassThru | ForEach-Object {
                 Write-Output ("Started: {0} (PID={1})" -f $service.Name, $_.Id)
             }

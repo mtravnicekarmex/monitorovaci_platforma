@@ -1,0 +1,25 @@
+# Reviewed direct runtime dependencies for Python 3.14 on Windows.
+# Regenerate requirements-production.lock.txt only after targeted and full tests.
+
+altair==6.1.0
+APScheduler==3.11.2
+beautifulsoup4==4.14.3
+fastapi==0.136.3
+GeoAlchemy2==0.20.0
+openpyxl==3.1.5
+pandas==3.0.3
+Pillow==12.2.0
+playwright==1.60.0
+psycopg2-binary==2.9.12
+pydantic==2.13.4
+pyodbc==5.3.0
+pypdf==6.12.2
+pypdfium2==5.9.0
+python-decouple==3.8
+reportlab==4.5.1
+requests==2.34.2
+selenium==4.43.0
+SQLAlchemy==2.0.50
+streamlit==1.57.0
+uvicorn[standard]==0.49.0
+XlsxWriter==3.2.9

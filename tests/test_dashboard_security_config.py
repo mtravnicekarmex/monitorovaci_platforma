@@ -126,3 +126,50 @@ def test_api_startup_rejects_invalid_session_timeouts(
 
     with pytest.raises(ValueError, match=message):
         api_config.get_api_settings()
+
+
+def test_api_docs_are_disabled_by_default(monkeypatch):
+    values = {
+        "API_TITLE": "Test API",
+        "API_VERSION": "test",
+        "API_TOKEN_EXPIRY_MINUTES": 480,
+        "API_SESSION_INACTIVITY_MINUTES": 30,
+    }
+
+    def fake_config(name, default=None, cast=None):
+        value = values.get(name, default)
+        return cast(value) if cast is not None else value
+
+    monkeypatch.setattr(api_config, "config", fake_config)
+    monkeypatch.setattr(
+        api_config,
+        "_get_required_token_secret",
+        lambda: "test-secret",
+    )
+    monkeypatch.setattr(api_config, "_get_cors_origins", lambda: ())
+
+    assert api_config.get_api_settings().enable_docs is False
+
+
+def test_api_docs_can_be_enabled_explicitly(monkeypatch):
+    values = {
+        "API_TITLE": "Test API",
+        "API_VERSION": "test",
+        "API_TOKEN_EXPIRY_MINUTES": 480,
+        "API_SESSION_INACTIVITY_MINUTES": 30,
+        "API_ENABLE_DOCS": "true",
+    }
+
+    def fake_config(name, default=None, cast=None):
+        value = values.get(name, default)
+        return cast(value) if cast is not None else value
+
+    monkeypatch.setattr(api_config, "config", fake_config)
+    monkeypatch.setattr(
+        api_config,
+        "_get_required_token_secret",
+        lambda: "test-secret",
+    )
+    monkeypatch.setattr(api_config, "_get_cors_origins", lambda: ())
+
+    assert api_config.get_api_settings().enable_docs is True

@@ -38,6 +38,9 @@ Tailscale Serve zustane behem pripravy a po nasazeni jako neveřejny servisni a 
 - Tailscale Serve poskytuje funkcni soukromy HTTPS pristup.
 - `start_api_dashboard.bat` spousti Windows Planovac uloh pri spusteni systemu.
   Procesy se proto obnovi bez prihlaseni uzivatele do Windows.
+- Produkcni procesy pouzivaji samostatne `.venv-production` vytvorene z
+  `requirements-production.lock.txt`.
+- Produkcni Uvicorn bezi s jednim workerem bez `--reload`.
 
 ## Spousteni a obnova procesu
 
@@ -52,6 +55,17 @@ Procesy bezici z teto naplanovane ulohy jsou v neinteraktivni relaci. Jejich
 konzolova okna nejsou pozdeji dostupna pro beznou obsluhu. Soucasny podporovany
 postup pro obnoveni cele sady procesu je restart cele Windows stanice.
 
+Naplanovana uloha ma tri pokusy o opakovani launcheru po jedne minute. Launcher
+ale po uspesnem spusteni oddelenych procesu skonci, takze pozdejsi pad jednoho
+procesu uloha automaticky neobnovi. V takovem pripade zustava podporovanym
+postupem restart cele stanice.
+
+Aktualni uloha bezi pod uctem `tra`, s prihlasenim heslem a
+`RunLevel=Highest`. Jde o prijatou mezeru v least-privilege modelu. Zmena na
+dedikovany neinteraktivni ucet vyzaduje samostatne overeni minimalnich prav pro
+projekt, chranene konfigurace, ProgramData logy a stav, databaze, sitove cesty,
+porty 80/443 a uloziste Caddy certifikatu.
+
 Provozni pravidla:
 
 1. Nespoustet rucne dalsi kopii `start_api_dashboard.bat`, pokud planovana sada
@@ -64,6 +78,28 @@ Provozni pravidla:
    verejne HTTPS podle restart checklistu.
 5. Samostatne ukoncovani a znovuspousteni produkcnich procesu nepovazovat za
    podporovany recovery postup, dokud nebude provozni model zmenen.
+
+### Produkcni Python a logy
+
+Produkci pripravuje:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\bootstrap_production_environment.ps1
+```
+
+Skript vytvori `.venv-production` pro Python 3.14, nainstaluje presny
+`requirements-production.lock.txt`, spusti `pip check` a kontrolu, ze nejsou
+pritomne odlisne nebo nezamcene balicky. Launcher stejnou kontrolu opakuje pred
+kazdym produkcnim startem.
+
+API, Streamlit a Caddy zapisuji kombinovany standardni a chybovy vystup do:
+
+```text
+C:\ProgramData\monitorovaci_platforma\logs
+```
+
+Kazdy z techto logu ma limit 10 MiB a 10 zaloh. Scheduler zachovava denni
+rotaci se 14 zalohami a autentizacni audit ma samostatnou 90denni retenci.
 
 ### Povinny predrestartovy handoff
 
@@ -126,7 +162,7 @@ Je znam konecny verejny hostname a mame pristup k jeho DNS zone.
 - [x] Odstranit pevne zapsany vyvojovy `API_TOKEN_SECRET` ze `start_api_dashboard.bat`.
 - [x] Vygenerovat dlouhy nahodny produkcni `API_TOKEN_SECRET`.
 - [x] Ulozit secret mimo verzovany kod, napr. do lokalniho `.env` nebo zabezpeceneho systemoveho prostredi.
-- [ ] Odstranit `--reload` ze spousteni Uvicorn.
+- [x] Odstranit `--reload` ze spousteni Uvicorn.
 - [ ] Overit, ze `.env` a dalsi soubory se secrets nejsou verzovane ani verejne dostupne.
 - [ ] Overit silna hesla vsech aktivnich dashboard uzivatelu.
 - [x] Doplnit omezeni pokusu o prihlaseni nebo jinou ochranu proti hrube sile.
@@ -327,6 +363,22 @@ elevovaneho PowerShellu:
 
 Skript pred kopii validuje konfiguraci, vytvori timestampovanou zalohu a pri
 selhani reloadu obnovi predchozi runtime konfiguraci.
+
+### Security response headers
+
+Caddy pridava na verejne Streamlit i FastAPI odpovedi:
+
+- `Strict-Transport-Security: max-age=31536000`
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `X-Frame-Options: SAMEORIGIN`
+- omezenou `Permissions-Policy` s `geolocation=(self)`
+- Streamlit-kompatibilni `Content-Security-Policy-Report-Only`
+
+Verejne odpovedi nemaji obsahovat `Server` ani `Via`. CSP je zamerne pouze
+report-only; pred jejim vynucenim je nutne v autentizovanem prohlizeci overit
+prihlaseni, obnovu session, downloady, fotografie zarizeni, mapu a mobilni
+geolokaci.
 
 Rollback:
 

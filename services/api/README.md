@@ -2,27 +2,39 @@
 
 Tato slozka obsahuje paralelni API vrstvu, kterou budeme postupne nasazovat vedle existujiciho Streamlit dashboardu.
 
-## Prvni spusteni
+## Vyvojove spusteni
 
 API vrstva neimportuje jen FastAPI moduly. Pri startu saha i do sdilenych DB/model vrstev, proto `requirements-api.txt`
-obsahuje take `sqlalchemy`, `pandas`, `geoalchemy2` a DB drivery.
+instaluje stejny presny dependency lock jako produkce.
 
 1. Vytvorit virtualni prostredi v koreni projektu:
-   `py -m venv .venv`
+   `py -3.14 -m venv .venv`
 2. Doinstalovat zavislosti do tohoto virtualniho prostredi:
    `.venv\Scripts\python.exe -m pip install -r requirements-api.txt`
 3. Pripravit `.env` podle `.env.example` a vyplnit DB pristupy.
 4. Nastavit `API_TOKEN_SECRET` v `.env` nebo v prostredi.
    Placeholder `change-me` je neplatny a API s nim zamerne nenastartuje.
-5. Pro lokalni vyvoj spustit API skrz helper:
-   `powershell -ExecutionPolicy Bypass -File scripts\start_api.ps1`
+5. Pro lokalni vyvoj s automatickym reloadem spustit API skrz helper:
+   `powershell -ExecutionPolicy Bypass -File scripts\start_api_dev.ps1`
 
 Poznamky:
 
-- Helper skript ocekava virtualni prostredi v `.venv`.
+- Vyvojovy helper ocekava virtualni prostredi v `.venv`.
 - Pro endpointy, ktere sahaji do MSSQL, musi byt na stroji dostupny `ODBC Driver 18 for SQL Server`.
 - Pokud chces API spustit bez helperu, pouzij:
   `.venv\Scripts\python.exe -m uvicorn services.api.main:app --host 127.0.0.1 --port 8000 --reload`
+
+## Produkcni prostredi
+
+Produkce pouziva oddelene `.venv-production`, Python 3.14 a presny soubor
+`requirements-production.lock.txt`. Prostredi se vytvori jednorazove:
+
+`powershell -ExecutionPolicy Bypass -File scripts\bootstrap_production_environment.ps1`
+
+Bootstrap pripne pip, nainstaluje lock, spusti `pip check` a odmitne chybejici,
+odlisne nebo nezamcene balicky. `start_api_dashboard.bat` pred startem kontrolu
+opakuje. Produkcni Uvicorn bezi na `127.0.0.1:8000` s jednim workerem a bez
+`--reload`.
 
 ## Autentizace
 
@@ -51,7 +63,9 @@ curl http://localhost:8000/api/v1/vodomery/devices \
 
 ## API Dokumentace
 
-Automaticky generovaná dokumentace je dostupná na:
+Automaticky generovana dokumentace je ve vychozim produkcnim nastaveni
+vypnuta. Pro lokalni vyvoj ji lze zapnout nastavenim `API_ENABLE_DOCS=true`;
+potom je dostupna na:
 
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
@@ -148,6 +162,7 @@ Konfigurace se načítá z proměnných prostředí (viz `.env.example`):
 |----------|-------|
 | `API_TITLE` | Název API |
 | `API_VERSION` | Verze API |
+| `API_ENABLE_DOCS` | Volitelne zapnuti `/docs`, `/redoc` a `/openapi.json`; vychozi hodnota je `false` |
 | `API_TOKEN_SECRET` | Tajný klíč pro JWT tokeny |
 | `API_TOKEN_EXPIRY_MINUTES` | Absolutní maximální platnost relace v minutách |
 | `API_SESSION_INACTIVITY_MINUTES` | Klouzavá platnost aktivní relace v minutách |

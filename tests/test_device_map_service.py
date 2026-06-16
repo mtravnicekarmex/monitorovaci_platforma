@@ -12,6 +12,7 @@ from services.api.services.device_map import (
     _empty_layer_response,
     _load_detail_properties,
     _row_to_feature,
+    load_map_layer_features,
     resolve_map_feature_image_file,
 )
 
@@ -304,3 +305,54 @@ def test_load_detail_properties_does_not_select_photo_when_disabled(monkeypatch)
         "include_photo": False,
     }
     assert details == {"V-1": {"identifikace": "V-1"}}
+
+
+def test_map_features_query_restricts_rows_to_assigned_devices(monkeypatch):
+    captured = {}
+
+    class _Result:
+        def mappings(self):
+            return self
+
+        def all(self):
+            return []
+
+    class _Session:
+        def execute(self, _statement, params):
+            captured["params"] = params
+            return _Result()
+
+        def close(self):
+            captured["closed"] = True
+
+    current_user = SimpleNamespace(
+        is_admin=False,
+        allowed_devices=("V-1",),
+    )
+    monkeypatch.setattr(
+        "services.api.services.device_map.get_session_pg",
+        lambda: _Session(),
+    )
+    monkeypatch.setattr(
+        "services.api.services.device_map._load_table_columns",
+        lambda _session, config: {
+            config.geometry_column,
+            config.identifier_column,
+            *config.property_columns,
+        },
+    )
+    monkeypatch.setattr(
+        "services.api.services.device_map._load_detail_properties",
+        lambda _config, _identifiers: {},
+    )
+
+    response = load_map_layer_features(
+        current_user,
+        VODOMERY_MAP_LAYER,
+        filter_values_by_column={"identifikace": ("V-2",)},
+    )
+
+    assert captured["params"]["identifiers"] == ("V-1",)
+    assert captured["params"]["filter_0"] == ("V-2",)
+    assert captured["closed"] is True
+    assert response["feature_collection"]["features"] == []

@@ -13,6 +13,7 @@ class ApiSettings:
     token_expiry_minutes: int
     session_inactivity_minutes: int
     cors_origins: tuple[str, ...]
+    enable_docs: bool
 
 
 def _get_required_token_secret() -> str:
@@ -67,4 +68,5 @@ def get_api_settings() -> ApiSettings:
         token_expiry_minutes=absolute_expiry_minutes,
         session_inactivity_minutes=inactivity_minutes,
         cors_origins=_get_cors_origins(),
+        enable_docs=config("API_ENABLE_DOCS", default=False, cast=bool),
     )

@@ -1,20 +1,21 @@
-cd /d C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma_v1.5
+DEVELOPMENT ONLY
+cd /d C:\Users\tra\PycharmProjects\monitorovaci_platforma
 
-API START
+API DEV START
 REM API_TOKEN_SECRET se nacita z lokalniho .env nebo chraneneho prostredi.
-.venv\Scripts\python.exe -m uvicorn services.api.main:app --host 127.0.0.1 --port 8000 --reload
+powershell -ExecutionPolicy Bypass -File scripts\start_api_dev.ps1
 
-DASHBOARD START
+DASHBOARD DEV START
 set DASHBOARD_API_BASE_URL=http://127.0.0.1:8000
-.venv\Scripts\python.exe -m streamlit run moduly\apps\dashboard\login.py --server.port 8001
+.venv\Scripts\python.exe -m streamlit run moduly\apps\dashboard\login.py --server.address 127.0.0.1 --server.port 8001
 
 WEB FRONTEND START
-cd /d C:\Users\tra\Desktop\tra\Python\PycharmProjects\monitorovaci_platforma_v1.5\frontend_next
+cd /d C:\Users\tra\PycharmProjects\monitorovaci_platforma\frontend_next
 set BACKEND_API_BASE_URL=http://127.0.0.1:8000
 npm run dev -- --hostname 127.0.0.1 --port 3000
 
 WEB FRONTEND STOP
 for /f "tokens=5" %a in ('netstat -ano ^| findstr :3000 ^| findstr LISTENING') do taskkill /PID %a /F
 
-SCHEDULER START
+SCHEDULER DEV START
 .venv\Scripts\python.exe main.py

@@ -1275,7 +1275,6 @@ def fetch_charge_sessions_dataframe(
             )
             open_company_dashboard(page, dashboard_path=dashboard_path)
             open_charging_sessions(page)
-            open_summary(page)
             set_charge_sessions_page_length(page)
             return load_main_table(page)
         finally:

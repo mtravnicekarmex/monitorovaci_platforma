@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from moduly.apps.dashboard.database.db_init import ensure_dashboard_tables
+from services.api.core.config import ApiSettings
 from services.api.core.config import get_api_settings
 from services.api.core.runtime_state import api_readiness
 from services.api.routes.admin import router as admin_router
@@ -64,31 +65,36 @@ async def lifespan(_: FastAPI):
         api_readiness.mark_not_ready()
 
 
-app = FastAPI(
-    title=settings.title,
-    version=settings.version,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
-    lifespan=lifespan,
-)
-
-if settings.cors_origins:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=list(settings.cors_origins),
-        allow_credentials=False,
-        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Accept", "Authorization", "Content-Type"],
+def create_api_app(api_settings: ApiSettings = settings) -> FastAPI:
+    application = FastAPI(
+        title=api_settings.title,
+        version=api_settings.version,
+        docs_url="/docs" if api_settings.enable_docs else None,
+        redoc_url="/redoc" if api_settings.enable_docs else None,
+        openapi_url="/openapi.json" if api_settings.enable_docs else None,
+        lifespan=lifespan,
     )
 
-app.include_router(health_router)
-app.include_router(scheduler_health_router)
-app.include_router(auth_router)
-app.include_router(admin_router)
-app.include_router(kalorimetry_router)
-app.include_router(map_router)
-app.include_router(manometry_router)
-app.include_router(plynomery_router)
-app.include_router(vodomery_router)
-app.include_router(web_search_router)
+    if api_settings.cors_origins:
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(api_settings.cors_origins),
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            allow_headers=["Accept", "Authorization", "Content-Type"],
+        )
+
+    application.include_router(health_router)
+    application.include_router(scheduler_health_router)
+    application.include_router(auth_router)
+    application.include_router(admin_router)
+    application.include_router(kalorimetry_router)
+    application.include_router(map_router)
+    application.include_router(manometry_router)
+    application.include_router(plynomery_router)
+    application.include_router(vodomery_router)
+    application.include_router(web_search_router)
+    return application
+
+
+app = create_api_app(settings)

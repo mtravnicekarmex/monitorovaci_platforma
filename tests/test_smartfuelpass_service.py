@@ -480,7 +480,7 @@ def test_fetch_charge_sessions_dataframe_uses_login_timeout_for_auto_login(monke
     monkeypatch.setattr(service, "_auto_login_if_needed", lambda page, context, **kwargs: captured.update({"auto_login": kwargs}) or False)
     monkeypatch.setattr(service, "open_company_dashboard", lambda page, dashboard_path=None: captured.update({"dashboard_path": dashboard_path}))
     monkeypatch.setattr(service, "open_charging_sessions", lambda page: captured.update({"opened_sessions": True}))
-    monkeypatch.setattr(service, "open_summary", lambda page: captured.update({"opened_summary": True}))
+    monkeypatch.setattr(service, "open_summary", lambda page: pytest.fail("fetch should not click the Summary/All filter"))
     monkeypatch.setattr(service, "set_charge_sessions_page_length", lambda page: captured.update({"page_length_set": True}) or True)
     monkeypatch.setattr(service, "load_main_table", lambda page: expected)
 
@@ -488,6 +488,7 @@ def test_fetch_charge_sessions_dataframe_uses_login_timeout_for_auto_login(monke
 
     assert result is expected
     assert captured["auto_login"]["timeout_seconds"] == 333
+    assert captured["opened_sessions"] is True
     assert captured["page_length_set"] is True
     assert fake_context.page.default_timeout == 15000
     assert fake_context.page.visited_urls == [

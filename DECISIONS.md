@@ -756,3 +756,136 @@ Implications:
 - Regression tests must verify route dependencies, service-level rejection,
   and absence of direct commits in the active revision/device Streamlit
   modules.
+
+## DEC-037: FastAPI Authorization Inventory Is Executable
+
+Date: 2026-06-15
+
+Decision: FastAPI authorization coverage is maintained as an executable
+inventory of registered operations and their public, admin, section, page, and
+device boundaries.
+
+Rationale: Hand-selected endpoint tests can remain green while a new route is
+accidentally left public, assigned the wrong dependency, or returns a
+validation response before authorization. Runtime route enumeration makes
+authorization expectations fail closed when the API surface changes.
+
+Implications:
+
+- Every registered `/api/v1/*` and `/health/*` operation must be either in the
+  explicit public allowlist or return HTTP 401 without authentication.
+- Every operation using the admin dependency must be in the explicit admin
+  inventory and return HTTP 403 for a valid non-admin bearer token.
+- Section and configurable-page route groups have explicit dependency
+  inventories and denial tests.
+- Device-scoped routes must test both assigned and unassigned identifiers, and
+  service functions must reject an unassigned identifier before database
+  access.
+- Permission changes must invalidate both previously issued bearer tokens and
+  browser-session cookie tokens through `token_version`.
+- Map catalog, feature, filter-option, and image paths must preserve device
+  isolation; feature and filter queries must bind only assigned identifiers.
+- Adding or changing an API route requires updating
+  `tests/test_api_authorization_regression.py` as part of the same change.
+
+## DEC-038: Public Responses Use Reviewed Security Headers
+
+Date: 2026-06-15
+
+Decision: Caddy applies a shared set of security response headers to the public
+dashboard and same-origin FastAPI routes. Stable controls are enforced, while
+the Streamlit-compatible Content Security Policy remains report-only.
+
+Rationale: The public HTTPS surface should prevent MIME sniffing, reduce
+referrer leakage, restrict framing and unused browser capabilities, and avoid
+unnecessary server fingerprinting. Streamlit and embedded dashboard components
+currently require inline scripts/styles, WebSockets, data/blob resources, and
+same-origin frames, so CSP must be observed before enforcement.
+
+Implications:
+
+- HSTS uses `max-age=31536000` without `includeSubDomains` or preload because
+  HTTPS support for unrelated subdomains is outside this application's scope.
+- `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: strict-origin-when-cross-origin`, and
+  `X-Frame-Options: SAMEORIGIN` are enforced.
+- `Permissions-Policy` disables unused browser capabilities and retains
+  `geolocation=(self)` for the same-origin mobile map.
+- `Content-Security-Policy-Report-Only` allows the current Streamlit runtime,
+  WebSocket connection, local iframe components, map tiles, and data/blob
+  resources while documenting the intended future policy.
+- Moving CSP from report-only to enforcement requires authenticated browser
+  verification of login, session renewal, downloads, photos, map rendering,
+  and map geolocation.
+- Caddy removes `Server` and `Via` from public responses while retaining
+  functional protocol headers such as `Alt-Svc`.
+- Tracked changes to these headers require Caddy configuration tests,
+  validation, deployment through the backed-up runtime script, and live
+  verification on both Streamlit and FastAPI responses.
+
+## DEC-039: Production Runtime Uses an Exact Isolated Python Environment
+
+Date: 2026-06-15
+
+Decision: Production FastAPI, Streamlit, and scheduler processes use a
+dedicated `.venv-production` built from an exact reviewed dependency lock.
+Production Uvicorn runs one worker without reload; reload is confined to
+explicit development launchers.
+
+Rationale: The shared `.venv` had dependency metadata drift, missing declared
+packages, and prerelease versions. Using it for both development and production
+made startup behavior non-reproducible and allowed the Uvicorn file watcher in
+the public runtime.
+
+Implications:
+
+- `requirements-production.in` records reviewed direct pins and
+  `requirements-production.lock.txt` records exact direct and transitive pins
+  for CPython 3.14 on Windows.
+- `scripts/bootstrap_production_environment.ps1` creates
+  `.venv-production`, pins pip, installs the lock, runs `pip check`, and
+  verifies the resulting environment.
+- Production startup fails closed on a Python, pip, package-version, missing
+  package, or unlocked-package mismatch.
+- `start_api_dashboard.bat`, `scripts/start_api.ps1`, and
+  `scripts/start_all_services.ps1` are production launchers. Development
+  reload belongs only in `scripts/start_api_dev.ps1` and
+  `scripts/start_all_services_dev.ps1`.
+- FastAPI and Streamlit bind only to loopback. Caddy remains the public
+  boundary and its admin API remains loopback-only.
+- API, Streamlit, and fresh-start Caddy output uses 10 MiB size rotation with
+  10 backups under ProgramData. Existing scheduler and authentication audit
+  retention policies remain unchanged.
+- The scheduled task retries launcher-level failures, but does not supervise
+  detached child processes. Full workstation restart remains the supported
+  runtime recovery procedure.
+- The current `tra`/`RunLevel=Highest` scheduled-task identity is an accepted
+  least-privilege gap. Moving to a dedicated non-interactive account requires
+  a separate rights and operational-access validation.
+
+## DEC-040: Public API Surface Remains Minimal
+
+Date: 2026-06-16
+
+Decision: FastAPI documentation routes are disabled by default, and the public
+Caddy hostname proxies only `/api/*` to FastAPI. The unauthenticated
+`/api/v1/auth/users-exist` endpoint remains public because the active
+Streamlit login page uses it before authentication to decide whether the
+dashboard has any configured users.
+
+Rationale: OpenAPI and interactive documentation are useful for local
+development but unnecessary on the production runtime surface. The login
+bootstrap endpoint returns only a minimal boolean and prevents a worse
+unauthenticated fallback flow in the dashboard.
+
+Implications:
+
+- `/docs`, `/redoc`, and `/openapi.json` are registered only when
+  `API_ENABLE_DOCS=true` is set explicitly.
+- Health responses must stay minimal and must not expose database, scheduler,
+  host, version, or exception details.
+- `users-exist` remains in the explicit public API inventory and should not
+  return user identifiers, counts, roles, timestamps, or operational details.
+- Caddy should continue to route only `/api/*` to FastAPI and all other public
+  paths to Streamlit unless a future reviewed endpoint exposure requires a
+  narrower rule.

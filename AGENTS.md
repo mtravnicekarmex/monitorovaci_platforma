@@ -58,7 +58,15 @@ At the end of every substantive session:
 - `frontend_next/`: experimental Next.js MVP. It is not the active production dashboard and is not currently used in daily operation. Treat it as a future migration/prototype area, not as the source of truth for current dashboard behavior.
 - `.streamlit/config.toml`: Streamlit server and navigation settings.
 - `Caddyfile`: tracked mirror of the deployed public proxy configuration at `C:\Program Files\Caddy\Caddyfile`.
-- `requirements-api.txt`: Python runtime/API dependency set.
+- `requirements-production.in`: reviewed direct production dependency pins.
+- `requirements-production.lock.txt`: exact production direct and transitive
+  dependency set for CPython 3.14 on Windows.
+- `requirements-api.txt`: compatibility entry point that installs the
+  production lock.
+- `scripts/bootstrap_production_environment.ps1`: creates and verifies the
+  isolated `.venv-production` runtime.
+- `scripts/run_with_rotating_log.py`: captures API, Streamlit, and Caddy
+  stdout/stderr into size-rotated ProgramData logs.
 - `tests/`: pytest suite for scheduler, imports, dashboards, reports, auth/navigation, anomaly handling, and supporting services.
 
 ## Runtime Surfaces
@@ -119,6 +127,15 @@ Known hygiene topics to handle only after explicit approval:
 - Do not restore a cross-origin map image API override. Deployments must expose the image endpoint under the dashboard origin so the browser can use the protected session cookie without disclosing it to JavaScript.
 - Leaflet `1.9.4` JavaScript, CSS, images, license, and source metadata are vendored under `moduly/apps/dashboard/assets/leaflet/1.9.4` and embedded by `map_shared.py`; do not restore runtime executable-code loading from a public CDN.
 - Public dashboard HTTPS is served at `https://monitoring.armexholding.cz`.
+- Caddy adds the reviewed public security headers. HSTS, `nosniff`,
+  `Referrer-Policy`, `X-Frame-Options`, and `Permissions-Policy` are enforced;
+  the Streamlit-compatible CSP remains report-only until authenticated browser
+  workflows have been reviewed against collected violations.
+- The public `Permissions-Policy` must preserve same-origin geolocation for the
+  map page. Do not change it to `geolocation=()` while mobile map location is a
+  supported dashboard feature.
+- Caddy removes public `Server` and `Via` response headers. Do not restore
+  upstream or proxy fingerprinting headers without an operational reason.
 - Caddy exposes the Streamlit login page directly without a second browser
   authentication prompt. FastAPI rate-limits `/api/v1/auth/login` by normalized
   account identifier and trusted client IP with temporary increasing lockouts.
@@ -132,6 +149,19 @@ Known hygiene topics to handle only after explicit approval:
   raw `X-Forwarded-For` headers.
 - `https://monitoring.armexholding.cz` is the only supported public client entry point; direct client access through the public IP address is not required or supported.
 - `start_api_dashboard.bat` starts or reloads `C:\Program Files\Caddy\caddy.exe` only after FastAPI and Streamlit health checks pass.
+- Production FastAPI, Streamlit, and scheduler processes use the isolated
+  `.venv-production` environment. Startup fails closed if Python is not 3.14,
+  pip is not the reviewed version, a locked package is missing or mismatched,
+  or an unlocked package is present.
+- Production Uvicorn uses one worker without `--reload`. Development reload
+  behavior belongs only in explicitly named `*_dev.ps1` launchers that use
+  `.venv`.
+- API and Streamlit remain bound to `127.0.0.1`; Caddy is the only public
+  application listener and its admin API remains on `127.0.0.1:2019`.
+- API, Streamlit, and fresh-start Caddy output is written under
+  `C:\ProgramData\monitorovaci_platforma\logs` with 10 MiB files and 10 rotated
+  backups. Scheduler logs remain daily rotated with 14 backups; authentication
+  audit records retain their separately configured 90-day rotation.
 - The runtime Caddy configuration is `C:\Program Files\Caddy\Caddyfile`; keep the tracked root `Caddyfile` synchronized with it.
 - On the Windows production workstation, `start_api_dashboard.bat` is launched
   by Windows Task Scheduler with the trigger `At system startup`. This allows
@@ -143,6 +173,16 @@ Known hygiene topics to handle only after explicit approval:
   set is to restart the whole Windows workstation. Do not assume that an agent
   can safely stop and recreate individual production processes from the current
   interactive session.
+- The startup task retries launcher-level failures three times at one-minute
+  intervals, but it does not supervise a child process after the launcher has
+  completed. A later API, Streamlit, scheduler, or Caddy process exit therefore
+  requires the supported full-workstation recovery procedure.
+- The current scheduled task runs as `tra` with password logon and
+  `RunLevel=Highest`. This is an accepted least-privilege gap. Do not change
+  the task account or elevation without verifying access to the project,
+  protected environment, ProgramData state/logs, databases, network shares,
+  ports 80/443, and Caddy certificate storage. A future dedicated
+  non-interactive service account should receive only those rights.
 - Changes to the launcher or process startup arguments take effect only after
   the scheduled task runs again, normally after a workstation restart. Do not
   redesign this startup/recovery model without explicit user approval.
@@ -283,6 +323,11 @@ Water event types currently include examples such as:
 ## Testing
 
 Prefer targeted tests first, then broader tests when risk justifies it.
+
+- `tests/test_api_authorization_regression.py` is the executable authorization
+  inventory for FastAPI. New or changed routes must update its explicit public,
+  admin, section/page, and device-scope expectations and preserve unauthenticated
+  HTTP 401 and unauthorized HTTP 403 behavior.
 
 Common commands:
 

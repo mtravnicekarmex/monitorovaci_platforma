@@ -406,11 +406,44 @@ Completion criteria:
 
 ### 11. Expand authorization regression coverage
 
-- [ ] Test all API routes without authentication.
-- [ ] Test all admin routes with a non-admin token.
-- [ ] Test every device-scoped route with an allowed and disallowed identifier.
-- [ ] Test permission changes against already issued tokens.
-- [ ] Test map catalog, features, filters, and images for cross-device access.
+- [x] Test all API routes without authentication.
+- [x] Test all admin routes with a non-admin token.
+- [x] Test every device-scoped route with an allowed and disallowed identifier.
+- [x] Test permission changes against already issued tokens.
+- [x] Test map catalog, features, filters, and images for cross-device access.
+
+Completed on 2026-06-15:
+
+- Added an executable FastAPI operation inventory covering all 75 registered
+  `/api/v1/*` and `/health/*` operations. The five intentionally public
+  operations are explicit; all 70 protected operations are invoked through the
+  ASGI application without credentials and must return HTTP 401.
+- Added an explicit inventory of all 37 admin operations across scheduler,
+  admin, kalorimetry, plynomery, and vodomery routes. Every operation is invoked
+  with a valid signed non-admin bearer token and must return HTTP 403 before
+  endpoint validation or database access.
+- Added route inventories and denial tests for all vodomery, manometry,
+  plynomery, and web-search section/page dependencies, plus positive dependency
+  tests for assigned sections and the configurable web-search page.
+- Added allowed/disallowed identifier tests for every non-admin API route that
+  accepts a device identifier, with direct service tests verifying that an
+  unassigned identifier is rejected before a PostgreSQL or MSSQL session opens.
+- Added bearer-token and browser-cookie regression tests proving that section,
+  page, device, role, and activation changes invalidate tokens issued before
+  the permission change.
+- Added map authorization coverage proving that the catalog hides unavailable
+  device layers, feature and filter SQL parameters contain only assigned device
+  identifiers, and image resolution allows an assigned identifier while
+  rejecting a different device.
+- The new coverage found three vodomery routes where `AuthorizationError`,
+  which subclasses `ValueError`, was incorrectly converted to HTTP 422.
+  Exception ordering was corrected so cross-device requests return HTTP 403.
+- The focused P1.11 suite passed all 222 tests and the broader authorization,
+  authentication, navigation, token, startup, admin, and map suite passed all
+  304 tests.
+- The complete suite passed 702 of 704 tests. The two remaining failures are
+  the previously documented unrelated failures in
+  `tests/test_vodomery_reports.py`.
 
 Completion criteria:
 
@@ -420,14 +453,47 @@ Completion criteria:
 
 ### 12. Add security response headers
 
-- [ ] Add HSTS after confirming HTTPS is the only supported public access method.
-- [ ] Add `X-Content-Type-Options: nosniff`.
-- [ ] Add `Referrer-Policy: strict-origin-when-cross-origin`.
-- [ ] Add clickjacking protection using CSP `frame-ancestors` and a compatible fallback where useful.
-- [ ] Develop a Streamlit-compatible Content Security Policy, initially in report-only mode.
-- [ ] Add a restrictive `Permissions-Policy`, while preserving map geolocation where required.
-- [ ] Remove unnecessary server fingerprinting headers where practical.
-- [ ] Add Caddy configuration tests and verify live response headers.
+- [x] Add HSTS after confirming HTTPS is the only supported public access method.
+- [x] Add `X-Content-Type-Options: nosniff`.
+- [x] Add `Referrer-Policy: strict-origin-when-cross-origin`.
+- [x] Add clickjacking protection using CSP `frame-ancestors` and a compatible fallback where useful.
+- [x] Develop a Streamlit-compatible Content Security Policy, initially in report-only mode.
+- [x] Add a restrictive `Permissions-Policy`, while preserving map geolocation where required.
+- [x] Remove unnecessary server fingerprinting headers where practical.
+- [x] Add Caddy configuration tests and verify live response headers.
+
+Completed on 2026-06-15:
+
+- Caddy now applies the same reviewed headers to Streamlit and same-origin
+  FastAPI responses.
+- HSTS is enforced for one year without `includeSubDomains` or preload because
+  unrelated subdomains were not reviewed as part of this dashboard change.
+- MIME sniffing is disabled, referrers use
+  `strict-origin-when-cross-origin`, and framing is restricted to the same
+  origin through `X-Frame-Options: SAMEORIGIN`.
+- The report-only CSP documents a future enforcement baseline while allowing
+  the current Streamlit inline scripts/styles, WebSockets, local iframe
+  components, HTTPS map tiles, and data/blob images and workers.
+- `Permissions-Policy` disables browsing topics, camera, microphone, payment,
+  and USB access while retaining `geolocation=(self)` for the map page.
+- Public `Server` and `Via` headers are removed. Caddy's functional HTTP/3
+  advertisement remains unchanged.
+- The tracked configuration passed Caddy 2.11.4 validation and four Caddy
+  regression tests.
+- The broader Caddy, authentication, session, authorization, map, and
+  responsive-dashboard regression suite passed all 273 tests.
+- The backed-up deployment script synchronized and reloaded the runtime
+  configuration. Tracked and runtime SHA-256 values matched after deployment.
+- Live dashboard HTTP 200 and protected API HTTP 401 responses carried the
+  complete header set without `Server` or `Via`.
+- Streamlit health remained HTTP 200 and a direct WebSocket handshake returned
+  HTTP 101 after deployment.
+
+Accepted limitation:
+
+- CSP is intentionally report-only. Converting it to enforcement requires a
+  separate authenticated browser pass covering login/session renewal,
+  downloads, device photos, map rendering, and mobile map geolocation.
 
 Completion criteria:
 
@@ -435,14 +501,14 @@ Completion criteria:
 
 ### 13. Harden production process configuration
 
-- [ ] Remove Uvicorn `--reload` from production startup.
-- [ ] Separate development and production launch configurations.
-- [ ] Use deterministic dependency versions or a reviewed lock file.
-- [ ] Define service restart, log retention, and least-privilege operating account behavior.
+- [x] Remove Uvicorn `--reload` from production startup.
+- [x] Separate development and production launch configurations.
+- [x] Use deterministic dependency versions or a reviewed lock file.
+- [x] Define service restart, log retention, and least-privilege operating account behavior.
 - [x] Document the current Windows startup and full-runtime recovery behavior.
 - [x] Require a written pre-restart state and post-restart expectation handoff.
-- [ ] Confirm FastAPI and Streamlit remain bound only to `127.0.0.1`.
-- [ ] Confirm Caddy admin API remains bound only to loopback.
+- [x] Confirm FastAPI and Streamlit remain bound only to `127.0.0.1`.
+- [x] Confirm Caddy admin API remains bound only to loopback.
 
 Current operational constraint documented on 2026-06-12:
 
@@ -460,6 +526,39 @@ Current operational constraint documented on 2026-06-12:
   processes/listeners, and exact post-restart checks.
 - Do not initiate or request the restart until the handoff is complete. After
   restart, append actual verification results and any deviations.
+
+Implementation prepared on 2026-06-15:
+
+- Production launchers use `.venv-production`, one Uvicorn worker, explicit
+  loopback bindings, and no development reload behavior.
+- Development reload remains available only through explicitly named
+  `scripts/start_api_dev.ps1` and `scripts/start_all_services_dev.ps1`.
+- `requirements-production.in` contains reviewed direct pins and
+  `requirements-production.lock.txt` contains 82 exact direct and transitive
+  pins for CPython 3.14 on Windows. Startup rejects version drift and unlocked
+  packages.
+- API, Streamlit, and fresh-start Caddy output rotates in ProgramData at
+  10 MiB with 10 backups. Scheduler retains 14 daily log backups and the
+  authentication audit retains its separate 90-day policy.
+- The startup task retries launcher failures three times after one minute but
+  does not supervise a child process after launcher completion. Full
+  workstation restart remains the supported recovery path.
+- The task currently runs as `tra` with password logon and
+  `RunLevel=Highest`. This is an accepted gap pending a separately validated
+  dedicated non-interactive account with only the required filesystem,
+  database, network-share, listener, and Caddy-certificate rights.
+- Existing listeners were confirmed at `127.0.0.1:8000`,
+  `127.0.0.1:8001`, and `127.0.0.1:2019`. A temporary production Uvicorn
+  instance also returned HTTP 200 on loopback port 8010 without `--reload`.
+
+Activation status:
+
+- The isolated environment was built successfully and passed `pip check`,
+  exact-lock verification, application imports, launcher dry-run, and focused
+  regression tests.
+- The scheduled production process set still uses the pre-change command line
+  until the mandatory handoff is complete and the workstation is restarted.
+  Completion criteria therefore require post-restart verification.
 
 Startup resilience correction on 2026-06-13:
 
@@ -487,11 +586,32 @@ Completion criteria:
 
 ### 14. Limit exposed public endpoints
 
-- [ ] Decide whether `/api/v1/auth/users-exist` needs to remain public.
-- [ ] Keep liveness/readiness responses minimal and avoid operational detail.
-- [ ] Ensure `/docs`, `/redoc`, and `/openapi.json` are disabled or admin-restricted in production.
-- [ ] Verify Caddy routes only intended public paths to FastAPI.
-- [ ] Add route exposure tests against the public hostname.
+- [x] Decide whether `/api/v1/auth/users-exist` needs to remain public.
+- [x] Keep liveness/readiness responses minimal and avoid operational detail.
+- [x] Ensure `/docs`, `/redoc`, and `/openapi.json` are disabled or admin-restricted in production.
+- [x] Verify Caddy routes only intended public paths to FastAPI.
+- [x] Add route exposure tests against the public hostname.
+
+Implementation prepared on 2026-06-16:
+
+- `/api/v1/auth/users-exist` remains public by decision because the active
+  Streamlit login page uses it before authentication to decide whether the
+  dashboard has any configured users. The endpoint returns only the existing
+  minimal boolean bootstrap state.
+- Health responses remain limited to `{"status": "ok"}`,
+  `{"status": "ready"}`, or `{"status": "unavailable"}` and do not expose
+  database, scheduler, host, version, or exception details.
+- FastAPI documentation routes are now disabled by default. `/docs`, `/redoc`,
+  and `/openapi.json` are registered only when `API_ENABLE_DOCS=true` is set
+  explicitly, intended for local development rather than production.
+- The public Caddy configuration continues to proxy only `/api/*` to FastAPI;
+  `/docs`, `/redoc`, and `/openapi.json` are not routed to the API by the
+  public hostname.
+- Regression coverage verifies the FastAPI documentation route setting,
+  minimal health responses, Caddy route exposure, and the existing
+  authorization inventory.
+- Runtime activation of the FastAPI documentation setting requires the next
+  normal API restart because production Uvicorn does not run with reload.
 
 Completion criteria:
 

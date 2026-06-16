@@ -3826,3 +3826,905 @@ Not verified:
 Working tree:
 - Existing modified `data/smartfuelpass/session_cookies.json` remained
   untouched and must not be staged or committed without explicit approval.
+
+### 2026-06-15 - P1.11 authorization regression coverage
+
+Scope:
+- Completed dashboard security checklist item P1.11.
+- Converted the current FastAPI authorization surface into an executable route,
+  role, section, page, and device contract.
+
+Changed:
+- Added `tests/test_api_authorization_regression.py` with runtime enumeration of
+  all 75 `/api/v1/*` and `/health/*` operations.
+- Explicitly classified five public operations and verified that all 70
+  protected operations return HTTP 401 without credentials.
+- Explicitly inventoried 37 admin operations and verified each with a valid
+  signed non-admin token returning HTTP 403.
+- Added denial coverage for every vodomery, manometry, plynomery, and web-search
+  section/page route, plus positive dependency checks.
+- Added allowed/disallowed identifier coverage for all non-admin
+  identifier-scoped routes and pre-database service rejection tests.
+- Added token-revocation tests for section, page, device, role, and activation
+  changes against both bearer and browser-cookie tokens issued before the
+  change.
+- Expanded map catalog, feature-query, filter-query, and image cross-device
+  coverage.
+- Added DEC-037 and the authorization inventory rule to `AGENTS.md`.
+
+Finding and fix:
+- `get_vodomery_measurement_series`,
+  `get_vodomery_prediction_profiles`, and
+  `get_vodomery_recent_anomalies` caught `ValueError` before
+  `AuthorizationError`.
+- Because `AuthorizationError` subclasses `ValueError`, cross-device requests
+  returned HTTP 422 instead of HTTP 403.
+- Reordered those exception handlers so authorization failures now return HTTP
+  403.
+
+Verification:
+- Focused P1.11 tests: 222 passed.
+- Broader auth/admin/token/navigation/startup/map tests: 304 passed.
+- Full suite: 702 passed, 2 failed. Both failures are the previously documented
+  unrelated failures in `tests/test_vodomery_reports.py`.
+
+Deployment:
+- No production process was restarted during P1.11.
+- The route-status correction is present in the working tree and will take
+  effect in the production FastAPI process after the next supported workstation
+  restart.
+- The existing modified sensitive
+  `data/smartfuelpass/session_cookies.json` was not read or changed.
+
+### 2026-06-15 07:06 CEST - Pre-restart P1.11 handoff
+
+Reason for restart:
+- The user explicitly requested saving the current conversation state and
+  restarting the workstation.
+- Renew the complete production runtime through the supported Windows startup
+  task and cold-start the completed P1.11 authorization changes.
+
+Current task/conversation state:
+- Completed: dashboard security checklist item P1.11.
+- Completed: executable authorization inventory for route, role, section,
+  configurable-page, device, token-revocation, and map boundaries.
+- Completed: corrected three vodomery routes so cross-device
+  `AuthorizationError` responses map to HTTP 403 instead of HTTP 422.
+- Pending: restart the workstation and perform the post-restart verification
+  listed below.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`,
+  `SESSION_NOTES.md`, and this handoff, then run
+  `git status --short --untracked-files=all`.
+
+Working tree and deployment:
+- `HEAD`, `origin/master`, and `origin/HEAD` are
+  `918d7bc0516cd080b97ddedf790fdcc3a56972ae`.
+- Modified P1.11 files are:
+  - `AGENTS.md`
+  - `DASHBOARD_SECURITY_CHECKLIST.md`
+  - `DECISIONS.md`
+  - `SESSION_NOTES.md`
+  - `services/api/routes/vodomery.py`
+  - `tests/test_dashboard_session_security.py`
+  - `tests/test_device_map_service.py`
+  - `tests/test_map_layers_service.py`
+- Untracked P1.11 file:
+  - `tests/test_api_authorization_regression.py`
+- Existing sensitive runtime modification:
+  - `data/smartfuelpass/session_cookies.json`
+- No P1.11 change is committed. The startup task runs directly from this
+  working tree, so the cold-started services must load the uncommitted files.
+- FastAPI currently starts with Uvicorn `--reload`, but no authenticated live
+  cross-device request was issued against operational data. The post-restart
+  focused tests are the required verification of the HTTP 403 correction.
+
+P1.11 verification already completed:
+- Focused P1.11 suite passed all 222 tests.
+- Broader auth/admin/token/navigation/startup/map suite passed all 304 tests.
+- Full suite passed 702 tests and retained only the two previously documented
+  unrelated failures in `tests/test_vodomery_reports.py`.
+- Changed Python files compiled successfully.
+- `git diff --check` passed with only line-ending warnings.
+
+Pre-restart runtime state:
+- Workstation boot time is 2026-06-14 09:56:55 CEST.
+- Scheduled task `API_dashboard_caddy` is `Ready`; its
+  2026-06-14 09:57:05 run completed with result `0`.
+- FastAPI listens on `127.0.0.1:8000`, Streamlit on `127.0.0.1:8001`, and one
+  Caddy process owns ports 80/443 plus `127.0.0.1:2019`.
+- Tailscale owns its expected interface-specific port 443 listeners.
+- FastAPI live and ready, Streamlit health, and the Caddy admin endpoint all
+  return HTTP 200.
+- Explicit-loopback hostname routing returns HTTP 308 for HTTP, HTTP 200 for
+  the HTTPS dashboard, and HTTP 401 for the protected API, map image without
+  its session cookie, and session refresh without bearer authentication.
+- PostgreSQL `server2a:5432` and MSSQL `server2a:1433` are reachable.
+- The scheduler process lock is held. The latest observed heartbeat is within
+  the configured 300-second TTL.
+- The latest `quarter_hour_job` completed successfully at
+  2026-06-15 07:05:08 CEST with no failures in the preceding 24 hours; its next
+  scheduled run is 07:16:05 CEST.
+- The latest `hourly_job` completed successfully at
+  2026-06-15 07:02:19 CEST with no failures in the preceding 24 hours.
+
+Caddy, SQLite, and alert state:
+- Tracked and runtime Caddyfile SHA-256 values are equal at
+  `F41D3B31EA03308CB4345B1D11F0488B11D1FE527CBF135B0E1E166E5E7BC9BE`.
+- `caddy validate` reports a valid runtime configuration.
+- `core/scheduler/data/database_availability.sqlite3` exists and its integrity
+  check is `ok`.
+- PostgreSQL and MSSQL are both stored as available, with no active outage and
+  zero failed checks.
+- Exactly four delivered transition events exist: one `unavailable` and one
+  `recovered` event for each database. No event is pending.
+- The active-admin email hash cache exists and was refreshed at
+  2026-06-15 07:05:05 CEST. Its values were not printed.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, revert, stage, or commit
+  `data/smartfuelpass/session_cookies.json` without explicit user approval.
+- Do not print, change, delete, or commit the ignored local `.env`, API signing
+  secret, email credentials, dashboard credentials, cookies, bearer tokens,
+  authentication audit records, operational recipient addresses, raw SQLite
+  reason values, or admin email hash-cache values.
+- Do not inspect or change other SmartFuelPass browser/session artifacts.
+
+Expected processes and listeners after restart:
+- Scheduled task `API_dashboard_caddy` runs at system startup and completes
+  with result `0`.
+- One FastAPI/Uvicorn runtime owns `127.0.0.1:8000`.
+- One Streamlit runtime owns `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds `scheduler_process`, and updates
+  `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns ports 80/443 plus `127.0.0.1:2019`.
+- Tailscale interface-specific port 443 listeners may remain in addition.
+
+Expected application state:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL remains
+  available.
+- Streamlit `/_stcore/health` and the Caddy admin endpoint: HTTP 200.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- HTTPS dashboard: HTTP 200.
+- Protected API, map image without cookie, and session refresh without bearer:
+  HTTP 401.
+- PostgreSQL and MSSQL TCP checks remain reachable.
+- Scheduler lock and heartbeat remain active, and database jobs run normally.
+- The P1.11 route inventory remains at 75 application operations, five
+  explicitly public operations, 70 protected operations, and 37 admin
+  operations unless an intentional route change occurs.
+- Unassigned identifiers on the three corrected vodomery routes map to HTTP
+  403, not HTTP 422.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task result, process tree, and exactly one
+  expected runtime listener per service.
+- Confirm API live/ready semantics, Streamlit health, and Caddy admin health.
+- Confirm tracked/runtime Caddyfile hash equality and run `caddy validate`.
+- Confirm HTTP redirect, HTTPS dashboard, protected API, map image, and session
+  refresh status codes through explicit-loopback hostname routing.
+- Recheck TCP connectivity to `server2a:5432` and `server2a:1433` without
+  printing credentials.
+- Confirm scheduler process lock, heartbeat age, latest/next job state, and at
+  least one completed post-restart `quarter_hour_job`.
+- Confirm SQLite integrity, both available service states, four delivered
+  transition events, no pending event, and no duplicate recovery event.
+- Confirm the admin email hash cache exists without printing its values.
+- Run:
+  `.venv\Scripts\python.exe -m pytest
+  tests\test_api_authorization_regression.py
+  tests\test_dashboard_session_security.py tests\test_map_routes.py
+  tests\test_map_layers_service.py tests\test_device_map_service.py
+  -q --tb=short`
+  and expect 222 passing tests.
+- Compile the changed Python modules, import FastAPI, run `git diff --check`,
+  and finish with `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with all deviations.
+
+Known risks or accepted gaps:
+- The modified SmartFuelPass cookie file is an existing sensitive runtime
+  change and must remain untouched.
+- P1.11 changes are uncommitted and depend on the current working tree being
+  preserved across restart.
+- A database or network outage during restart can make API readiness return
+  HTTP 503 and cause scheduled database jobs to skip until connectivity
+  recovers.
+- No authenticated production cross-device request, mailbox access, or
+  operational data mutation was performed.
+
+### 2026-06-15 07:24 CEST - Post-restart P1.11 verification
+
+Scope:
+- Verified the production cold start after the workstation boot at
+  2026-06-15 07:12:42 CEST.
+- Verified the complete runtime and the first post-restart
+  `quarter_hour_job` with the uncommitted P1.11 authorization changes loaded
+  from the preserved working tree.
+
+Startup and runtime:
+- Scheduled task `API_dashboard_caddy` ran at 07:12:52 and completed with
+  result `0`; its final state was `Ready`.
+- FastAPI listened on `127.0.0.1:8000`, Streamlit on `127.0.0.1:8001`, and
+  one Caddy process owned ports 80/443 plus `127.0.0.1:2019`.
+- Tailscale interface-specific port 443 listeners were also present as
+  expected.
+- FastAPI live and ready, Streamlit health, and the Caddy admin endpoint all
+  returned HTTP 200.
+- Explicit-loopback hostname routing returned HTTP 308 for HTTP, HTTP 200 for
+  the HTTPS dashboard, and HTTP 401 JSON for the protected API, map image
+  without its session cookie, and session refresh without bearer
+  authentication.
+- Tracked and runtime Caddyfile SHA-256 values remained equal at
+  `F41D3B31EA03308CB4345B1D11F0488B11D1FE527CBF135B0E1E166E5E7BC9BE`;
+  `caddy validate` reported a valid configuration.
+
+Database and scheduler:
+- PostgreSQL `server2a:5432` and MSSQL `server2a:1433` were reachable.
+- The scheduler process lock was held and the heartbeat remained within its
+  configured 300-second TTL.
+- The first post-restart `quarter_hour_job` completed successfully at
+  07:16:10 CEST with zero failures in the preceding 24 hours; its next run was
+  scheduled for 07:35:05 CEST.
+- SQLite integrity was `ok`. PostgreSQL and MSSQL remained stored as
+  available, with no active outage and zero failed checks.
+- The event registry remained at exactly four delivered events: one
+  `unavailable` and one `recovered` event for each database. No event was
+  pending and no duplicate recovery event was created.
+- The active-admin email hash cache existed and was refreshed at
+  07:16:07 CEST; its values were not printed.
+
+P1.11 verification:
+- The required authorization, session, map-route, map-layer, and device-map
+  suite passed all 222 tests.
+- The executable route inventory therefore remained at 75 application
+  operations, five public operations, 70 protected operations, and 37 admin
+  operations.
+- The three corrected Vodomery authorization paths retained HTTP 403 behavior
+  for unassigned identifiers through the focused regression coverage.
+- Changed Python modules compiled and FastAPI/Vodomery imports passed.
+- `git diff --check` passed with only existing line-ending warnings.
+
+Deviations and accepted gaps:
+- No deviation from the pre-restart handoff was found.
+- Process command lines in the non-interactive scheduled-task session were not
+  visible; service identity was confirmed through listener ownership, process
+  topology, health checks, scheduler metrics, and the held scheduler lock.
+- No authenticated production cross-device request, mailbox access, or
+  operational data mutation was performed.
+- The existing sensitive modification to
+  `data/smartfuelpass/session_cookies.json` remained untouched.
+
+### 2026-06-15 07:35 CEST - P1.12 security response headers
+
+Scope:
+- Completed dashboard security checklist item 12.
+- Added and deployed reviewed security response headers for the public
+  Streamlit and same-origin FastAPI surfaces.
+
+Changed:
+- Added HSTS with a one-year max age and no subdomain/preload scope.
+- Added `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: strict-origin-when-cross-origin`, and
+  `X-Frame-Options: SAMEORIGIN`.
+- Added a restrictive `Permissions-Policy` that disables unused capabilities
+  while preserving `geolocation=(self)` for the map page.
+- Added a Streamlit-compatible `Content-Security-Policy-Report-Only` covering
+  inline runtime code, WebSockets, local iframe components, HTTPS map tiles,
+  and data/blob resources.
+- Removed public `Server` and `Via` response headers.
+- Added Caddy regression coverage and documented DEC-038 and the deployment
+  behavior.
+
+Deployment:
+- The tracked Caddy configuration validated with Caddy 2.11.4.
+- The deployment script created
+  `Caddyfile.pre-deploy-20260615-073310`, synchronized the runtime file, and
+  reloaded the existing Caddy process through the loopback admin API.
+- Tracked and runtime Caddyfile SHA-256 values both became
+  `3387659A473097A43B76B7951D833463F77F7C0AC559975271EA3F48B59D1802`.
+- One Caddy process continued to own ports 80/443 and `127.0.0.1:2019`; no
+  duplicate runtime was started.
+
+Verified:
+- Four Caddy configuration tests passed.
+- The broader Caddy, authentication, session, authorization, map, and
+  responsive-dashboard suite passed all 273 tests.
+- Live dashboard HTTP 200 and protected FastAPI HTTP 401 responses contained
+  the complete security header set and contained neither `Server` nor `Via`.
+- HTTP continued to redirect to HTTPS with status 308.
+- FastAPI live/ready, Streamlit health, and the Caddy admin endpoint remained
+  HTTP 200.
+- A direct Streamlit WebSocket handshake returned HTTP 101 and included the
+  enforced HSTS and `nosniff` headers.
+- The public dashboard HTML referenced local Streamlit scripts and styles; no
+  external executable script or stylesheet origin was present.
+
+Accepted gap:
+- CSP remains report-only. No authenticated production browser session or
+  mobile geolocation prompt was used during this change.
+- The existing sensitive modification to
+  `data/smartfuelpass/session_cookies.json` remained untouched.
+
+### 2026-06-15 08:25 CEST - Pre-restart P1.13 handoff
+
+Reason for restart:
+- Activate the hardened production process configuration for dashboard
+  security checklist item P1.13 through the supported Windows startup task.
+- Replace the currently running pre-change `.venv`/Uvicorn reload process set
+  with the exact `.venv-production` runtime and non-reload launch arguments.
+
+Current task/conversation state:
+- Completed: separated production and development launchers.
+- Completed: removed `--reload` from every production launcher and set
+  Uvicorn to one worker on `127.0.0.1:8000`.
+- Completed: kept development reload only in explicitly named
+  `scripts/start_api_dev.ps1` and `scripts/start_all_services_dev.ps1`.
+- Completed: added reviewed direct dependency pins and an exact 82-package
+  direct/transitive lock for CPython 3.14 on Windows.
+- Completed: created and verified the ignored local `.venv-production`.
+- Completed: added fail-closed environment verification and rotating
+  API/Streamlit/Caddy output logs.
+- Completed: documented restart, retention, listener, and operating-account
+  behavior in AGENTS, DEC-039, the security checklist, API README, and public
+  deployment guidance.
+- Pending: restart the workstation and perform the post-restart verification
+  below before marking the P1.13 completion criterion operationally verified.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`,
+  `SESSION_NOTES.md`, and this handoff, then run
+  `git status --short --untracked-files=all`.
+
+P1.13 implementation:
+- Production uses `.venv-production`; startup rejects Python versions other
+  than 3.14, pip versions other than 26.1.2, missing/mismatched locked
+  packages, and unlocked installed packages.
+- `requirements-production.in` contains 22 reviewed direct pins.
+- `requirements-production.lock.txt` contains 82 exact direct and transitive
+  pins and has SHA-256
+  `25A86320E4290817842D9CC0CB3D5AB975C3CA8E10D79306F0E5B2988F99092F`.
+- API, Streamlit, and a fresh Caddy start write combined output under
+  `C:\ProgramData\monitorovaci_platforma\logs` with 10 MiB files and 10
+  backups.
+- Scheduler logging remains daily rotated with 14 backups. Authentication
+  audit retention remains separately configured for 90 days.
+- The task retries launcher-level failure three times at one-minute intervals,
+  but does not supervise a child after launcher completion. A later child
+  failure still requires the supported full-workstation restart.
+- The scheduled task currently runs as `tra`, uses password logon, and has
+  `RunLevel=Highest`. This is an accepted least-privilege gap pending a
+  separate migration to a dedicated non-interactive account with validated
+  project, protected-config, ProgramData, database, network-share, listener,
+  and Caddy certificate rights.
+
+Working tree and deployment:
+- `HEAD`, `origin/master`, and `origin/HEAD` are
+  `918d7bc0516cd080b97ddedf790fdcc3a56972ae`.
+- Modified files are:
+  - `.gitignore`
+  - `AGENTS.md`
+  - `Caddyfile`
+  - `DASHBOARD_SECURITY_CHECKLIST.md`
+  - `DECISIONS.md`
+  - `PUBLIC_HTTPS_DEPLOYMENT.md`
+  - `SESSION_NOTES.md`
+  - `data/smartfuelpass/session_cookies.json`
+  - `requirements-api.txt`
+  - `run.txt`
+  - `scripts/start_all_services.ps1`
+  - `scripts/start_api.ps1`
+  - `services/api/README.md`
+  - `services/api/routes/vodomery.py`
+  - `start_api_dashboard - kopie.bat`
+  - `start_api_dashboard.bat`
+  - `tests/test_caddy_config.py`
+  - `tests/test_dashboard_session_security.py`
+  - `tests/test_device_map_service.py`
+  - `tests/test_map_layers_service.py`
+- Untracked files are:
+  - `requirements-production.in`
+  - `requirements-production.lock.txt`
+  - `scripts/bootstrap_production_environment.ps1`
+  - `scripts/run_with_rotating_log.py`
+  - `scripts/start_all_services_dev.ps1`
+  - `scripts/start_api_dev.ps1`
+  - `scripts/verify_production_environment.py`
+  - `tests/test_api_authorization_regression.py`
+  - `tests/test_production_runtime.py`
+- The ignored `.venv-production` is a required local deployment artifact and
+  must remain present across restart.
+- No P1.13 file is committed. The startup task runs directly from this working
+  tree and will load the uncommitted launcher and lock.
+- P1.13 launcher changes are not active in the current production process set:
+  the workstation booted at 07:12:42 CEST, before these files and
+  `.venv-production` were prepared.
+- P1.12 Caddy headers are already deployed. Tracked and runtime Caddyfile
+  SHA-256 values match at
+  `3387659A473097A43B76B7951D833463F77F7C0AC559975271EA3F48B59D1802`,
+  and the runtime configuration validates.
+
+P1.13 verification already completed:
+- The bootstrap created `.venv-production` successfully, pinned pip 26.1.2,
+  installed the exact lock, passed `pip check`, and passed the fail-closed
+  environment verifier.
+- FastAPI, Streamlit, pandas, SQLAlchemy, reportlab, openpyxl, PostgreSQL and
+  MSSQL drivers, the API application, and scheduler modules imported from the
+  production environment.
+- Every active Streamlit page loaded from the production environment without a
+  missing-module error.
+- A temporary production Uvicorn instance returned HTTP 200 on
+  `127.0.0.1:8010`; its command line did not contain `--reload`.
+- A temporary production Streamlit instance returned HTTP 200 on
+  `127.0.0.1:8011/_stcore/health`.
+- Both temporary processes were stopped and ports 8010/8011 were confirmed
+  closed.
+- Production launcher dry-run showed `.venv-production`, one Uvicorn worker,
+  loopback API/Streamlit bindings, and rotating-log wrappers.
+- PowerShell parsing passed for all new and changed launcher/bootstrap scripts.
+- Focused production, Caddy, and security configuration tests passed all 21
+  tests.
+- Full suite passed 710 tests. The only two failures are the previously
+  documented unrelated `tests/test_vodomery_reports.py` failures.
+- Changed Python files compiled and `git diff --check` passed with only
+  line-ending warnings.
+
+Pre-restart runtime state:
+- Workstation boot time is 2026-06-15 07:12:42 CEST.
+- Scheduled task `API_dashboard_caddy` is `Ready`; its 07:12:52 run completed
+  with result `0`.
+- Task settings are password logon, `RunLevel=Highest`,
+  `MultipleInstances=IgnoreNew`, three one-minute restart attempts, and
+  `StartWhenAvailable=True`.
+- FastAPI listens on `127.0.0.1:8000`, Streamlit on `127.0.0.1:8001`, and one
+  Caddy process owns ports 80/443 plus `127.0.0.1:2019`.
+- Tailscale owns its expected interface-specific port 443 listeners.
+- FastAPI live and ready, Streamlit health, and Caddy admin health return HTTP
+  200.
+- Explicit-loopback hostname routing returns HTTP 308 for HTTP, HTTP 200 for
+  the HTTPS dashboard, and HTTP 401 for the protected API, map image without
+  its session cookie, and session refresh without bearer authentication.
+- PostgreSQL `server2a:5432` and MSSQL `server2a:1433` are reachable.
+- Scheduler metrics report `scheduler_running=True`; the process lock is held
+  and the heartbeat is within the configured 300-second TTL.
+- `quarter_hour_job` last completed successfully at 08:16:07 with zero
+  failures in 24 hours; its next run is 08:35:05.
+- `hourly_job` last completed successfully at 08:02:19 with zero failures in
+  24 hours; its next run is 09:02:05.
+- SQLite integrity is `ok`. PostgreSQL and MSSQL are stored as available, have
+  no active outage, and have zero failed checks.
+- The event registry has four delivered events, no pending event, and no
+  duplicate recovery event.
+- The active-admin email hash cache exists and was refreshed at 08:16:05; its
+  values were not printed.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, revert, stage, or commit
+  `data/smartfuelpass/session_cookies.json` without explicit user approval.
+- Do not print, change, delete, or commit the ignored local `.env`, API signing
+  secret, email credentials, dashboard credentials, cookies, bearer tokens,
+  authentication audit records, operational recipient addresses, raw SQLite
+  reason values, or admin email hash-cache values.
+- Do not inspect or change other SmartFuelPass browser/session artifacts.
+- Do not delete or rebuild `.venv-production` during post-restart verification
+  unless its exact verifier fails and the user approves remediation.
+
+Expected processes and listeners after restart:
+- Scheduled task `API_dashboard_caddy` runs at system startup and completes
+  with result `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child that listens only
+  on `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child that listens only on
+  `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds `scheduler_process`, and updates
+  `core/scheduler/logs/scheduler_metrics.json`.
+- One rotating-log wrapper owns one Caddy runtime that listens on ports 80/443
+  plus admin `127.0.0.1:2019`.
+- Tailscale interface-specific port 443 listeners may remain in addition.
+- No listener exists on temporary ports 8010 or 8011.
+
+Expected application and log state:
+- `.venv-production\Scripts\python.exe
+  scripts\verify_production_environment.py` succeeds and `pip check` reports no
+  broken requirements.
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL remains
+  available.
+- Streamlit `/_stcore/health` and the Caddy admin endpoint: HTTP 200.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- HTTPS dashboard: HTTP 200.
+- Protected API, map image without cookie, and session refresh without bearer:
+  HTTP 401.
+- `C:\ProgramData\monitorovaci_platforma\logs\api.log`,
+  `dashboard.log`, and `caddy.log` exist and contain startup records without
+  secrets.
+- `api.log` contains a normal Uvicorn server start and does not contain a
+  Uvicorn reloader/watchfiles start.
+- Scheduler lock and heartbeat remain active, and database jobs run normally.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task result/settings, process tree, and exactly
+  one expected listener owner per production service.
+- Confirm `.venv-production` exact-lock verification and `pip check`.
+- Confirm API live/ready semantics, Streamlit health, and Caddy admin health.
+- Confirm tracked/runtime Caddyfile hash equality and run `caddy validate`.
+- Confirm HTTP redirect, HTTPS dashboard, protected API, map image, and session
+  refresh status codes through explicit-loopback hostname routing.
+- Confirm API/Streamlit/Caddy log creation and inspect only safe startup lines;
+  verify the API log has no reloader/watchfiles startup.
+- Recheck TCP connectivity to `server2a:5432` and `server2a:1433` without
+  printing credentials.
+- Confirm scheduler process lock, heartbeat age, latest/next job state, and at
+  least one completed post-restart `quarter_hour_job`.
+- Confirm SQLite integrity, both available service states, four delivered
+  transition events, no pending event, and no duplicate recovery event.
+- Confirm the admin email hash cache exists without printing its values.
+- Run:
+  `.venv\Scripts\python.exe -m pytest
+  tests\test_production_runtime.py tests\test_caddy_config.py
+  tests\test_dashboard_security_config.py -q --tb=short`
+  and expect 21 passing tests.
+- Compile the changed Python modules, import FastAPI and scheduler through
+  `.venv-production`, run `git diff --check`, and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart P1.13 verification entry with all deviations and
+  only then mark the completion criterion operationally verified.
+
+Known risks or accepted gaps:
+- The modified SmartFuelPass cookie file is an existing sensitive runtime
+  change and must remain untouched.
+- P1.11-P1.13 changes are uncommitted and depend on the current working tree
+  and ignored `.venv-production` being preserved across restart.
+- A database or network outage during restart can make API readiness return
+  HTTP 503 and cause scheduled database jobs to skip until connectivity
+  recovers.
+- The current scheduled-task account remains broader than least privilege.
+- The launcher does not independently restart a child that fails after startup.
+- No authenticated production browser workflow, mailbox access, or
+  operational data mutation was performed.
+
+### 2026-06-16 - SmartFuelPass charge sessions fetch fix
+
+Scope:
+- Investigated failed `daily_job` and `smartfuelpass_weekly_report_job`
+  alerts caused by SmartFuelPass charge-session loading.
+- Confirmed both failures were isolated to the SmartFuelPass portal fetch path,
+  not PostgreSQL, MSSQL, scheduler liveness, DB upsert, or email delivery.
+
+Changed:
+- Removed the `open_summary()` / `Celkově` click from
+  `fetch_charge_sessions_dataframe()` because the portal no longer loads the
+  charge-session table after that filter is clicked.
+- Updated the SmartFuelPass service regression test so the fetch flow fails if
+  it tries to click the summary/all filter.
+
+Verified:
+- `.venv\Scripts\python.exe -m pytest tests\test_smartfuelpass_service.py
+  tests\test_smartfuelpass_sync.py -q --tb=short` passed 29 tests.
+- `.venv-production\Scripts\python.exe -m py_compile
+  moduly\apps\smartfuelpass\service.py` passed.
+- Live SmartFuelPass read-only fetch through the production Python runtime
+  succeeded with a temporary cookie file in `%TEMP%`: 17 source rows and 11
+  columns were loaded.
+- Sync row building on the live dataframe, without PostgreSQL writes, produced
+  8 completed rows, 0 invalid rows, and 0 missing IDs.
+- Report building, without PDF render or email send, produced 17 source rows,
+  8 valid rows, and 0 invalid rows.
+- `git diff --check -- moduly\apps\smartfuelpass\service.py
+  tests\test_smartfuelpass_service.py` passed with only existing line-ending
+  warnings.
+
+Not verified:
+- No production database upsert was performed.
+- No SmartFuelPass weekly email was sent.
+- The full test suite was not run for this narrow SmartFuelPass flow change.
+
+Decisions/notes:
+- `data/smartfuelpass/session_cookies.json` remains unchanged for now by user
+  request.
+- Headless login without a persistent cookie was proven functional during
+  read-only checks, but removing persistent cookie storage remains a future
+  design change rather than part of this fix.
+
+### 2026-06-16 - Dashboard security checklist P2.14
+
+Scope:
+- Continued `DASHBOARD_SECURITY_CHECKLIST.md` implementation with P2.14
+  public endpoint exposure hardening.
+
+Changed:
+- Added `API_ENABLE_DOCS` to FastAPI settings with default `false`.
+- Registered `/docs`, `/redoc`, and `/openapi.json` only when
+  `API_ENABLE_DOCS=true` is set explicitly.
+- Refactored `services/api/main.py` to use a small `create_api_app()` factory
+  so route exposure can be tested without relying on the local `.env`.
+- Added regression tests for disabled/enabled documentation routes, minimal
+  health responses, and Caddy route exposure.
+- Documented that `/api/v1/auth/users-exist` intentionally remains public as
+  a minimal boolean bootstrap endpoint for the active Streamlit login page.
+- Updated `DASHBOARD_SECURITY_CHECKLIST.md`, `.env.example`,
+  `services/api/README.md`, and `DECISIONS.md`.
+
+Verified:
+- `.venv\Scripts\python.exe -m pytest tests\test_api_public_exposure.py
+  tests\test_dashboard_security_config.py tests\test_caddy_config.py
+  tests\test_api_authorization_regression.py -q --tb=short` passed 182 tests.
+- `.venv-production\Scripts\python.exe -m py_compile services\api\main.py
+  services\api\core\config.py` passed.
+
+Not verified:
+- The running production API process was not restarted, so the new FastAPI
+  documentation-route setting will activate on the next normal API restart.
+- No external network route scan was performed in this step.
+
+Decisions/notes:
+- P2.14 is implemented in code and tests. Runtime activation of the FastAPI
+  docs setting follows the existing no-reload production restart model.
+
+### 2026-06-16 09:08 CEST - Pre-restart handoff
+
+Reason for restart:
+- The user requested saving the current work, restarting the workstation, and
+  checking runtime state after restart.
+- Activate the current working-tree runtime changes through the supported
+  Windows startup task, including the SmartFuelPass fetch fix, P2.14 FastAPI
+  documentation-route hardening, and the previously prepared P1.13 production
+  process configuration.
+
+Current task/conversation state:
+- Completed: SmartFuelPass charge-session fetch no longer clicks
+  `open_summary()` / `Celkove`, because that portal filter no longer loads the
+  table.
+- Completed: live read-only SmartFuelPass verification through the production
+  Python runtime loaded 17 source rows and built 8 valid report/sync rows
+  without database writes or email sends.
+- Completed: dashboard security checklist P2.14 implementation in code and
+  tests. FastAPI docs are disabled by default and enabled only with
+  `API_ENABLE_DOCS=true`.
+- Completed: `/api/v1/auth/users-exist` remains public by decision as a
+  minimal boolean bootstrap endpoint for the active Streamlit login page.
+- Completed: targeted P2.14 tests passed 182 tests, and changed FastAPI modules
+  compiled under `.venv-production`.
+- Pending after restart: verify the startup task loads the current working
+  tree, production services start once, FastAPI docs are unavailable by
+  default, the public route surface remains correct, and SmartFuelPass fetch
+  works without the removed `Celkove` click.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`,
+  `SESSION_NOTES.md`, and this handoff, then run
+  `git status --short --untracked-files=all`.
+
+Working tree and deployment:
+- Current time captured before restart: 2026-06-16 09:08:14 CEST.
+- Branch: `master`.
+- `HEAD`: `918d7bc0516cd080b97ddedf790fdcc3a56972ae`.
+- No git commit was created for this restart handoff.
+- `git status --short --untracked-files=all` before restart:
+  - `M .env.example`
+  - `M .gitignore`
+  - `M AGENTS.md`
+  - `M Caddyfile`
+  - `M DASHBOARD_SECURITY_CHECKLIST.md`
+  - `M DECISIONS.md`
+  - `M PUBLIC_HTTPS_DEPLOYMENT.md`
+  - `M SESSION_NOTES.md`
+  - `M data/smartfuelpass/session_cookies.json`
+  - `M moduly/apps/smartfuelpass/service.py`
+  - `M requirements-api.txt`
+  - `M run.txt`
+  - `M scripts/start_all_services.ps1`
+  - `M scripts/start_api.ps1`
+  - `M services/api/README.md`
+  - `M services/api/core/config.py`
+  - `M services/api/main.py`
+  - `M services/api/routes/vodomery.py`
+  - `M start_api_dashboard - kopie.bat`
+  - `M start_api_dashboard.bat`
+  - `M tests/test_caddy_config.py`
+  - `M tests/test_dashboard_security_config.py`
+  - `M tests/test_dashboard_session_security.py`
+  - `M tests/test_device_map_service.py`
+  - `M tests/test_map_layers_service.py`
+  - `M tests/test_smartfuelpass_service.py`
+  - `?? .idea/pyProjectModel.xml`
+  - `?? requirements-production.in`
+  - `?? requirements-production.lock.txt`
+  - `?? scripts/bootstrap_production_environment.ps1`
+  - `?? scripts/run_with_rotating_log.py`
+  - `?? scripts/start_all_services_dev.ps1`
+  - `?? scripts/start_api_dev.ps1`
+  - `?? scripts/verify_production_environment.py`
+  - `?? tests/test_api_authorization_regression.py`
+  - `?? tests/test_api_public_exposure.py`
+  - `?? tests/test_production_runtime.py`
+- Tracked root `Caddyfile` SHA-256 before restart:
+  `3387659A473097A43B76B7951D833463F77F7C0AC559975271EA3F48B59D1802`.
+- Existing runtime process state before restart:
+  - FastAPI health live: HTTP 200 on `127.0.0.1:8000`.
+  - FastAPI health ready: HTTP 200 on `127.0.0.1:8000`.
+  - Streamlit health: HTTP 200 on `127.0.0.1:8001`.
+  - Loopback listeners: `127.0.0.1:8000` owned by PID 10076,
+    `127.0.0.1:8001` owned by PID 10944, and `127.0.0.1:2019` owned by
+    PID 10528.
+  - Scheduled task `API_dashboard_caddy`: `Ready`; last run
+    2026-06-15 10:02:24 CEST; result `0`.
+  - PostgreSQL `server2a:5432` and MSSQL `server2a:1433` TCP checks returned
+    reachable without printing credentials.
+- Scheduler metrics before restart:
+  - `quarter_hour_job`: last success at 2026-06-16 09:05:09 CEST; next run
+    2026-06-16 09:16:05 CEST; zero failures in the last 24 hours.
+  - `hourly_job`: last success at 2026-06-16 09:02:19 CEST; next run
+    2026-06-16 10:02:05 CEST; zero failures in the last 24 hours.
+  - `daily_job`: last error at 2026-06-16 00:22:54 CEST from the pre-fix
+    SmartFuelPass `sync_charge_sessions_to_db` failure.
+  - `smartfuelpass_weekly_report_job`: last error at 2026-06-16 07:02:45 CEST
+    from the pre-fix SmartFuelPass `send_charge_sessions_report_email`
+    failure.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, revert, stage, or commit
+  `data/smartfuelpass/session_cookies.json` without explicit user approval.
+  The user explicitly chose to leave this file as-is for now.
+- Do not print, change, delete, or commit the ignored local `.env`,
+  `API_TOKEN_SECRET`, email credentials, dashboard credentials, cookies,
+  bearer tokens, authentication audit records, operational recipient addresses,
+  raw SQLite reason values, or admin email hash-cache values.
+- Do not inspect or change other SmartFuelPass browser/session artifacts unless
+  needed for a user-approved SmartFuelPass session-storage change.
+- Keep the ignored `.venv-production` local deployment artifact present across
+  restart.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and the
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock, and
+  updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP 80/443 and admin `127.0.0.1:2019`.
+- Tailscale interface-specific port 443 listeners may remain in addition.
+- No listener should remain on temporary ports 8010 or 8011.
+
+Expected application state after restart:
+- `.venv-production\Scripts\python.exe
+  scripts\verify_production_environment.py` succeeds and `pip check` reports no
+  broken requirements.
+- FastAPI `/health/live` returns HTTP 200.
+- FastAPI `/health/ready` returns HTTP 200 while PostgreSQL remains available;
+  HTTP 503 is acceptable only if database initialization is still retrying
+  during a database outage.
+- Streamlit `/_stcore/health` and the Caddy admin endpoint return HTTP 200.
+- HTTP hostname route redirects to HTTPS with HTTP 308.
+- HTTPS dashboard returns HTTP 200.
+- Protected API, map image without cookie, and session refresh without bearer
+  return HTTP 401.
+- FastAPI docs are disabled by default after the restart:
+  `/docs`, `/redoc`, and `/openapi.json` are not registered unless
+  `API_ENABLE_DOCS=true` is explicitly set.
+- The public Caddy hostname continues to route only `/api/*` to FastAPI and all
+  other paths to Streamlit.
+- `GET /api/v1/auth/users-exist` remains intentionally public and returns only
+  the minimal boolean bootstrap response.
+- SmartFuelPass charge-session fetch works without the `Celkove` click.
+
+Required post-restart checks:
+- Read the context files and run `git status --short --untracked-files=all`.
+- Confirm boot time, scheduled-task last run/result/settings, process tree, and
+  exactly one expected listener owner per service.
+- Confirm `.venv-production` exact-lock verification and `pip check`.
+- Confirm API live/ready, Streamlit health, and Caddy admin health.
+- Confirm tracked/runtime Caddyfile hash equality and run Caddy validation.
+- Confirm HTTP redirect, HTTPS dashboard, protected API, map image, and session
+  refresh status codes through explicit-loopback hostname routing.
+- Confirm `/docs`, `/redoc`, and `/openapi.json` are not API documentation
+  routes in the restarted FastAPI runtime unless `API_ENABLE_DOCS=true` is
+  intentionally configured.
+- Confirm `/api/v1/auth/users-exist` remains HTTP 200 with a minimal boolean
+  response and no account details.
+- Recheck TCP connectivity to `server2a:5432` and `server2a:1433` without
+  printing credentials.
+- Confirm scheduler process lock, heartbeat age, latest/next job state, and at
+  least one completed post-restart `quarter_hour_job`.
+- Confirm SmartFuelPass read-only fetch through the production Python runtime
+  with a temporary cookie path, no DB write, and no email send.
+- Run:
+  `.venv\Scripts\python.exe -m pytest
+  tests\test_api_public_exposure.py tests\test_dashboard_security_config.py
+  tests\test_caddy_config.py tests\test_api_authorization_regression.py
+  tests\test_smartfuelpass_service.py tests\test_smartfuelpass_sync.py
+  tests\test_production_runtime.py -q --tb=short`
+- Compile changed Python modules through `.venv-production`:
+  `.venv-production\Scripts\python.exe -m py_compile
+  services\api\main.py services\api\core\config.py
+  moduly\apps\smartfuelpass\service.py`
+- Run `git diff --check` for changed files and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- `data/smartfuelpass/session_cookies.json` is still a tracked sensitive
+  runtime/session artifact by explicit current decision.
+- P1.11-P1.14 and SmartFuelPass changes are uncommitted and depend on the
+  current working tree being preserved across restart.
+- A database or network outage during restart can make API readiness return
+  HTTP 503 and cause scheduled database jobs to skip until connectivity
+  recovers.
+- The current scheduled-task account remains broader than least privilege.
+- The launcher does not independently restart a child that fails after startup.
+- No authenticated production browser workflow, mailbox access, production
+  database SmartFuelPass upsert, or SmartFuelPass email send was performed
+  before this restart.
+
+### 2026-06-16 09:21 CEST - Post-restart verification
+
+Scope:
+- Checked runtime state after the Windows workstation restart requested on
+  2026-06-16.
+
+Changed:
+- Added this post-restart verification note only.
+
+Verified:
+- Workstation boot time was 2026-06-16 09:11:13 CEST.
+- Scheduled task `API_dashboard_caddy` last ran at 2026-06-16 09:11:23 CEST
+  with result `0` and state `Ready`.
+- Expected listeners were present: Caddy on ports 80/443 and
+  `127.0.0.1:2019`, FastAPI on `127.0.0.1:8000`, Streamlit on
+  `127.0.0.1:8001`, and no listeners on temporary ports 8010 or 8011.
+- `.venv-production` matched `requirements-production.lock.txt`, and
+  `pip check` reported no broken requirements.
+- FastAPI `/health/live`, FastAPI `/health/ready`, Streamlit
+  `/_stcore/health`, and Caddy admin `/config/` returned HTTP 200.
+- Tracked and runtime `Caddyfile` SHA-256 values matched
+  `3387659A473097A43B76B7951D833463F77F7C0AC559975271EA3F48B59D1802`, and
+  `caddy validate --config "C:\Program Files\Caddy\Caddyfile"` reported a
+  valid configuration.
+- Explicit-loopback hostname routing returned HTTP 308 for HTTP, HTTP 200 for
+  the HTTPS dashboard, and HTTP 401 for protected API, map image without
+  cookie, and session refresh without bearer authentication.
+- FastAPI docs were disabled by default: `/docs`, `/redoc`, and
+  `/openapi.json` returned HTTP 404 on `127.0.0.1:8000`.
+- `/api/v1/auth/users-exist` returned HTTP 200 and only the boolean
+  `users_exist` response field.
+- PostgreSQL `server2a:5432` and MSSQL `server2a:1433` TCP checks returned
+  reachable without printing credentials.
+- Scheduler metrics reported `scheduler_running=True`; heartbeat updated after
+  restart, and `quarter_hour_job` completed successfully at
+  2026-06-16 09:16:09 CEST with next run at 2026-06-16 09:35:05 CEST.
+- Database availability SQLite integrity was `ok`; PostgreSQL and MSSQL were
+  stored as available, with no active outage, zero failed checks, four
+  delivered events, and zero pending events.
+- Admin alert email hash cache existed and contained one hash; hash values were
+  not printed.
+- Safe startup log inspection showed Uvicorn started PID 7100 without
+  reloader/watchfiles output, Streamlit started after restart, and Caddy served
+  the initial configuration after restart.
+- SmartFuelPass read-only fetch through `.venv-production` and a temporary
+  cookie path loaded 17 source rows and 11 columns, built 8 completed sync
+  rows, found 0 invalid rows, and found 0 missing IDs. No database write, PDF
+  render, or email send was performed. The temporary cookie file was removed.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_api_public_exposure.py tests\test_dashboard_security_config.py
+  tests\test_caddy_config.py tests\test_api_authorization_regression.py
+  tests\test_smartfuelpass_service.py tests\test_smartfuelpass_sync.py
+  tests\test_production_runtime.py -q --tb=short` passed 219 tests.
+- `.venv-production\Scripts\python.exe -m py_compile services\api\main.py
+  services\api\core\config.py moduly\apps\smartfuelpass\service.py` passed.
+- `git diff --check` reported no whitespace errors, only existing LF-to-CRLF
+  warnings.
+
+Not verified:
+- No authenticated production browser workflow was performed.
+- No production SmartFuelPass database upsert or SmartFuelPass email send was
+  performed.
+- Process command lines for non-interactive startup-owned child processes were
+  not visible from the current interactive session, but listener ownership,
+  health checks, and logs matched the expected runtime.
+
+Decisions/notes:
+- `daily_job` and `smartfuelpass_weekly_report_job` still show the pre-fix
+  2026-06-16 failures in scheduler metrics until their next scheduled runs,
+  but the post-restart read-only SmartFuelPass fetch verified the fixed portal
+  flow.
+- Caddy logged transient HTTP 502 responses around 2026-06-16 09:10:53 to
+  09:10:59 CEST while Streamlit was not yet accepting connections. Current
+  Streamlit health and HTTPS routing are healthy.
+- `data/smartfuelpass/session_cookies.json` remains an existing tracked
+  sensitive runtime artifact and was not printed, changed, removed, staged, or
+  committed.

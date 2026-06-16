@@ -1,20 +1,3 @@
-# FastAPI runtime
-fastapi>=0.115,<1.0
-uvicorn[standard]>=0.30,<1.0
-pydantic>=2.8,<3.0
-
-# Shared dependencies imported by the API layer
-python-decouple>=3.8,<4.0
-sqlalchemy>=2.0,<3.0
-pandas>=2.0,<3.0
-openpyxl>=3.1,<4.0
-geoalchemy2>=0.15,<1.0
-requests>=2.32,<3.0
-beautifulsoup4>=4.12,<5.0
-selenium>=4.21,<5.0
-playwright>=1.51,<2.0
-psycopg2-binary>=2.9,<3.0
-pyodbc>=5.1,<6.0
-reportlab>=4.0,<5.0
-pypdf>=6.0,<7.0
-pypdfium2>=4.30,<5.0
+# Compatibility entry point for the active API/dashboard/scheduler runtime.
+# Exact direct and transitive versions are maintained in the production lock.
+-r requirements-production.lock.txt

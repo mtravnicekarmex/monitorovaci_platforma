@@ -1,12 +1,26 @@
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$pythonExe = Join-Path $projectRoot ".venv\Scripts\python.exe"
+$pythonExe = Join-Path $projectRoot ".venv-production\Scripts\python.exe"
+$verifyScript = Join-Path $projectRoot "scripts\verify_production_environment.py"
+$logRunner = Join-Path $projectRoot "scripts\run_with_rotating_log.py"
 
-if (-not (Test-Path $pythonExe)) {
-    throw "Python virtual environment nebyl nalezen v .venv. Vytvor ho pres 'py -m venv .venv' a doinstaluj requirements-api.txt."
+foreach ($requiredPath in @($pythonExe, $verifyScript, $logRunner)) {
+    if (-not (Test-Path -LiteralPath $requiredPath)) {
+        throw "Required production file was not found: $requiredPath"
+    }
 }
 
 Set-Location $projectRoot
+& $pythonExe $verifyScript
+if ($LASTEXITCODE -ne 0) {
+    throw "Production environment does not match requirements-production.lock.txt."
+}
 
-& $pythonExe -m uvicorn services.api.main:app --host 127.0.0.1 --port 8000 --reload
+& $pythonExe $logRunner --log-name api -- $pythonExe `
+    -m uvicorn services.api.main:app `
+    --host 127.0.0.1 `
+    --port 8000 `
+    --workers 1 `
+    --proxy-headers `
+    --forwarded-allow-ips 127.0.0.1

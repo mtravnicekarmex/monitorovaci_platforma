@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,6 +22,27 @@ from services.api.services.dashboard_auth import DashboardUserContext
 
 
 router = APIRouter(prefix="/health", tags=["health"])
+
+
+LOG_RECORD_RE = re.compile(
+    r"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) \| "
+)
+
+
+def _parse_log_record_timestamp(line: str) -> datetime | None:
+    match = LOG_RECORD_RE.match(line)
+    if match is None:
+        return None
+    try:
+        return datetime.strptime(match.group("timestamp"), "%Y-%m-%d %H:%M:%S,%f")
+    except ValueError:
+        return None
+
+
+def _local_naive_timestamp(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone().replace(tzinfo=None)
 
 
 def _tail_text_file(path: Path, *, max_lines: int) -> str:
@@ -45,6 +67,33 @@ def _tail_text_file(path: Path, *, max_lines: int) -> str:
     text = data.decode("utf-8", errors="replace")
     lines = text.splitlines()
     return "\n".join(lines[-max_lines:])
+
+
+def _read_text_file_since(
+    path: Path,
+    *,
+    since: datetime,
+    max_lines: int,
+    margin_seconds: float = 2.0,
+) -> str:
+    if max_lines <= 0:
+        return ""
+
+    threshold = _local_naive_timestamp(since) - timedelta(seconds=margin_seconds)
+    selected_lines: list[str] = []
+    include_record = False
+
+    with path.open("r", encoding="utf-8", errors="replace") as file_handle:
+        for line in file_handle:
+            line = line.rstrip("\r\n")
+            timestamp = _parse_log_record_timestamp(line)
+            if timestamp is not None:
+                include_record = timestamp >= threshold
+
+            if include_record:
+                selected_lines.append(line)
+
+    return "\n".join(selected_lines[-max_lines:])
 
 
 @router.get(
@@ -137,6 +186,10 @@ def get_scheduler_health(
 )
 def get_scheduler_log(
     lines: Annotated[int, Query(ge=1, le=2000)] = 300,
+    since: Annotated[
+        datetime | None,
+        Query(description="Optional lower bound for returned scheduler log records."),
+    ] = None,
     current_user: DashboardUserContext = Depends(get_current_admin_user),
 ) -> SchedulerLogResponse:
     del current_user
@@ -153,7 +206,10 @@ def get_scheduler_log(
         )
 
     try:
-        content = _tail_text_file(log_path, max_lines=lines)
+        if since is None:
+            content = _tail_text_file(log_path, max_lines=lines)
+        else:
+            content = _read_text_file_since(log_path, since=since, max_lines=lines)
         stat = log_path.stat()
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Nepodarilo se nacist scheduler log: {exc}") from exc

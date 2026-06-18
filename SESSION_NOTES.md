@@ -4647,6 +4647,81 @@ Known risks or accepted gaps:
   recovers.
 - The current scheduled-task account remains broader than least privilege.
 - The launcher does not independently restart a child that fails after startup.
+
+### 2026-06-16 10:11 CEST - Post-restart verification
+
+Scope:
+- Checked runtime state after the Windows workstation restart requested on
+  2026-06-16.
+
+Changed:
+- Added this post-restart verification note only.
+
+Verified:
+- Workstation boot time was 2026-06-16 10:03:08 CEST.
+- Scheduled task `API_dashboard_caddy` last ran at 2026-06-16 10:03:18 CEST
+  with result `0`, state `Ready`, and zero missed runs.
+- Expected listeners were present: Caddy on ports 80/443 and
+  `127.0.0.1:2019`, FastAPI on `127.0.0.1:8000`, Streamlit on
+  `127.0.0.1:8001`, and no listeners on temporary ports 8010 or 8011.
+- Tailscale interface-specific port 443 listeners were present as expected.
+- `.venv-production` matched `requirements-production.lock.txt`, and
+  `pip check` reported no broken requirements.
+- FastAPI `/health/live`, FastAPI `/health/ready`, Streamlit
+  `/_stcore/health`, and Caddy admin `/config/` returned HTTP 200.
+- Tracked and runtime `Caddyfile` SHA-256 values matched
+  `3387659A473097A43B76B7951D833463F77F7C0AC559975271EA3F48B59D1802`, and
+  `caddy validate --config "C:\Program Files\Caddy\Caddyfile"` reported a
+  valid configuration.
+- Explicit-loopback hostname routing returned HTTP 308 for HTTP and HTTP 200
+  for the HTTPS dashboard.
+- Protected API `/api/v1/auth/me`, map image without cookie, and session
+  refresh without bearer authentication returned HTTP 401.
+- FastAPI docs were disabled by default: `/docs`, `/redoc`, and
+  `/openapi.json` returned HTTP 404 on `127.0.0.1:8000`.
+- `/api/v1/auth/users-exist` returned HTTP 200 and only the boolean
+  `users_exist` response field.
+- PostgreSQL `server2a:5432` and MSSQL `server2a:1433` TCP checks returned
+  reachable without printing credentials.
+- Scheduler metrics reported `scheduler_running=True`; heartbeat updated after
+  restart, and `quarter_hour_job` completed successfully at
+  2026-06-16 10:05:09 CEST with next run at 2026-06-16 10:16:05 CEST.
+- Scheduler lock files were present, including `scheduler_process.lock`.
+- Production Python `get_manual_run_specs()` included
+  `sync_charge_sessions_to_db` with label `Zapis SmartFuelPass relaci do
+  databaze` under lock `daily_job`, `smartfuelpass_weekly_report_job` with
+  label `SmartFuelPass weekly report job`, and
+  `send_charge_sessions_report_email` with label
+  `Odeslani SmartFuelPass PDF emailu` under lock
+  `smartfuelpass_weekly_report_job`.
+- Local FastAPI route `/health/scheduler` exists and returned HTTP 401 without
+  authentication.
+- `.venv\Scripts\python.exe -m pytest tests\test_scheduler.py -q --tb=short`
+  passed 51 tests.
+- `.venv-production\Scripts\python.exe -m py_compile
+  core\scheduler\scheduler.py core\scheduler\job_schedule.py
+  moduly\mereni\elektromery\SOFTLINK\SOFTLINK_data_z_dotazu.py
+  tests\test_scheduler.py` passed.
+- `git diff --check` reported no whitespace errors, only existing LF-to-CRLF
+  warnings.
+
+Not verified:
+- No authenticated production browser workflow was performed.
+- The authenticated `/health/scheduler` response was not fetched with an admin
+  bearer token. The route existence, unauthenticated HTTP 401 behavior, and
+  production manual-run registry were verified instead.
+- Process command lines for non-interactive startup-owned child processes were
+  not visible from the current interactive session, but listener ownership and
+  health checks matched the expected runtime.
+
+Decisions/notes:
+- `daily_job`, `sync_charge_sessions_to_db`,
+  `smartfuelpass_weekly_report_job`, and `send_charge_sessions_report_email`
+  still show the pre-fix 2026-06-16 failures in scheduler metrics until their
+  next real or manual runs record a new result.
+- `data/smartfuelpass/session_cookies.json` remains an existing tracked
+  sensitive runtime artifact and was not printed, changed, removed, staged, or
+  committed.
 - No authenticated production browser workflow, mailbox access, production
   database SmartFuelPass upsert, or SmartFuelPass email send was performed
   before this restart.
@@ -4728,3 +4803,1045 @@ Decisions/notes:
 - `data/smartfuelpass/session_cookies.json` remains an existing tracked
   sensitive runtime artifact and was not printed, changed, removed, staged, or
   committed.
+
+### 2026-06-16 - Manual daily job and SmartFuelPass scheduler UI check
+
+Scope:
+- Investigated a manual `daily_job` alert from the dashboard Scheduler Health
+  page.
+- Checked the manual-run registry for SmartFuelPass database sync and weekly
+  PDF report entries.
+
+Changed:
+- Added `sync_charge_sessions_to_db` as a manual internal scheduler step under
+  the `daily_job` lock.
+- Renamed the scheduled SmartFuelPass report label to distinguish it from the
+  internal email-sending step.
+- Renamed the SmartFuelPass report internal step label to
+  `Odeslani SmartFuelPass PDF emailu`.
+- Replaced the SOFTLINK login success `print()` checkmark with ASCII text so
+  manual runs do not fail on Windows `charmap` stdout encoding.
+- Added scheduler regression coverage for the new SmartFuelPass DB sync manual
+  step and distinct SmartFuelPass report labels.
+
+Verified:
+- The alert screenshot showed `daily_job` failing on
+  `SOFTLINK_save_to_database_all` with a `charmap` encoding error for Unicode
+  character `\u2705`.
+- `.venv\Scripts\python.exe -m pytest tests\test_scheduler.py -q --tb=short`
+  passed 51 tests.
+- `.venv-production\Scripts\python.exe -m py_compile
+  core\scheduler\scheduler.py core\scheduler\job_schedule.py
+  moduly\mereni\elektromery\SOFTLINK\SOFTLINK_data_z_dotazu.py
+  tests\test_scheduler.py` passed.
+- Local `.venv-production` supervised `daily_job.__scheduler_unlocked_fn__()`
+  completed all steps: runtime/database preflight, SOFTLINK import,
+  monitoring import, SmartFuelPass DB sync, and meteo sync.
+- Local `.venv-production` `trigger_manual_job("daily_job")` completed with
+  `JOB MANUAL SUCCESS` at 2026-06-16 09:47:23 CEST. Substeps completed
+  successfully; no manual-run alert was emitted by that local process.
+- `git diff --check` reported no whitespace errors, only existing LF-to-CRLF
+  warnings.
+
+Not verified:
+- The running FastAPI process was not restarted, so the dashboard UI and API
+  manual-run endpoint will not expose the new SmartFuelPass DB sync step or
+  use the SOFTLINK ASCII output fix until the next supported runtime restart.
+- No authenticated browser UI check was performed after the code change.
+
+Decisions/notes:
+- The two SmartFuelPass report entries were expected from different registry
+  layers: scheduled job `smartfuelpass_weekly_report_job` and internal step
+  `send_charge_sessions_report_email`. Their labels are now intentionally
+  distinct.
+- The local manual-trigger verification used a separate Python process and can
+  race with the production scheduler metrics writer. The scheduler log showed
+  the production `quarter_hour_job` still completed at 2026-06-16 09:47:09
+  CEST while the local manual run was active.
+
+### 2026-06-16 09:59 CEST - Pre-restart handoff
+
+Reason for restart:
+- The user requested loading the current state and restarting the workstation.
+- Activate the latest scheduler/manual-run changes in the running FastAPI and
+  scheduler runtime: SmartFuelPass DB sync as a manual `daily_job` step,
+  distinct SmartFuelPass report labels, and the SOFTLINK ASCII login output
+  fix.
+
+Current task/conversation state:
+- Completed: investigated the manual `daily_job` alert; root cause was the
+  SOFTLINK login success `print()` containing Unicode checkmark `\u2705` under
+  Windows `charmap` stdout encoding.
+- Completed: added manual scheduler step `sync_charge_sessions_to_db` under
+  the `daily_job` lock.
+- Completed: distinguished scheduled SmartFuelPass weekly report job label
+  from the internal email-sending step label.
+- Completed: local `.venv-production` supervised `daily_job` and local
+  `trigger_manual_job("daily_job")` both completed successfully from the
+  current working tree.
+- Pending after restart: verify FastAPI has loaded the new manual-run registry
+  and the dashboard/API exposes `sync_charge_sessions_to_db`.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`,
+  `SESSION_NOTES.md`, then run `git status --short --untracked-files=all`.
+
+Working tree and deployment:
+- Current time captured before restart: 2026-06-16 09:59:41 CEST.
+- Branch: `master`.
+- `HEAD`: `5928652359e82dbd5a309ec33a4dff353898551f`.
+- No git commit was created for this restart handoff.
+- `git status --short --untracked-files=all` before restart:
+  - `M SESSION_NOTES.md`
+  - `M core/scheduler/job_schedule.py`
+  - `M core/scheduler/scheduler.py`
+  - `M data/smartfuelpass/session_cookies.json`
+  - `M moduly/mereni/elektromery/SOFTLINK/SOFTLINK_data_z_dotazu.py`
+  - `M tests/test_scheduler.py`
+- Tracked root `Caddyfile` SHA-256 before restart:
+  `3387659A473097A43B76B7951D833463F77F7C0AC559975271EA3F48B59D1802`.
+- Runtime `C:\Program Files\Caddy\Caddyfile` SHA-256 before restart:
+  `3387659A473097A43B76B7951D833463F77F7C0AC559975271EA3F48B59D1802`.
+- Existing runtime process state before restart:
+  - FastAPI health live: HTTP 200 on `127.0.0.1:8000`.
+  - FastAPI health ready: HTTP 200 on `127.0.0.1:8000`.
+  - Streamlit health: HTTP 200 on `127.0.0.1:8001`.
+  - Caddy admin `/config/`: HTTP 200 on `127.0.0.1:2019`.
+  - Loopback listeners: `127.0.0.1:8000` PID 7100,
+    `127.0.0.1:8001` PID 10580, `127.0.0.1:2019` PID 11024.
+  - Caddy owns ports 80/443; Tailscale owns expected interface-specific 443
+    listeners.
+  - No listeners were present on temporary ports 8010 or 8011.
+- Scheduler metrics before restart:
+  - `scheduler_running=True`; heartbeat at 2026-06-16 09:56:29 CEST.
+  - `quarter_hour_job`: last success at 2026-06-16 09:47:09 CEST; next run
+    2026-06-16 10:05:05 CEST; zero failures in 24 hours.
+  - `daily_job`: still shows the pre-fix scheduled error from
+    2026-06-16 00:22:54 CEST until the running scheduler/API reloads and a
+    later real/manual run records success.
+  - `sync_charge_sessions_to_db`: still shows the pre-fix scheduled error from
+    2026-06-16 00:22:54 CEST in production metrics; local supervised checks
+    succeeded from the current working tree.
+  - `smartfuelpass_weekly_report_job`: still shows the pre-fix scheduled error
+    from 2026-06-16 07:02:45 CEST.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, revert, stage, or commit
+  `data/smartfuelpass/session_cookies.json` without explicit user approval.
+- Do not print, change, delete, or commit the ignored local `.env`,
+  `API_TOKEN_SECRET`, email credentials, dashboard credentials, cookies,
+  bearer tokens, authentication audit records, operational recipient
+  addresses, raw SQLite reason values, or admin email hash-cache values.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and the
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock, and
+  updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP 80/443 and admin `127.0.0.1:2019`.
+- Tailscale interface-specific port 443 listeners may remain in addition.
+- No listener should remain on temporary ports 8010 or 8011.
+
+Expected application state after restart:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL remains
+  available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- HTTPS dashboard: HTTP 200.
+- Protected API, map image without cookie, and session refresh without bearer:
+  HTTP 401.
+- FastAPI docs remain disabled by default: `/docs`, `/redoc`, and
+  `/openapi.json` return HTTP 404 unless `API_ENABLE_DOCS=true` is explicitly
+  set.
+- Scheduler Health manual-run registry includes internal step
+  `sync_charge_sessions_to_db` with label `Zapis SmartFuelPass relaci do
+  databaze`.
+- Scheduler Health SmartFuelPass entries distinguish scheduled
+  `SmartFuelPass weekly report job` from internal
+  `Odeslani SmartFuelPass PDF emailu`.
+- Manual `daily_job` no longer fails on the SOFTLINK login success print.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task last run/result/settings, process tree,
+  listeners, and no temporary ports 8010/8011.
+- Confirm `.venv-production` exact-lock verification and `pip check`.
+- Confirm API live/ready, Streamlit health, and Caddy admin health.
+- Confirm tracked/runtime Caddyfile hash equality and Caddy validation.
+- Confirm HTTP redirect, HTTPS dashboard, protected API, map image, session
+  refresh, disabled docs, and public `users-exist` status codes.
+- Confirm scheduler process lock, heartbeat age, latest/next `quarter_hour_job`,
+  and at least one completed post-restart scheduler heartbeat.
+- Confirm FastAPI scheduler health response includes
+  `sync_charge_sessions_to_db`, `smartfuelpass_weekly_report_job`, and
+  `send_charge_sessions_report_email` with the expected labels and locks.
+- Run `.venv\Scripts\python.exe -m pytest tests\test_scheduler.py -q --tb=short`.
+- Compile changed scheduler/SOFTLINK modules through `.venv-production`.
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- `data/smartfuelpass/session_cookies.json` is still a tracked sensitive
+  runtime/session artifact by explicit current decision.
+- Current changes are uncommitted and depend on the working tree being
+  preserved across restart.
+- A database or network outage during restart can make API readiness return
+  HTTP 503 and cause scheduled database jobs to skip until connectivity
+  recovers.
+- The current scheduled-task account remains broader than least privilege.
+- The launcher does not independently restart a child that fails after startup.
+
+### 2026-06-16 - Dashboard security checklist P2.15 code integrity scan
+
+Scope:
+- Continued P2.15 with a repeatable scheduled code integrity scan for
+  detecting unauthorized changes to tracked code and deployment configuration.
+
+Changed:
+- Added `scripts/code_integrity_scan.py`.
+- Added `scripts/run_code_integrity_scan.ps1`.
+- Added `scripts/register_code_integrity_scan_task.ps1`.
+- Added `tests/test_code_integrity_scan.py`.
+- Updated `DASHBOARD_SECURITY_CHECKLIST.md`, `DECISIONS.md`, and `AGENTS.md`.
+
+Verified:
+- `.venv\Scripts\python.exe -m pytest tests\test_code_integrity_scan.py -q
+  --tb=short` passed 4 tests.
+- `.venv-production\Scripts\python.exe scripts\code_integrity_scan.py
+  baseline --manifest .codex\tmp_code_integrity_manifest.json` refused to
+  create a baseline because scanned files are currently dirty, which is the
+  intended fail-closed behavior.
+
+Not verified:
+- No production baseline manifest was created.
+- The Windows scheduled task was not registered or run.
+- No dependency vulnerability scan was added or run yet.
+
+Decisions/notes:
+- The code integrity manifest is stored outside the repository under
+  `C:\ProgramData\monitorovaci_platforma\security` by default, and scan
+  reports are written under ProgramData security logs.
+- Runtime data, scheduler locks/logs/local SQLite state, SmartFuelPass session
+  artifacts, and known electric-meter source data artifacts are excluded from
+  the integrity scope.
+- Activation requires a reviewed/approved code state, then baseline creation
+  and scheduled task registration.
+
+### 2026-06-16 15:21 CEST - Pre-restart handoff
+
+Reason for restart:
+- The user requested saving the conversation/task state and restarting the
+  workstation.
+- Preserve and resume the current dashboard security checklist P2.15 work:
+  repeatable code integrity scan and pending scheduled scan activation.
+
+Current task/conversation state:
+- Completed: post-restart runtime check after the earlier restart confirmed
+  FastAPI, Streamlit, Caddy, and scheduler were healthy.
+- Completed: investigated the next security-checklist item and confirmed MFA
+  remains deferred by user decision.
+- Completed: implemented local code integrity scanning for tracked code and
+  deployment configuration files.
+- Completed: added PowerShell entry points for manual scan/baseline and
+  Windows scheduled-task registration.
+- Completed: documented the code integrity approach in
+  `DASHBOARD_SECURITY_CHECKLIST.md`, `DECISIONS.md`, `AGENTS.md`, and
+  `SESSION_NOTES.md`.
+- Pending after restart: review the current dirty working tree, decide whether
+  to commit or otherwise approve it as a new checkpoint, then create the first
+  production code-integrity baseline and register/run the scheduled scan.
+- Pending after restart: dependency vulnerability scanning with `pip-audit` or
+  an equivalent tool is still not implemented.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`,
+  `SESSION_NOTES.md`, and `DASHBOARD_SECURITY_CHECKLIST.md`, then run
+  `git status --short --untracked-files=all`.
+
+Working tree and deployment:
+- Current time captured before restart: 2026-06-16 15:21:41 CEST.
+- Branch: `master`.
+- `HEAD`: `5928652359e82dbd5a309ec33a4dff353898551f`.
+- No git commit was created for this restart handoff.
+- `git status --short --untracked-files=all` before restart:
+  - `M AGENTS.md`
+  - `M DASHBOARD_SECURITY_CHECKLIST.md`
+  - `M DECISIONS.md`
+  - `M SESSION_NOTES.md`
+  - `M core/scheduler/job_schedule.py`
+  - `M core/scheduler/scheduler.py`
+  - `M data/smartfuelpass/session_cookies.json`
+  - `M moduly/mereni/elektromery/SOFTLINK/SOFTLINK_data_z_dotazu.py`
+  - `M tests/test_scheduler.py`
+  - `?? scripts/code_integrity_scan.py`
+  - `?? scripts/register_code_integrity_scan_task.ps1`
+  - `?? scripts/run_code_integrity_scan.ps1`
+  - `?? tests/test_code_integrity_scan.py`
+- Tracked root `Caddyfile` SHA-256 before restart:
+  `3387659A473097A43B76B7951D833463F77F7C0AC559975271EA3F48B59D1802`.
+- Runtime `C:\Program Files\Caddy\Caddyfile` SHA-256 before restart:
+  `3387659A473097A43B76B7951D833463F77F7C0AC559975271EA3F48B59D1802`.
+- Existing runtime process state before restart:
+  - FastAPI health live: HTTP 200 on `127.0.0.1:8000`.
+  - FastAPI health ready: HTTP 200 on `127.0.0.1:8000`.
+  - Streamlit health: HTTP 200 on `127.0.0.1:8001`.
+  - Caddy admin `/config/`: HTTP 200 on `127.0.0.1:2019`.
+  - Loopback listeners: `127.0.0.1:8000` PID 9972,
+    `127.0.0.1:8001` PID 10928, `127.0.0.1:2019` PID 11180.
+  - Caddy owns ports 80/443; Tailscale owns expected interface-specific 443
+    listeners.
+  - No listeners were present on temporary ports 8010 or 8011.
+- Scheduler metrics before restart:
+  - `scheduler_running=True`; heartbeat at 2026-06-16 15:18:27 CEST.
+  - `quarter_hour_job`: last success at 2026-06-16 15:16:08 CEST; next run
+    2026-06-16 15:35:05 CEST; zero failures in 24 hours.
+  - `hourly_job`: last success at 2026-06-16 15:02:19 CEST; next run
+    2026-06-16 16:02:05 CEST; zero failures in 24 hours.
+  - `daily_job`: still shows the pre-fix scheduled error from
+    2026-06-16 00:22:54 CEST until a later real/manual run records success.
+  - `sync_charge_sessions_to_db`: still shows the pre-fix scheduled error
+    from 2026-06-16 00:22:54 CEST until a later real/manual run records
+    success.
+  - `smartfuelpass_weekly_report_job` and
+    `send_charge_sessions_report_email` still show the pre-fix scheduled error
+    from 2026-06-16 07:02:45 CEST.
+- Verification before restart:
+  - `.venv\Scripts\python.exe -m pytest tests\test_code_integrity_scan.py
+    tests\test_scheduler.py -q --tb=short` passed 55 tests.
+  - `.venv-production\Scripts\python.exe scripts\code_integrity_scan.py
+    baseline --manifest .codex\tmp_code_integrity_manifest.json` refused to
+    create a baseline because scanned files are dirty. This is expected and
+    must remain the fail-closed behavior until the current code state is
+    reviewed/approved.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, revert, stage, or commit
+  `data/smartfuelpass/session_cookies.json` without explicit user approval.
+  It remains a tracked sensitive runtime/session artifact.
+- Do not print, change, delete, or commit the ignored local `.env`,
+  `API_TOKEN_SECRET`, email credentials, dashboard credentials, cookies,
+  bearer tokens, authentication audit records, operational recipient
+  addresses, raw SQLite reason values, admin email hash-cache values, or
+  ProgramData security manifests/logs.
+- Do not create a production code integrity baseline from a dirty working tree
+  unless the user explicitly approves that exact state as the new checkpoint.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and the
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock, and
+  updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP 80/443 and admin `127.0.0.1:2019`.
+- Tailscale interface-specific port 443 listeners may remain in addition.
+- No listener should remain on temporary ports 8010 or 8011.
+
+Expected application state after restart:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL remains
+  available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- HTTPS dashboard: HTTP 200.
+- Protected API, map image without cookie, and session refresh without bearer:
+  HTTP 401.
+- FastAPI docs remain disabled by default: `/docs`, `/redoc`, and
+  `/openapi.json` return HTTP 404 unless `API_ENABLE_DOCS=true` is explicitly
+  set.
+- Scheduler Health manual-run registry still includes
+  `sync_charge_sessions_to_db` with label `Zapis SmartFuelPass relaci do
+  databaze`, plus distinct SmartFuelPass weekly report labels.
+- Code integrity scanner scripts remain present in the working tree but no
+  production baseline or scheduled task is active unless explicitly created
+  after restart.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task last run/result/settings, process tree,
+  listeners, and no temporary ports 8010/8011.
+- Confirm `.venv-production` exact-lock verification and `pip check`.
+- Confirm API live/ready, Streamlit health, and Caddy admin health.
+- Confirm tracked/runtime Caddyfile hash equality and Caddy validation.
+- Confirm HTTP redirect, HTTPS dashboard, protected API, map image, session
+  refresh, disabled docs, and public `users-exist` status codes.
+- Confirm scheduler process lock, heartbeat age, latest/next
+  `quarter_hour_job`, and at least one completed post-restart scheduler
+  heartbeat.
+- Confirm FastAPI scheduler health/manual-run registry includes
+  `sync_charge_sessions_to_db`, `smartfuelpass_weekly_report_job`, and
+  `send_charge_sessions_report_email` with expected labels and locks.
+- Run `.venv\Scripts\python.exe -m pytest tests\test_code_integrity_scan.py
+  tests\test_scheduler.py -q --tb=short`.
+- Compile changed scheduler/SOFTLINK/security scanner modules through
+  `.venv-production`.
+- Run the code integrity baseline command and confirm it still refuses dirty
+  scanned files until the current state is reviewed/approved.
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- `data/smartfuelpass/session_cookies.json` is still a tracked sensitive
+  runtime/session artifact by explicit current decision.
+- Current changes are uncommitted and depend on the working tree being
+  preserved across restart.
+- The code integrity scan is a local drift detector, not tamper-proof host
+  intrusion detection.
+- Dependency vulnerability scanning remains open in P2.15.
+- A database or network outage during restart can make API readiness return
+  HTTP 503 and cause scheduled database jobs to skip until connectivity
+  recovers.
+- The current scheduled-task account remains broader than least privilege.
+- The launcher does not independently restart a child that fails after startup.
+
+### 2026-06-17 07:21 CEST - Post-restart verification
+
+Scope:
+- Checked runtime state after the 2026-06-16 workstation restart.
+- Verified the scheduler/API/dashboard/Caddy runtime and the pending P2.15
+  code-integrity activation state.
+
+Changed:
+- Appended this post-restart verification note.
+
+Verified:
+- Windows boot time was 2026-06-16 15:28:04 CEST.
+- Scheduled task `API_dashboard_caddy` last ran at 2026-06-16 15:28:14 CEST
+  with result `0`.
+- Listeners were present on Caddy `:80`/`:443`, Caddy admin
+  `127.0.0.1:2019`, FastAPI `127.0.0.1:8000`, and Streamlit
+  `127.0.0.1:8001`; no listeners were present on temporary ports `8010` or
+  `8011`. Tailscale still had expected interface-specific `443` listeners.
+- Local health checks returned HTTP 200 for FastAPI `/health/live`,
+  FastAPI `/health/ready`, Streamlit `/_stcore/health`, and Caddy admin
+  `/config/`.
+- `.venv-production` passed `pip check` and
+  `scripts/verify_production_environment.py`.
+- The tracked root `Caddyfile` and runtime
+  `C:\Program Files\Caddy\Caddyfile` SHA-256 hashes matched
+  `3387659A473097A43B76B7951D833463F77F7C0AC559975271EA3F48B59D1802`, and
+  `caddy validate` reported a valid configuration.
+- Loopback Caddy checks using host `monitoring.armexholding.cz` returned HTTP
+  308 for HTTP root, HTTP 200 for HTTPS dashboard, HTTP 401 for protected map
+  catalog without bearer token, HTTP 401 for map image without cookie, HTTP
+  401 for session refresh without bearer token, and HTTP 200 for public
+  `users-exist`.
+- Direct FastAPI checks returned HTTP 404 for `/docs`, `/redoc`, and
+  `/openapi.json`.
+- Scheduler metrics showed `scheduler_running=True`, heartbeat
+  `2026-06-17T07:18:24.632597`, `quarter_hour_job` success at
+  `2026-06-17T07:16:09.045294`, next `quarter_hour_job` at
+  `2026-06-17T07:35:05+02:00`, and zero `quarter_hour_job` failures in the
+  last 24 hours.
+- The production scheduler recorded post-restart success for `daily_job`,
+  `SOFTLINK_save_to_database_all`, and `sync_charge_sessions_to_db`.
+- Local production-code manual-run specs included
+  `sync_charge_sessions_to_db` with label `Zapis SmartFuelPass relaci do
+  databaze` and lock `daily_job`, plus distinct SmartFuelPass report labels
+  `SmartFuelPass weekly report job` and `Odeslani SmartFuelPass PDF emailu`.
+- `.venv\Scripts\python.exe -m pytest tests\test_code_integrity_scan.py
+  tests\test_scheduler.py -q --tb=short` passed 55 tests.
+- `.venv-production\Scripts\python.exe -m py_compile` passed for the changed
+  scheduler, SOFTLINK, code-integrity, and related test modules.
+- Code-integrity baseline creation still refused the dirty working tree, as
+  expected before an approved baseline.
+- `git diff --check` reported no whitespace errors, only existing LF-to-CRLF
+  warnings.
+
+Not verified:
+- True external access from outside the server/LAN was not verified. From the
+  workstation, `monitoring.armexholding.cz` resolved to `77.95.46.168`, but
+  TCP `443` timed out from source `192.168.2.249`; this matches the known
+  same-server/public-IP hairpin limitation and should be checked from an
+  external network if public reachability must be confirmed.
+- The authenticated `/health/scheduler` API response was not read because it
+  requires an administrator bearer token or browser session; no secrets,
+  cookies, or tokens were inspected. The route returned HTTP 401 without
+  authentication, and the code registry plus runtime metrics were checked
+  separately.
+- No production code-integrity baseline was created and no scheduled
+  code-integrity task was registered.
+
+Working tree after verification before this note:
+- `M AGENTS.md`
+- `M DASHBOARD_SECURITY_CHECKLIST.md`
+- `M DECISIONS.md`
+- `M SESSION_NOTES.md`
+- `M core/scheduler/job_schedule.py`
+- `M core/scheduler/scheduler.py`
+- `M data/smartfuelpass/session_cookies.json`
+- `M moduly/mereni/elektromery/SOFTLINK/SOFTLINK_data_z_dotazu.py`
+- `M tests/test_scheduler.py`
+- `?? scripts/code_integrity_scan.py`
+- `?? scripts/register_code_integrity_scan_task.ps1`
+- `?? scripts/run_code_integrity_scan.ps1`
+- `?? tests/test_code_integrity_scan.py`
+
+Follow-up:
+- Confirm public reachability from an external network if needed.
+- Review/commit or explicitly approve the dirty working tree before creating
+  the production code-integrity baseline.
+- Dependency vulnerability scanning remains open for P2.15.
+
+### 2026-06-17 - Scheduler Health manual-run log panel
+
+Scope:
+- Updated the Streamlit `Sprava / Health scheduleru` page so manual scheduler
+  job or internal-step runs keep an open progress/log panel.
+
+Changed:
+- `moduly/apps/dashboard/pages/16_scheduler_health.py` now stores the latest
+  manual-run request in Streamlit session state, polls the scheduler log while
+  the run is active, renders the same ERROR summary styling as the main
+  scheduler log excerpt, shows `Nejsou zadne ERROR zaznamy` after a clean
+  success, and leaves the panel open after completion.
+- `moduly/apps/dashboard/scheduler_log_view.py` now has helpers for slicing
+  scheduler logs from the manual-run request time and detecting
+  `JOB MANUAL SUCCESS`, `JOB MANUAL ERROR`, and `JOB MANUAL SKIPPED` records.
+- `tests/test_dashboard_scheduler_log_view.py` covers the new log slicing and
+  manual-run completion detection helpers.
+
+Verified:
+- `.venv\Scripts\python.exe -m pytest tests\test_dashboard_scheduler_log_view.py
+  tests\test_scheduler_metrics.py -q --tb=short` passed 11 tests.
+- `.venv-production\Scripts\python.exe -m py_compile` passed for the changed
+  scheduler-health page, log-view helper, and test module.
+- `git diff --check` reported no whitespace errors, only existing LF-to-CRLF
+  warnings.
+
+Not verified:
+- No authenticated browser click-through was performed against the running
+  dashboard.
+- The running Streamlit process was not restarted, so the UI change will load
+  after the next supported runtime restart or Streamlit reload.
+
+### 2026-06-17 08:20 CEST - Pre-restart handoff
+
+Reason for restart:
+- The user requested saving the current state and restarting the workstation.
+- Activate the latest Streamlit dashboard change in the running runtime:
+  `Sprava / Health scheduleru` manual-run progress/log panel.
+- Preserve the current dirty working tree and pending security-checklist
+  P2.15 code-integrity activation state.
+
+Current task/conversation state:
+- Completed: post-restart runtime check earlier on 2026-06-17 confirmed
+  FastAPI, Streamlit, Caddy, and scheduler were healthy after the 2026-06-16
+  restart.
+- Completed: implemented the Scheduler Health manual-run progress/log panel.
+  The page stores the latest manual-run request in Streamlit session state,
+  polls scheduler log tail during active runs, highlights ERROR blocks with
+  the existing scheduler log styling, shows `Nejsou zadne ERROR zaznamy` on a
+  clean success, and leaves the panel open after completion.
+- Completed: added scheduler-log helper coverage for manual-run log slicing
+  and `JOB MANUAL SUCCESS`, `JOB MANUAL ERROR`, and `JOB MANUAL SKIPPED`
+  detection.
+- Pending after restart: verify the dashboard UI loads the new manual-run
+  panel in an authenticated browser session.
+- Pending after restart: review/commit or explicitly approve the dirty working
+  tree before creating the first production code-integrity baseline.
+- Pending after restart: dependency vulnerability scanning remains open for
+  P2.15.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`,
+  `SESSION_NOTES.md`, then run `git status --short --untracked-files=all`.
+
+Working tree and deployment:
+- Current time captured before restart: 2026-06-17 08:20:19 CEST.
+- Branch: `master`.
+- `HEAD`: `5928652359e82dbd5a309ec33a4dff353898551f`.
+- No git commit was created for this restart handoff.
+- `git status --short --untracked-files=all` before restart:
+  - `M AGENTS.md`
+  - `M DASHBOARD_SECURITY_CHECKLIST.md`
+  - `M DECISIONS.md`
+  - `M SESSION_NOTES.md`
+  - `M core/scheduler/job_schedule.py`
+  - `M core/scheduler/scheduler.py`
+  - `M data/smartfuelpass/session_cookies.json`
+  - `M moduly/apps/dashboard/pages/16_scheduler_health.py`
+  - `M moduly/apps/dashboard/scheduler_log_view.py`
+  - `M moduly/mereni/elektromery/SOFTLINK/SOFTLINK_data_z_dotazu.py`
+  - `M tests/test_dashboard_scheduler_log_view.py`
+  - `M tests/test_scheduler.py`
+  - `?? scripts/code_integrity_scan.py`
+  - `?? scripts/register_code_integrity_scan_task.ps1`
+  - `?? scripts/run_code_integrity_scan.ps1`
+  - `?? tests/test_code_integrity_scan.py`
+- Tracked root `Caddyfile` SHA-256 before restart:
+  `3387659A473097A43B76B7951D833463F77F7C0AC559975271EA3F48B59D1802`.
+- Runtime `C:\Program Files\Caddy\Caddyfile` SHA-256 before restart:
+  `3387659A473097A43B76B7951D833463F77F7C0AC559975271EA3F48B59D1802`.
+- Caddy runtime configuration validation reported `Valid configuration`.
+- Existing runtime process/listener state before restart:
+  - Caddy owned TCP `:80` and `:443`, PID `11232`.
+  - Caddy admin listened on `127.0.0.1:2019`, PID `11232`.
+  - FastAPI listened on `127.0.0.1:8000`, PID `9928`.
+  - Streamlit listened on `127.0.0.1:8001`, PID `10824`.
+  - Tailscale owned expected interface-specific `443` listeners on
+    `100.66.79.74` and `fd7a:115c:a1e0::e38:4f4b`.
+  - No listeners were present on temporary ports `8010` or `8011`.
+- Runtime health before restart:
+  - FastAPI `/health/live`: HTTP 200 on `127.0.0.1:8000`.
+  - FastAPI `/health/ready`: HTTP 200 on `127.0.0.1:8000`.
+  - Streamlit `/_stcore/health`: HTTP 200 on `127.0.0.1:8001`.
+  - Caddy admin `/config/`: HTTP 200 on `127.0.0.1:2019`.
+- Production environment before restart:
+  - `.venv-production\Scripts\python.exe -m pip check` reported no broken
+    requirements.
+  - `scripts/verify_production_environment.py` reported that the production
+    Python environment matches `requirements-production.lock.txt`.
+- Scheduler metrics before restart:
+  - `scheduler_running=True`; heartbeat at `2026-06-17T08:18:24.975504`.
+  - `quarter_hour_job`: last success at `2026-06-17T08:16:08.980943`; next
+    run `2026-06-17T08:35:05+02:00`; zero failures in 24 hours.
+  - `hourly_job`: last success at `2026-06-17T08:02:19.052882`; next run
+    `2026-06-17T09:02:05+02:00`.
+  - `daily_job`: last success at `2026-06-17T00:20:56.302058`.
+  - `sync_charge_sessions_to_db`: last success at
+    `2026-06-17T00:20:55.909289`.
+  - `SOFTLINK_save_to_database_all`: last success at
+    `2026-06-17T00:15:15.207851`.
+- Verification before restart:
+  - `.venv\Scripts\python.exe -m pytest tests\test_dashboard_scheduler_log_view.py
+    tests\test_scheduler_metrics.py -q --tb=short` passed 11 tests after the
+    Scheduler Health manual-run log-panel change.
+  - `.venv-production\Scripts\python.exe -m py_compile` passed for the
+    changed Scheduler Health page, scheduler-log helper, and test module.
+  - `git diff --check` reported no whitespace errors, only existing
+    LF-to-CRLF warnings.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, revert, stage, or commit
+  `data/smartfuelpass/session_cookies.json` without explicit user approval.
+  It remains a tracked sensitive runtime/session artifact.
+- Do not print, change, delete, or commit the ignored local `.env`,
+  `API_TOKEN_SECRET`, email credentials, dashboard credentials, cookies,
+  bearer tokens, authentication audit records, operational recipient
+  addresses, raw SQLite reason values, admin email hash-cache values, or
+  ProgramData security manifests/logs.
+- Do not create a production code-integrity baseline from a dirty working tree
+  unless the user explicitly approves that exact state as the new checkpoint.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and the
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP `80`/`443` and admin `127.0.0.1:2019`.
+- Tailscale interface-specific `443` listeners may remain in addition.
+- No listener should remain on temporary ports `8010` or `8011`.
+
+Expected application state after restart:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL
+  remains available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- HTTPS dashboard: HTTP 200.
+- Protected API, map image without cookie, and session refresh without bearer:
+  HTTP 401.
+- FastAPI docs remain disabled by default: `/docs`, `/redoc`, and
+  `/openapi.json` return HTTP 404 unless `API_ENABLE_DOCS=true` is explicitly
+  set.
+- Scheduler Health manual-run registry includes `sync_charge_sessions_to_db`
+  with label `Zapis SmartFuelPass relaci do databaze`, plus distinct
+  SmartFuelPass weekly report labels.
+- Scheduler Health manual-run UI opens and preserves a progress/log panel for
+  the selected job or internal step.
+- A successful manual run displays green `Nejsou zadne ERROR zaznamy`; ERROR
+  records display in the same red block style as the main scheduler log
+  excerpt.
+- Code integrity scanner scripts remain present in the working tree, but no
+  production baseline or scheduled task is active unless explicitly created
+  after restart.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task last run/result/settings, process tree,
+  listeners, and no temporary ports `8010`/`8011`.
+- Confirm `.venv-production` exact-lock verification and `pip check`.
+- Confirm API live/ready, Streamlit health, and Caddy admin health.
+- Confirm tracked/runtime Caddyfile hash equality and Caddy validation.
+- Confirm HTTP redirect, HTTPS dashboard, protected API, map image, session
+  refresh, disabled docs, and public `users-exist` status codes.
+- Confirm scheduler process lock, heartbeat age, latest/next
+  `quarter_hour_job`, and at least one completed post-restart scheduler
+  heartbeat.
+- Confirm FastAPI scheduler health/manual-run registry includes
+  `sync_charge_sessions_to_db`, `smartfuelpass_weekly_report_job`, and
+  `send_charge_sessions_report_email` with expected labels and locks.
+- Verify the authenticated Streamlit `Sprava / Health scheduleru` page shows
+  the new manual-run progress/log panel after a manual run request. Prefer a
+  low-risk internal step and do not run data-changing jobs casually.
+- Run `.venv\Scripts\python.exe -m pytest tests\test_dashboard_scheduler_log_view.py
+  tests\test_scheduler_metrics.py tests\test_code_integrity_scan.py
+  tests\test_scheduler.py -q --tb=short`.
+- Compile changed scheduler, SOFTLINK, dashboard Scheduler Health, scheduler
+  log-view, and code-integrity modules through `.venv-production`.
+- Run the code-integrity baseline command and confirm it still refuses dirty
+  scanned files until the current state is reviewed/approved.
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- `data/smartfuelpass/session_cookies.json` is still a tracked sensitive
+  runtime/session artifact by explicit current decision.
+- Current changes are uncommitted and depend on the working tree being
+  preserved across restart.
+- The code integrity scan is a local drift detector, not tamper-proof host
+  intrusion detection.
+- Dependency vulnerability scanning remains open in P2.15.
+- True external public reachability from outside the server/LAN remains a
+  separate check. Earlier local same-server public-IP access timed out while
+  loopback Caddy hostname routing worked.
+- A database or network outage during restart can make API readiness return
+  HTTP 503 and cause scheduled database jobs to skip until connectivity
+  recovers.
+- The current scheduled-task account remains broader than least privilege.
+- The launcher does not independently restart a child that fails after
+  startup.
+
+### 2026-06-17 08:51 CEST - Post-restart verification
+
+Scope:
+- Checked runtime state after the 2026-06-17 workstation restart requested to
+  activate the Scheduler Health manual-run progress/log panel.
+
+Changed:
+- Appended this post-restart verification note.
+
+Verified:
+- Windows boot time was 2026-06-17 08:43:52 CEST.
+- Scheduled task `API_dashboard_caddy` last ran at 2026-06-17 08:44:02 CEST
+  with result `0`; the task uses a boot trigger, `RunLevel=Highest`, and user
+  `tra`.
+- Listeners were present on Caddy `:80`/`:443`, Caddy admin
+  `127.0.0.1:2019`, FastAPI `127.0.0.1:8000`, and Streamlit
+  `127.0.0.1:8001`; no listeners were present on temporary ports `8010` or
+  `8011`. Tailscale still had expected interface-specific `443` listeners.
+- Local health checks returned HTTP 200 for FastAPI `/health/live`,
+  FastAPI `/health/ready`, Streamlit `/_stcore/health`, and Caddy admin
+  `/config/`.
+- `.venv-production` passed `pip check` and
+  `scripts/verify_production_environment.py`.
+- The tracked root `Caddyfile` and runtime
+  `C:\Program Files\Caddy\Caddyfile` SHA-256 hashes matched
+  `3387659A473097A43B76B7951D833463F77F7C0AC559975271EA3F48B59D1802`, and
+  `caddy validate` reported a valid configuration.
+- Loopback Caddy checks using host `monitoring.armexholding.cz` returned HTTP
+  308 for HTTP root, HTTP 200 for HTTPS dashboard, HTTP 401 for protected map
+  catalog without bearer token, HTTP 401 for map image without cookie, HTTP
+  401 for session refresh without bearer token, and HTTP 200 for public
+  `users-exist`.
+- Direct FastAPI checks returned HTTP 404 for `/docs`, `/redoc`, and
+  `/openapi.json`.
+- Scheduler metrics showed `scheduler_running=True`, heartbeat
+  `2026-06-17T08:49:07.691389`, `quarter_hour_job` success at
+  `2026-06-17T08:47:09.230514`, next `quarter_hour_job` at
+  `2026-06-17T09:05:05+02:00`, and zero `quarter_hour_job` failures in the
+  last 24 hours.
+- The production scheduler manual-run registry included
+  `sync_charge_sessions_to_db` with label `Zapis SmartFuelPass relaci do
+  databaze` and lock `daily_job`, plus `smartfuelpass_weekly_report_job` with
+  label `SmartFuelPass weekly report job` and
+  `send_charge_sessions_report_email` with label `Odeslani SmartFuelPass PDF
+  emailu`, both using lock `smartfuelpass_weekly_report_job`.
+- `.venv\Scripts\python.exe -m pytest tests\test_dashboard_scheduler_log_view.py
+  tests\test_scheduler_metrics.py tests\test_code_integrity_scan.py
+  tests\test_scheduler.py -q --tb=short` passed 66 tests.
+- `.venv-production\Scripts\python.exe -m py_compile` passed for the changed
+  scheduler, SOFTLINK, dashboard Scheduler Health, scheduler log-view,
+  code-integrity, and related test modules.
+- Code-integrity baseline creation still refused the dirty working tree, as
+  expected before an approved baseline.
+- `git diff --check` reported no whitespace errors, only existing LF-to-CRLF
+  warnings.
+
+Not verified:
+- Authenticated browser click-through of `Sprava / Health scheduleru` was not
+  performed because no administrator bearer token, cookie, or credentials were
+  inspected.
+- True external access from outside the server/LAN was not verified; loopback
+  hostname routing through Caddy was verified.
+- No production code-integrity baseline was created and no scheduled
+  code-integrity task was registered.
+
+Working tree after verification before this note:
+- `M AGENTS.md`
+- `M DASHBOARD_SECURITY_CHECKLIST.md`
+- `M DECISIONS.md`
+- `M SESSION_NOTES.md`
+- `M core/scheduler/job_schedule.py`
+- `M core/scheduler/scheduler.py`
+- `M data/smartfuelpass/session_cookies.json`
+- `M moduly/apps/dashboard/pages/16_scheduler_health.py`
+- `M moduly/apps/dashboard/scheduler_log_view.py`
+- `M moduly/mereni/elektromery/SOFTLINK/SOFTLINK_data_z_dotazu.py`
+- `M tests/test_dashboard_scheduler_log_view.py`
+- `M tests/test_scheduler.py`
+- `?? scripts/code_integrity_scan.py`
+- `?? scripts/register_code_integrity_scan_task.ps1`
+- `?? scripts/run_code_integrity_scan.ps1`
+- `?? tests/test_code_integrity_scan.py`
+
+Follow-up:
+- Verify the new Scheduler Health manual-run panel in an authenticated
+  browser session with a low-risk manual target.
+- Review/commit or explicitly approve the dirty working tree before creating
+  the production code-integrity baseline.
+- Dependency vulnerability scanning remains open for P2.15.
+
+### 2026-06-17 - Scheduler Health manual-run log fix
+
+Scope:
+- Fixed the Scheduler Health manual-run progress panel that stayed on
+  `Cekam na prvni zaznam rucniho behu v scheduler logu` and did not show the
+  log text area.
+
+Changed:
+- `core/scheduler/scheduler.py` now enables scheduler file logging before a
+  manual-run worker executes in the FastAPI process, so `JOB MANUAL ...`
+  records are written to `core/scheduler/logs/scheduler.log`.
+- `services/api/routes/scheduler_health.py` supports optional `since` filtering
+  for `/health/scheduler/log`.
+- `moduly/apps/dashboard/api_client.py` can pass the `since` query parameter.
+- `moduly/apps/dashboard/pages/16_scheduler_health.py` reads manual-run logs
+  from the request time and always renders the manual-run log text area, even
+  while waiting for the first record.
+- Added regression coverage in `tests/test_scheduler.py` and
+  `tests/test_scheduler_metrics.py`.
+
+Verified:
+- `.venv\Scripts\python.exe -m pytest tests\test_dashboard_scheduler_log_view.py
+  tests\test_scheduler_metrics.py tests\test_scheduler.py -q --tb=short`
+  passed 64 tests.
+- `.venv-production\Scripts\python.exe -m py_compile` passed for the changed
+  scheduler, scheduler-health route, dashboard API client, Scheduler Health
+  page, scheduler log-view helper, and related tests.
+- `.venv-production\Scripts\python.exe -c "import services.api.main; print('ok')"`
+  passed.
+- `git diff --check` reported no whitespace errors, only existing LF-to-CRLF
+  warnings.
+
+Not verified:
+- Authenticated browser click-through was not repeated after this fix.
+- The running production FastAPI/Streamlit processes have not been restarted
+  yet, so the fix is not active in the currently running runtime until the next
+  supported restart/reload.
+
+Follow-up:
+- After the next supported runtime restart, verify the panel with a low-risk
+  manual target and confirm `JOB MANUAL START` plus a completion record appears
+  in the text area.
+
+### 2026-06-17 10:27 CEST - Pre-restart handoff
+
+Reason for restart:
+- The user requested saving the current state and restarting the workstation.
+- Activate the Scheduler Health manual-run log fix in the running FastAPI and
+  Streamlit runtime.
+
+Current task/conversation state:
+- Completed: diagnosed the Scheduler Health manual-run progress panel staying
+  on `Cekam na prvni zaznam rucniho behu v scheduler logu`.
+- Completed: fixed manual-run workers so they enable scheduler file logging in
+  the FastAPI process before executing a manual job.
+- Completed: added optional `since` filtering to `/health/scheduler/log`,
+  dashboard API client support for `since`, and UI behavior that always renders
+  the manual-run log text area.
+- Completed: added targeted regression tests for manual-run file logging and
+  timestamp-filtered scheduler log reads.
+- Pending after restart: verify `Sprava / Health scheduleru` in an
+  authenticated browser session with a low-risk manual target and confirm
+  `JOB MANUAL START` plus a completion record appears in the text area.
+- Pending after restart: review/commit or explicitly approve the dirty working
+  tree before creating the first production code-integrity baseline.
+- Pending after restart: dependency vulnerability scanning remains open for
+  P2.15.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`,
+  `SESSION_NOTES.md`, then run `git status --short --untracked-files=all`.
+
+Working tree and deployment:
+- Current time captured before restart: 2026-06-17 10:27:11 CEST.
+- Branch: `master`.
+- `HEAD`: `5928652359e82dbd5a309ec33a4dff353898551f`.
+- No git commit was created for this restart handoff.
+- `git status --short --untracked-files=all` before restart:
+  - `M AGENTS.md`
+  - `M DASHBOARD_SECURITY_CHECKLIST.md`
+  - `M DECISIONS.md`
+  - `M SESSION_NOTES.md`
+  - `M core/scheduler/job_schedule.py`
+  - `M core/scheduler/scheduler.py`
+  - `M data/smartfuelpass/session_cookies.json`
+  - `M moduly/apps/dashboard/api_client.py`
+  - `M moduly/apps/dashboard/pages/16_scheduler_health.py`
+  - `M moduly/apps/dashboard/scheduler_log_view.py`
+  - `M moduly/mereni/elektromery/SOFTLINK/SOFTLINK_data_z_dotazu.py`
+  - `M services/api/routes/scheduler_health.py`
+  - `M tests/test_dashboard_scheduler_log_view.py`
+  - `M tests/test_scheduler.py`
+  - `M tests/test_scheduler_metrics.py`
+  - `?? scripts/code_integrity_scan.py`
+  - `?? scripts/register_code_integrity_scan_task.ps1`
+  - `?? scripts/run_code_integrity_scan.ps1`
+  - `?? tests/test_code_integrity_scan.py`
+- Tracked root `Caddyfile` SHA-256 before restart:
+  `3387659A473097A43B76B7951D833463F77F7C0AC559975271EA3F48B59D1802`.
+- Runtime `C:\Program Files\Caddy\Caddyfile` SHA-256 before restart:
+  `3387659A473097A43B76B7951D833463F77F7C0AC559975271EA3F48B59D1802`.
+- Caddy runtime configuration validation reported `Valid configuration`.
+- Existing runtime process/listener state before restart:
+  - Caddy owned TCP `:80` and `:443`, PID `10392`.
+  - Caddy admin listened on `127.0.0.1:2019`, PID `10392`.
+  - FastAPI listened on `127.0.0.1:8000`, PID `9848`.
+  - Streamlit listened on `127.0.0.1:8001`, PID `10852`.
+  - Tailscale owned expected interface-specific `443` listeners on
+    `100.66.79.74` and `fd7a:115c:a1e0::e38:4f4b`.
+  - No listeners were present on temporary ports `8010` or `8011`.
+- Runtime health before restart:
+  - FastAPI `/health/live`: HTTP 200 on `127.0.0.1:8000`.
+  - FastAPI `/health/ready`: HTTP 200 on `127.0.0.1:8000`.
+  - Streamlit `/_stcore/health`: HTTP 200 on `127.0.0.1:8001`.
+  - Caddy admin `/config/`: HTTP 200 on `127.0.0.1:2019`.
+- Loopback Caddy checks using host `monitoring.armexholding.cz` returned HTTP
+  308 for HTTP root, HTTP 200 for HTTPS dashboard, HTTP 401 for protected map
+  catalog without bearer token, HTTP 401 for map image without cookie, HTTP
+  401 for session refresh without bearer token, and HTTP 200 for public
+  `users-exist`.
+- Production environment before restart:
+  - `.venv-production\Scripts\python.exe -m pip check` reported no broken
+    requirements.
+  - `scripts/verify_production_environment.py` reported that the production
+    Python environment matches `requirements-production.lock.txt`.
+- Scheduler metrics before restart:
+  - `scheduler_running=True`; heartbeat at `2026-06-17T10:24:08.448402`.
+  - `quarter_hour_job`: last success at `2026-06-17T10:16:08.598185`; next
+    run `2026-06-17T10:35:05+02:00`; zero failures in 24 hours.
+  - `hourly_job`: last success at `2026-06-17T10:02:19.877368`; next run
+    `2026-06-17T11:02:05+02:00`.
+  - `daily_job`: last success at `2026-06-17T00:20:56.302058`.
+  - `sync_charge_sessions_to_db`: last success at
+    `2026-06-17T00:20:55.909289`.
+  - `SOFTLINK_save_to_database_all`: last success at
+    `2026-06-17T00:15:15.207851`.
+- Verification before restart:
+  - `.venv\Scripts\python.exe -m pytest tests\test_dashboard_scheduler_log_view.py
+    tests\test_scheduler_metrics.py tests\test_scheduler.py -q --tb=short`
+    passed 64 tests after the manual-run log fix.
+  - `.venv-production\Scripts\python.exe -m py_compile` passed for the
+    changed scheduler, scheduler-health route, dashboard API client, Scheduler
+    Health page, scheduler log-view helper, and related tests.
+  - `.venv-production\Scripts\python.exe -c "import services.api.main; print('ok')"`
+    passed.
+  - `git diff --check` reported no whitespace errors, only existing
+    LF-to-CRLF warnings.
+- Runtime activation state before restart:
+  - The currently running FastAPI and Streamlit processes were started before
+    the manual-run log fix and do not yet include it.
+  - The restart is expected to load the updated
+    `core/scheduler/scheduler.py`, `services/api/routes/scheduler_health.py`,
+    `moduly/apps/dashboard/api_client.py`, and
+    `moduly/apps/dashboard/pages/16_scheduler_health.py`.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, revert, stage, or commit
+  `data/smartfuelpass/session_cookies.json` without explicit user approval.
+  It remains a tracked sensitive runtime/session artifact.
+- Do not print, change, delete, or commit the ignored local `.env`,
+  `API_TOKEN_SECRET`, email credentials, dashboard credentials, cookies,
+  bearer tokens, authentication audit records, operational recipient
+  addresses, raw SQLite reason values, admin email hash-cache values, or
+  ProgramData security manifests/logs.
+- Do not create a production code-integrity baseline from a dirty working tree
+  unless the user explicitly approves that exact state as the new checkpoint.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and the
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP `80`/`443` and admin `127.0.0.1:2019`.
+- Tailscale interface-specific `443` listeners may remain in addition.
+- No listener should remain on temporary ports `8010` or `8011`.
+
+Expected application state after restart:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL
+  remains available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- HTTPS dashboard: HTTP 200.
+- Protected API, map image without cookie, and session refresh without bearer:
+  HTTP 401.
+- Public `users-exist`: HTTP 200.
+- FastAPI docs remain disabled by default: `/docs`, `/redoc`, and
+  `/openapi.json` return HTTP 404 unless `API_ENABLE_DOCS=true` is explicitly
+  set.
+- Scheduler Health manual-run registry includes `sync_charge_sessions_to_db`
+  with label `Zapis SmartFuelPass relaci do databaze`, plus distinct
+  SmartFuelPass weekly report labels.
+- Scheduler Health manual-run UI opens and preserves a progress/log panel for
+  the selected job or internal step. The log text area should appear even
+  before the first matching log record.
+- A manual run should write `JOB MANUAL START` and one of
+  `JOB MANUAL SUCCESS`, `JOB MANUAL ERROR`, or `JOB MANUAL SKIPPED` to
+  `core/scheduler/logs/scheduler.log`; the dashboard panel should display
+  those records.
+- Code integrity scanner scripts remain present in the working tree, but no
+  production baseline or scheduled task is active unless explicitly created
+  after restart.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task last run/result/settings, process tree,
+  listeners, and no temporary ports `8010`/`8011`.
+- Confirm `.venv-production` exact-lock verification and `pip check`.
+- Confirm API live/ready, Streamlit health, and Caddy admin health.
+- Confirm tracked/runtime Caddyfile hash equality and Caddy validation.
+- Confirm HTTP redirect, HTTPS dashboard, protected API, map image, session
+  refresh, disabled docs, and public `users-exist` status codes.
+- Confirm scheduler process lock, heartbeat age, latest/next
+  `quarter_hour_job`, and at least one completed post-restart scheduler
+  heartbeat.
+- Confirm FastAPI scheduler health/manual-run registry includes
+  `sync_charge_sessions_to_db`, `smartfuelpass_weekly_report_job`, and
+  `send_charge_sessions_report_email` with expected labels and locks.
+- Verify the authenticated Streamlit `Sprava / Health scheduleru` page with a
+  low-risk manual target. Confirm exactly one progress panel remains open,
+  the log text area renders, and the log contains `JOB MANUAL START` plus a
+  completion record.
+- Run `.venv\Scripts\python.exe -m pytest tests\test_dashboard_scheduler_log_view.py
+  tests\test_scheduler_metrics.py tests\test_scheduler.py -q --tb=short`.
+- Compile changed scheduler, scheduler-health route, dashboard API client,
+  Scheduler Health page, scheduler log-view helper, and related tests through
+  `.venv-production`.
+- Run the code-integrity baseline command and confirm it still refuses dirty
+  scanned files until the current state is reviewed/approved.
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- `data/smartfuelpass/session_cookies.json` is still a tracked sensitive
+  runtime/session artifact by explicit current decision.
+- Current changes are uncommitted and depend on the working tree being
+  preserved across restart.
+- The code integrity scan is a local drift detector, not tamper-proof host
+  intrusion detection.
+- Dependency vulnerability scanning remains open in P2.15.
+- True external public reachability from outside the server/LAN remains a
+  separate check. Earlier local same-server public-IP access timed out while
+  loopback Caddy hostname routing worked.
+- A database or network outage during restart can make API readiness return
+  HTTP 503 and cause scheduled database jobs to skip until connectivity
+  recovers.
+- The current scheduled-task account remains broader than least privilege.
+- The launcher does not independently restart a child that fails after
+  startup.

@@ -889,3 +889,33 @@ Implications:
 - Caddy should continue to route only `/api/*` to FastAPI and all other public
   paths to Streamlit unless a future reviewed endpoint exposure requires a
   narrower rule.
+
+## DEC-041: Code Integrity Scan Uses An Approved Manifest Outside The Repository
+
+Date: 2026-06-16
+
+Decision: Unauthorized code-change detection uses a SHA-256 manifest of
+approved tracked code and deployment configuration files stored outside the
+repository under ProgramData. A scheduled scan compares the working tree
+against that manifest and reports changed, missing, or unexpected source files.
+
+Rationale: Dependency vulnerability scanning does not detect local code
+tampering. A local manifest gives a repeatable baseline for the approved
+deployment state without storing runtime data or secrets in the repository.
+
+Implications:
+
+- `scripts/code_integrity_scan.py` owns manifest creation and scan comparison.
+- The default manifest path is
+  `C:\ProgramData\monitorovaci_platforma\security\code_integrity_manifest.json`.
+- Default scan reports are written under
+  `C:\ProgramData\monitorovaci_platforma\logs\security`.
+- Runtime data, scheduler locks/logs/local SQLite state, SmartFuelPass session
+  artifacts, and known electric-meter source data artifacts are excluded from
+  the code-integrity scope.
+- Baseline creation should happen only after the current code state is
+  reviewed and either committed or explicitly approved.
+- This is a local integrity control, not a tamper-proof host intrusion
+  detection system. An actor able to modify both the repository and the
+  scheduled scan mechanism can still bypass it; stronger protection requires
+  external monitoring or stricter OS-level controls.

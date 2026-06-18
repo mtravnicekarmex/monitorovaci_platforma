@@ -65,6 +65,12 @@ At the end of every substantive session:
   production lock.
 - `scripts/bootstrap_production_environment.ps1`: creates and verifies the
   isolated `.venv-production` runtime.
+- `scripts/code_integrity_scan.py`: creates and checks the approved code
+  integrity SHA-256 manifest for tracked code/deployment files.
+- `scripts/run_code_integrity_scan.ps1`: production PowerShell entry point for
+  manual or scheduled code integrity baseline/scan runs.
+- `scripts/register_code_integrity_scan_task.ps1`: idempotent helper for
+  registering the daily Windows code integrity scheduled task.
 - `scripts/run_with_rotating_log.py`: captures API, Streamlit, and Caddy
   stdout/stderr into size-rotated ProgramData logs.
 - `tests/`: pytest suite for scheduler, imports, dashboards, reports, auth/navigation, anomaly handling, and supporting services.
@@ -162,6 +168,15 @@ Known hygiene topics to handle only after explicit approval:
   `C:\ProgramData\monitorovaci_platforma\logs` with 10 MiB files and 10 rotated
   backups. Scheduler logs remain daily rotated with 14 backups; authentication
   audit records retain their separately configured 90-day rotation.
+- Code integrity baselines are stored outside the repository at
+  `C:\ProgramData\monitorovaci_platforma\security\code_integrity_manifest.json`
+  by default. Scan reports are written under
+  `C:\ProgramData\monitorovaci_platforma\logs\security`. Create a new baseline
+  only after the current code state is reviewed and either committed or
+  explicitly approved; do not baseline a dirty working tree silently.
+- The code integrity scan is a local drift detector for tracked code and
+  deployment configuration. It is not tamper-proof against an actor who can
+  modify both the repository and the scheduled scan mechanism.
 - The runtime Caddy configuration is `C:\Program Files\Caddy\Caddyfile`; keep the tracked root `Caddyfile` synchronized with it.
 - On the Windows production workstation, `start_api_dashboard.bat` is launched
   by Windows Task Scheduler with the trigger `At system startup`. This allows

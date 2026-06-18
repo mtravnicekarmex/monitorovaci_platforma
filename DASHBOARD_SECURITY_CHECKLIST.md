@@ -619,17 +619,51 @@ Completion criteria:
 
 ## P2 - Dependency And Operational Security
 
-### 15. Add dependency vulnerability scanning
+### 15. Add dependency vulnerability and code integrity scanning
 
 - [ ] Add `pip-audit` or an equivalent scanner to the development/security toolchain.
 - [ ] Scan the installed environment and declared dependencies.
 - [ ] Resolve or explicitly document accepted vulnerabilities.
 - [ ] Add a repeatable CI or scheduled scan.
 - [ ] Review direct CDN and browser asset dependencies separately.
+- [x] Add a repeatable local code integrity scanner for tracked code and
+  deployment configuration files.
+- [x] Add a Windows scheduled-task registration script for the code integrity
+  scanner.
+- [ ] Create the approved production code integrity baseline after the current
+  code changes are reviewed and committed or explicitly approved.
+- [ ] Register and run the scheduled code integrity scan against that approved
+  baseline.
 
 Completion criteria:
 
-- Dependency vulnerabilities are checked regularly with recorded results.
+- Dependency vulnerabilities and code integrity are checked regularly with
+  recorded results.
+
+Code integrity implementation prepared on 2026-06-16:
+
+- `scripts/code_integrity_scan.py` creates a SHA-256 manifest for tracked
+  code and deployment configuration files and compares later scans against
+  that approved manifest.
+- The default manifest path is outside the repository under ProgramData:
+  `C:\ProgramData\monitorovaci_platforma\security\code_integrity_manifest.json`.
+- Scan reports are written under
+  `C:\ProgramData\monitorovaci_platforma\logs\security` by default.
+- Runtime data, scheduler locks/logs/local SQLite state, SmartFuelPass session
+  artifacts, and known electric-meter source data artifacts are excluded from
+  the code integrity scope.
+- New untracked source/configuration files are reported as unexpected unless
+  they match an excluded runtime/data path.
+- Baseline creation refuses to run while scanned files are dirty unless
+  `--allow-dirty` is passed after explicit approval, so an unreviewed change is
+  not silently promoted to the approved state.
+- `scripts/run_code_integrity_scan.ps1` runs the scanner through
+  `.venv-production`.
+- `scripts/register_code_integrity_scan_task.ps1` registers a daily Windows
+  scheduled task named `MonitoringCodeIntegrityScan`.
+- Activation is still pending: no production baseline was created and no
+  scheduled task was registered during implementation because the working tree
+  contains current uncommitted code changes.
 
 ### 16. Review secret and runtime artifact hygiene
 

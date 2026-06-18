@@ -72,7 +72,7 @@ SCHEDULER_JOB_SPECS: tuple[SchedulerJobSpec, ...] = (
     ),
     SchedulerJobSpec(
         id="smartfuelpass_weekly_report_job",
-        label="SmartFuelPass weekly report",
+        label="SmartFuelPass weekly report job",
         description="Tydenni SmartFuelPass PDF report emailem.",
         trigger_kwargs={"day_of_week": "tue", "hour": 6, "minute": 55, "second": 5},
     ),

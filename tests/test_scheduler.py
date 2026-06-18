@@ -1404,6 +1404,61 @@ def test_daily_job_schedule_description_mentions_smartfuelpass_sync():
     assert "SmartFuelPass" in daily_job_spec.description
 
 
+def test_daily_job_manual_specs_include_smartfuelpass_database_sync():
+    manual_specs = scheduler.get_manual_run_specs()
+
+    sync_spec = manual_specs["sync_charge_sessions_to_db"]
+
+    assert sync_spec.run_fn is scheduler.sync_charge_sessions_to_db
+    assert sync_spec.lock_names == ("daily_job",)
+    assert sync_spec.is_scheduled is False
+    assert "databaze" in sync_spec.label
+
+
+def test_smartfuelpass_report_manual_labels_distinguish_job_and_email_step():
+    manual_specs = scheduler.get_manual_run_specs()
+
+    scheduled_job = manual_specs["smartfuelpass_weekly_report_job"]
+    email_step = manual_specs["send_charge_sessions_report_email"]
+
+    assert scheduled_job.is_scheduled is True
+    assert email_step.is_scheduled is False
+    assert scheduled_job.label != email_step.label
+    assert "job" in scheduled_job.label.lower()
+    assert "email" in email_step.label.lower()
+
+
+def test_manual_run_worker_enables_scheduler_file_logging(monkeypatch):
+    calls = []
+    manual_spec = SimpleNamespace(id="demo_manual_job")
+    acquired_locks = object()
+    requested_at = datetime.datetime(2026, 6, 17, 9, 30)
+
+    def fake_setup_logging(*, enable_file=False):
+        calls.append(("setup_logging", enable_file))
+        return scheduler.logger
+
+    def fake_run_manual_job(spec, *, requested_at):
+        calls.append(("run", spec.id, requested_at))
+
+    def fake_release_job_locks(lock_handle):
+        calls.append(("release", lock_handle))
+
+    monkeypatch.setattr(scheduler, "setup_logging", fake_setup_logging)
+    monkeypatch.setattr(scheduler, "_run_manual_job", fake_run_manual_job)
+    monkeypatch.setattr(scheduler, "_release_job_locks", fake_release_job_locks)
+
+    scheduler._run_manual_job_worker(
+        manual_spec,
+        acquired_locks,
+        requested_at=requested_at,
+    )
+
+    assert calls[0] == ("setup_logging", True)
+    assert calls[1] == ("run", "demo_manual_job", requested_at)
+    assert calls[2] == ("release", acquired_locks)
+
+
 def test_quarter_hour_schedule_and_manual_specs_include_manometry_import():
     quarter_hour_spec = next(job_spec for job_spec in get_scheduler_job_specs() if job_spec.id == "quarter_hour_job")
     manual_specs = scheduler.get_manual_run_specs()

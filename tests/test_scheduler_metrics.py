@@ -133,6 +133,38 @@ def test_scheduler_log_route_returns_tail_lines(monkeypatch, tmp_path):
     assert response.updated_at is not None
 
 
+def test_scheduler_log_route_can_return_records_since_timestamp(monkeypatch, tmp_path):
+    log_path = tmp_path / "scheduler.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "2026-05-14 09:59:50,000 | INFO | core.scheduler.scheduler | old",
+                "2026-05-14 10:00:01,000 | INFO | core.scheduler.scheduler | current",
+                "continued current",
+                "2026-05-14 10:00:02,000 | INFO | core.scheduler.scheduler | next",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(scheduler_health, "SCHEDULER_LOG_PATH", log_path)
+
+    response = scheduler_health.get_scheduler_log(
+        lines=20,
+        since=datetime(2026, 5, 14, 10, 0, 1),
+        current_user=SimpleNamespace(is_admin=True),
+    )
+
+    assert response.exists is True
+    assert response.lines_returned == 3
+    assert response.content == "\n".join(
+        [
+            "2026-05-14 10:00:01,000 | INFO | core.scheduler.scheduler | current",
+            "continued current",
+            "2026-05-14 10:00:02,000 | INFO | core.scheduler.scheduler | next",
+        ]
+    )
+
+
 def test_scheduler_log_route_handles_missing_log_file(monkeypatch, tmp_path):
     log_path = tmp_path / "missing-scheduler.log"
     monkeypatch.setattr(scheduler_health, "SCHEDULER_LOG_PATH", log_path)

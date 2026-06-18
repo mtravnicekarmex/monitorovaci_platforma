@@ -399,12 +399,21 @@ def get_scheduler_health(access_token: str) -> dict[str, object]:
     return dict(response.json())
 
 
-def get_scheduler_log(access_token: str, *, lines: int = 300) -> dict[str, object]:
+def get_scheduler_log(
+    access_token: str,
+    *,
+    lines: int = 300,
+    since: datetime.datetime | str | None = None,
+) -> dict[str, object]:
+    params: dict[str, object] = {"lines": int(lines)}
+    if since:
+        params["since"] = since.isoformat() if isinstance(since, datetime.datetime) else str(since)
+
     response = _request(
         "GET",
         "/health/scheduler/log",
         access_token=access_token,
-        params={"lines": int(lines)},
+        params=params,
     )
     return dict(response.json())
 

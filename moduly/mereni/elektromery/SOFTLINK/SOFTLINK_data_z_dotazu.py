@@ -27,7 +27,7 @@ def SOFTLINK_dotaz():
 
         portal.wait_for_selector("text=Odhlásit")
 
-        print("✅ Úspěšně přihlášen")
+        print("SOFTLINK login succeeded")
 
         # ====== OPRAVA CESTY ======
         auth_path = Path(__file__).resolve().parent / "lds_auth.json"

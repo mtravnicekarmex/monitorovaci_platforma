@@ -186,6 +186,10 @@ def setup_logging(*, enable_file: bool = False):
 logger = setup_logging()
 
 
+def _ensure_scheduler_file_logging() -> None:
+    setup_logging(enable_file=True)
+
+
 
 
 # -------------------------
@@ -1748,6 +1752,15 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             kind="internal_step",
         ),
         ManualRunnableSpec(
+            id="sync_charge_sessions_to_db",
+            label="Zapis SmartFuelPass relaci do databaze",
+            description="Synchronizace SmartFuelPass nabijecich relaci do databaze.",
+            run_fn=sync_charge_sessions_to_db,
+            lock_names=("daily_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
             id="meteo_sync",
             label="Synchronizace meteo dat",
             description="Synchronizace meteorologickych dat pro dalsi vyhodnoceni.",
@@ -1848,8 +1861,8 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
         ),
         ManualRunnableSpec(
             id="send_charge_sessions_report_email",
-            label="Tydenni report SmartFuelPass",
-            description="Odeslani tydenniho email reportu SmartFuelPass.",
+            label="Odeslani SmartFuelPass PDF emailu",
+            description="Odeslani tydenniho PDF email reportu SmartFuelPass.",
             run_fn=send_charge_sessions_report_email,
             lock_names=("smartfuelpass_weekly_report_job",),
             is_scheduled=False,
@@ -1994,6 +2007,7 @@ def _run_manual_job_worker(
     requested_at: datetime,
 ) -> None:
     try:
+        _ensure_scheduler_file_logging()
         _run_manual_job(manual_spec, requested_at=requested_at)
     finally:
         _release_job_locks(acquired_locks)

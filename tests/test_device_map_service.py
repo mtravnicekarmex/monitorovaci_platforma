@@ -8,6 +8,7 @@ from services.api.services.device_map import (
     MISTNOSTI_MAP_LAYER,
     MapFeatureImageError,
     MapFeatureImageNotFound,
+    MapLayerConfig,
     VODOMERY_MAP_LAYER,
     _empty_layer_response,
     _load_detail_properties,
@@ -161,6 +162,60 @@ def test_row_to_feature_serializes_mistnosti_polygon_and_properties():
     }
 
 
+def test_row_to_feature_uses_source_photo_without_exposing_path():
+    config = MapLayerConfig(
+        layer_id="kamery",
+        title="Kamery",
+        schema="evidence",
+        table="KAMERY",
+        geometry_column="geom",
+        identifier_column="kamera_id",
+        property_columns=("kamera_id", "nazev", "foto"),
+        show_photo=True,
+        restrict_to_allowed_devices=False,
+    )
+    row = {
+        "kamera_id": "K-1",
+        "nazev": "Vjezd",
+        "foto": r"P:\photos\kamera.jpg",
+        "geometry": '{"type":"Point","coordinates":[14.1,50.7]}',
+    }
+
+    feature = _row_to_feature(row, config)
+
+    assert feature is not None
+    assert feature["properties"]["kamera_id"] == "K-1"
+    assert feature["properties"]["nazev"] == "Vjezd"
+    assert feature["properties"]["has_photo"] is True
+    assert "foto" not in feature["properties"]
+
+
+def test_row_to_feature_keeps_identifier_available_when_not_configured_as_property():
+    config = MapLayerConfig(
+        layer_id="kamery",
+        title="Kamery",
+        schema="evidence",
+        table="KAMERY",
+        geometry_column="geom",
+        identifier_column="kamera_id",
+        property_columns=("nazev",),
+        show_photo=True,
+        restrict_to_allowed_devices=False,
+    )
+    row = {
+        "kamera_id": "K-1",
+        "nazev": "Vjezd",
+        "foto": r"P:\photos\kamera.jpg",
+        "geometry": '{"type":"Point","coordinates":[14.1,50.7]}',
+    }
+
+    feature = _row_to_feature(row, config)
+
+    assert feature is not None
+    assert feature["properties"]["kamera_id"] == "K-1"
+    assert feature["properties"]["has_photo"] is True
+
+
 def test_vodomery_layer_config_uses_existing_device_permission_identifier():
     user_context = SimpleNamespace(is_admin=False, allowed_devices=("V-1",))
 
@@ -264,6 +319,55 @@ def test_resolve_map_feature_image_file_rejects_layer_with_photos_disabled(monke
         resolve_map_feature_image_file(config, "V-1")
 
     assert load_called is False
+
+
+def test_resolve_map_feature_image_file_reads_source_photo_for_generic_layer(monkeypatch, tmp_path):
+    image_path = tmp_path / "kamera.jpg"
+    image_path.write_bytes(b"image-bytes")
+    config = MapLayerConfig(
+        layer_id="kamery",
+        title="Kamery",
+        schema="evidence",
+        table="KAMERY",
+        geometry_column="geom",
+        identifier_column="kamera_id",
+        property_columns=("kamera_id", "nazev", "foto"),
+        show_photo=True,
+        restrict_to_allowed_devices=False,
+    )
+    captured: dict[str, object] = {}
+
+    class _Result:
+        def mappings(self):
+            return self
+
+        def first(self):
+            return {"foto": str(image_path)}
+
+    class _Session:
+        def execute(self, statement, params):
+            captured["statement"] = str(statement)
+            captured["params"] = params
+            return _Result()
+
+        def close(self):
+            captured["closed"] = True
+
+    monkeypatch.setattr(
+        "services.api.services.device_map.get_session_pg",
+        lambda: _Session(),
+    )
+    monkeypatch.setattr(
+        "services.api.services.device_map._load_table_columns",
+        lambda _session, _config: {"kamera_id", "foto"},
+    )
+
+    image_file = resolve_map_feature_image_file(config, "K-1")
+
+    assert captured["params"] == {"identifier": "K-1"}
+    assert captured["closed"] is True
+    assert image_file.path == image_path
+    assert image_file.media_type == "image/jpeg"
 
 
 def test_row_to_feature_omits_photo_metadata_when_photos_disabled():

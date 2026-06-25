@@ -69,6 +69,7 @@ SUPPORTED_IMAGE_SUFFIXES = {
 PHOTO_PATH_PREFIX_FALLBACKS: tuple[tuple[str, str], ...] = (
     ("P:\\", "\\\\SERVER1A\\Company\\"),
 )
+PHOTO_SOURCE_COLUMN = "foto"
 
 
 VODOMERY_MAP_LAYER = MapLayerConfig(
@@ -314,10 +315,19 @@ def _build_layer_statement(
 
     table_ref = f"{_quote_identifier(config.schema)}.{_quote_identifier(config.table)}"
     geometry_ref = f"t.{_quote_identifier(config.geometry_column)}"
+    internal_columns = [config.identifier_column]
+    if config.show_photo and PHOTO_SOURCE_COLUMN in available_columns:
+        internal_columns.append(PHOTO_SOURCE_COLUMN)
+    selected_column_names = tuple(
+        dict.fromkeys(
+            column
+            for column in (*internal_columns, *config.property_columns)
+            if column in available_columns
+        )
+    )
     selected_columns = [
         f"t.{_quote_identifier(column)} AS {_quote_identifier(column)}"
-        for column in config.property_columns
-        if column in available_columns
+        for column in selected_column_names
     ]
     selected_columns.append(
         "ST_AsGeoJSON("
@@ -393,6 +403,37 @@ def _load_detail_properties(
     return {}
 
 
+def _load_source_photo_value(config: MapLayerConfig, identifier: str) -> object:
+    session = get_session_pg()
+    try:
+        available_columns = _load_table_columns(session, config)
+        required_columns = {config.identifier_column, PHOTO_SOURCE_COLUMN}
+        missing_required = sorted(required_columns - available_columns)
+        if missing_required:
+            raise MapFeatureImageError(
+                f"Mapova vrstva {config.layer_id} nema sloupec pro fotku: {PHOTO_SOURCE_COLUMN}."
+            )
+
+        table_ref = f"{_quote_identifier(config.schema)}.{_quote_identifier(config.table)}"
+        identifier_ref = f"t.{_quote_identifier(config.identifier_column)}"
+        photo_ref = f"t.{_quote_identifier(PHOTO_SOURCE_COLUMN)}"
+        row = session.execute(
+            text(
+                f"SELECT {photo_ref} AS {_quote_identifier(PHOTO_SOURCE_COLUMN)} "
+                f"FROM {table_ref} AS t "
+                f"WHERE {identifier_ref} = :identifier "
+                f"LIMIT 1"
+            ),
+            {"identifier": identifier},
+        ).mappings().first()
+    finally:
+        session.close()
+
+    if row is None:
+        raise MapFeatureImageNotFound("Prvek mapove vrstvy nebyl nalezen.")
+    return row.get(PHOTO_SOURCE_COLUMN)
+
+
 def resolve_map_feature_image_file(config: MapLayerConfig, identifier: str) -> MapFeatureImageFile:
     cleaned_identifier = str(identifier or "").strip()
     if not cleaned_identifier:
@@ -400,16 +441,17 @@ def resolve_map_feature_image_file(config: MapLayerConfig, identifier: str) -> M
 
     if not config.show_photo:
         raise MapFeatureImageError("Zobrazeni fotek neni pro vrstvu povoleno.")
-    if config.layer_id != VODOMERY_MAP_LAYER.layer_id:
-        raise MapFeatureImageError("Vrstva nema podporovane fotky.")
 
-    detail = _load_vodomery_device_details(
-        (cleaned_identifier,),
-        include_photo=True,
-    ).get(cleaned_identifier)
-    if not detail:
-        raise MapFeatureImageNotFound("Detail zarizeni nebyl nalezen.")
-    return _resolve_image_file(detail.get("foto"))
+    if config.layer_id == VODOMERY_MAP_LAYER.layer_id:
+        detail = _load_vodomery_device_details(
+            (cleaned_identifier,),
+            include_photo=True,
+        ).get(cleaned_identifier)
+        if not detail:
+            raise MapFeatureImageNotFound("Detail zarizeni nebyl nalezen.")
+        return _resolve_image_file(detail.get(PHOTO_SOURCE_COLUMN))
+
+    return _resolve_image_file(_load_source_photo_value(config, cleaned_identifier))
 
 
 def _row_to_feature(
@@ -430,12 +472,16 @@ def _row_to_feature(
     properties = {
         _property_key(column, config): _serialize_property_value(row.get(column))
         for column in config.property_columns
-        if column in row
+        if column in row and column.casefold() != PHOTO_SOURCE_COLUMN
     }
-    identifier = properties.get(config.identifier_column)
+    identifier = row.get(config.identifier_column)
+    if identifier not in (None, "") and config.identifier_column not in properties:
+        properties[config.identifier_column] = _serialize_property_value(identifier)
     detail = dict(detail_properties.get(str(identifier), {}) if detail_properties else {})
     properties["detail_source_found"] = bool(detail)
-    photo_value = detail.pop("foto", None)
+    photo_value = detail.pop(PHOTO_SOURCE_COLUMN, None)
+    if photo_value in (None, ""):
+        photo_value = row.get(PHOTO_SOURCE_COLUMN)
     if config.show_photo:
         properties["has_photo"] = bool(str(photo_value or "").strip())
     properties.update(detail)

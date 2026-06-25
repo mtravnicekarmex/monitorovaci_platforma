@@ -224,6 +224,160 @@ Known risks or accepted gaps:
 
 ## Session Log
 
+### 2026-06-25 08:20 +02:00 - Post-restart verification for KAMERY map photos
+
+Scope:
+- Loaded post-restart state after the `KAMERY` generic map-layer photo fix.
+- Checked that new dashboard map layers with `show_photo=True` use the layer
+  source table `foto` column for photo availability and image resolution.
+
+Verified:
+- Windows last boot time: `2026-06-25 08:08:25 +02:00`.
+- Startup scheduled task `API_dashboard_caddy` last ran at
+  `2026-06-25 08:08:35 +02:00` with result `0`.
+- Listeners present: FastAPI `127.0.0.1:8000`, Streamlit
+  `127.0.0.1:8001`, Caddy `80`, `443`, and `127.0.0.1:2019`.
+- No temporary listeners on `8010` or `8011`.
+- API `/health/live` and `/health/ready`, Streamlit `/_stcore/health`, and
+  Caddy admin config endpoint returned HTTP 200.
+- Current `dashboard.Map_Layers` metadata has `kamery` with
+  `show_photo=True`, source `evidence.KAMERY`, identifier column `označení`,
+  and source table columns include both the identifier and `foto`.
+- `vodomery` remains the special supported layer that resolves photos through
+  the existing device-detail path instead of `evidence.vodoměry.foto`.
+- Targeted tests passed:
+  `.venv\Scripts\python.exe -m pytest tests\test_device_map_service.py
+  tests\test_map_layers_service.py tests\test_map_routes.py
+  tests\test_dashboard_map_shared.py -q --tb=short` reported 59 passed.
+- `git diff --check` reported no whitespace errors, only expected
+  LF-to-CRLF warnings.
+
+Not verified:
+- Real authenticated browser click on a `KAMERY` popup photo was not performed
+  in this shell session.
+
+Decisions/notes:
+- Generic non-Vodomery map layers with `show_photo=True` derive photo
+  availability from the trusted source column `foto` and keep the raw photo
+  path out of GeoJSON/browser properties.
+
+### 2026-06-25 08:06 +02:00 - Pre-restart handoff after KAMERY map photo fix
+
+Reason for restart:
+- User requested saving the conversation state before restarting the Windows
+  workstation.
+- Restart is expected to reload FastAPI and Streamlit so the generic map-layer
+  photo fix becomes active in the running dashboard.
+
+Current task/conversation state:
+- Completed: diagnosed that `Mapove podklady / Mapa` photo loading for the new
+  `KAMERY` layer failed with `Fotku se nepodarilo nacist.` because map image
+  resolution only supported the special Vodomery path through
+  `dbo.Zarizeni_vodomery`.
+- Completed: kept the existing Vodomery photo path behavior unchanged.
+- Completed: added generic support for non-Vodomery layers with
+  `show_photo=True`; the image endpoint now resolves the `foto` source column
+  server-side from the configured layer table by `identifier_column`.
+- Completed: kept raw `foto` paths out of GeoJSON/browser properties.
+- Completed: ensured the layer identifier remains available in GeoJSON even if
+  the admin configuration omits it from `property_columns`, so popup image
+  requests can still call `/api/v1/map/images`.
+- Pending: restart/reload runtime processes and verify a real authenticated
+  `KAMERY` popup photo in the browser.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and
+  `SESSION_NOTES.md`; run `git status --short --untracked-files=all`; then
+  verify runtime health and the real `KAMERY` map photo flow.
+
+Working tree and deployment:
+- Current time captured before restart: `2026-06-25 08:06:44 +02:00`.
+- Branch: `master`.
+- `HEAD`: `90a352f318f8526541f3da14eca41a0f50916d51`.
+- No git commit was created for this handoff.
+- `git status --short --untracked-files=all` before this handoff:
+  - `M services/api/services/device_map.py`
+  - `M tests/test_device_map_service.py`
+- Files changed by the latest `KAMERY` map-photo fix:
+  - `services/api/services/device_map.py`
+  - `tests/test_device_map_service.py`
+- Runtime deployment state was not checked in this handoff. Existing running
+  FastAPI and Streamlit processes may still be using older code until restart.
+
+Verification already run for the latest `KAMERY` map-photo fix:
+- `.venv\Scripts\python.exe -m py_compile services\api\services\device_map.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_device_map_service.py
+  tests\test_map_layers_service.py tests\test_map_routes.py
+  tests\test_dashboard_map_shared.py -q --tb=short` passed 59 tests.
+- `git diff --check` reported no whitespace errors, only expected LF-to-CRLF
+  warnings.
+
+Sensitive/runtime artifacts:
+- Do not print, read, delete, revert, stage, or commit raw values from ignored
+  local `.env`, dashboard/API tokens, passwords, cookies, authentication audit
+  logs, ProgramData security artifacts, or any local leftover SmartFuelPass
+  session JSON files.
+- Do not print raw device photo filesystem paths from source columns such as
+  `foto`; only inspect safe status codes and non-sensitive headers if
+  troubleshooting `/api/v1/map/images`.
+- Do not create a production code-integrity baseline from a dirty working tree
+  unless the user explicitly approves that exact state.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and its
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP `80`/`443` and admin `127.0.0.1:2019`.
+- No listener should remain on temporary ports `8010` or `8011`.
+
+Expected application state after restart:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL is
+  available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- HTTPS dashboard: HTTP 200.
+- Protected API without bearer token: HTTP 401 JSON.
+- `/api/v1/map/images` without any dashboard cookie: HTTP 401.
+- `Mapove podklady / Mapa` should load a `KAMERY` popup photo instead of
+  displaying `Fotku se nepodarilo nacist.` when the layer has `show_photo=True`,
+  a valid `identifier_column`, and a source `foto` value pointing to an
+  accessible image file.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task last run/result/settings, process tree,
+  listeners, and no temporary ports `8010` or `8011`.
+- Confirm API live/ready, Streamlit health, Caddy admin health, and scheduler
+  heartbeat.
+- Log in to `https://monitoring.armexholding.cz` without printing cookie or
+  token values.
+- Open `Mapove podklady / Mapa`, enable/select the `KAMERY` layer, click a
+  camera object with a configured photo, and confirm the popup photo loads and
+  the lightbox opens.
+- If the photo still fails, inspect only the HTTP status and safe headers for
+  `/api/v1/map/images`; distinguish 401, 403, 404, and 400 without printing
+  cookies, bearer tokens, or raw file paths.
+- Re-run targeted tests:
+  `.venv\Scripts\python.exe -m pytest tests\test_device_map_service.py
+  tests\test_map_layers_service.py tests\test_map_routes.py
+  tests\test_dashboard_map_shared.py -q --tb=short`
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- The real authenticated browser photo flow for `KAMERY` has not yet been
+  verified after the generic map-layer photo fix.
+- The `KAMERY` layer configuration must use `show_photo=True`, a correct
+  `identifier_column`, and a source table containing a `foto` column.
+- Current changes are uncommitted and depend on the working tree being
+  preserved across restart.
+- The current scheduled-task account remains broader than least privilege.
+- The launcher does not independently restart a child process that fails after
+  startup.
+
 ### 2026-06-05
 
 Scope:

@@ -10,6 +10,7 @@ from services.api.core import dependencies, tokens
 from services.api.core.dependencies import (
     get_current_admin_user,
     get_current_browser_session_user,
+    get_current_map_image_session_user,
     get_current_manometry_user,
     get_current_plynomery_user,
     get_current_user,
@@ -400,6 +401,7 @@ def test_every_protected_api_operation_rejects_missing_authentication(method, pa
     assert _dependency_calls(route) & {
         get_current_user,
         get_current_browser_session_user,
+        get_current_map_image_session_user,
     }
     assert _request_status(method, path) == 401
 

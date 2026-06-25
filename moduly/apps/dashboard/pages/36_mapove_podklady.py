@@ -33,6 +33,7 @@ st.set_page_config(
 
 
 require_page_access("mapove_podklady_map")
+MAP_IMAGE_ENDPOINT_PATH = "/api/v1/map/images"
 
 
 def _layer_id(layer: dict[str, object]) -> str:
@@ -44,6 +45,41 @@ def _format_layer_label(layer_by_id: dict[str, dict[str, object]], layer_id: str
     title = str(layer.get("title") or layer_id)
     layer_kind = str(layer.get("layer_kind") or "context")
     return f"{title} ({layer_kind})"
+
+
+def _request_header(name: str) -> str:
+    headers = getattr(st.context, "headers", {}) or {}
+    value = ""
+    try:
+        value = str(headers.get(name, "") or "")
+    except AttributeError:
+        value = ""
+    if not value:
+        try:
+            value = str(headers.get(name.lower(), "") or "")
+        except AttributeError:
+            value = ""
+    return value.split(",", 1)[0].strip()
+
+
+def _dashboard_request_origin() -> str | None:
+    host = _request_header("X-Forwarded-Host") or _request_header("Host")
+    if not host or any(char in host for char in "/\\\r\n"):
+        return None
+
+    proto = _request_header("X-Forwarded-Proto") or "http"
+    proto = proto.casefold()
+    if proto not in {"http", "https"}:
+        return None
+
+    return f"{proto}://{host}"
+
+
+def _map_image_endpoint_url() -> str:
+    origin = _dashboard_request_origin()
+    if not origin:
+        return MAP_IMAGE_ENDPOINT_PATH
+    return f"{origin}{MAP_IMAGE_ENDPOINT_PATH}"
 
 
 def _session_filters_by_layer(
@@ -180,6 +216,7 @@ def render_page() -> None:
             build_leaflet_map_html(
                 filtered_payload,
                 height_px=880,
+                image_endpoint_url=_map_image_endpoint_url(),
             ),
             height=900,
             scrolling=False,

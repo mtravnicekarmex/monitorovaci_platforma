@@ -919,3 +919,146 @@ Implications:
   detection system. An actor able to modify both the repository and the
   scheduled scan mechanism can still bypass it; stronger protection requires
   external monitoring or stricter OS-level controls.
+
+## DEC-042: Dependency Audits Use An Isolated Security Toolchain
+
+Date: 2026-06-18
+
+Decision: Python dependency vulnerability scanning uses `pip-audit` from a
+separate `.venv-security` environment, not from `.venv-production`.
+
+Rationale: The production environment is deliberately exact-locked and startup
+fails when unlocked packages are installed. Installing audit tooling into that
+environment would weaken the runtime invariant and mix operational code with
+security tooling.
+
+Implications:
+
+- `requirements-security.in` and `requirements-security.lock.txt` define the
+  isolated security-tooling package set.
+- `scripts/bootstrap_security_toolchain.ps1` creates `.venv-security` from the
+  security lock.
+- `scripts/run_dependency_audit.ps1` first verifies `.venv-production` against
+  `requirements-production.lock.txt`, then audits both the production lock and
+  the installed production `site-packages` path.
+- Dependency audit reports are written under
+  `C:\ProgramData\monitorovaci_platforma\logs\security` by default.
+- Windows scheduled task `MonitoringDependencyAudit` runs the dependency audit
+  daily. It is separate from the code-integrity scheduled task because code
+  integrity depends on an approved manifest baseline.
+- `pip-audit` and its transitive dependencies must not be added to
+  `requirements-production.lock.txt` unless the production runtime itself
+  starts requiring them.
+
+## DEC-043: Secret Hygiene Reviews Use Redacted Metadata
+
+Date: 2026-06-18
+
+Decision: Secret and runtime-artifact hygiene reviews may scan tracked files
+and Git history, but reports must contain only redacted metadata such as rule,
+severity, path, line number, and commit. Raw secret values, cookies, bearer
+tokens, passwords, credential payloads, and operational data must not be
+printed or written into repository documentation.
+
+Rationale: P2.16 requires review of tracked files and Git history for secrets
+and private operational data. The review itself must not amplify exposure by
+copying sensitive values into terminal output, notes, or commits.
+
+Implications:
+
+- `scripts/secret_hygiene_scan.py` reports `value=REDACTED` and intentionally
+  skips raw content review for known sensitive session/auth files.
+- `SECURITY_SECRET_INVENTORY.md` documents approved secret locations and
+  access expectations without storing values.
+- Current tracked SmartFuelPass session artifacts are treated as critical
+  until their sessions are invalidated and the files are removed from Git by a
+  separately approved cleanup.
+- Historical hard-coded API signing secrets were already rotated on
+  2026-06-12; other historical credential/session paths require external
+  rotation only if the historical value is still valid.
+- Git history rewrite is not part of P2.16. It requires a separate explicit
+  approval because it rewrites repository history and affects collaborators or
+  remotes.
+
+## DEC-044: SmartFuelPass Sessions Are Not Persisted As JSON
+
+Date: 2026-06-18
+
+Decision: SmartFuelPass automation uses configured portal credentials to log
+in for each portal run. The application no longer reads or writes reusable
+SmartFuelPass browser/session cookies from JSON files.
+
+Rationale: Reusable portal session JSON files are sensitive runtime artifacts
+and were previously tracked. Password login per run keeps the approved secret
+boundary in `.env` or the protected service environment instead of spreading a
+second reusable credential into repository or runtime data files.
+
+Implications:
+
+- `SMARTFUELPASS_EMAIL` and `SMARTFUELPASS_PASSWORD` remain the supported
+  authentication inputs for SmartFuelPass automation.
+- `SMARTFUELPASS_SESSION_COOKIES_PATH`,
+  `data/smartfuelpass/session_cookies.json`, and
+  `data/smartfuelpass/auto_login_session.json` must not be restored as runtime
+  session persistence.
+- Existing public `cookie_path` parameters are compatibility no-ops until a
+  later cleanup removes them from callers.
+- Historical and local leftover SmartFuelPass session JSON files remain
+  sensitive; do not read their contents, and expire portal sessions externally
+  if old cookies may still be valid.
+
+## DEC-045: Public Proxy Blocks Documentation Aliases Before Streamlit Fallback
+
+Date: 2026-06-18
+
+Decision: Public Caddy routing explicitly returns HTTP 404 for `/docs`,
+`/redoc`, and `/openapi.json` before the general Streamlit fallback. Caddy
+automatic HTTP redirects are disabled, and the HTTP listener owns the
+HTTP-to-HTTPS redirect so response header stripping applies there too.
+
+Rationale: FastAPI documentation routes are disabled, but the public proxy
+fallback previously served the Streamlit shell for documentation-looking paths.
+The public surface should not expose API docs and should not make those paths
+look valid. Automatic Caddy redirects also exposed the `Server` header outside
+the reviewed header block.
+
+Implications:
+
+- Keep explicit `http://monitoring.armexholding.cz` and
+  `https://monitoring.armexholding.cz` site blocks in `Caddyfile`.
+- Keep `auto_https disable_redirects` while the explicit HTTP redirect block is
+  responsible for HTTP-to-HTTPS redirects.
+- Keep `@fastapi_docs path /docs /redoc /openapi.json` followed by
+  `respond @fastapi_docs 404` before the API and Streamlit handlers.
+- Runtime `C:\Program Files\Caddy\Caddyfile` must be synchronized with the
+  tracked `Caddyfile` before these rules affect production traffic.
+
+## DEC-046: Map Photos Use A Dedicated Path-Scoped Cookie For Iframes
+
+Date: 2026-06-25
+
+Clarifies: DEC-015
+
+Decision: Map photo requests may authenticate with the dedicated HttpOnly
+`__Secure-monitoring_map_image_session` cookie in addition to the main
+`__Host-monitoring_dashboard_session` cookie. The dedicated cookie is `Secure`,
+uses `SameSite=None`, has no `Domain` attribute, and is scoped to
+`/api/v1/map/images`.
+
+Rationale: Streamlit renders the Leaflet map inside a browser iframe. Some
+browsers do not attach the main `SameSite=Lax` dashboard session cookie to
+iframe fetches, which causes authenticated map photos to fail while the map
+data itself loads through the server-side bearer token. A path-scoped HttpOnly
+cookie lets the iframe authenticate only the image endpoint without exposing
+the main bearer token to JavaScript.
+
+Implications:
+
+- The main dashboard session cookie remains `SameSite=Lax` and `Path=/`.
+- The main API bearer token must still not be passed into map iframe
+  JavaScript.
+- The map image route accepts either the main dashboard session cookie or the
+  dedicated map image cookie.
+- Logout and invalid-cookie cleanup must expire both current dashboard cookies.
+- Do not restore a browser-configured cross-origin image API override; map
+  images should still load from the dashboard origin under `/api/v1/map/images`.

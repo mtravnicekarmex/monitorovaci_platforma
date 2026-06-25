@@ -58,6 +58,23 @@ def test_scan_detects_changed_missing_and_unexpected_source_files(tmp_path):
     assert result.scanned_count == 2
 
 
+def test_untracked_requirements_input_is_unexpected_source(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    (repo / "app.py").write_text("print('ok')\n", encoding="utf-8")
+    _commit_all(repo)
+
+    (repo / "requirements-security.in").write_text(
+        "pip-audit==2.10.1\n",
+        encoding="utf-8",
+    )
+
+    assert code_integrity_scan.list_untracked_source_paths(repo) == (
+        "requirements-security.in",
+    )
+
+
 def test_baseline_dirty_check_ignores_runtime_data_but_not_code(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -107,3 +124,9 @@ def test_integrity_scan_scripts_are_scheduled_task_entrypoints():
     assert "Register-ScheduledTask" in registrar
     assert "MonitoringCodeIntegrityScan" in registrar
     assert "run_code_integrity_scan.ps1" in registrar
+    assert "InteractiveToken" not in registrar
+    assert "-LogonType Interactive" in registrar
+    assert "LeastPrivilege" not in registrar
+    assert "-RunLevel Limited" in registrar
+    assert "-At $time" in registrar
+    assert "-At $time.TimeOfDay" not in registrar

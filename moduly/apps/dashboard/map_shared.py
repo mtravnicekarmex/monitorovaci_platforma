@@ -189,6 +189,7 @@ def build_leaflet_map_html(
     payload: dict[str, object],
     *,
     height_px: int = DEFAULT_MAP_HEIGHT_PX,
+    image_endpoint_url: str = "/api/v1/map/images",
 ) -> str:
     layers = _normalize_map_layers(payload)
 
@@ -197,6 +198,7 @@ def build_leaflet_map_html(
     layer_title = escape(str(payload.get("title") or "Mapa"))
     leaflet_css = _leaflet_css_for_inline_html()
     leaflet_javascript = _leaflet_javascript_for_inline_html()
+    map_image_endpoint_url = str(image_endpoint_url or "/api/v1/map/images")
     leaflet_default_icon_options = json.dumps(
         {
             "iconRetinaUrl": _leaflet_image_data_uri("marker-icon-2x.png"),
@@ -457,7 +459,7 @@ def build_leaflet_map_html(
     L.Icon.Default.mergeOptions({leaflet_default_icon_options});
     const encodedPayload = "{encoded_payload}";
     const primaryLayerId = "{primary_layer_id}";
-    const mapImageEndpointUrl = "/api/v1/map/images";
+    const mapImageEndpointUrl = {json.dumps(map_image_endpoint_url)};
     const photoLightbox = document.getElementById("map-photo-lightbox");
     const photoLightboxImage = document.getElementById("map-photo-lightbox-image");
     const photoLightboxOpen = document.getElementById("map-photo-lightbox-open");
@@ -544,12 +546,20 @@ def build_leaflet_map_html(
     }}
 
     function mapImageUrl(layerId, identifier) {{
-      let url;
-      try {{
-        url = new URL(mapImageEndpointUrl);
-      }} catch (_) {{
-        const parentUrl = document.referrer || window.location.href;
-        url = new URL(mapImageEndpointUrl, parentUrl);
+      let url = null;
+      const baseCandidates = [document.baseURI, document.referrer, window.location.href].filter(Boolean);
+      for (const baseUrl of baseCandidates) {{
+        try {{
+          url = new URL(mapImageEndpointUrl, baseUrl);
+          break;
+        }} catch (_) {{}}
+      }}
+      if (!url) {{
+        try {{
+          url = new URL(mapImageEndpointUrl);
+        }} catch (_) {{
+          throw new Error("Map image endpoint URL is invalid.");
+        }}
       }}
       url.searchParams.set("layer_id", layerId);
       url.searchParams.set("identifier", identifier);
@@ -604,7 +614,7 @@ def build_leaflet_map_html(
         target.dataset.mapPhoto = "loading";
         try {{
           const response = await fetch(mapImageUrl(target.dataset.layerId, target.dataset.identifier), {{
-            credentials: "same-origin",
+            credentials: "include",
             headers: {{
               "Accept": "image/*"
             }}

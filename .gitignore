@@ -3,6 +3,7 @@
 !.env.example
 .venv/
 .venv-production/
+.venv-security/
 __pycache__/
 *.py[cod]
 *.log
@@ -12,16 +13,22 @@ npm-debug.log*
 
 .idea/workspace.xml
 .conv/
+.codex/local_programdata/
 
 core/scheduler/logs/
 services/api/logs/
-core/scheduler/locks/scheduler_process.lock
+core/scheduler/locks/*.lock
 core/scheduler/data/*.parquet
 core/scheduler/data/*.sqlite3*
 data/*.parquet
+data/smartfuelpass/session_cookies.json
+data/smartfuelpass/auto_login_session.json
 scheduler.log
 
 moduly/mereni/elektromery/SOFTLINK/lds_auth.json
 moduly/mereni/elektromery/data/*.ts
+moduly/mereni/elektromery/data/**/*.ts
+moduly/mereni/elektromery/data/**/*.xlsx
+frontend_next/tsconfig.tsbuildinfo
 
 run.txt

@@ -11,30 +11,6 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from moduly.apps.smartfuelpass import service
 
 
-class FakeResponse:
-    def __init__(self, *, url: str, text: str, status_code: int = 200):
-        self.url = url
-        self.text = text
-        self.status_code = status_code
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise RuntimeError(f"HTTP {self.status_code}")
-
-
-class FakeSession:
-    def __init__(self, responses):
-        self.responses = responses
-        self.closed = False
-
-    def get(self, url, timeout=None, allow_redirects=True):
-        del timeout, allow_redirects
-        return self.responses[url]
-
-    def close(self):
-        self.closed = True
-
-
 class FakeElement:
     def __init__(self):
         self.cleared = False
@@ -50,6 +26,7 @@ class FakeElement:
 class FakeDriver:
     def __init__(self):
         self.visited_urls = []
+        self.current_url = ""
         self.inputs = {
             "Email": FakeElement(),
             "Password": FakeElement(),
@@ -66,6 +43,7 @@ class FakeDriver:
 
     def get(self, url):
         self.visited_urls.append(url)
+        self.current_url = url
 
     def find_element(self, by, value):
         assert by == "id"
@@ -85,6 +63,89 @@ class FakePage:
 
     def content(self):
         return self._html
+
+
+class FakeReportingPage:
+    def __init__(self, responses):
+        self.responses = responses
+        self.url = "about:blank"
+        self._html = ""
+        self.default_timeout = None
+        self.visited_urls = []
+
+    def set_default_timeout(self, timeout):
+        self.default_timeout = timeout
+
+    def goto(self, url, wait_until=None):
+        self.visited_urls.append((url, wait_until))
+        self.url = url
+        self._html = self.responses[url]
+
+    def wait_for_load_state(self, state, timeout=None):
+        return None
+
+    def content(self):
+        return self._html
+
+
+class FakeReportingContext:
+    def __init__(self, page):
+        self.page = page
+        self.closed = False
+
+    def new_page(self):
+        return self.page
+
+    def close(self):
+        self.closed = True
+
+
+class FakeReportingBrowser:
+    def __init__(self, context):
+        self.context = context
+        self.closed = False
+
+    def new_context(self):
+        return self.context
+
+    def close(self):
+        self.closed = True
+
+
+class FakeReportingPlaywright:
+    def __init__(self, browser, captured):
+        self.browser = browser
+        self.captured = captured
+        self.chromium = self
+
+    def launch(self, headless=True):
+        self.captured["headless"] = headless
+        return self.browser
+
+
+class FakeReportingSyncPlaywright:
+    def __init__(self, manager):
+        self.manager = manager
+
+    def __enter__(self):
+        return self.manager
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+def install_fake_reporting_playwright(monkeypatch, responses):
+    captured = {}
+    page = FakeReportingPage(responses)
+    context = FakeReportingContext(page)
+    browser = FakeReportingBrowser(context)
+    manager = FakeReportingPlaywright(browser, captured)
+    monkeypatch.setattr(
+        service,
+        "_load_playwright_api",
+        lambda: (lambda: FakeReportingSyncPlaywright(manager), RuntimeError),
+    )
+    return captured, page, context, browser
 
 
 def test_parse_report_targets_supports_labels_and_relative_urls(monkeypatch):
@@ -118,42 +179,16 @@ def test_weekly_report_recipients_require_explicit_configuration(monkeypatch):
         service._smartfuel_weekly_report_recipients()
 
 
-def test_create_authenticated_session_loads_cookie_payload(tmp_path):
-    cookie_path = tmp_path / "cookies.json"
-    cookie_path.write_text(
-        json.dumps(
-            {
-                "cookies": [
-                    {
-                        "name": "sessionid",
-                        "value": "abc123",
-                        "domain": "portal.smartfuelpass.com",
-                        "path": "/",
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    session = service.create_authenticated_session(cookie_path=cookie_path)
-
-    cookie = next(item for item in session.cookies if item.name == "sessionid")
-    assert cookie.value == "abc123"
-    assert "User-Agent" in session.headers
-    session.close()
-
-
 def test_fetch_reporting_snapshots_extracts_title_and_text(monkeypatch):
     target = service.SmartFuelPassReportTarget(
         key="dashboard",
         url="https://portal.smartfuelpass.com/dashboard",
     )
-    fake_session = FakeSession(
+    login_calls = []
+    captured, page, context, browser = install_fake_reporting_playwright(
+        monkeypatch,
         {
-            target.url: FakeResponse(
-                url=target.url,
-                text="""
+            target.url: """
                 <html>
                     <head><title>Dashboard - Smart Fuel Pass</title></head>
                     <body>
@@ -163,11 +198,14 @@ def test_fetch_reporting_snapshots_extracts_title_and_text(monkeypatch):
                     </body>
                 </html>
                 """,
-            )
-        }
+        },
     )
 
-    monkeypatch.setattr(service, "create_authenticated_session", lambda **kwargs: fake_session)
+    monkeypatch.setattr(
+        service,
+        "perform_playwright_login",
+        lambda page, **kwargs: login_calls.append((page, kwargs)) or "https://portal.smartfuelpass.com/",
+    )
 
     snapshots = service.fetch_reporting_snapshots(targets=(target,))
 
@@ -175,139 +213,84 @@ def test_fetch_reporting_snapshots_extracts_title_and_text(monkeypatch):
     assert snapshots[0].title == "Dashboard - Smart Fuel Pass"
     assert "Vehicles" in snapshots[0].text
     assert "hidden()" not in snapshots[0].text
-    assert fake_session.closed is True
+    assert login_calls[0][0] is page
+    assert captured["headless"] is True
+    assert context.closed is True
+    assert browser.closed is True
 
 
-def test_fetch_reporting_snapshots_auto_logs_in_when_cookie_session_is_missing(monkeypatch, tmp_path):
+def test_fetch_reporting_snapshots_logs_in_without_cookie_file(monkeypatch, tmp_path):
     target = service.SmartFuelPassReportTarget(
         key="dashboard",
         url="https://portal.smartfuelpass.com/dashboard",
     )
-    fake_session = FakeSession(
+    cookie_path = tmp_path / "cookies.json"
+    login_calls = []
+    _, page, _, _ = install_fake_reporting_playwright(
+        monkeypatch,
         {
-            target.url: FakeResponse(
-                url=target.url,
-                text="""
+            target.url: """
                 <html>
                     <head><title>Dashboard - Smart Fuel Pass</title></head>
                     <body><h1>Vehicles</h1></body>
                 </html>
                 """,
-            )
-        }
+        },
     )
-    cookie_path = tmp_path / "cookies.json"
-    create_calls = {"count": 0}
-    login_calls = []
 
-    def fake_create_authenticated_session(**kwargs):
-        create_calls["count"] += 1
-        assert kwargs["cookie_path"] == cookie_path
-        if create_calls["count"] == 1:
-            raise service.SmartFuelPassAuthenticationError("missing cookies")
-        return fake_session
-
-    def fake_auto_login(**kwargs):
-        login_calls.append(kwargs)
-        return cookie_path
-
-    monkeypatch.setattr(service, "create_authenticated_session", fake_create_authenticated_session)
-    monkeypatch.setattr(service, "login_and_save_session_with_playwright", fake_auto_login)
+    monkeypatch.setattr(
+        service,
+        "perform_playwright_login",
+        lambda page, **kwargs: login_calls.append((page, kwargs)) or "https://portal.smartfuelpass.com/",
+    )
     monkeypatch.setattr(service, "_smartfuel_request_timeout_seconds", lambda: 11)
     monkeypatch.setattr(service, "_smartfuel_login_timeout_seconds", lambda: 222)
 
     snapshots = service.fetch_reporting_snapshots(targets=(target,), cookie_path=cookie_path)
 
     assert len(snapshots) == 1
-    assert create_calls["count"] == 2
     assert len(login_calls) == 1
-    assert login_calls[0]["cookie_path"] == cookie_path
-    assert login_calls[0]["timeout_seconds"] == 222
-    assert login_calls[0]["headless"] is True
-    assert fake_session.closed is True
+    assert login_calls[0][0] is page
+    assert login_calls[0][1]["timeout_seconds"] == 222
+    assert page.default_timeout == 11000
+    assert not cookie_path.exists()
 
 
-def test_fetch_reporting_snapshots_retries_after_expired_session(monkeypatch, tmp_path):
+def test_fetch_reporting_snapshots_rejects_login_page_after_password_login(monkeypatch):
     target = service.SmartFuelPassReportTarget(
         key="dashboard",
         url="https://portal.smartfuelpass.com/dashboard",
     )
-    expired_session = FakeSession(
+    install_fake_reporting_playwright(
+        monkeypatch,
         {
-            target.url: FakeResponse(
-                url="https://portal.smartfuelpass.com/User/Login?ReturnUrl=%2Fdashboard",
-                text="""
+            target.url: """
                 <html>
                     <head><title>Login - Smart Fuel Pass</title></head>
                     <body><form id="loginForm"></form></body>
                 </html>
                 """,
-            )
-        }
+        },
     )
-    refreshed_session = FakeSession(
-        {
-            target.url: FakeResponse(
-                url=target.url,
-                text="""
-                <html>
-                    <head><title>Dashboard - Smart Fuel Pass</title></head>
-                    <body><p>Monthly overview</p></body>
-                </html>
-                """,
-            )
-        }
-    )
-    sessions = [expired_session, refreshed_session]
-    cookie_path = tmp_path / "cookies.json"
-    login_calls = []
 
     monkeypatch.setattr(
         service,
-        "create_authenticated_session",
-        lambda **kwargs: sessions.pop(0),
-    )
-    monkeypatch.setattr(
-        service,
-        "login_and_save_session_with_playwright",
-        lambda **kwargs: login_calls.append(kwargs) or cookie_path,
+        "perform_playwright_login",
+        lambda page, **kwargs: "https://portal.smartfuelpass.com/",
     )
 
-    snapshots = service.fetch_reporting_snapshots(targets=(target,), cookie_path=cookie_path)
-
-    assert len(snapshots) == 1
-    assert snapshots[0].title == "Dashboard - Smart Fuel Pass"
-    assert len(login_calls) == 1
-    assert login_calls[0]["cookie_path"] == cookie_path
-    assert expired_session.closed is True
-    assert refreshed_session.closed is True
+    with pytest.raises(service.SmartFuelPassAuthenticationError, match="authenticated reporting page"):
+        service.fetch_reporting_snapshots(targets=(target,))
 
 
-def test_fetch_reporting_snapshots_rejects_login_page(monkeypatch):
+def test_fetch_reporting_snapshots_rejects_disabled_password_login():
     target = service.SmartFuelPassReportTarget(
         key="dashboard",
         url="https://portal.smartfuelpass.com/dashboard",
     )
-    fake_session = FakeSession(
-        {
-            target.url: FakeResponse(
-                url="https://portal.smartfuelpass.com/User/Login?ReturnUrl=%2Fdashboard",
-                text="""
-                <html>
-                    <head><title>Login - Smart Fuel Pass</title></head>
-                    <body><form id="loginForm"></form></body>
-                </html>
-                """,
-            )
-        }
-    )
 
-    monkeypatch.setattr(service, "create_authenticated_session", lambda **kwargs: fake_session)
-
-    with pytest.raises(service.SmartFuelPassError, match="expired or unauthenticated"):
+    with pytest.raises(service.SmartFuelPassAuthenticationError, match="password login"):
         service.fetch_reporting_snapshots(targets=(target,), auto_login=False)
-
-    assert fake_session.closed is True
 
 
 def test_save_reporting_export_writes_json(monkeypatch, tmp_path):
@@ -333,12 +316,13 @@ def test_save_reporting_export_writes_json(monkeypatch, tmp_path):
     assert payload["pages"][0]["title"] == "Dashboard"
 
 
-def test_bootstrap_browser_session_fills_credentials_and_persists_cookies(tmp_path):
+def test_bootstrap_browser_session_fills_credentials_without_persisting_cookies(tmp_path):
     fake_driver = FakeDriver()
     wait_calls = []
+    cookie_path = tmp_path / "cookies.json"
 
-    cookie_path = service.bootstrap_browser_session(
-        cookie_path=tmp_path / "cookies.json",
+    login_url = service.bootstrap_browser_session(
+        cookie_path=cookie_path,
         login_url="https://portal.smartfuelpass.com/User/Login",
         email="user@example.com",
         password="secret",
@@ -348,35 +332,34 @@ def test_bootstrap_browser_session_fills_credentials_and_persists_cookies(tmp_pa
         ),
     )
 
-    payload = json.loads(cookie_path.read_text(encoding="utf-8"))
-
+    assert login_url == "https://portal.smartfuelpass.com/User/Login"
     assert fake_driver.visited_urls == ["https://portal.smartfuelpass.com/User/Login"]
     assert fake_driver.inputs["Email"].values == ["user@example.com"]
     assert fake_driver.inputs["Password"].values == ["secret"]
     assert wait_calls[0][1] == "https://portal.smartfuelpass.com/User/Login"
-    assert payload[0]["name"] == "sessionid"
+    assert not cookie_path.exists()
     assert fake_driver.quit_called is True
 
 
-def test_bootstrap_browser_session_defaults_to_playwright_auto_login(monkeypatch, tmp_path):
+def test_bootstrap_browser_session_defaults_to_playwright_password_login(monkeypatch, tmp_path):
     captured = {}
 
-    def fake_auto_login(**kwargs):
+    def fake_login(**kwargs):
         captured.update(kwargs)
-        path = tmp_path / "cookies.json"
-        path.write_text("[]", encoding="utf-8")
-        return path
+        return "https://portal.smartfuelpass.com/dashboard"
 
-    monkeypatch.setattr(service, "login_and_save_session_with_playwright", fake_auto_login)
+    monkeypatch.setattr(service, "login_with_playwright", fake_login)
 
-    result = service.bootstrap_browser_session(cookie_path=tmp_path / "cookies.json")
+    cookie_path = tmp_path / "cookies.json"
+    result = service.bootstrap_browser_session(cookie_path=cookie_path)
 
-    assert result == tmp_path / "cookies.json"
-    assert captured["cookie_path"] == tmp_path / "cookies.json"
+    assert result == "https://portal.smartfuelpass.com/dashboard"
     assert captured["headless"] is True
+    assert "cookie_path" not in captured
+    assert not cookie_path.exists()
 
 
-def test_auto_login_if_needed_persists_new_cookies(monkeypatch, tmp_path):
+def test_auto_login_if_needed_uses_password_login_without_persisting_cookies(monkeypatch, tmp_path):
     page = FakePage()
 
     class FakeContext:
@@ -394,11 +377,10 @@ def test_auto_login_if_needed_persists_new_cookies(monkeypatch, tmp_path):
     cookie_path = tmp_path / "cookies.json"
     did_login = service._auto_login_if_needed(page, FakeContext(), cookie_path=cookie_path, timeout_seconds=30)
 
-    payload = json.loads(cookie_path.read_text(encoding="utf-8"))
-
     assert did_login is True
     assert captured["page"] is page
-    assert payload[0]["name"] == "sessionid"
+    assert captured["timeout_seconds"] == 30
+    assert not cookie_path.exists()
 
 
 def test_auto_login_if_needed_skips_when_page_is_authenticated(tmp_path):
@@ -477,7 +459,7 @@ def test_fetch_charge_sessions_dataframe_uses_login_timeout_for_auto_login(monke
     monkeypatch.setattr(service, "_smartfuel_request_timeout_seconds", lambda: 15)
     monkeypatch.setattr(service, "_smartfuel_login_timeout_seconds", lambda: 333)
     monkeypatch.setattr(service, "_create_playwright_context", lambda *args, **kwargs: fake_context)
-    monkeypatch.setattr(service, "_auto_login_if_needed", lambda page, context, **kwargs: captured.update({"auto_login": kwargs}) or False)
+    monkeypatch.setattr(service, "perform_playwright_login", lambda page, **kwargs: captured.update({"login": kwargs}) or "https://portal.smartfuelpass.com/")
     monkeypatch.setattr(service, "open_company_dashboard", lambda page, dashboard_path=None: captured.update({"dashboard_path": dashboard_path}))
     monkeypatch.setattr(service, "open_charging_sessions", lambda page: captured.update({"opened_sessions": True}))
     monkeypatch.setattr(service, "open_summary", lambda page: pytest.fail("fetch should not click the Summary/All filter"))
@@ -487,13 +469,11 @@ def test_fetch_charge_sessions_dataframe_uses_login_timeout_for_auto_login(monke
     result = service.fetch_charge_sessions_dataframe(cookie_path=tmp_path / "cookies.json")
 
     assert result is expected
-    assert captured["auto_login"]["timeout_seconds"] == 333
+    assert captured["login"]["timeout_seconds"] == 333
     assert captured["opened_sessions"] is True
     assert captured["page_length_set"] is True
     assert fake_context.page.default_timeout == 15000
-    assert fake_context.page.visited_urls == [
-        ("https://portal.smartfuelpass.com/Fuel/Merchant/Dashboard?contractId=12147&accountId=0", "domcontentloaded")
-    ]
+    assert fake_context.page.visited_urls == []
     assert fake_context.closed is True
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, status
 from fastapi.security import APIKeyCookie, HTTPAuthorizationCredentials, HTTPBearer
 
-from app.dashboard_session import DASHBOARD_SESSION_COOKIE_NAME
+from app.dashboard_session import DASHBOARD_SESSION_COOKIE_NAME, MAP_IMAGE_SESSION_COOKIE_NAME
 from services.api.core.tokens import TokenError, decode_access_token
 from services.api.services.dashboard_auth import (
     AuthorizationError,
@@ -17,6 +17,10 @@ from services.api.services.dashboard_auth import (
 bearer_scheme = HTTPBearer(auto_error=False)
 browser_session_scheme = APIKeyCookie(
     name=DASHBOARD_SESSION_COOKIE_NAME,
+    auto_error=False,
+)
+map_image_session_scheme = APIKeyCookie(
+    name=MAP_IMAGE_SESSION_COOKIE_NAME,
     auto_error=False,
 )
 
@@ -65,6 +69,19 @@ def get_current_browser_session_user(
             detail="Chybi dashboard session cookie.",
         )
     return _get_user_context_from_access_token(access_token)
+
+
+def get_current_map_image_session_user(
+    access_token: str | None = Depends(browser_session_scheme),
+    map_image_access_token: str | None = Depends(map_image_session_scheme),
+) -> DashboardUserContext:
+    resolved_access_token = access_token or map_image_access_token
+    if not resolved_access_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Chybi dashboard session cookie.",
+        )
+    return _get_user_context_from_access_token(resolved_access_token)
 
 
 def get_current_vodomery_user(

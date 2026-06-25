@@ -9,6 +9,8 @@ from starlette.requests import Request
 from app.dashboard_session import (
     DASHBOARD_SESSION_COOKIE_NAME,
     LEGACY_DASHBOARD_SESSION_COOKIE_NAME,
+    MAP_IMAGE_SESSION_COOKIE_NAME,
+    MAP_IMAGE_SESSION_COOKIE_PATH,
 )
 from services.api.core.login_throttle import LoginFailureStatus
 from services.api.routes import auth as auth_routes
@@ -59,6 +61,16 @@ def test_persist_browser_session_sets_host_secure_httponly_cookie(monkeypatch):
     assert "SameSite=lax" in cookie
     assert "Secure" in cookie
     assert "Domain=" not in cookie
+    map_image_cookie = next(
+        value
+        for value in cookies
+        if value.startswith(f"{MAP_IMAGE_SESSION_COOKIE_NAME}=token-value")
+    )
+    assert "HttpOnly" in map_image_cookie
+    assert f"Path={MAP_IMAGE_SESSION_COOKIE_PATH}" in map_image_cookie
+    assert "SameSite=none" in map_image_cookie
+    assert "Secure" in map_image_cookie
+    assert "Domain=" not in map_image_cookie
     assert any(
         value.startswith(f"{LEGACY_DASHBOARD_SESSION_COOKIE_NAME}=")
         and "Max-Age=0" in value
@@ -75,6 +87,7 @@ def test_clear_browser_session_expires_current_and_legacy_cookie():
     for cookie_name in (
         DASHBOARD_SESSION_COOKIE_NAME,
         LEGACY_DASHBOARD_SESSION_COOKIE_NAME,
+        MAP_IMAGE_SESSION_COOKIE_NAME,
     ):
         cookie = next(
             value for value in cookies if value.startswith(f"{cookie_name}=")
@@ -82,7 +95,10 @@ def test_clear_browser_session_expires_current_and_legacy_cookie():
         assert "Max-Age=0" in cookie
         assert "HttpOnly" in cookie
         assert "Secure" in cookie
-        assert "Path=/" in cookie
+    map_image_cookie = next(
+        value for value in cookies if value.startswith(f"{MAP_IMAGE_SESSION_COOKIE_NAME}=")
+    )
+    assert f"Path={MAP_IMAGE_SESSION_COOKIE_PATH}" in map_image_cookie
 
 
 def test_refresh_session_preserves_absolute_session_start(monkeypatch):

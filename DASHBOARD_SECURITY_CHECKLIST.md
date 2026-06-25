@@ -192,14 +192,14 @@ Completion criteria:
 
 ### 6. Add MFA or corporate SSO
 
-Status: Deferred by user decision on 2026-06-12. This item remains open and is
-not considered completed.
+Status: Skipped by user decision on 2026-06-18. This item is an accepted
+residual risk and is not a blocker for the remaining P2 checklist work.
 
 - [!] Decide between corporate OIDC/SAML SSO and application-managed MFA.
-- [ ] Require MFA at minimum for administrators.
-- [ ] Define enrollment, recovery, revocation, and lost-device procedures.
-- [ ] Require recent reauthentication for sensitive actions.
-- [ ] Add tests for authentication and recovery flows.
+- [!] Require MFA at minimum for administrators.
+- [!] Define enrollment, recovery, revocation, and lost-device procedures.
+- [!] Require recent reauthentication for sensitive actions.
+- [!] Add tests for authentication and recovery flows.
 
 Reason for deferral:
 
@@ -221,8 +221,7 @@ Revisit:
 
 - When corporate OIDC/SAML capabilities and ownership are known.
 - Before materially expanding administrator access or dashboard exposure.
-- After the currently actionable P1 session, token, and authorization items
-  have been addressed.
+- When the accepted residual password-only administrator risk changes.
 
 Completion criteria:
 
@@ -621,11 +620,11 @@ Completion criteria:
 
 ### 15. Add dependency vulnerability and code integrity scanning
 
-- [ ] Add `pip-audit` or an equivalent scanner to the development/security toolchain.
-- [ ] Scan the installed environment and declared dependencies.
-- [ ] Resolve or explicitly document accepted vulnerabilities.
-- [ ] Add a repeatable CI or scheduled scan.
-- [ ] Review direct CDN and browser asset dependencies separately.
+- [x] Add `pip-audit` or an equivalent scanner to the development/security toolchain.
+- [x] Scan the installed environment and declared dependencies.
+- [x] Resolve or explicitly document accepted vulnerabilities.
+- [x] Add a repeatable CI or scheduled scan.
+- [x] Review direct CDN and browser asset dependencies separately.
 - [x] Add a repeatable local code integrity scanner for tracked code and
   deployment configuration files.
 - [x] Add a Windows scheduled-task registration script for the code integrity
@@ -639,6 +638,37 @@ Completion criteria:
 
 - Dependency vulnerabilities and code integrity are checked regularly with
   recorded results.
+
+Dependency audit implementation completed on 2026-06-18:
+
+- Added isolated security tooling through `.venv-security`,
+  `requirements-security.in`, and `requirements-security.lock.txt`.
+  `pip-audit==2.10.1` is not installed into `.venv-production`, so the
+  production runtime exact-lock check remains meaningful.
+- Added `scripts/bootstrap_security_toolchain.ps1`,
+  `scripts/run_dependency_audit.ps1`, and
+  `scripts/register_dependency_audit_task.ps1`.
+- `scripts/run_dependency_audit.ps1` verifies `.venv-production` against
+  `requirements-production.lock.txt`, audits the production lock with
+  `pip-audit --no-deps`, audits the installed production `site-packages`
+  path, and writes JSON reports under
+  `C:\ProgramData\monitorovaci_platforma\logs\security` by default.
+- The first audit found `pypdf==6.12.2` affected by `CVE-2026-54531` and
+  `CVE-2026-54530`, both fixed in `pypdf==6.13.0`.
+- Updated `requirements-production.in`, `requirements-production.lock.txt`,
+  and the local `.venv-production` installation to `pypdf==6.13.0`.
+- After the update, `.venv-production` passed exact-lock verification and
+  `pip check`, and the dependency audit returned no known vulnerabilities for
+  both the lock and installed environment.
+- Registered Windows scheduled task `MonitoringDependencyAudit` for a daily
+  03:40 run and executed it once through Task Scheduler on 2026-06-18 with
+  result `0`; the next run is scheduled for 2026-06-19 03:40.
+- Reviewed active dashboard browser asset references. Leaflet remains
+  vendored; no active dashboard source loads external executable JavaScript.
+  Remaining external browser endpoints are data/image endpoints such as
+  Open-Meteo and map tile providers.
+- The audit intentionally uses fully pinned requirements with `--no-deps`.
+  Hash-pinned dependency files remain a possible later hardening step.
 
 Code integrity implementation prepared on 2026-06-16:
 
@@ -654,6 +684,8 @@ Code integrity implementation prepared on 2026-06-16:
   the code integrity scope.
 - New untracked source/configuration files are reported as unexpected unless
   they match an excluded runtime/data path.
+- Source/configuration detection includes requirements `.in` files, so a new
+  untracked dependency input is not silently missed.
 - Baseline creation refuses to run while scanned files are dirty unless
   `--allow-dirty` is passed after explicit approval, so an unreviewed change is
   not silently promoted to the approved state.
@@ -662,34 +694,138 @@ Code integrity implementation prepared on 2026-06-16:
 - `scripts/register_code_integrity_scan_task.ps1` registers a daily Windows
   scheduled task named `MonitoringCodeIntegrityScan`.
 - Activation is still pending: no production baseline was created and no
-  scheduled task was registered during implementation because the working tree
+  code-integrity scheduled task was registered because the working tree
   contains current uncommitted code changes.
 
 ### 16. Review secret and runtime artifact hygiene
 
-- [ ] Search tracked files and Git history for credentials, tokens, cookies, and private operational data.
-- [ ] Rotate any exposed secrets before removing them from current files.
-- [ ] Review tracked SmartFuelPass session artifacts separately with explicit approval.
-- [ ] Confirm `.env` and generated secret files remain ignored.
-- [ ] Document where each production secret is stored and who can access it.
+- [x] Search tracked files and Git history for credentials, tokens, cookies, and private operational data.
+- [!] Rotate any exposed secrets before removing them from current files.
+- [x] Review tracked SmartFuelPass session artifacts separately with explicit approval.
+- [x] Confirm `.env` and generated secret files remain ignored.
+- [x] Document where each production secret is stored and who can access it.
 
 Completion criteria:
 
 - No active secret or reusable browser session is stored in tracked files.
 
+Partial completion on 2026-06-18:
+
+- Added `scripts/secret_hygiene_scan.py`, which scans the current tracked and
+  untracked source working tree plus reachable Git history while reporting
+  only redacted metadata. Raw matched values are not printed or stored in repo
+  documentation.
+- Added regression coverage proving current and historical secret matches are
+  redacted and known session paths are reported without reading their cookie
+  payloads.
+- Added `SECURITY_SECRET_INVENTORY.md` documenting non-secret production
+  secret, credential, session, and sensitive runtime artifact locations and
+  access expectations.
+- Confirmed `.env`, `.env.*`, SmartFuelPass session JSON files, SOFTLINK auth
+  JSON, scheduler locks, frontend build info, nested electric-meter source
+  data, and `run.txt` are ignored for future additions. Some of those files
+  remain tracked and require explicit cleanup.
+- Redacted scan on 2026-06-18 reported current tracked critical paths:
+  `data/smartfuelpass/session_cookies.json` and
+  `data/smartfuelpass/auto_login_session.json`.
+- User approved retiring SmartFuelPass JSON session persistence on 2026-06-18.
+  SmartFuelPass automation now logs in with `SMARTFUELPASS_EMAIL` and
+  `SMARTFUELPASS_PASSWORD` for each portal run instead of reading or writing a
+  session cookie JSON file.
+- `data/smartfuelpass/session_cookies.json` and
+  `data/smartfuelpass/auto_login_session.json` were removed from the Git index
+  and remain ignored for any local leftover copies.
+- Redacted rescan after untracking reported no current SmartFuelPass session
+  JSON findings. Current findings are limited to tracked electric-meter source
+  files, scheduler lock files, and `frontend_next/tsconfig.tsbuildinfo`.
+- Remaining current tracked private/runtime data artifacts are:
+  `moduly/mereni/elektromery/data/old/*.ts`,
+  `moduly/mereni/elektromery/data/old/*.xlsx`,
+  `core/scheduler/locks/*.lock`, and
+  `frontend_next/tsconfig.tsbuildinfo`.
+- Git history still contains historical `.env` paths, historical hard-coded
+  `API_TOKEN_SECRET` assignments in launch scripts and `run.txt`, historical
+  SmartFuelPass session JSON paths, historical SOFTLINK auth path, and
+  historical meter source/runtime/build artifacts.
+- The historical API signing secret exposure was already remediated by the
+  2026-06-12 production secret rotation. No current hard-coded API signing
+  secret was reported by the final redacted scan.
+
+Open remediation:
+
+- Expire historical SmartFuelPass portal sessions externally if any old session
+  cookies might still be valid. Local ignored leftover JSON files can be
+  deleted manually after operational review, but application code no longer
+  reads them.
+- Rotate SOFTLINK credentials/session externally if the historical
+  `lds_auth.json` value is still valid.
+- Remove tracked runtime/data/build artifacts from Git only after explicit
+  approval.
+- Do not rewrite Git history without a separate explicit history-rewrite
+  decision and backup/remote coordination.
+
 ### 17. Perform an external security verification
 
-- [ ] Test from a network outside the server and corporate LAN.
-- [ ] Verify TLS configuration and certificate chain.
-- [ ] Run a security header assessment.
-- [ ] Test login throttling, session expiry, logout, and token revocation.
-- [ ] Test horizontal and vertical authorization boundaries.
-- [ ] Test common XSS, CSRF, injection, path traversal, and file-serving scenarios.
-- [ ] Record findings, remediation, and accepted residual risks.
+- [!] Test from a network outside the server and corporate LAN.
+- [-] Verify TLS configuration and certificate chain.
+- [-] Run a security header assessment.
+- [-] Test login throttling, session expiry, logout, and token revocation.
+- [-] Test horizontal and vertical authorization boundaries.
+- [-] Test common XSS, CSRF, injection, path traversal, and file-serving scenarios.
+- [-] Record findings, remediation, and accepted residual risks.
 
 Completion criteria:
 
 - The public deployment has a dated security verification report with no unresolved critical or high-risk findings.
+
+Partial verification on 2026-06-18:
+
+- Direct requests from the server to `https://monitoring.armexholding.cz/` and
+  `http://monitoring.armexholding.cz/` timed out, so this environment still
+  does not satisfy the required outside-server/outside-LAN test. A real
+  external-network check remains required.
+- Loopback SNI route with
+  `curl --resolve monitoring.armexholding.cz:443:127.0.0.1` verified that the
+  HTTPS dashboard returns HTTP 200 and certificate validation succeeds without
+  `-k`.
+- Reviewed HTTPS response headers through the same loopback hostname:
+  HSTS, `nosniff`, `Referrer-Policy`, `X-Frame-Options`,
+  `Permissions-Policy`, and CSP report-only were present; `Server` and `Via`
+  were absent on HTTPS responses.
+- Public `users-exist` returned HTTP 200 with only the minimal boolean payload.
+- `POST /api/v1/auth/session/refresh` without bearer returned HTTP 401.
+- `/api/v1/map/images` without the dashboard session cookie returned HTTP 401.
+- Runtime finding: HTTP redirect responses still included `Server: Caddy`.
+  Tracked `Caddyfile` was updated to disable Caddy automatic redirects and use
+  an explicit HTTP redirect block with `-Server` and `-Via`.
+- Runtime finding: public `/docs`, `/redoc`, and `/openapi.json` fell through
+  to the Streamlit shell with HTTP 200. Tracked `Caddyfile` was updated to
+  respond HTTP 404 for those paths before the Streamlit fallback.
+- Follow-up on 2026-06-18: the public Caddy routing rules were wrapped in an
+  explicit `route` block so Caddy preserves the `/docs`, `/redoc`, and
+  `/openapi.json` 404 rule before the Streamlit fallback after adaptation.
+  The tracked configuration was deployed to
+  `C:\Program Files\Caddy\Caddyfile` from an elevated PowerShell process and
+  reloaded successfully.
+- Runtime remediation on 2026-06-18 verified that tracked and runtime
+  Caddyfile hashes matched, runtime Caddy validation passed, HTTP redirect
+  responses no longer exposed `Server` or `Via`, and `/docs`, `/redoc`, and
+  `/openapi.json` returned HTTP 404 through the public hostname loopback
+  route.
+- Automated security regression on 2026-06-18 covered login throttling,
+  session refresh/logout/token revocation behavior, admin and device
+  authorization boundaries, map image access controls, and device photo path
+  handling:
+  `.venv\Scripts\python.exe -m pytest tests\test_auth_routes.py
+  tests\test_login_throttle.py tests\test_auth_audit.py
+  tests\test_admin_auth_audit.py tests\test_dashboard_auth_state.py
+  tests\test_dashboard_session_security.py
+  tests\test_api_authorization_regression.py
+  tests\test_admin_write_authorization.py tests\test_map_routes.py
+  tests\test_map_layers_service.py tests\test_device_map_service.py
+  tests\test_dashboard_map_shared.py tests\test_dashboard_device_photo.py
+  tests\test_api_public_exposure.py tests\test_caddy_config.py -q --tb=short`
+  passed 283 tests.
 
 ## Current Positive Controls
 

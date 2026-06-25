@@ -169,7 +169,7 @@ def test_leaflet_map_html_renders_foto_as_popup_image_only_when_present():
     assert 'const mapImageEndpointUrl = "/api/v1/map/images";' in html
     assert "function photoPlaceholderHtml" in html
     assert "fetch(mapImageUrl" in html
-    assert 'credentials: "same-origin"' in html
+    assert 'credentials: "include"' in html
     assert "Authorization" not in html
     assert "Bearer" not in html
     assert "mapImageAccessToken" not in html
@@ -188,9 +188,23 @@ def test_leaflet_map_html_supports_same_origin_image_api():
     html = build_leaflet_map_html({"layers": []})
 
     assert 'const mapImageEndpointUrl = "/api/v1/map/images";' in html
-    assert "const parentUrl = document.referrer || window.location.href;" in html
-    assert "new URL(mapImageEndpointUrl, parentUrl)" in html
+    assert "const baseCandidates = [document.baseURI, document.referrer, window.location.href]" in html
+    assert "new URL(mapImageEndpointUrl, baseUrl)" in html
     assert "DASHBOARD_BROWSER_API_BASE_URL" not in html
+
+
+def test_leaflet_map_html_accepts_absolute_image_endpoint_without_token():
+    html = build_leaflet_map_html(
+        {"layers": []},
+        image_endpoint_url="https://monitoring.armexholding.cz/api/v1/map/images",
+    )
+
+    assert (
+        'const mapImageEndpointUrl = "https://monitoring.armexholding.cz/api/v1/map/images";'
+        in html
+    )
+    assert "Authorization" not in html
+    assert "Bearer" not in html
 
 
 def test_leaflet_map_html_supports_mobile_device_location():

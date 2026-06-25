@@ -19,5 +19,6 @@ def test_map_page_does_not_pass_main_token_to_iframe():
     source = MAP_PAGE_PATH.read_text(encoding="utf-8")
 
     assert "access_token=access_token" not in source
-    assert "image_api_base_url=" not in source
+    assert "image_endpoint_url=_map_image_endpoint_url()" in source
     assert "get_dashboard_browser_api_base_url" not in source
+    assert "DASHBOARD_BROWSER_API_BASE_URL" not in source

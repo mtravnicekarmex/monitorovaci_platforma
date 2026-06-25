@@ -1,4 +1,16 @@
-monitoring.armexholding.cz {
+{
+	auto_https disable_redirects
+}
+
+http://monitoring.armexholding.cz {
+	header {
+		-Server
+		-Via
+	}
+	redir https://monitoring.armexholding.cz{uri} 308
+}
+
+https://monitoring.armexholding.cz {
 	encode gzip zstd
 
 	header {
@@ -12,10 +24,15 @@ monitoring.armexholding.cz {
 		-Via
 	}
 
-	handle /api/* {
-		reverse_proxy 127.0.0.1:8000
-	}
-	handle {
-		reverse_proxy 127.0.0.1:8001
+	route {
+		@fastapi_docs path /docs /redoc /openapi.json
+		respond @fastapi_docs 404
+
+		handle /api/* {
+			reverse_proxy 127.0.0.1:8000
+		}
+		handle {
+			reverse_proxy 127.0.0.1:8001
+		}
 	}
 }

@@ -10,17 +10,21 @@ DEPLOY_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "deploy_caddy_runtime.ps1"
 def test_public_dashboard_routes_api_and_streamlit_separately():
     source = CADDYFILE_PATH.read_text(encoding="utf-8")
 
-    assert "monitoring.armexholding.cz {" in source
+    assert "http://monitoring.armexholding.cz {" in source
+    assert "https://monitoring.armexholding.cz {" in source
+    assert "auto_https disable_redirects" in source
     assert "basic_auth" not in source
     assert "DASHBOARD_GATE_" not in source
+    assert "redir https://monitoring.armexholding.cz{uri} 308" in source
+    assert "\n\troute {\n\t\t@fastapi_docs path /docs /redoc /openapi.json" in source
+    assert "@fastapi_docs path /docs /redoc /openapi.json" in source
+    assert "respond @fastapi_docs 404" in source
+    assert source.index("respond @fastapi_docs 404") < source.index("handle /api/*")
     assert source.index("handle /api/*") < source.index("handle {")
     assert "reverse_proxy 127.0.0.1:8000" in source
     assert "reverse_proxy 127.0.0.1:8001" in source
     assert "tls internal" not in source
     assert ":8080" not in source
-    assert "handle /docs" not in source
-    assert "handle /redoc" not in source
-    assert "handle /openapi.json" not in source
 
 
 def test_public_dashboard_sets_reviewed_security_headers():

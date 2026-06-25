@@ -1,0 +1,3 @@
+# Reviewed direct security tooling dependencies. Do not install into .venv-production.
+
+pip-audit==2.10.1

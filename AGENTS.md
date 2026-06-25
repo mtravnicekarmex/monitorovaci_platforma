@@ -58,13 +58,29 @@ At the end of every substantive session:
 - `frontend_next/`: experimental Next.js MVP. It is not the active production dashboard and is not currently used in daily operation. Treat it as a future migration/prototype area, not as the source of truth for current dashboard behavior.
 - `.streamlit/config.toml`: Streamlit server and navigation settings.
 - `Caddyfile`: tracked mirror of the deployed public proxy configuration at `C:\Program Files\Caddy\Caddyfile`.
+- `DASHBOARD_SECURITY_CHECKLIST.md`: tracked public dashboard security
+  remediation plan and status.
+- `SECURITY_SECRET_INVENTORY.md`: non-secret inventory of production secret,
+  credential, session, and sensitive runtime artifact locations.
 - `requirements-production.in`: reviewed direct production dependency pins.
 - `requirements-production.lock.txt`: exact production direct and transitive
   dependency set for CPython 3.14 on Windows.
+- `requirements-security.in`: reviewed direct dependency pins for the isolated
+  local security-tooling environment.
+- `requirements-security.lock.txt`: exact dependency set for `.venv-security`.
 - `requirements-api.txt`: compatibility entry point that installs the
   production lock.
 - `scripts/bootstrap_production_environment.ps1`: creates and verifies the
   isolated `.venv-production` runtime.
+- `scripts/bootstrap_security_toolchain.ps1`: creates the isolated
+  `.venv-security` audit-tooling environment.
+- `scripts/run_dependency_audit.ps1`: audits the production dependency lock
+  and installed `.venv-production` packages through `.venv-security`.
+- `scripts/register_dependency_audit_task.ps1`: registers the daily Windows
+  dependency vulnerability audit scheduled task.
+- `scripts/secret_hygiene_scan.py`: redacted scanner for tracked files and Git
+  history; reports sensitive paths and likely secret assignments without
+  printing values.
 - `scripts/code_integrity_scan.py`: creates and checks the approved code
   integrity SHA-256 manifest for tracked code/deployment files.
 - `scripts/run_code_integrity_scan.ps1`: production PowerShell entry point for
@@ -91,8 +107,9 @@ Experimental or future-facing surface:
 
 Treat these as sensitive or operational artifacts:
 
-- `data/smartfuelpass/session_cookies.json`
-- `data/smartfuelpass/auto_login_session.json`
+- Any leftover local `data/smartfuelpass/session_cookies.json` or
+  `data/smartfuelpass/auto_login_session.json` files. SmartFuelPass JSON
+  session persistence is retired; do not read, restore, or commit these files.
 - `C:\ProgramData\monitorovaci_platforma\caddy-dashboard-auth.env`
 - `C:\ProgramData\monitorovaci_platforma\dashboard-proxy-credentials.txt`
 - Any `.env`, credentials, cookies, tokens, browser sessions, or account data.
@@ -101,7 +118,8 @@ Treat these as sensitive or operational artifacts:
 
 Known hygiene topics to handle only after explicit approval:
 
-- Some SmartFuelPass session files are tracked or modified.
+- Historical SmartFuelPass session files exist in Git history; expire portal
+  sessions externally if old cookies may still be valid.
 - `core/scheduler/locks/*.lock` are tracked runtime lock artifacts.
 - `frontend_next/tsconfig.tsbuildinfo` is a tracked build artifact.
 - `.gitignore` ignores `moduly/mereni/elektromery/data/*.ts` but not nested files such as `moduly/mereni/elektromery/data/old/*.ts`.
@@ -126,10 +144,17 @@ Known hygiene topics to handle only after explicit approval:
   503 until that initialization succeeds.
 - Streamlit remains the active dashboard unless a task explicitly targets the experimental Next.js area.
 - Shared behavior should live in modules/services, not in duplicated page logic.
+- SmartFuelPass automation logs in with configured credentials for each portal
+  run. Do not restore JSON cookie/session persistence or
+  `SMARTFUELPASS_SESSION_COOKIES_PATH`.
 - `Mapove podklady` uses general FastAPI map endpoints and admin-configured metadata in `dashboard.Map_Layers`.
 - Map feature images must be resolved server-side from `layer_id` and device identifier; do not expose an endpoint that serves arbitrary client-supplied file paths.
 - Browser map image loading must use same-origin `/api/v1/map/images` through Caddy, which routes `/api/*` to FastAPI and other requests to Streamlit.
-- Map iframe JavaScript must never receive the main API bearer token. The image endpoint authenticates only through the existing HttpOnly dashboard session cookie; other API routes continue to require bearer authentication.
+- Map iframe JavaScript must never receive the main API bearer token. The image endpoint authenticates through HttpOnly dashboard cookies; other API routes continue to require bearer authentication.
+- Map image loading may also use the dedicated HttpOnly
+  `__Secure-monitoring_map_image_session` cookie, scoped to
+  `/api/v1/map/images` with `SameSite=None`, so Streamlit iframe fetches can
+  authenticate without exposing the main bearer token to JavaScript.
 - Do not restore a cross-origin map image API override. Deployments must expose the image endpoint under the dashboard origin so the browser can use the protected session cookie without disclosing it to JavaScript.
 - Leaflet `1.9.4` JavaScript, CSS, images, license, and source metadata are vendored under `moduly/apps/dashboard/assets/leaflet/1.9.4` and embedded by `map_shared.py`; do not restore runtime executable-code loading from a public CDN.
 - Public dashboard HTTPS is served at `https://monitoring.armexholding.cz`.
@@ -142,6 +167,12 @@ Known hygiene topics to handle only after explicit approval:
   supported dashboard feature.
 - Caddy removes public `Server` and `Via` response headers. Do not restore
   upstream or proxy fingerprinting headers without an operational reason.
+- Caddy uses an explicit HTTP listener for HTTP-to-HTTPS redirects and disables
+  automatic redirects so `Server`/`Via` stripping also applies to redirect
+  responses.
+- Public `/docs`, `/redoc`, and `/openapi.json` must return HTTP 404 at the
+  Caddy layer before the Streamlit fallback. Do not let documentation-looking
+  paths fall through to the Streamlit shell.
 - Caddy exposes the Streamlit login page directly without a second browser
   authentication prompt. FastAPI rate-limits `/api/v1/auth/login` by normalized
   account identifier and trusted client IP with temporary increasing lockouts.
@@ -159,6 +190,9 @@ Known hygiene topics to handle only after explicit approval:
   `.venv-production` environment. Startup fails closed if Python is not 3.14,
   pip is not the reviewed version, a locked package is missing or mismatched,
   or an unlocked package is present.
+- Dependency vulnerability scanning uses the separate `.venv-security`
+  environment. Do not install `pip-audit` or security-tooling packages into
+  `.venv-production`; that would break the production exact-lock invariant.
 - Production Uvicorn uses one worker without `--reload`. Development reload
   behavior belongs only in explicitly named `*_dev.ps1` launchers that use
   `.venv`.
@@ -177,6 +211,9 @@ Known hygiene topics to handle only after explicit approval:
 - The code integrity scan is a local drift detector for tracked code and
   deployment configuration. It is not tamper-proof against an actor who can
   modify both the repository and the scheduled scan mechanism.
+- Secret hygiene scan reports must remain redacted. Do not print raw scanner
+  match values, cookie payloads, token strings, passwords, or credential file
+  contents.
 - The runtime Caddy configuration is `C:\Program Files\Caddy\Caddyfile`; keep the tracked root `Caddyfile` synchronized with it.
 - On the Windows production workstation, `start_api_dashboard.bat` is launched
   by Windows Task Scheduler with the trigger `At system startup`. This allows

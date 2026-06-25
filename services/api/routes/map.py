@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 
-from services.api.core.dependencies import get_current_browser_session_user, get_current_user
+from services.api.core.dependencies import get_current_map_image_session_user, get_current_user
 from services.api.schemas.device_map import (
     MapFilterOptionsRequest,
     MapFilterOptionsResponse,
@@ -116,7 +116,7 @@ def post_map_filter_options(
 def get_map_image(
     layer_id: str = Query(min_length=1),
     identifier: str = Query(min_length=1),
-    current_user: DashboardUserContext = Depends(get_current_browser_session_user),
+    current_user: DashboardUserContext = Depends(get_current_map_image_session_user),
 ) -> FileResponse:
     try:
         image_file = load_map_feature_image_file(

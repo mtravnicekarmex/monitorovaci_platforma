@@ -36,6 +36,7 @@ UNTRACKED_SOURCE_SUFFIXES = {
     ".config",
     ".css",
     ".html",
+    ".in",
     ".js",
     ".json",
     ".md",

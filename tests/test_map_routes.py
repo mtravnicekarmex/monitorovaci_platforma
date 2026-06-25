@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from app.dashboard_session import DASHBOARD_SESSION_COOKIE_NAME
+from app.dashboard_session import DASHBOARD_SESSION_COOKIE_NAME, MAP_IMAGE_SESSION_COOKIE_NAME
 from services.api.core import dependencies
 from services.api.routes import map as map_routes
 from services.api.schemas.device_map import MapLayerFeaturesRequest
@@ -40,6 +40,25 @@ def test_browser_session_user_rejects_bearer_without_cookie():
     assert exc_info.value.detail == "Chybi dashboard session cookie."
 
 
+def test_map_image_session_user_accepts_path_scoped_cookie(monkeypatch):
+    token_payload = SimpleNamespace(subject="tester", token_version=3)
+    user_context = SimpleNamespace(username="tester", token_version=3)
+    monkeypatch.setattr(
+        dependencies,
+        "decode_access_token",
+        lambda token: token_payload if token == "map-image-token" else None,
+    )
+    monkeypatch.setattr(
+        dependencies,
+        "get_dashboard_user_context",
+        lambda subject: user_context if subject == "tester" else None,
+    )
+
+    current_user = dependencies.get_current_map_image_session_user(None, "map-image-token")
+
+    assert current_user is user_context
+
+
 def test_map_image_route_uses_browser_session_cookie_dependency():
     dependency = inspect.signature(map_routes.get_map_image).parameters["current_user"].default.dependency
     cookie_scheme = (
@@ -47,10 +66,17 @@ def test_map_image_route_uses_browser_session_cookie_dependency():
         .parameters["access_token"]
         .default.dependency
     )
+    map_image_cookie_scheme = (
+        inspect.signature(dependencies.get_current_map_image_session_user)
+        .parameters["map_image_access_token"]
+        .default.dependency
+    )
 
-    assert dependency is dependencies.get_current_browser_session_user
+    assert dependency is dependencies.get_current_map_image_session_user
     assert cookie_scheme is dependencies.browser_session_scheme
     assert dependencies.browser_session_scheme.model.name == DASHBOARD_SESSION_COOKIE_NAME
+    assert map_image_cookie_scheme is dependencies.map_image_session_scheme
+    assert dependencies.map_image_session_scheme.model.name == MAP_IMAGE_SESSION_COOKIE_NAME
 
 
 def test_map_layer_features_request_accepts_single_filter_value():

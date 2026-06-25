@@ -1,17 +1,16 @@
 param(
     [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot),
-    [string]$TaskName = "MonitoringCodeIntegrityScan",
-    [string]$DailyAt = "03:20",
-    [string]$ManifestPath = "",
+    [string]$TaskName = "MonitoringDependencyAudit",
+    [string]$DailyAt = "03:40",
     [string]$ReportDir = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 $resolvedProjectRoot = (Resolve-Path $ProjectRoot).Path
-$runner = Join-Path $resolvedProjectRoot "scripts\run_code_integrity_scan.ps1"
+$runner = Join-Path $resolvedProjectRoot "scripts\run_dependency_audit.ps1"
 if (-not (Test-Path -LiteralPath $runner)) {
-    throw "Code integrity scan runner was not found: $runner"
+    throw "Dependency audit runner was not found: $runner"
 }
 
 $time = [DateTime]::ParseExact($DailyAt, "HH:mm", [Globalization.CultureInfo]::InvariantCulture)
@@ -19,13 +18,8 @@ $taskArguments = @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
     "-File", "`"$runner`"",
-    "-Mode", "Scan",
     "-ProjectRoot", "`"$resolvedProjectRoot`""
 )
-
-if ($ManifestPath) {
-    $taskArguments += @("-ManifestPath", "`"$ManifestPath`"")
-}
 
 if ($ReportDir) {
     $taskArguments += @("-ReportDir", "`"$ReportDir`"")
@@ -38,7 +32,7 @@ $trigger = New-ScheduledTaskTrigger -Daily -At $time
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -MultipleInstances IgnoreNew `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 45)
 $principal = New-ScheduledTaskPrincipal `
     -UserId $env:USERNAME `
     -LogonType Interactive `
@@ -50,7 +44,7 @@ Register-ScheduledTask `
     -Trigger $trigger `
     -Settings $settings `
     -Principal $principal `
-    -Description "Runs the monitorovaci_platforma code integrity scan against the approved ProgramData manifest." `
+    -Description "Runs the monitorovaci_platforma dependency vulnerability audit and writes ProgramData reports." `
     -Force | Out-Null
 
 Write-Output ("Registered scheduled task '{0}' for {1}." -f $TaskName, $DailyAt)

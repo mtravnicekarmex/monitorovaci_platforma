@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable
 from urllib.parse import urljoin, urlparse
 
 import pandas as pd
-import requests
 from bs4 import BeautifulSoup
 from decouple import config
 
@@ -29,7 +28,6 @@ if TYPE_CHECKING:
 
 DEFAULT_BASE_URL = "https://portal.smartfuelpass.com/"
 DEFAULT_LOGIN_URL = "https://portal.smartfuelpass.com/User/Login"
-DEFAULT_SESSION_COOKIE_PATH = Path("data") / "smartfuelpass" / "session_cookies.json"
 DEFAULT_REPORT_EXPORT_PATH = Path("data") / "smartfuelpass" / "reporting_snapshot.json"
 DEFAULT_TIMEOUT_SECONDS = 120
 DEFAULT_LOGIN_TIMEOUT_SECONDS = 300
@@ -38,7 +36,6 @@ DEFAULT_FETCH_ATTEMPTS = 2
 DEFAULT_FETCH_RETRY_DELAY_SECONDS = 5
 DEFAULT_NAVIGATION_TIMEOUT_MS = 15000
 DEFAULT_PAGE_LENGTH = "100"
-DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/135.0 Safari/537.36"
 DEFAULT_DASHBOARD_PATH = "/Fuel/Merchant/Dashboard?contractId=12147&accountId=0"
 DEFAULT_CHARGING_SESSIONS_LABEL = "Nabíjecí relace"
 DEFAULT_SUMMARY_LABEL = "Celkově"
@@ -296,26 +293,6 @@ def _flatten_dataframe_column(column: object) -> str:
     return str(column or "").strip()
 
 
-def _resolve_cookie_path(cookie_path: str | Path | None = None) -> Path:
-    return _resolve_path(
-        cookie_path or config(
-            "SMARTFUELPASS_SESSION_COOKIES_PATH",
-            default=str(DEFAULT_SESSION_COOKIE_PATH),
-        ),
-        DEFAULT_SESSION_COOKIE_PATH,
-    )
-
-
-def _write_cookie_payload(cookies: list[dict[str, Any]], cookie_path: str | Path | None = None) -> Path:
-    resolved_cookie_path = _resolve_cookie_path(cookie_path)
-    resolved_cookie_path.parent.mkdir(parents=True, exist_ok=True)
-    resolved_cookie_path.write_text(
-        json.dumps(cookies, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return resolved_cookie_path
-
-
 def parse_report_targets(raw_targets: str | None) -> tuple[SmartFuelPassReportTarget, ...]:
     if raw_targets is None:
         raw_targets = ""
@@ -353,87 +330,6 @@ def parse_report_targets(raw_targets: str | None) -> tuple[SmartFuelPassReportTa
 def load_report_targets_from_config() -> tuple[SmartFuelPassReportTarget, ...]:
     raw_targets = config("SMARTFUELPASS_REPORT_TARGETS", default="")
     return parse_report_targets(raw_targets)
-
-
-def _load_cookie_payload(cookie_path: str | Path | None = None) -> list[dict[str, Any]]:
-    resolved_cookie_path = _resolve_cookie_path(cookie_path)
-    if not resolved_cookie_path.exists():
-        raise SmartFuelPassAuthenticationError(
-            "SmartFuelPass session cookie file was not found. "
-            f"Expected path: {resolved_cookie_path}"
-        )
-
-    try:
-        payload = json.loads(resolved_cookie_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise SmartFuelPassAuthenticationError(
-            f"SmartFuelPass session cookie file is not valid JSON: {resolved_cookie_path}"
-        ) from exc
-
-    raw_cookies = payload.get("cookies", []) if isinstance(payload, dict) else payload
-    if not isinstance(raw_cookies, list):
-        raise SmartFuelPassAuthenticationError(
-            "SmartFuelPass session cookie payload must be a list or an object with 'cookies'."
-        )
-
-    cookies: list[dict[str, Any]] = []
-    for raw_cookie in raw_cookies:
-        if not isinstance(raw_cookie, dict):
-            continue
-
-        name = str(raw_cookie.get("name") or "").strip()
-        if not name:
-            continue
-
-        cookie_payload = {
-            "name": name,
-            "value": str(raw_cookie.get("value") or ""),
-            "domain": str(raw_cookie.get("domain") or "").strip(),
-            "path": str(raw_cookie.get("path") or "/").strip() or "/",
-        }
-        for bool_key in ("secure", "httpOnly"):
-            if bool_key in raw_cookie:
-                cookie_payload[bool_key] = bool(raw_cookie[bool_key])
-        same_site = raw_cookie.get("sameSite")
-        if isinstance(same_site, str) and same_site.strip():
-            cookie_payload["sameSite"] = same_site.strip()
-        expires = raw_cookie.get("expires", raw_cookie.get("expiry"))
-        if isinstance(expires, (int, float)):
-            cookie_payload["expires"] = float(expires)
-
-        cookies.append(cookie_payload)
-
-    if not cookies:
-        raise SmartFuelPassAuthenticationError(
-            f"SmartFuelPass session cookie file does not contain usable cookies: {resolved_cookie_path}"
-        )
-
-    return cookies
-
-
-def create_authenticated_session(
-    *,
-    cookie_path: str | Path | None = None,
-    user_agent: str | None = None,
-) -> requests.Session:
-    session = requests.Session()
-    session.headers.update(
-        {
-            "User-Agent": user_agent
-            or config("SMARTFUELPASS_USER_AGENT", default=DEFAULT_USER_AGENT).strip()
-            or DEFAULT_USER_AGENT,
-        }
-    )
-
-    for cookie in _load_cookie_payload(cookie_path):
-        cookie_kwargs = {
-            "path": cookie["path"],
-        }
-        if cookie["domain"]:
-            cookie_kwargs["domain"] = cookie["domain"]
-        session.cookies.set(cookie["name"], cookie["value"], **cookie_kwargs)
-
-    return session
 
 
 def _looks_like_login_page(url: str, html_content: str) -> bool:
@@ -480,61 +376,54 @@ def fetch_reporting_snapshots(
     if not resolved_targets:
         raise SmartFuelPassError("No SmartFuelPass report targets are configured.")
 
+    if not auto_login:
+        raise SmartFuelPassAuthenticationError(
+            "SmartFuelPass reporting snapshots require password login; persisted cookie sessions are disabled."
+        )
+
+    _ = cookie_path
     resolved_timeout = timeout_seconds or _smartfuel_request_timeout_seconds()
     resolved_login_timeout = _smartfuel_login_timeout_seconds()
-    resolved_cookie_path = _resolve_cookie_path(cookie_path)
+    sync_playwright, playwright_timeout_error = _load_playwright_api()
 
-    for attempt in range(2 if auto_login else 1):
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=headless)
+        context = browser.new_context()
+        page = context.new_page()
         try:
-            session = create_authenticated_session(cookie_path=resolved_cookie_path)
-        except SmartFuelPassAuthenticationError:
-            if attempt > 0 or not auto_login:
-                raise
-            login_and_save_session_with_playwright(
-                cookie_path=resolved_cookie_path,
-                timeout_seconds=resolved_login_timeout,
-                headless=headless,
-            )
-            continue
+            page.set_default_timeout(resolved_timeout * 1000)
+            perform_playwright_login(page, timeout_seconds=resolved_login_timeout)
 
-        try:
             snapshots: list[SmartFuelPassPageSnapshot] = []
             for target in resolved_targets:
-                response = session.get(target.url, timeout=resolved_timeout, allow_redirects=True)
-                response.raise_for_status()
+                page.goto(target.url, wait_until="domcontentloaded")
+                try:
+                    page.wait_for_load_state("networkidle", timeout=resolved_timeout * 1000)
+                except playwright_timeout_error:
+                    pass
 
-                if _looks_like_login_page(response.url, response.text):
+                html_content = page.content()
+                if _looks_like_login_page(page.url, html_content):
                     raise SmartFuelPassAuthenticationError(
-                        "SmartFuelPass session appears to be expired or unauthenticated. "
+                        "SmartFuelPass login did not produce an authenticated reporting page. "
                         f"Portal returned the login page for {target.url}."
                     )
 
-                title, page_text = _extract_page_text(response.text)
+                title, page_text = _extract_page_text(html_content)
                 snapshots.append(
                     SmartFuelPassPageSnapshot(
                         key=target.key,
                         url=target.url,
                         title=title,
                         text=page_text,
-                        html=response.text,
+                        html=html_content,
                     )
                 )
 
             return tuple(snapshots)
-        except SmartFuelPassAuthenticationError:
-            if attempt > 0 or not auto_login:
-                raise
-            login_and_save_session_with_playwright(
-                cookie_path=resolved_cookie_path,
-                timeout_seconds=resolved_login_timeout,
-                headless=headless,
-            )
         finally:
-            session.close()
-
-    raise SmartFuelPassAuthenticationError(
-        "SmartFuelPass automatic login retry did not produce an authenticated session."
-    )
+            context.close()
+            browser.close()
 
 
 def build_reporting_export(
@@ -655,10 +544,10 @@ def bootstrap_browser_session(
     timeout_seconds: int | None = None,
     driver_factory: Callable[[], Any] | None = None,
     wait_for_login_completion: Callable[[Any, str, int], None] | None = None,
-) -> Path:
+) -> str:
+    _ = cookie_path
     if driver_factory is None and wait_for_login_completion is None:
-        return login_and_save_session_with_playwright(
-            cookie_path=cookie_path,
+        return login_with_playwright(
             login_url=login_url,
             email=email,
             password=password,
@@ -668,7 +557,6 @@ def bootstrap_browser_session(
 
     resolved_login_url = login_url or _smartfuel_login_url()
     resolved_timeout = timeout_seconds or _smartfuel_login_timeout_seconds()
-    resolved_cookie_path = _resolve_cookie_path(cookie_path)
 
     driver = (driver_factory or _default_browser_driver_factory)()
     try:
@@ -690,11 +578,7 @@ def bootstrap_browser_session(
             resolved_timeout,
         )
 
-        cookies = driver.get_cookies()
-        if not cookies:
-            raise SmartFuelPassError("SmartFuelPass browser session did not expose any cookies to persist.")
-
-        return _write_cookie_payload(cookies, resolved_cookie_path)
+        return str(getattr(driver, "current_url", "") or resolved_login_url)
     finally:
         quit_method = getattr(driver, "quit", None)
         if callable(quit_method):
@@ -779,6 +663,33 @@ def perform_playwright_login(
     return page.url
 
 
+def login_with_playwright(
+    *,
+    login_url: str | None = None,
+    email: str | None = None,
+    password: str | None = None,
+    timeout_seconds: int | None = None,
+    headless: bool = True,
+) -> str:
+    sync_playwright, _ = _load_playwright_api()
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=headless)
+        context = browser.new_context()
+        page = context.new_page()
+        try:
+            return perform_playwright_login(
+                page,
+                login_url=login_url,
+                email=email,
+                password=password,
+                timeout_seconds=timeout_seconds,
+            )
+        finally:
+            context.close()
+            browser.close()
+
+
 def login_and_save_session_with_playwright(
     *,
     cookie_path: str | Path | None = None,
@@ -787,48 +698,15 @@ def login_and_save_session_with_playwright(
     password: str | None = None,
     timeout_seconds: int | None = None,
     headless: bool = True,
-) -> Path:
-    sync_playwright, _ = _load_playwright_api()
-    resolved_cookie_path = _resolve_cookie_path(cookie_path)
-
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=headless)
-        context = browser.new_context()
-        page = context.new_page()
-        try:
-            perform_playwright_login(
-                page,
-                login_url=login_url,
-                email=email,
-                password=password,
-                timeout_seconds=timeout_seconds,
-            )
-            cookies = context.cookies()
-            if not cookies:
-                raise SmartFuelPassError("SmartFuelPass automatic login succeeded but no cookies were returned.")
-            return _write_cookie_payload(cookies, resolved_cookie_path)
-        finally:
-            context.close()
-            browser.close()
-
-
-def _normalize_playwright_cookie(cookie: dict[str, Any]) -> dict[str, Any]:
-    normalized = {
-        "name": cookie["name"],
-        "value": cookie["value"],
-        "path": cookie.get("path") or "/",
-    }
-    domain = str(cookie.get("domain") or "").strip()
-    if domain:
-        normalized["domain"] = domain
-    else:
-        normalized["url"] = _smartfuel_base_url()
-
-    for key in ("secure", "httpOnly", "sameSite", "expires"):
-        if key in cookie:
-            normalized[key] = cookie[key]
-
-    return normalized
+) -> str:
+    _ = cookie_path
+    return login_with_playwright(
+        login_url=login_url,
+        email=email,
+        password=password,
+        timeout_seconds=timeout_seconds,
+        headless=headless,
+    )
 
 
 def _create_playwright_context(
@@ -837,20 +715,8 @@ def _create_playwright_context(
     cookie_path: str | Path | None = None,
     ignore_missing_cookie_path: bool = False,
 ) -> Any:
-    context = browser.new_context()
-    try:
-        cookies = _load_cookie_payload(cookie_path)
-    except SmartFuelPassError:
-        if not ignore_missing_cookie_path:
-            raise
-        cookies = []
-
-    if cookies:
-        context.add_cookies([
-            _normalize_playwright_cookie(cookie)
-            for cookie in cookies
-        ])
-    return context
+    _ = cookie_path, ignore_missing_cookie_path
+    return browser.new_context()
 
 
 def _assert_authenticated_page(page: Any, *, source_url: str) -> None:
@@ -872,6 +738,7 @@ def _auto_login_if_needed(
     password: str | None = None,
     timeout_seconds: int | None = None,
 ) -> bool:
+    _ = context, cookie_path
     if not _looks_like_login_page(page.url, page.content()):
         return False
 
@@ -882,7 +749,6 @@ def _auto_login_if_needed(
         password=password,
         timeout_seconds=timeout_seconds,
     )
-    _write_cookie_payload(context.cookies(), cookie_path)
     return True
 
 
@@ -1246,31 +1112,18 @@ def fetch_charge_sessions_dataframe(
     timeout_seconds: int | None = None,
 ) -> pd.DataFrame:
     sync_playwright, _ = _load_playwright_api()
+    _ = cookie_path
     resolved_timeout_seconds = timeout_seconds or _smartfuel_request_timeout_seconds()
     resolved_login_timeout_seconds = _smartfuel_login_timeout_seconds()
-    resolved_cookie_path = _resolve_cookie_path(cookie_path)
-    target_url = urljoin(_smartfuel_base_url(), (dashboard_path or _smartfuel_dashboard_path()).lstrip("/"))
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=headless)
-        context = _create_playwright_context(
-            browser,
-            cookie_path=resolved_cookie_path,
-            ignore_missing_cookie_path=True,
-        )
+        context = _create_playwright_context(browser)
         page = context.new_page()
         try:
             page.set_default_timeout(resolved_timeout_seconds * 1000)
-            page.goto(target_url, wait_until="domcontentloaded")
-            try:
-                page.wait_for_load_state("networkidle", timeout=resolved_timeout_seconds * 1000)
-            except Exception:
-                pass
-
-            _auto_login_if_needed(
+            perform_playwright_login(
                 page,
-                context,
-                cookie_path=resolved_cookie_path,
                 timeout_seconds=resolved_login_timeout_seconds,
             )
             open_company_dashboard(page, dashboard_path=dashboard_path)

@@ -8,6 +8,8 @@ from fastapi.security import HTTPAuthorizationCredentials
 from app.dashboard_session import (
     DASHBOARD_SESSION_COOKIE_NAME,
     LEGACY_DASHBOARD_SESSION_COOKIE_NAME,
+    MAP_IMAGE_SESSION_COOKIE_NAME,
+    MAP_IMAGE_SESSION_COOKIE_PATH,
 )
 from services.api.core.auth_audit import auth_audit_service
 from services.api.core.dependencies import bearer_scheme, get_current_user
@@ -203,6 +205,15 @@ def persist_browser_session(
         samesite="lax",
         path="/",
     )
+    response.set_cookie(
+        key=MAP_IMAGE_SESSION_COOKIE_NAME,
+        value=credentials.credentials,
+        expires=expires_at,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        path=MAP_IMAGE_SESSION_COOKIE_PATH,
+    )
     response.delete_cookie(
         key=LEGACY_DASHBOARD_SESSION_COOKIE_NAME,
         httponly=True,
@@ -232,6 +243,13 @@ def clear_browser_session() -> Response:
             samesite="lax",
             path="/",
         )
+    response.delete_cookie(
+        key=MAP_IMAGE_SESSION_COOKIE_NAME,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        path=MAP_IMAGE_SESSION_COOKIE_PATH,
+    )
     response.headers["Clear-Site-Data"] = '"cache", "storage"'
     return response
 

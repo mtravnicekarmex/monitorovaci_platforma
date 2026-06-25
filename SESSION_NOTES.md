@@ -5505,6 +5505,928 @@ Known risks or accepted gaps:
 - The launcher does not independently restart a child that fails after
   startup.
 
+## 2026-06-18 13:20 +02:00 - Restart Handoff Before SmartFuelPass/P2.17 Activation
+
+Reason for restart:
+- User requested saving state and restarting the workstation.
+- Restart is intended to reload FastAPI, Streamlit, scheduler, and Caddy from
+  the normal Windows startup task after the SmartFuelPass and security
+  hardening work.
+
+Current conversation/task state:
+- P2.16 secret hygiene is partially complete. SmartFuelPass reusable session
+  JSON persistence was retired and the two session JSON files were removed
+  from the Git index. Other tracked runtime/private artifacts remain open.
+- User chose SmartFuelPass password login only, without saving JSON session
+  files.
+- P2.17 external security verification was started, not completed. Loopback
+  hostname checks passed for several HTTPS/auth/header controls, but a true
+  external-network test outside the server/LAN remains required.
+- Runtime Caddy deployment of the tracked P2.17 proxy fixes is still pending
+  because `scripts\deploy_caddy_runtime.ps1` requires an elevated
+  administrator PowerShell session.
+
+Completed work in the current state:
+- SmartFuelPass service no longer reads or writes
+  `data/smartfuelpass/session_cookies.json` or
+  `data/smartfuelpass/auto_login_session.json`.
+- SmartFuelPass reporting snapshots and charge-session imports use a fresh
+  Playwright context and `SMARTFUELPASS_EMAIL` /
+  `SMARTFUELPASS_PASSWORD` login for each portal run.
+- Existing SmartFuelPass `cookie_path` parameters remain compatibility no-ops.
+- `SMARTFUELPASS_SESSION_COOKIES_PATH` was removed from `.env.example`.
+- `data/smartfuelpass/session_cookies.json` and
+  `data/smartfuelpass/auto_login_session.json` were removed from the Git
+  index with `git rm --cached`; local ignored copies were not read or deleted.
+- Tracked `Caddyfile` now disables automatic redirects, uses an explicit HTTP
+  redirect block with `-Server`/`-Via`, uses an explicit HTTPS block, and
+  returns HTTP 404 for `/docs`, `/redoc`, and `/openapi.json` before the
+  Streamlit fallback.
+- Added or updated `SECURITY_SECRET_INVENTORY.md`,
+  `DASHBOARD_SECURITY_CHECKLIST.md`, `DECISIONS.md`, `AGENTS.md`, and these
+  session notes for P2.16/P2.17.
+
+Changed/uncommitted files before restart:
+- Modified: `.env.example`, `.gitignore`, `AGENTS.md`, `Caddyfile`,
+  `DASHBOARD_SECURITY_CHECKLIST.md`, `DECISIONS.md`, `SESSION_NOTES.md`,
+  `moduly/apps/smartfuelpass/__init__.py`,
+  `moduly/apps/smartfuelpass/service.py`,
+  `requirements-production.in`, `requirements-production.lock.txt`,
+  `scripts/code_integrity_scan.py`,
+  `scripts/register_code_integrity_scan_task.ps1`,
+  `tests/test_caddy_config.py`, `tests/test_code_integrity_scan.py`,
+  `tests/test_smartfuelpass_service.py`.
+- Git-index deletions: `data/smartfuelpass/auto_login_session.json`,
+  `data/smartfuelpass/session_cookies.json`.
+- Untracked new files: `SECURITY_SECRET_INVENTORY.md`,
+  `requirements-security.in`, `requirements-security.lock.txt`,
+  `scripts/bootstrap_security_toolchain.ps1`,
+  `scripts/register_dependency_audit_task.ps1`,
+  `scripts/run_dependency_audit.ps1`, `scripts/secret_hygiene_scan.py`,
+  `tests/test_dependency_audit_tooling.py`,
+  `tests/test_secret_hygiene_scan.py`.
+
+Verification already run:
+- `.venv\Scripts\python.exe -m pytest tests\test_smartfuelpass_service.py
+  tests\test_smartfuelpass_sync.py tests\test_secret_hygiene_scan.py
+  tests\test_code_integrity_scan.py tests\test_dependency_audit_tooling.py
+  tests\test_production_runtime.py tests\test_dashboard_security_config.py
+  tests\test_caddy_config.py tests\test_api_public_exposure.py -q --tb=short`
+  passed 66 tests.
+- `C:\Program Files\Caddy\caddy.exe validate --config Caddyfile --adapter caddyfile`
+  passed and reported automatic HTTP redirects disabled.
+- `.venv\Scripts\python.exe -m py_compile scripts\secret_hygiene_scan.py
+  scripts\code_integrity_scan.py moduly\apps\smartfuelpass\service.py
+  moduly\apps\smartfuelpass\__init__.py` passed.
+- `git diff --check` reported no whitespace errors, only expected LF-to-CRLF
+  warnings.
+- Redacted secret hygiene scan reported current findings only for tracked
+  electric-meter source files, scheduler lock files, and
+  `frontend_next/tsconfig.tsbuildinfo`; no current SmartFuelPass session JSON
+  findings remained.
+
+Deployment state before restart:
+- Running FastAPI, Streamlit, and scheduler processes were started before the
+  SmartFuelPass code change and need restart to load it.
+- Tracked `Caddyfile` contains P2.17 fixes, but runtime
+  `C:\Program Files\Caddy\Caddyfile` was not updated from this non-elevated
+  shell. A restart alone is not expected to activate those tracked Caddy proxy
+  fixes unless the runtime file has been synchronized separately.
+- `MonitoringDependencyAudit` was registered earlier and last ran
+  successfully. Code-integrity baseline/scheduled activation remains pending
+  until the working tree is reviewed/approved.
+
+Sensitive artifacts and handling rules:
+- Do not print, read, delete, revert, or commit raw values from ignored local
+  `.env`, dashboard/API tokens, passwords, cookies, authentication audit logs,
+  ProgramData security artifacts, or any local leftover SmartFuelPass session
+  JSON files.
+- Local leftover `data/smartfuelpass/session_cookies.json` and
+  `data/smartfuelpass/auto_login_session.json` files may still exist but are
+  ignored and must not be inspected. Expire SmartFuelPass portal sessions
+  externally if old cookies may still be valid.
+- Do not create a production code-integrity baseline from the dirty working
+  tree unless the user explicitly approves that exact state.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and its
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP `80`/`443` and admin `127.0.0.1:2019`.
+- No listener should remain on temporary ports `8010` or `8011`.
+
+Expected application state after restart:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL is
+  available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- HTTPS dashboard: HTTP 200.
+- HTTP hostname route: HTTP 308 to HTTPS. After runtime Caddy deployment, the
+  redirect response should not include `Server` or `Via`.
+- Protected API, map image without cookie, and session refresh without bearer:
+  HTTP 401.
+- Public `/api/v1/auth/users-exist`: HTTP 200 with minimal boolean payload.
+- FastAPI docs remain disabled. After runtime Caddy deployment, public
+  `/docs`, `/redoc`, and `/openapi.json` should return HTTP 404 rather than
+  the Streamlit shell.
+- SmartFuelPass scheduled/manual jobs should use password login only and must
+  not create or update SmartFuelPass session JSON files.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task last run/result/settings, process tree,
+  listeners, and no temporary ports `8010`/`8011`.
+- Confirm `.venv-production` exact-lock verification and `pip check`.
+- Confirm API live/ready, Streamlit health, Caddy admin health, and scheduler
+  heartbeat.
+- Confirm tracked/runtime Caddyfile hash equality. If they differ, run
+  `scripts\deploy_caddy_runtime.ps1` from an elevated administrator PowerShell
+  session and reload Caddy before rechecking P2.17 proxy findings.
+- Validate runtime Caddyfile and verify HTTP redirect, HTTPS dashboard,
+  protected API, map image, session refresh, disabled docs, and public
+  `users-exist` status codes.
+- Confirm no `Server` or `Via` headers on HTTPS responses and, after runtime
+  Caddy deployment, on HTTP redirect responses.
+- Run SmartFuelPass targeted tests again:
+  `.venv\Scripts\python.exe -m pytest tests\test_smartfuelpass_service.py
+  tests\test_smartfuelpass_sync.py -q --tb=short`.
+- Run security/tooling tests as needed:
+  `.venv\Scripts\python.exe -m pytest tests\test_secret_hygiene_scan.py
+  tests\test_code_integrity_scan.py tests\test_dependency_audit_tooling.py
+  tests\test_caddy_config.py tests\test_api_public_exposure.py -q --tb=short`.
+- Run `scripts\secret_hygiene_scan.py` and confirm no current SmartFuelPass
+  session JSON findings.
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- True P2.17 external verification from a network outside the server and
+  corporate LAN is still open.
+- Login throttling, session expiry, logout, token revocation, horizontal and
+  vertical authorization boundaries, and XSS/CSRF/injection/path traversal
+  checks are not fully completed for P2.17.
+- Runtime Caddy proxy fixes are not active until the runtime Caddyfile is
+  synchronized and Caddy is reloaded.
+- The current changes are uncommitted and depend on the working tree being
+  preserved across restart.
+- The current scheduled-task account remains broader than least privilege.
+- The launcher does not independently restart a child process that fails after
+  startup.
+
+## 2026-06-25 06:52 +02:00 - Current pre-restart handoff after map photo iframe fix
+
+Reason for restart:
+- User requested saving the current conversation state before restarting the
+  workstation.
+- Restart is expected to reload FastAPI, Streamlit, scheduler, and Caddy from
+  the normal Windows startup task.
+
+Current task/conversation state:
+- Completed: diagnosed the `Mapove podklady / Mapa` popup photo failure as a
+  browser credential issue in the Streamlit component iframe.
+- Completed: changed map popup photo fetches from `credentials: "same-origin"`
+  to `credentials: "include"` so the HttpOnly dashboard session cookie can be
+  attached to `/api/v1/map/images` from the iframe.
+- Completed: preserved the P1.7 security rule that the main bearer token is
+  not passed into generated map HTML or JavaScript.
+- Pending after restart: open the dashboard through
+  `https://monitoring.armexholding.cz`, go to `Mapove podklady / Mapa`, click
+  a Vodomery object with `has_photo`, and confirm the photo loads instead of
+  `Fotku se nepodarilo nacist.`
+- Pending after restart: if the popup still fails, inspect the browser network
+  status for `/api/v1/map/images` without printing cookies or token values.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and
+  `SESSION_NOTES.md`, then run `git status --short --untracked-files=all`.
+
+Working tree and deployment:
+- Current time captured before restart: 2026-06-25 06:52:21 +02:00.
+- Branch: `master`.
+- `HEAD`: `69dc532eccbc49db3152e7a1ce0627392375601b`.
+- No git commit was created for this handoff.
+- `git status --short --untracked-files=all` before restart:
+  - `M .env.example`
+  - `M .gitignore`
+  - `M AGENTS.md`
+  - `M Caddyfile`
+  - `M DASHBOARD_SECURITY_CHECKLIST.md`
+  - `M DECISIONS.md`
+  - `M SESSION_NOTES.md`
+  - `D data/smartfuelpass/auto_login_session.json`
+  - `D data/smartfuelpass/session_cookies.json`
+  - `M moduly/apps/dashboard/map_shared.py`
+  - `M moduly/apps/smartfuelpass/__init__.py`
+  - `M moduly/apps/smartfuelpass/service.py`
+  - `M requirements-production.in`
+  - `M requirements-production.lock.txt`
+  - `M scripts/code_integrity_scan.py`
+  - `M scripts/register_code_integrity_scan_task.ps1`
+  - `M tests/test_caddy_config.py`
+  - `M tests/test_code_integrity_scan.py`
+  - `M tests/test_dashboard_map_shared.py`
+  - `M tests/test_smartfuelpass_service.py`
+  - `?? SECURITY_SECRET_INVENTORY.md`
+  - `?? requirements-security.in`
+  - `?? requirements-security.lock.txt`
+  - `?? scripts/bootstrap_security_toolchain.ps1`
+  - `?? scripts/register_dependency_audit_task.ps1`
+  - `?? scripts/run_dependency_audit.ps1`
+  - `?? scripts/secret_hygiene_scan.py`
+  - `?? tests/test_dependency_audit_tooling.py`
+  - `?? tests/test_secret_hygiene_scan.py`
+- Files changed in this final map-photo fix only:
+  - `moduly/apps/dashboard/map_shared.py`
+  - `tests/test_dashboard_map_shared.py`
+- Existing unrelated dirty files are from earlier security, Caddy,
+  SmartFuelPass, dependency-audit, and code-integrity work. Do not revert or
+  clean them without explicit approval.
+- Tracked root `Caddyfile` SHA-256 before restart:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Runtime Caddyfile hash equality was not checked in this handoff from
+  `C:\Program Files\Caddy\Caddyfile`; verify after restart.
+- Existing listener state before restart:
+  - Caddy owned TCP `:80` and `:443`, PID `10048`.
+  - Caddy admin listened on `127.0.0.1:2019`, PID `10048`.
+  - FastAPI listened on `127.0.0.1:8000`, PID `11252`.
+  - Streamlit listened on `127.0.0.1:8001`, PID `11972`.
+  - Tailscale owned expected interface-specific `443` listeners on
+    `100.66.79.74` and `fd7a:115c:a1e0::e38:4f4b`, PID `7060`.
+- Runtime health before restart:
+  - FastAPI `/health/live`: HTTP 200 on `127.0.0.1:8000`.
+  - FastAPI `/health/ready`: HTTP 200 on `127.0.0.1:8000`.
+  - Streamlit `/_stcore/health`: HTTP 200 on `127.0.0.1:8001`.
+  - Caddy admin `/config/`: HTTP 200 on `127.0.0.1:2019`.
+- Scheduler metrics before restart:
+  - `scheduler_running=True`.
+  - Heartbeat observed at `2026-06-25T06:52:24.432676`.
+  - `quarter_hour_job` detail was not extracted by the quick handoff command;
+    verify latest/next job state after restart.
+
+Verification already run for the map-photo fix:
+- `.venv\Scripts\python.exe -m pytest tests\test_dashboard_map_shared.py
+  tests\test_map_routes.py tests\test_map_layers_service.py
+  tests\test_device_map_service.py tests\test_dashboard_map_page_layout.py
+  -v --tb=short` passed 56 tests.
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\apps\dashboard\map_shared.py` passed.
+- `git diff --check -- moduly/apps/dashboard/map_shared.py
+  tests/test_dashboard_map_shared.py` reported no whitespace errors, only
+  expected LF-to-CRLF warnings.
+
+Not verified before restart:
+- Full pytest suite was not run.
+- Live authenticated browser click on a real map object/photo was not tested.
+- Production `.venv-production` verification was not rerun in this handoff.
+- Runtime Caddyfile hash equality was not checked in this handoff.
+
+Sensitive/runtime artifacts:
+- Do not print, read, delete, revert, stage, or commit raw values from ignored
+  local `.env`, API/dashboard tokens, passwords, cookies, authentication audit
+  logs, ProgramData security artifacts, or local leftover SmartFuelPass session
+  JSON files.
+- `data/smartfuelpass/session_cookies.json` and
+  `data/smartfuelpass/auto_login_session.json` remain sensitive historical
+  session artifacts and are currently deleted from the Git index in the dirty
+  working tree. Do not inspect or restore their contents.
+- Do not create a production code-integrity baseline from the dirty working
+  tree unless the user explicitly approves that exact state.
+- For the map-photo verification, browser DevTools may show whether a cookie
+  was included, but cookie values must not be printed or copied.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and its
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP `80`/`443` and admin `127.0.0.1:2019`.
+- Tailscale interface-specific `443` listeners may remain in addition.
+- No listener should remain on temporary ports `8010` or `8011`.
+
+Expected application state after restart:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL is
+  available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- HTTPS dashboard: HTTP 200.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- Protected bearer API without bearer token: HTTP 401 JSON.
+- Map image without dashboard session cookie: HTTP 401.
+- Public `/api/v1/auth/users-exist`: HTTP 200 with minimal boolean payload.
+- FastAPI docs remain disabled. Public `/docs`, `/redoc`, and
+  `/openapi.json` should return HTTP 404 after runtime Caddy deployment is
+  synchronized.
+- Generated map HTML must still contain no `Authorization`, `Bearer`, access
+  token, or `mapImageAccessToken` text.
+- Generated map photo loading should call `/api/v1/map/images` with
+  `credentials: "include"`.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task last run/result/settings, process tree,
+  listeners, and no temporary ports `8010` or `8011`.
+- Confirm `.venv-production` exact-lock verification and `pip check`.
+- Confirm API live/ready, Streamlit health, Caddy admin health, and scheduler
+  heartbeat.
+- Confirm latest/next `quarter_hour_job` state from scheduler metrics.
+- Confirm tracked/runtime Caddyfile hash equality and Caddy validation. If
+  they differ, run `scripts\deploy_caddy_runtime.ps1` from an elevated
+  administrator PowerShell session and reload Caddy before rechecking public
+  proxy findings.
+- Verify HTTP redirect, HTTPS dashboard, protected API, unauthenticated map
+  image, disabled docs, session refresh, and public `users-exist` status codes.
+- Open an authenticated browser session and validate the change-specific map
+  workflow: `Mapove podklady / Mapa` -> click a Vodomery object with a photo
+  -> confirm the popup photo loads and the lightbox opens.
+- If the photo still fails, inspect only status code and safe headers for
+  `/api/v1/map/images`; do not print cookie or token values.
+- Rerun the targeted map tests:
+  `.venv\Scripts\python.exe -m pytest tests\test_dashboard_map_shared.py
+  tests\test_map_routes.py tests\test_map_layers_service.py
+  tests\test_device_map_service.py tests\test_dashboard_map_page_layout.py
+  -v --tb=short`.
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- The map-photo fix has not yet been validated with a real authenticated
+  browser click.
+- Current changes are uncommitted and depend on the working tree being
+  preserved across restart.
+- Earlier P2.17 external security verification and runtime Caddy deployment
+  synchronization topics may still be open.
+- The launcher does not independently restart a child process that fails after
+  startup.
+
+## 2026-06-25 06:52 +02:00 - Pre-restart handoff after map photo iframe fix
+
+Reason for restart:
+- User requested saving the current conversation state before restarting the
+  workstation.
+- Restart is expected to reload FastAPI, Streamlit, scheduler, and Caddy from
+  the normal Windows startup task.
+
+Current task/conversation state:
+- Completed: diagnosed the `Mapove podklady / Mapa` popup photo failure as a
+  browser credential issue in the Streamlit component iframe.
+- Completed: changed map popup photo fetches from `credentials: "same-origin"`
+  to `credentials: "include"` so the HttpOnly dashboard session cookie can be
+  attached to `/api/v1/map/images` from the iframe.
+- Completed: preserved the P1.7 security rule that the main bearer token is
+  not passed into generated map HTML or JavaScript.
+- Pending after restart: open the dashboard through
+  `https://monitoring.armexholding.cz`, go to `Mapove podklady / Mapa`, click
+  a Vodomery object with `has_photo`, and confirm the photo loads instead of
+  `Fotku se nepodarilo nacist.`
+- Pending after restart: if the popup still fails, inspect the browser network
+  status for `/api/v1/map/images` without printing cookies or token values.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and
+  `SESSION_NOTES.md`, then run `git status --short --untracked-files=all`.
+
+Working tree and deployment:
+- Current time captured before restart: 2026-06-25 06:52:21 +02:00.
+- Branch: `master`.
+- `HEAD`: `69dc532eccbc49db3152e7a1ce0627392375601b`.
+- No git commit was created for this handoff.
+- `git status --short --untracked-files=all` before restart:
+  - `M .env.example`
+  - `M .gitignore`
+  - `M AGENTS.md`
+  - `M Caddyfile`
+  - `M DASHBOARD_SECURITY_CHECKLIST.md`
+  - `M DECISIONS.md`
+  - `M SESSION_NOTES.md`
+  - `D data/smartfuelpass/auto_login_session.json`
+  - `D data/smartfuelpass/session_cookies.json`
+  - `M moduly/apps/dashboard/map_shared.py`
+  - `M moduly/apps/smartfuelpass/__init__.py`
+  - `M moduly/apps/smartfuelpass/service.py`
+  - `M requirements-production.in`
+  - `M requirements-production.lock.txt`
+  - `M scripts/code_integrity_scan.py`
+  - `M scripts/register_code_integrity_scan_task.ps1`
+  - `M tests/test_caddy_config.py`
+  - `M tests/test_code_integrity_scan.py`
+  - `M tests/test_dashboard_map_shared.py`
+  - `M tests/test_smartfuelpass_service.py`
+  - `?? SECURITY_SECRET_INVENTORY.md`
+  - `?? requirements-security.in`
+  - `?? requirements-security.lock.txt`
+  - `?? scripts/bootstrap_security_toolchain.ps1`
+  - `?? scripts/register_dependency_audit_task.ps1`
+  - `?? scripts/run_dependency_audit.ps1`
+  - `?? scripts/secret_hygiene_scan.py`
+  - `?? tests/test_dependency_audit_tooling.py`
+  - `?? tests/test_secret_hygiene_scan.py`
+- Files changed in this final map-photo fix only:
+  - `moduly/apps/dashboard/map_shared.py`
+  - `tests/test_dashboard_map_shared.py`
+- Existing unrelated dirty files are from earlier security, Caddy,
+  SmartFuelPass, dependency-audit, and code-integrity work. Do not revert or
+  clean them without explicit approval.
+- Tracked root `Caddyfile` SHA-256 before restart:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Runtime Caddyfile hash equality was not checked in this handoff from
+  `C:\Program Files\Caddy\Caddyfile`; verify after restart.
+- Existing listener state before restart:
+  - Caddy owned TCP `:80` and `:443`, PID `10048`.
+  - Caddy admin listened on `127.0.0.1:2019`, PID `10048`.
+  - FastAPI listened on `127.0.0.1:8000`, PID `11252`.
+  - Streamlit listened on `127.0.0.1:8001`, PID `11972`.
+  - Tailscale owned expected interface-specific `443` listeners on
+    `100.66.79.74` and `fd7a:115c:a1e0::e38:4f4b`, PID `7060`.
+- Runtime health before restart:
+  - FastAPI `/health/live`: HTTP 200 on `127.0.0.1:8000`.
+  - FastAPI `/health/ready`: HTTP 200 on `127.0.0.1:8000`.
+  - Streamlit `/_stcore/health`: HTTP 200 on `127.0.0.1:8001`.
+  - Caddy admin `/config/`: HTTP 200 on `127.0.0.1:2019`.
+- Scheduler metrics before restart:
+  - `scheduler_running=True`.
+  - Heartbeat observed at `2026-06-25T06:52:24.432676`.
+  - `quarter_hour_job` detail was not extracted by the quick handoff command;
+    verify latest/next job state after restart.
+
+Verification already run for the map-photo fix:
+- `.venv\Scripts\python.exe -m pytest tests\test_dashboard_map_shared.py
+  tests\test_map_routes.py tests\test_map_layers_service.py
+  tests\test_device_map_service.py tests\test_dashboard_map_page_layout.py
+  -v --tb=short` passed 56 tests.
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\apps\dashboard\map_shared.py` passed.
+- `git diff --check -- moduly/apps/dashboard/map_shared.py
+  tests/test_dashboard_map_shared.py` reported no whitespace errors, only
+  expected LF-to-CRLF warnings.
+
+Not verified before restart:
+- Full pytest suite was not run.
+- Live authenticated browser click on a real map object/photo was not tested.
+- Production `.venv-production` verification was not rerun in this handoff.
+- Runtime Caddyfile hash equality was not checked in this handoff.
+
+Sensitive/runtime artifacts:
+- Do not print, read, delete, revert, stage, or commit raw values from ignored
+  local `.env`, API/dashboard tokens, passwords, cookies, authentication audit
+  logs, ProgramData security artifacts, or local leftover SmartFuelPass session
+  JSON files.
+- `data/smartfuelpass/session_cookies.json` and
+  `data/smartfuelpass/auto_login_session.json` remain sensitive historical
+  session artifacts and are currently deleted from the Git index in the dirty
+  working tree. Do not inspect or restore their contents.
+- Do not create a production code-integrity baseline from the dirty working
+  tree unless the user explicitly approves that exact state.
+- For the map-photo verification, browser DevTools may show whether a cookie
+  was included, but cookie values must not be printed or copied.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and its
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP `80`/`443` and admin `127.0.0.1:2019`.
+- Tailscale interface-specific `443` listeners may remain in addition.
+- No listener should remain on temporary ports `8010` or `8011`.
+
+Expected application state after restart:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL is
+  available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- HTTPS dashboard: HTTP 200.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- Protected bearer API without bearer token: HTTP 401 JSON.
+- Map image without dashboard session cookie: HTTP 401.
+- Public `/api/v1/auth/users-exist`: HTTP 200 with minimal boolean payload.
+- FastAPI docs remain disabled. Public `/docs`, `/redoc`, and
+  `/openapi.json` should return HTTP 404 after runtime Caddy deployment is
+  synchronized.
+- Generated map HTML must still contain no `Authorization`, `Bearer`, access
+  token, or `mapImageAccessToken` text.
+- Generated map photo loading should call `/api/v1/map/images` with
+  `credentials: "include"`.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task last run/result/settings, process tree,
+  listeners, and no temporary ports `8010` or `8011`.
+- Confirm `.venv-production` exact-lock verification and `pip check`.
+- Confirm API live/ready, Streamlit health, Caddy admin health, and scheduler
+  heartbeat.
+- Confirm latest/next `quarter_hour_job` state from scheduler metrics.
+- Confirm tracked/runtime Caddyfile hash equality and Caddy validation. If
+  they differ, run `scripts\deploy_caddy_runtime.ps1` from an elevated
+  administrator PowerShell session and reload Caddy before rechecking public
+  proxy findings.
+- Verify HTTP redirect, HTTPS dashboard, protected API, unauthenticated map
+  image, disabled docs, session refresh, and public `users-exist` status codes.
+- Open an authenticated browser session and validate the change-specific map
+  workflow: `Mapove podklady / Mapa` -> click a Vodomery object with a photo
+  -> confirm the popup photo loads and the lightbox opens.
+- If the photo still fails, inspect only status code and safe headers for
+  `/api/v1/map/images`; do not print cookie or token values.
+- Rerun the targeted map tests:
+  `.venv\Scripts\python.exe -m pytest tests\test_dashboard_map_shared.py
+  tests\test_map_routes.py tests\test_map_layers_service.py
+  tests\test_device_map_service.py tests\test_dashboard_map_page_layout.py
+  -v --tb=short`.
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- The map-photo fix has not yet been validated with a real authenticated
+  browser click.
+- Current changes are uncommitted and depend on the working tree being
+  preserved across restart.
+- Earlier P2.17 external security verification and runtime Caddy deployment
+  synchronization topics may still be open.
+- The launcher does not independently restart a child process that fails after
+  startup.
+
+## 2026-06-18 13:56 +02:00 - Post-restart verification after SmartFuelPass/P2.17 restart
+
+Scope:
+- Performed the required read-only post-restart runtime and security checks
+  after the workstation restart.
+- Attempted the tracked-to-runtime Caddy deployment step, but it could not run
+  from the current non-elevated PowerShell session.
+
+Verified:
+- Windows boot time was `2026-06-18 13:28:45 +02:00`.
+- Scheduled task `API_dashboard_caddy` last ran at `2026-06-18 13:28:55`
+  with result `0`, state `Ready`, user `tra`, and run level `Highest`.
+- Listeners were present on Caddy `:80`, `:443`, and `127.0.0.1:2019`,
+  FastAPI `127.0.0.1:8000`, and Streamlit `127.0.0.1:8001`.
+- No listeners were present on temporary ports `8010` or `8011`.
+- `.venv-production` matched `requirements-production.lock.txt`, and
+  `pip check` reported no broken requirements.
+- FastAPI `/health/live`, FastAPI `/health/ready`, Streamlit
+  `/_stcore/health`, and Caddy admin `/config/` returned HTTP 200.
+- Scheduler metrics reported `scheduler_running=True` and heartbeat
+  `2026-06-18T13:39:01.901482`.
+- `quarter_hour_job` last ran successfully at
+  `2026-06-18T13:35:09.165524`, next run
+  `2026-06-18T13:47:05+02:00`, with zero 24h failures.
+- `hourly_job` and `daily_job` also reported successful latest runs and zero
+  24h failures.
+- SmartFuelPass manual-run registry contains
+  `sync_charge_sessions_to_db`, `smartfuelpass_weekly_report_job`, and
+  `send_charge_sessions_report_email` with expected labels and locks.
+- Loopback hostname checks returned HTTP 308 for HTTP root, HTTP 200 for the
+  HTTPS dashboard, HTTP 401 for protected map catalog without bearer,
+  HTTP 401 for map image without cookie, HTTP 401 for session refresh without
+  bearer, and HTTP 200 for public `users-exist`.
+- HTTPS dashboard/API responses had the reviewed security headers and did not
+  expose `Server` or `Via`.
+- `tests\test_smartfuelpass_service.py` and
+  `tests\test_smartfuelpass_sync.py` passed: 28 tests.
+- Security/tooling tests passed: `tests\test_secret_hygiene_scan.py`,
+  `tests\test_code_integrity_scan.py`,
+  `tests\test_dependency_audit_tooling.py`, `tests\test_caddy_config.py`,
+  and `tests\test_api_public_exposure.py`: 19 tests.
+- `scripts\code_integrity_scan.py baseline` refused to create a baseline on
+  dirty scanned files without explicit approval.
+- Redacted `scripts\secret_hygiene_scan.py` reported 17 expected current
+  findings for tracked scheduler locks, `frontend_next/tsconfig.tsbuildinfo`,
+  and old electric-meter source data paths; no current SmartFuelPass session
+  JSON findings were present.
+- `git diff --check` reported no whitespace errors, only existing LF/CRLF
+  warnings.
+
+Deviations:
+- Tracked `Caddyfile` SHA-256 was
+  `B72714F21E00CB6CD1F27391707D7B0BF5442ED47C8DF6B59C225F4E1DEAA980`.
+- Runtime `C:\Program Files\Caddy\Caddyfile` SHA-256 was
+  `3387659A473097A43B76B7951D833463F77F7C0AC559975271EA3F48B59D1802`.
+- Runtime Caddyfile validation passed, but it still showed automatic
+  HTTP-to-HTTPS redirects enabled.
+- Public `/docs`, `/redoc`, and `/openapi.json` still returned HTTP 200 via
+  the Streamlit fallback because the runtime Caddyfile had not been deployed.
+- HTTP redirect still exposed a `Server` header for the same reason.
+- `scripts\deploy_caddy_runtime.ps1` was invoked through an approved
+  escalated command but failed with its intended administrator-session guard:
+  `This script must run from an elevated administrator PowerShell session.`
+
+Not verified:
+- Authenticated Streamlit `Sprava / Health scheduleru` manual-run UI was not
+  verified because no browser/admin session was used in this check.
+- No live SmartFuelPass portal login/manual run was executed.
+- True external-network P2.17 verification outside the server/corporate LAN
+  remains open.
+
+Follow-up:
+- Run `scripts\deploy_caddy_runtime.ps1` from an elevated administrator
+  PowerShell session, then recheck runtime/tracked Caddyfile hash equality,
+  Caddy validation, `/docs`/`/redoc`/`/openapi.json` HTTP 404, and absence of
+  `Server`/`Via` headers on HTTP redirects.
+- Review/commit or explicitly approve the current dirty working tree before
+  creating the first production code-integrity baseline.
+
+## 2026-06-18 14:08 +02:00 - Caddy runtime proxy fix deployed
+
+Scope:
+- Resolved the remaining post-restart Caddy runtime deviation.
+
+Changed:
+- Wrapped the public Caddy routing rules in an explicit `route` block so
+  `/docs`, `/redoc`, and `/openapi.json` are handled before the Streamlit
+  fallback after Caddy adapts the Caddyfile.
+- Tightened `tests/test_caddy_config.py` to require that ordered route block.
+- Deployed the tracked `Caddyfile` to `C:\Program Files\Caddy\Caddyfile`
+  through `scripts\deploy_caddy_runtime.ps1` from an elevated PowerShell
+  process.
+
+Verified:
+- Tracked and runtime Caddyfile SHA-256 values matched:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Runtime Caddy validation reported `Valid configuration` and automatic
+  HTTP-to-HTTPS redirects disabled.
+- Loopback hostname checks returned HTTP 308 for HTTP root, HTTP 200 for the
+  HTTPS dashboard, HTTP 401 for protected map catalog without bearer,
+  HTTP 401 for map image without cookie, HTTP 401 for session refresh without
+  bearer, HTTP 200 for public `users-exist`, and HTTP 404 for `/docs`,
+  `/redoc`, and `/openapi.json`.
+- HTTP redirect, HTTPS dashboard, HTTPS docs, and HTTPS `users-exist`
+  responses did not expose `Server` or `Via` headers.
+- FastAPI live/ready, Streamlit health, and Caddy admin health returned
+  HTTP 200 after reload.
+- Caddy/API public exposure tests passed:
+  `.venv\Scripts\python.exe -m pytest tests\test_caddy_config.py
+  tests\test_api_public_exposure.py -q --tb=short`.
+
+Not verified:
+- No authenticated browser workflows were retested in this step.
+
+## 2026-06-18 14:12 +02:00 - P2.17 automated security regression follow-up
+
+Scope:
+- Continued P2.17 after the Caddy runtime fix by running the existing
+  automated security regression set for login/session behavior, token
+  revocation, authorization boundaries, and map/photo file-serving controls.
+
+Changed:
+- Updated `DASHBOARD_SECURITY_CHECKLIST.md` to record the deployed Caddy
+  runtime remediation and automated security regression coverage.
+- Marked the login/session, authorization-boundary, and common attack-scenario
+  P2.17 checklist items as partial because automated tests passed, but full
+  external and authenticated browser verification remains open.
+
+Verified:
+- `.venv\Scripts\python.exe -m pytest tests\test_auth_routes.py
+  tests\test_login_throttle.py tests\test_auth_audit.py
+  tests\test_admin_auth_audit.py tests\test_dashboard_auth_state.py
+  tests\test_dashboard_session_security.py
+  tests\test_api_authorization_regression.py
+  tests\test_admin_write_authorization.py tests\test_map_routes.py
+  tests\test_map_layers_service.py tests\test_device_map_service.py
+  tests\test_dashboard_map_shared.py tests\test_dashboard_device_photo.py
+  tests\test_api_public_exposure.py tests\test_caddy_config.py -q --tb=short`
+  passed 283 tests.
+
+Not verified:
+- True external-network P2.17 test outside the server and corporate LAN.
+- Authenticated browser workflows for login throttling, session expiry,
+  logout, token revocation, and UI-level authorization behavior.
+- Manual penetration-style XSS/CSRF/injection/path traversal testing against
+  the live authenticated dashboard.
+
+## 2026-06-18 - SmartFuelPass Session JSON Persistence Retired
+
+- User approved replacing SmartFuelPass JSON session persistence with password
+  login only.
+- Updated SmartFuelPass service code so reporting snapshots and charge-session
+  imports use a fresh Playwright context and `SMARTFUELPASS_EMAIL` /
+  `SMARTFUELPASS_PASSWORD` login for each portal run.
+- Kept existing `cookie_path` parameters as compatibility no-ops; application
+  code no longer reads or writes `data/smartfuelpass/session_cookies.json` or
+  `data/smartfuelpass/auto_login_session.json`.
+- Removed both SmartFuelPass session JSON files from the Git index with
+  `git rm --cached`; local ignored copies were not read or deleted.
+- Removed `SMARTFUELPASS_SESSION_COOKIES_PATH` from `.env.example`.
+- Added DEC-044 documenting that SmartFuelPass sessions must not be persisted
+  as JSON.
+- Verification:
+  - `.venv\Scripts\python.exe -m py_compile moduly\apps\smartfuelpass\service.py
+    moduly\apps\smartfuelpass\__init__.py`
+  - `.venv\Scripts\python.exe -m pytest tests\test_smartfuelpass_service.py
+    tests\test_smartfuelpass_sync.py -q --tb=short` passed 28 tests.
+  - `.venv\Scripts\python.exe -m pytest tests\test_smartfuelpass_service.py
+    tests\test_smartfuelpass_sync.py tests\test_secret_hygiene_scan.py
+    tests\test_code_integrity_scan.py tests\test_dependency_audit_tooling.py
+    tests\test_production_runtime.py tests\test_dashboard_security_config.py
+    -q --tb=short` passed 59 tests.
+  - `.venv\Scripts\python.exe scripts\secret_hygiene_scan.py` reported
+    `status=findings findings=17 raw_values=not_included`; redacted metadata
+    showed only tracked electric-meter source files, scheduler lock files, and
+    `frontend_next/tsconfig.tsbuildinfo` as current findings.
+- Remaining related risk: historical or local leftover SmartFuelPass session
+  JSON values remain sensitive. Do not print or inspect their contents; expire
+  portal sessions externally if old cookies may still be valid.
+
+## 2026-06-18 - P2.17 External Security Verification Started
+
+- Public-hostname requests from the server to
+  `https://monitoring.armexholding.cz/` and
+  `http://monitoring.armexholding.cz/` timed out, so a true external-network
+  check outside the server/LAN remains required.
+- Loopback SNI checks with `curl --resolve monitoring.armexholding.cz:443:127.0.0.1`
+  verified HTTPS dashboard HTTP 200 and certificate validation without `-k`.
+- HTTPS security headers were present through loopback hostname: HSTS,
+  `nosniff`, `Referrer-Policy`, `X-Frame-Options`, `Permissions-Policy`, and
+  CSP report-only. `Server` and `Via` were absent on HTTPS responses.
+- Public `users-exist` returned HTTP 200 with only the minimal boolean payload.
+- Unauthenticated `POST /api/v1/auth/session/refresh` returned HTTP 401.
+- Unauthenticated `/api/v1/map/images` without the dashboard session cookie
+  returned HTTP 401.
+- Findings in the running runtime before deployment:
+  - HTTP redirect response still included `Server: Caddy`.
+  - Public `/docs`, `/redoc`, and `/openapi.json` fell through to the
+    Streamlit shell with HTTP 200.
+- Updated tracked `Caddyfile` to use `auto_https disable_redirects`, an
+  explicit HTTP redirect block with `-Server`/`-Via`, explicit HTTPS site
+  block, and HTTP 404 responses for `/docs`, `/redoc`, and `/openapi.json`
+  before API/Streamlit handlers.
+- Added DEC-045 for public proxy documentation aliases and explicit redirect
+  handling.
+- Validation:
+  - `C:\Program Files\Caddy\caddy.exe validate --config Caddyfile --adapter caddyfile`
+    passed and reported automatic HTTP redirects disabled for the HTTPS site.
+  - `.venv\Scripts\python.exe -m pytest tests\test_caddy_config.py
+    tests\test_api_public_exposure.py tests\test_dashboard_security_config.py
+    -q --tb=short` passed 18 tests.
+  - `.venv\Scripts\python.exe -m pytest tests\test_caddy_config.py
+    -q --tb=short` passed 4 tests after the final Caddyfile adjustment.
+- Runtime deployment attempt with `scripts\deploy_caddy_runtime.ps1` failed
+  because the current shell is not an elevated administrator PowerShell
+  session. The runtime file at `C:\Program Files\Caddy\Caddyfile` still needs
+  deployment/reload from an elevated shell.
+
+### 2026-06-18 - Dashboard security checklist P2.15 dependency audit
+
+Scope:
+- Continued `DASHBOARD_SECURITY_CHECKLIST.md` P2.15 after the user confirmed
+  P1.6 MFA/SSO is intentionally skipped for now.
+- Added dependency vulnerability scanning while preserving the production
+  exact-lock runtime model.
+
+Changed:
+- Added `requirements-security.in` and `requirements-security.lock.txt` for an
+  isolated `.venv-security` audit toolchain with `pip-audit==2.10.1`.
+- Added `scripts/bootstrap_security_toolchain.ps1`,
+  `scripts/run_dependency_audit.ps1`, and
+  `scripts/register_dependency_audit_task.ps1`.
+- Updated `requirements-production.in` and
+  `requirements-production.lock.txt` from `pypdf==6.12.2` to
+  `pypdf==6.13.0` after the first audit found `CVE-2026-54531` and
+  `CVE-2026-54530`.
+- Updated the local `.venv-production` installation to `pypdf==6.13.0`.
+- Updated `.gitignore` for `.venv-security/` and
+  `.codex/local_programdata/`.
+- Fixed scheduled-task registration script compatibility for both dependency
+  audit and code-integrity scan by using `-At $time`,
+  `-LogonType Interactive`, and `-RunLevel Limited`.
+- Updated `scripts/code_integrity_scan.py` so untracked `.in`
+  source/configuration files are included in unexpected-file detection.
+- Added dependency-audit and code-integrity regression coverage.
+- Updated `AGENTS.md`, `DECISIONS.md`, and
+  `DASHBOARD_SECURITY_CHECKLIST.md`.
+
+Verified:
+- Created `.venv-security` from `.venv-production` Python and installed
+  `pip-audit==2.10.1`; `.venv-security` passed `pip check`.
+- `.venv-security\Scripts\python.exe -m pip_audit --version` returned
+  `pip-audit 2.10.1`.
+- The first dependency audit found two `pypdf==6.12.2` vulnerabilities in both
+  the production lock and installed environment, with fix version `6.13.0`.
+- After updating `pypdf`, `.venv-production\Scripts\python.exe
+  scripts\verify_production_environment.py` passed.
+- `.venv-production\Scripts\python.exe -m pip check` passed.
+- `scripts\run_dependency_audit.ps1 -ReportDir
+  .codex\local_programdata\logs\security` returned status `ok` with no known
+  vulnerabilities for both requirements and installed environment.
+- `scripts\run_dependency_audit.ps1` wrote clean dependency audit reports under
+  `C:\ProgramData\monitorovaci_platforma\logs\security`.
+- Registered Windows scheduled task `MonitoringDependencyAudit` for daily
+  03:40.
+- Started `MonitoringDependencyAudit` once through Task Scheduler; it finished
+  with `LastTaskResult=0` at 2026-06-18 07:43:37 CEST and next run
+  2026-06-19 03:40:00 CEST.
+- Reviewed active dashboard browser asset references: no external executable
+  script source is loaded by active dashboard files; remaining external browser
+  endpoints are data/image endpoints such as Open-Meteo and map tiles.
+- `scripts\run_code_integrity_scan.ps1 -Mode Baseline` refused the dirty
+  scanned working tree as expected and now includes `requirements-security.in`
+  in the dirty path list.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_code_integrity_scan.py tests\test_dependency_audit_tooling.py
+  tests\test_production_runtime.py tests\test_dashboard_security_config.py
+  tests\test_dashboard_map_shared.py -q --tb=short` passed 40 tests.
+
+Not verified:
+- The full test suite was not run.
+- Code-integrity production baseline was not created because the current
+  scanned working tree is dirty.
+- `MonitoringCodeIntegrityScan` was not registered or run because there is no
+  approved production manifest baseline yet.
+- No workstation restart or authenticated browser Scheduler Health manual-run
+  verification was performed in this step.
+
+Decisions/notes:
+- Added DEC-042: dependency audits use isolated `.venv-security`; do not
+  install `pip-audit` into `.venv-production`.
+- P1.6 remains an accepted password-only administrator residual risk by user
+  decision, not a blocker for P2 work.
+- Dependency audit uses fully pinned requirements with `--no-deps`; hash-pinned
+  requirements are a possible future hardening step.
+
+Follow-up:
+- Review and commit, or explicitly approve, the current dirty working tree
+  before creating the production code-integrity baseline.
+- After the baseline exists, register and run `MonitoringCodeIntegrityScan`.
+- Continue with P2.16 secret/runtime artifact hygiene.
+
+### 2026-06-18 - Dashboard security checklist P2.16 secret hygiene
+
+Scope:
+- Continued `DASHBOARD_SECURITY_CHECKLIST.md` P2.16.
+- Searched tracked files, untracked source files, and reachable Git history for
+  credentials, tokens, cookies, private operational data, and runtime
+  artifacts without printing raw values.
+
+Changed:
+- Added `scripts/secret_hygiene_scan.py`, a redacted metadata scanner that
+  reports rule, severity, path, line number, and commit while writing
+  `value=REDACTED`.
+- Added `tests/test_secret_hygiene_scan.py`.
+- Added `SECURITY_SECRET_INVENTORY.md` with non-secret production secret and
+  sensitive artifact locations plus access expectations.
+- Updated `.gitignore` so future additions of SmartFuelPass session JSON,
+  scheduler lock files, nested electric-meter source data, frontend
+  `tsconfig.tsbuildinfo`, SOFTLINK auth JSON, `.env*`, and `run.txt` are
+  ignored.
+- Updated `AGENTS.md`, `DECISIONS.md`, and
+  `DASHBOARD_SECURITY_CHECKLIST.md`.
+
+Verified:
+- `git check-ignore --no-index -v` confirmed ignore coverage for `.env`,
+  `.env.local`, SmartFuelPass session JSON files, SOFTLINK auth JSON,
+  scheduler lock files, `frontend_next/tsconfig.tsbuildinfo`, nested
+  electric-meter `.ts` and `.xlsx` source artifacts, and `run.txt`.
+- `git ls-files` confirmed `.env` and `SOFTLINK/lds_auth.json` are not
+  currently tracked, while `data/smartfuelpass/session_cookies.json`,
+  `data/smartfuelpass/auto_login_session.json`, and `run.txt` remain tracked.
+- `.venv\Scripts\python.exe -m pytest tests\test_secret_hygiene_scan.py -q
+  --tb=short` passed 3 tests.
+- `.venv\Scripts\python.exe scripts\secret_hygiene_scan.py --history --output
+  .codex\local_programdata\logs\security\secret_hygiene_report_20260618.json`
+  completed with redacted findings only.
+- Final redacted scan summary: 78 findings, including 39 critical, 18 high,
+  and 21 medium metadata findings; no raw values were printed.
+- Current critical tracked paths reported by the final scan:
+  `data/smartfuelpass/session_cookies.json` and
+  `data/smartfuelpass/auto_login_session.json`.
+- Current high tracked private source-data paths reported:
+  `moduly/mereni/elektromery/data/old/*.ts` and
+  `moduly/mereni/elektromery/data/old/*.xlsx`.
+- Current medium tracked runtime/build artifacts reported:
+  `core/scheduler/locks/*.lock` and `frontend_next/tsconfig.tsbuildinfo`.
+- Historical redacted findings included `.env` paths, hard-coded
+  `API_TOKEN_SECRET` assignments in launch scripts and `run.txt`,
+  SmartFuelPass session JSON paths, SOFTLINK auth path, and tracked
+  operational/build artifacts. The historical API signing secret had already
+  been rotated on 2026-06-12.
+
+Not verified:
+- Raw SmartFuelPass cookie/session payloads were not printed or inspected.
+- SmartFuelPass sessions were not invalidated and tracked session JSON files
+  were not removed from Git.
+- SOFTLINK credentials/session were not externally rotated.
+- Git history was not rewritten.
+- Full test suite was not run.
+
+Decisions/notes:
+- Added DEC-043: secret hygiene reviews use redacted metadata.
+- P2.16 is partially complete. Search, ignore verification, and secret
+  inventory documentation are complete; active tracked SmartFuelPass session
+  artifacts keep the completion criterion open.
+
+Follow-up:
+- Invalidate/rotate SmartFuelPass portal sessions before untracking or
+  deleting tracked session JSON files.
+- Rotate SOFTLINK credentials/session externally if the historical auth file
+  value is still valid.
+- Decide whether to untrack/remove tracked runtime/data/build artifacts:
+  SmartFuelPass session JSON, scheduler lock files, electric-meter source
+  data artifacts, and `frontend_next/tsconfig.tsbuildinfo`.
+- Continue to P2.17 only after accepting that P2.16 cleanup remains blocked,
+  or after the above cleanup is explicitly approved and completed.
+
 ### 2026-06-17 08:51 CEST - Post-restart verification
 
 Scope:
@@ -5844,4 +6766,425 @@ Known risks or accepted gaps:
   recovers.
 - The current scheduled-task account remains broader than least privilege.
 - The launcher does not independently restart a child that fails after
+  startup.
+
+## 2026-06-18 13:23 +02:00 - Current Restart Handoff Before SmartFuelPass/P2.17 Activation
+
+Reason for restart:
+- User requested saving state and restarting the workstation.
+- Restart is intended to reload FastAPI, Streamlit, scheduler, and Caddy from
+  the normal Windows startup task after the SmartFuelPass and security
+  hardening work.
+
+Current conversation/task state:
+- P2.16 secret hygiene is partially complete. SmartFuelPass reusable session
+  JSON persistence was retired and the two session JSON files were removed
+  from the Git index. Other tracked runtime/private artifacts remain open.
+- User chose SmartFuelPass password login only, without saving JSON session
+  files.
+- P2.17 external security verification was started, not completed. Loopback
+  hostname checks passed for several HTTPS/auth/header controls, but a true
+  external-network test outside the server/LAN remains required.
+- Runtime Caddy deployment of the tracked P2.17 proxy fixes is still pending
+  because `scripts\deploy_caddy_runtime.ps1` requires an elevated
+  administrator PowerShell session.
+
+Completed work in the current state:
+- SmartFuelPass service no longer reads or writes
+  `data/smartfuelpass/session_cookies.json` or
+  `data/smartfuelpass/auto_login_session.json`.
+- SmartFuelPass reporting snapshots and charge-session imports use a fresh
+  Playwright context and `SMARTFUELPASS_EMAIL` /
+  `SMARTFUELPASS_PASSWORD` login for each portal run.
+- Existing SmartFuelPass `cookie_path` parameters remain compatibility no-ops.
+- `SMARTFUELPASS_SESSION_COOKIES_PATH` was removed from `.env.example`.
+- `data/smartfuelpass/session_cookies.json` and
+  `data/smartfuelpass/auto_login_session.json` were removed from the Git
+  index with `git rm --cached`; local ignored copies were not read or deleted.
+- Tracked `Caddyfile` now disables automatic redirects, uses an explicit HTTP
+  redirect block with `-Server`/`-Via`, uses an explicit HTTPS block, and
+  returns HTTP 404 for `/docs`, `/redoc`, and `/openapi.json` before the
+  Streamlit fallback.
+- Documentation and handoff state were updated in
+  `SECURITY_SECRET_INVENTORY.md`, `DASHBOARD_SECURITY_CHECKLIST.md`,
+  `DECISIONS.md`, `AGENTS.md`, and `SESSION_NOTES.md`.
+
+Changed/uncommitted files before restart:
+- Modified: `.env.example`, `.gitignore`, `AGENTS.md`, `Caddyfile`,
+  `DASHBOARD_SECURITY_CHECKLIST.md`, `DECISIONS.md`, `SESSION_NOTES.md`,
+  `moduly/apps/smartfuelpass/__init__.py`,
+  `moduly/apps/smartfuelpass/service.py`,
+  `requirements-production.in`, `requirements-production.lock.txt`,
+  `scripts/code_integrity_scan.py`,
+  `scripts/register_code_integrity_scan_task.ps1`,
+  `tests/test_caddy_config.py`, `tests/test_code_integrity_scan.py`,
+  `tests/test_smartfuelpass_service.py`.
+- Git-index deletions: `data/smartfuelpass/auto_login_session.json`,
+  `data/smartfuelpass/session_cookies.json`.
+- Untracked new files: `SECURITY_SECRET_INVENTORY.md`,
+  `requirements-security.in`, `requirements-security.lock.txt`,
+  `scripts/bootstrap_security_toolchain.ps1`,
+  `scripts/register_dependency_audit_task.ps1`,
+  `scripts/run_dependency_audit.ps1`, `scripts/secret_hygiene_scan.py`,
+  `tests/test_dependency_audit_tooling.py`,
+  `tests/test_secret_hygiene_scan.py`.
+
+Verification already run:
+- `.venv\Scripts\python.exe -m pytest tests\test_smartfuelpass_service.py
+  tests\test_smartfuelpass_sync.py tests\test_secret_hygiene_scan.py
+  tests\test_code_integrity_scan.py tests\test_dependency_audit_tooling.py
+  tests\test_production_runtime.py tests\test_dashboard_security_config.py
+  tests\test_caddy_config.py tests\test_api_public_exposure.py -q --tb=short`
+  passed 66 tests.
+- `C:\Program Files\Caddy\caddy.exe validate --config Caddyfile --adapter caddyfile`
+  passed and reported automatic HTTP redirects disabled.
+- `.venv\Scripts\python.exe -m py_compile scripts\secret_hygiene_scan.py
+  scripts\code_integrity_scan.py moduly\apps\smartfuelpass\service.py
+  moduly\apps\smartfuelpass\__init__.py` passed.
+- `git diff --check` reported no whitespace errors, only expected LF-to-CRLF
+  warnings.
+- Redacted secret hygiene scan reported current findings only for tracked
+  electric-meter source files, scheduler lock files, and
+  `frontend_next/tsconfig.tsbuildinfo`; no current SmartFuelPass session JSON
+  findings remained.
+
+Deployment state before restart:
+- Running FastAPI, Streamlit, and scheduler processes were started before the
+  SmartFuelPass code change and need restart to load it.
+- Tracked `Caddyfile` contains P2.17 fixes, but runtime
+  `C:\Program Files\Caddy\Caddyfile` was not updated from this non-elevated
+  shell. A restart alone is not expected to activate those tracked Caddy proxy
+  fixes unless the runtime file has been synchronized separately.
+- `MonitoringDependencyAudit` was registered earlier and last ran
+  successfully. Code-integrity baseline/scheduled activation remains pending
+  until the working tree is reviewed/approved.
+
+Sensitive artifacts and handling rules:
+- Do not print, read, delete, revert, or commit raw values from ignored local
+  `.env`, dashboard/API tokens, passwords, cookies, authentication audit logs,
+  ProgramData security artifacts, or any local leftover SmartFuelPass session
+  JSON files.
+- Local leftover `data/smartfuelpass/session_cookies.json` and
+  `data/smartfuelpass/auto_login_session.json` files may still exist but are
+  ignored and must not be inspected. Expire SmartFuelPass portal sessions
+  externally if old cookies may still be valid.
+- Do not create a production code-integrity baseline from the dirty working
+  tree unless the user explicitly approves that exact state.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and its
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP `80`/`443` and admin `127.0.0.1:2019`.
+- No listener should remain on temporary ports `8010` or `8011`.
+
+Expected application state after restart:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL is
+  available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- HTTPS dashboard: HTTP 200.
+- HTTP hostname route: HTTP 308 to HTTPS. After runtime Caddy deployment, the
+  redirect response should not include `Server` or `Via`.
+- Protected API, map image without cookie, and session refresh without bearer:
+  HTTP 401.
+- Public `/api/v1/auth/users-exist`: HTTP 200 with minimal boolean payload.
+- FastAPI docs remain disabled. After runtime Caddy deployment, public
+  `/docs`, `/redoc`, and `/openapi.json` should return HTTP 404 rather than
+  the Streamlit shell.
+- SmartFuelPass scheduled/manual jobs should use password login only and must
+  not create or update SmartFuelPass session JSON files.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task last run/result/settings, process tree,
+  listeners, and no temporary ports `8010` or `8011`.
+- Confirm `.venv-production` exact-lock verification and `pip check`.
+- Confirm API live/ready, Streamlit health, Caddy admin health, and scheduler
+  heartbeat.
+- Confirm tracked/runtime Caddyfile hash equality. If they differ, run
+  `scripts\deploy_caddy_runtime.ps1` from an elevated administrator PowerShell
+  session and reload Caddy before rechecking P2.17 proxy findings.
+- Validate runtime Caddyfile and verify HTTP redirect, HTTPS dashboard,
+  protected API, map image, session refresh, disabled docs, and public
+  `users-exist` status codes.
+- Confirm no `Server` or `Via` headers on HTTPS responses and, after runtime
+  Caddy deployment, on HTTP redirect responses.
+- Run SmartFuelPass targeted tests again:
+  `.venv\Scripts\python.exe -m pytest tests\test_smartfuelpass_service.py
+  tests\test_smartfuelpass_sync.py -q --tb=short`.
+- Run security/tooling tests as needed:
+  `.venv\Scripts\python.exe -m pytest tests\test_secret_hygiene_scan.py
+  tests\test_code_integrity_scan.py tests\test_dependency_audit_tooling.py
+  tests\test_caddy_config.py tests\test_api_public_exposure.py -q --tb=short`.
+- Run `scripts\secret_hygiene_scan.py` and confirm no current SmartFuelPass
+  session JSON findings.
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- True P2.17 external verification from a network outside the server and
+  corporate LAN is still open.
+- Login throttling, session expiry, logout, token revocation, horizontal and
+  vertical authorization boundaries, and XSS/CSRF/injection/path traversal
+  checks are not fully completed for P2.17.
+- Runtime Caddy proxy fixes are not active until the runtime Caddyfile is
+  synchronized and Caddy is reloaded.
+- The current changes are uncommitted and depend on the working tree being
+  preserved across restart.
+- The current scheduled-task account remains broader than least privilege.
+- The launcher does not independently restart a child process that fails after
+  startup.
+
+## 2026-06-25 06:52 +02:00 - Current restart pointer
+
+- Full current pre-restart handoff for the map photo iframe fix is recorded above under `2026-06-25 06:52 +02:00 - Current pre-restart handoff after map photo iframe fix`.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and `SESSION_NOTES.md`, then run `git status --short --untracked-files=all`.
+- Change-specific post-restart check: open `https://monitoring.armexholding.cz`, go to `Mapove podklady / Mapa`, click a Vodomery object with a photo, and confirm `/api/v1/map/images` loads the popup photo without printing cookies or tokens.
+
+### 2026-06-25
+
+Scope:
+- Continued diagnosis of `Mapove podklady / Mapa` popup photos still showing
+  `Fotku se nepodarilo nacist.`
+- Kept the main bearer token out of map iframe JavaScript.
+
+Changed:
+- Added dedicated HttpOnly `__Secure-monitoring_map_image_session` cookie for
+  `/api/v1/map/images` with `SameSite=None`.
+- Updated the map image route to accept either the main dashboard session
+  cookie or the dedicated map image cookie.
+- Updated Leaflet HTML generation so map image requests can use an absolute
+  endpoint URL derived from the current Streamlit request origin.
+- Updated auth, map route, map HTML, map page, and authorization regression
+  tests.
+- Added DEC-046 and updated AGENTS map-photo notes.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile app\dashboard_session.py
+  services\api\core\dependencies.py services\api\routes\auth.py
+  services\api\routes\map.py moduly\apps\dashboard\map_shared.py
+  moduly\apps\dashboard\pages\36_mapove_podklady.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_auth_routes.py
+  tests\test_map_routes.py tests\test_dashboard_map_shared.py
+  tests\test_dashboard_map_page_layout.py
+  tests\test_api_authorization_regression.py -q --tb=short`
+  passed 201 tests.
+- `.venv\Scripts\python.exe -m pytest tests\test_map_routes.py
+  tests\test_map_layers_service.py tests\test_device_map_service.py
+  tests\test_dashboard_map_shared.py tests\test_dashboard_map_page_layout.py
+  tests\test_dashboard_navigation_config.py -q --tb=short` passed 79 tests.
+
+Not verified:
+- Live authenticated browser click on a real Vodomery map photo was not tested
+  in this session.
+- Running production FastAPI/Streamlit processes may need restart or reload to
+  pick up the new cookie and iframe HTML changes.
+
+Follow-up:
+- After runtime reload, open `https://monitoring.armexholding.cz`, go to
+  `Mapove podklady / Mapa`, click a Vodomery object with a photo, and confirm
+  `/api/v1/map/images` returns the image without printing cookie or token
+  values.
+
+### 2026-06-25 07:16 +02:00 - Pre-restart handoff after dedicated map image cookie fix
+
+Reason for restart:
+- User requested saving the conversation state before restarting the Windows
+  workstation.
+- Restart is expected to reload FastAPI, Streamlit, scheduler, and Caddy from
+  the normal startup task so the map-photo cookie and iframe URL fixes can
+  become active in the running dashboard.
+
+Current task/conversation state:
+- Completed: diagnosed that `Mapove podklady / Mapa` popup photos still showed
+  `Fotku se nepodarilo nacist.` after the prior iframe `credentials: "include"`
+  change because iframe fetches may not receive the main `SameSite=Lax`
+  dashboard session cookie.
+- Completed: added dedicated HttpOnly
+  `__Secure-monitoring_map_image_session` cookie scoped to
+  `/api/v1/map/images` with `SameSite=None`.
+- Completed: updated `/api/v1/map/images` to authenticate through either the
+  main dashboard session cookie or the dedicated map image cookie.
+- Completed: updated Leaflet iframe HTML generation to accept an image endpoint
+  URL and the Streamlit map page to derive that URL from the current dashboard
+  request origin.
+- Completed: kept the main API bearer token out of map iframe JavaScript.
+- Pending: restart/reload runtime processes and verify a real authenticated
+  Vodomery photo popup in the browser.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and
+  `SESSION_NOTES.md`; run `git status --short --untracked-files=all`; then
+  verify runtime health and the real map photo flow.
+
+Working tree and deployment:
+- Current time captured before restart: `2026-06-25 07:16:22 +02:00`.
+- Branch: `master`.
+- `HEAD`: `69dc532eccbc49db3152e7a1ce0627392375601b`.
+- No git commit was created for this handoff.
+- `git status --short --untracked-files=all` before restart:
+  - `M .env.example`
+  - `M .gitignore`
+  - `M AGENTS.md`
+  - `M Caddyfile`
+  - `M DASHBOARD_SECURITY_CHECKLIST.md`
+  - `M DECISIONS.md`
+  - `M SESSION_NOTES.md`
+  - `M app/dashboard_session.py`
+  - `D data/smartfuelpass/auto_login_session.json`
+  - `D data/smartfuelpass/session_cookies.json`
+  - `M moduly/apps/dashboard/map_shared.py`
+  - `M moduly/apps/dashboard/pages/36_mapove_podklady.py`
+  - `M moduly/apps/smartfuelpass/__init__.py`
+  - `M moduly/apps/smartfuelpass/service.py`
+  - `M requirements-production.in`
+  - `M requirements-production.lock.txt`
+  - `M scripts/code_integrity_scan.py`
+  - `M scripts/register_code_integrity_scan_task.ps1`
+  - `M services/api/core/dependencies.py`
+  - `M services/api/routes/auth.py`
+  - `M services/api/routes/map.py`
+  - `M tests/test_api_authorization_regression.py`
+  - `M tests/test_auth_routes.py`
+  - `M tests/test_caddy_config.py`
+  - `M tests/test_code_integrity_scan.py`
+  - `M tests/test_dashboard_map_page_layout.py`
+  - `M tests/test_dashboard_map_shared.py`
+  - `M tests/test_map_routes.py`
+  - `M tests/test_smartfuelpass_service.py`
+  - `?? SECURITY_SECRET_INVENTORY.md`
+  - `?? requirements-security.in`
+  - `?? requirements-security.lock.txt`
+  - `?? scripts/bootstrap_security_toolchain.ps1`
+  - `?? scripts/register_dependency_audit_task.ps1`
+  - `?? scripts/run_dependency_audit.ps1`
+  - `?? scripts/secret_hygiene_scan.py`
+  - `?? tests/test_dependency_audit_tooling.py`
+  - `?? tests/test_secret_hygiene_scan.py`
+- Files changed by the latest map-photo fix:
+  - `app/dashboard_session.py`
+  - `services/api/routes/auth.py`
+  - `services/api/core/dependencies.py`
+  - `services/api/routes/map.py`
+  - `moduly/apps/dashboard/map_shared.py`
+  - `moduly/apps/dashboard/pages/36_mapove_podklady.py`
+  - `tests/test_auth_routes.py`
+  - `tests/test_map_routes.py`
+  - `tests/test_dashboard_map_shared.py`
+  - `tests/test_dashboard_map_page_layout.py`
+  - `tests/test_api_authorization_regression.py`
+  - `AGENTS.md`
+  - `DECISIONS.md`
+  - `SESSION_NOTES.md`
+- Runtime deployment state was not checked in this handoff. Existing running
+  FastAPI and Streamlit processes may still be using older code until restart.
+- Tracked/runtime Caddyfile synchronization was not checked in this handoff.
+
+Verification already run for the latest map-photo fix:
+- `.venv\Scripts\python.exe -m py_compile app\dashboard_session.py
+  services\api\core\dependencies.py services\api\routes\auth.py
+  services\api\routes\map.py moduly\apps\dashboard\map_shared.py
+  moduly\apps\dashboard\pages\36_mapove_podklady.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_auth_routes.py
+  tests\test_map_routes.py tests\test_dashboard_map_shared.py
+  tests\test_dashboard_map_page_layout.py
+  tests\test_api_authorization_regression.py -q --tb=short`
+  passed 201 tests.
+- `.venv\Scripts\python.exe -m pytest tests\test_map_routes.py
+  tests\test_map_layers_service.py tests\test_device_map_service.py
+  tests\test_dashboard_map_shared.py tests\test_dashboard_map_page_layout.py
+  tests\test_dashboard_navigation_config.py -q --tb=short` passed 79 tests.
+- `.venv\Scripts\python.exe -m pytest tests\test_dashboard_auth_state.py
+  tests\test_dashboard_session_security.py -q --tb=short` passed 23 tests.
+- `git diff --check` reported no whitespace errors, only expected LF-to-CRLF
+  warnings.
+
+Sensitive/runtime artifacts:
+- Do not print, read, delete, revert, stage, or commit raw values from ignored
+  local `.env`, dashboard/API tokens, passwords, cookies, authentication audit
+  logs, ProgramData security artifacts, or any local leftover SmartFuelPass
+  session JSON files.
+- `data/smartfuelpass/session_cookies.json` and
+  `data/smartfuelpass/auto_login_session.json` are shown as Git-index
+  deletions from earlier approved SmartFuelPass cleanup work; do not restore,
+  inspect, or delete local leftover copies unless explicitly approved.
+- Do not create a production code-integrity baseline from the dirty working
+  tree unless the user explicitly approves that exact state.
+- Browser DevTools may be used after restart only to inspect safe status codes
+  and non-sensitive headers for `/api/v1/map/images`; do not print cookie or
+  token values.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and its
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP `80`/`443` and admin `127.0.0.1:2019`.
+- No listener should remain on temporary ports `8010` or `8011`.
+
+Expected application state after restart:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL is
+  available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- HTTPS dashboard: HTTP 200.
+- Protected API without bearer token: HTTP 401 JSON.
+- `/api/v1/map/images` without any dashboard cookie: HTTP 401.
+- `/api/v1/auth/browser-session` after authenticated Streamlit login sets both
+  `__Host-monitoring_dashboard_session` and
+  `__Secure-monitoring_map_image_session`; do not print cookie values.
+- Generated map iframe HTML keeps `Authorization`, `Bearer`, and
+  `mapImageAccessToken` out of JavaScript and uses `/api/v1/map/images` under
+  the dashboard origin.
+- `Mapove podklady / Mapa` should load a Vodomery popup photo instead of
+  displaying `Fotku se nepodarilo nacist.`
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task last run/result/settings, process tree,
+  listeners, and no temporary ports `8010` or `8011`.
+- Confirm `.venv-production` exact-lock verification and `pip check`.
+- Confirm API live/ready, Streamlit health, Caddy admin health, and scheduler
+  heartbeat.
+- Confirm tracked/runtime Caddyfile hash equality and Caddy validation.
+- Verify HTTP redirect, HTTPS dashboard, protected API without bearer token,
+  map image without cookie, disabled docs, and public `users-exist` status.
+- Log in to `https://monitoring.armexholding.cz`; confirm login still persists
+  after reload without printing any cookie or token values.
+- Open `Mapove podklady / Mapa`, click a Vodomery object with a photo, and
+  confirm the popup photo loads and lightbox opens.
+- If the photo still fails, inspect only the HTTP status and safe headers for
+  `/api/v1/map/images`; likely statuses to distinguish are 401, 403, 404, and
+  400. Do not print cookies, bearer tokens, or raw file paths.
+- Re-run targeted tests:
+  `.venv\Scripts\python.exe -m pytest tests\test_auth_routes.py
+  tests\test_map_routes.py tests\test_dashboard_map_shared.py
+  tests\test_dashboard_map_page_layout.py
+  tests\test_api_authorization_regression.py -q --tb=short`
+- Re-run map service tests:
+  `.venv\Scripts\python.exe -m pytest tests\test_map_layers_service.py
+  tests\test_device_map_service.py tests\test_dashboard_navigation_config.py
+  -q --tb=short`
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- The real authenticated browser photo flow has not yet been verified after
+  the dedicated map image cookie fix.
+- Current changes are uncommitted and depend on the working tree being
+  preserved across restart.
+- Runtime Caddy deployment state was not checked in this handoff.
+- True external verification from a network outside the server and corporate
+  LAN remains a separate task.
+- Existing unrelated SmartFuelPass/security hardening changes are still
+  present in the dirty working tree.
+- The current scheduled-task account remains broader than least privilege.
+- The launcher does not independently restart a child process that fails after
   startup.

@@ -3,11 +3,16 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from services.api.core.dependencies import get_current_admin_user
-from services.api.schemas.admin import SystemProxyHealthResponse, SystemRuntimeHealthResponse
+from services.api.schemas.admin import (
+    SystemProxyHealthResponse,
+    SystemRuntimeHealthResponse,
+    SystemSchedulerHealthResponse,
+)
 from services.api.services.dashboard_auth import DashboardUserContext
 from services.api.services.system_health import (
     collect_system_proxy_health,
     collect_system_runtime_health,
+    collect_system_scheduler_health,
 )
 
 
@@ -44,3 +49,19 @@ def get_system_proxy_health(
 ) -> SystemProxyHealthResponse:
     del current_user
     return collect_system_proxy_health()
+
+
+@router.get(
+    "/scheduler",
+    response_model=SystemSchedulerHealthResponse,
+    summary="System scheduler health",
+    description=(
+        "Vraci bezpecny admin souhrn scheduler heartbeatu a metrik "
+        "planovanych jobu bez obsahu logu nebo command line procesu."
+    ),
+)
+def get_system_scheduler_health(
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> SystemSchedulerHealthResponse:
+    del current_user
+    return collect_system_scheduler_health()

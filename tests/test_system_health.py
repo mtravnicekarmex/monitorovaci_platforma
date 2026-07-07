@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
+from core.scheduler.job_schedule import get_scheduler_job_specs
+from core.scheduler.metrics import JobMetrics
 from services.api.routes import system_health as system_health_route
 from services.api.schemas.admin import (
+    SystemSchedulerHealthResponse,
     SystemProxyHealthResponse,
     SystemRuntimeBootStatus,
     SystemRuntimeHealthResponse,
@@ -223,6 +226,100 @@ def test_collect_system_proxy_health_reports_unexpected_route_and_header(monkeyp
     assert headers_by_key["server"].present is True
 
 
+def _fake_scheduler_jobs(
+    *,
+    reference_time: datetime,
+    failing_job_id: str | None = None,
+) -> dict[str, JobMetrics]:
+    jobs: dict[str, JobMetrics] = {}
+    for offset, job_spec in enumerate(get_scheduler_job_specs()):
+        failed = job_spec.id == failing_job_id
+        jobs[job_spec.id] = JobMetrics(
+            last_run=reference_time - timedelta(minutes=10),
+            last_status="error" if failed else "success",
+            last_duration_seconds=1.5,
+            next_run=reference_time + timedelta(minutes=offset + 1),
+            failure_count_24h=1 if failed else 0,
+            success_count_24h=0 if failed else 2,
+        )
+    return jobs
+
+
+def test_collect_system_scheduler_health_reports_ok(monkeypatch):
+    reference_time = datetime.now()
+
+    class FakeMetricsStore:
+        jobs = _fake_scheduler_jobs(reference_time=reference_time)
+        last_heartbeat = reference_time - timedelta(seconds=30)
+
+        def is_scheduler_running(self):
+            return True
+
+    monkeypatch.setattr(
+        system_health,
+        "get_metrics_store",
+        lambda *args, **kwargs: FakeMetricsStore(),
+    )
+
+    response = system_health.collect_system_scheduler_health()
+
+    assert response.status == "ok"
+    assert response.scheduler_running is True
+    assert response.total_failure_count_24h == 0
+    assert response.heartbeat_age_seconds is not None
+    assert {job.job_id: job.status for job in response.jobs}["quarter_hour_job"] == "ok"
+
+
+def test_collect_system_scheduler_health_reports_failure_metrics(monkeypatch):
+    reference_time = datetime.now()
+
+    class FakeMetricsStore:
+        jobs = _fake_scheduler_jobs(
+            reference_time=reference_time,
+            failing_job_id="daily_job",
+        )
+        last_heartbeat = reference_time - timedelta(seconds=30)
+
+        def is_scheduler_running(self):
+            return True
+
+    monkeypatch.setattr(
+        system_health,
+        "get_metrics_store",
+        lambda *args, **kwargs: FakeMetricsStore(),
+    )
+
+    response = system_health.collect_system_scheduler_health()
+    jobs_by_id = {job.job_id: job for job in response.jobs}
+
+    assert response.status == "degraded"
+    assert response.total_failure_count_24h == 1
+    assert jobs_by_id["daily_job"].status == "degraded"
+    assert "failures" in jobs_by_id["daily_job"].detail
+
+
+def test_collect_system_scheduler_health_reports_stopped_scheduler(monkeypatch):
+    reference_time = datetime.now()
+
+    class FakeMetricsStore:
+        jobs = _fake_scheduler_jobs(reference_time=reference_time)
+        last_heartbeat = reference_time - timedelta(minutes=10)
+
+        def is_scheduler_running(self):
+            return False
+
+    monkeypatch.setattr(
+        system_health,
+        "get_metrics_store",
+        lambda *args, **kwargs: FakeMetricsStore(),
+    )
+
+    response = system_health.collect_system_scheduler_health()
+
+    assert response.status == "error"
+    assert response.scheduler_running is False
+
+
 def test_system_runtime_health_route_delegates_to_service(monkeypatch):
     expected = SystemRuntimeHealthResponse(
         status="ok",
@@ -269,6 +366,31 @@ def test_system_proxy_health_route_delegates_to_service(monkeypatch):
     )
 
     response = system_health_route.get_system_proxy_health(
+        current_user=SimpleNamespace(is_admin=True)
+    )
+
+    assert response is expected
+
+
+def test_system_scheduler_health_route_delegates_to_service(monkeypatch):
+    expected = SystemSchedulerHealthResponse(
+        status="ok",
+        checked_at=datetime(2026, 7, 7, 7, 0),
+        scheduler_running=True,
+        last_heartbeat=datetime(2026, 7, 7, 6, 59),
+        heartbeat_age_seconds=60.0,
+        heartbeat_ttl_seconds=300,
+        total_success_count_24h=1,
+        total_failure_count_24h=0,
+        jobs=[],
+    )
+    monkeypatch.setattr(
+        system_health_route,
+        "collect_system_scheduler_health",
+        lambda: expected,
+    )
+
+    response = system_health_route.get_system_scheduler_health(
         current_user=SimpleNamespace(is_admin=True)
     )
 

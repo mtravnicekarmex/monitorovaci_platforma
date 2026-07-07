@@ -248,3 +248,28 @@ class SystemProxyHealthResponse(BaseModel):
     public_host: str
     routes: list[SystemProxyRouteStatus]
     headers: list[SystemProxyHeaderStatus]
+
+
+class SystemSchedulerJobStatus(BaseModel):
+    job_id: str
+    label: str
+    status: str = Field(..., pattern="^(ok|degraded|error)$")
+    last_status: str
+    last_run: datetime | None = None
+    next_run: datetime | None = None
+    success_count_24h: int = Field(ge=0)
+    failure_count_24h: int = Field(ge=0)
+    last_duration_seconds: float | None = None
+    detail: str
+
+
+class SystemSchedulerHealthResponse(BaseModel):
+    status: str = Field(..., pattern="^(ok|degraded|error)$")
+    checked_at: datetime
+    scheduler_running: bool
+    last_heartbeat: datetime | None = None
+    heartbeat_age_seconds: float | None = Field(default=None, ge=0)
+    heartbeat_ttl_seconds: int = Field(ge=1)
+    total_success_count_24h: int = Field(ge=0)
+    total_failure_count_24h: int = Field(ge=0)
+    jobs: list[SystemSchedulerJobStatus]

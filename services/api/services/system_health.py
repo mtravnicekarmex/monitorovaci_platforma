@@ -11,7 +11,15 @@ import ssl
 import subprocess
 from typing import Any
 
+from core.scheduler.job_schedule import get_scheduler_job_specs
+from core.scheduler.metrics import (
+    JobMetrics,
+    SCHEDULER_HEARTBEAT_TTL_SECONDS,
+    get_metrics_store,
+)
 from services.api.schemas.admin import (
+    SystemSchedulerHealthResponse,
+    SystemSchedulerJobStatus,
     SystemProxyHeaderStatus,
     SystemProxyHealthResponse,
     SystemProxyRouteStatus,
@@ -28,6 +36,8 @@ TEMPORARY_PORTS = (8010, 8011)
 PUBLIC_DASHBOARD_HOST = "monitoring.armexholding.cz"
 LOCAL_CADDY_HOST = "127.0.0.1"
 LOCAL_CADDY_TIMEOUT_SECONDS = 8
+SCHEDULER_CORE_JOB_ID = "quarter_hour_job"
+SCHEDULER_CORE_JOB_MAX_AGE_SECONDS = 45 * 60
 
 
 @dataclass(frozen=True)
@@ -208,6 +218,13 @@ def _worst_status(statuses: list[str]) -> str:
     if not statuses:
         return "degraded"
     return max(statuses, key=_status_rank)
+
+
+def _seconds_since(now: datetime, value: datetime | None) -> float | None:
+    if value is None:
+        return None
+    reference_now = now.astimezone(value.tzinfo) if value.tzinfo is not None else datetime.now()
+    return max(0.0, (reference_now - value).total_seconds())
 
 
 def _parse_datetime(value: Any) -> datetime | None:
@@ -656,4 +673,93 @@ def collect_system_proxy_health() -> SystemProxyHealthResponse:
         public_host=PUBLIC_DASHBOARD_HOST,
         routes=routes,
         headers=headers,
+    )
+
+
+def _build_scheduler_job_status(
+    job_id: str,
+    label: str,
+    metrics: JobMetrics,
+    *,
+    now: datetime,
+) -> SystemSchedulerJobStatus:
+    details: list[str] = []
+    status = "ok"
+    last_status = str(metrics.last_status or "unknown")
+    last_status_lower = last_status.lower()
+
+    if metrics.failure_count_24h > 0:
+        status = "degraded"
+        if last_status_lower.startswith("error"):
+            details.append("Last run ended with error.")
+        details.append("Job reported failures in the last 24 hours.")
+    elif last_status_lower.startswith("error"):
+        details.append("Last recorded run ended with error outside the current 24-hour window.")
+    if metrics.next_run is None:
+        status = "degraded"
+        details.append("Job has no next run in scheduler metrics.")
+
+    if job_id == SCHEDULER_CORE_JOB_ID:
+        last_run_age_seconds = _seconds_since(now, metrics.last_run)
+        if metrics.last_run is None:
+            status = "degraded"
+            details.append("Core quarter-hour job has not recorded a run.")
+        elif (
+            last_run_age_seconds is not None
+            and last_run_age_seconds > SCHEDULER_CORE_JOB_MAX_AGE_SECONDS
+        ):
+            status = "degraded"
+            details.append("Core quarter-hour job last run is older than expected.")
+
+    return SystemSchedulerJobStatus(
+        job_id=job_id,
+        label=label,
+        status=status,
+        last_status=last_status,
+        last_run=metrics.last_run,
+        next_run=metrics.next_run,
+        success_count_24h=max(0, int(metrics.success_count_24h)),
+        failure_count_24h=max(0, int(metrics.failure_count_24h)),
+        last_duration_seconds=metrics.last_duration_seconds,
+        detail=" ".join(details) if details else "Scheduler job metrics are in the expected state.",
+    )
+
+
+def collect_system_scheduler_health() -> SystemSchedulerHealthResponse:
+    checked_at = datetime.now().astimezone()
+    metrics = get_metrics_store(refresh_from_disk=True)
+    scheduler_running = metrics.is_scheduler_running()
+
+    jobs = [
+        _build_scheduler_job_status(
+            job_spec.id,
+            job_spec.label,
+            metrics.jobs.get(job_spec.id) or JobMetrics(),
+            now=checked_at,
+        )
+        for job_spec in get_scheduler_job_specs()
+    ]
+    total_success_count_24h = sum(max(0, int(job.success_count_24h)) for job in metrics.jobs.values())
+    total_failure_count_24h = sum(max(0, int(job.failure_count_24h)) for job in metrics.jobs.values())
+
+    if not scheduler_running:
+        status = "error"
+    else:
+        status = _worst_status(
+            [
+                *(job.status for job in jobs),
+                "degraded" if total_failure_count_24h > 0 else "ok",
+            ]
+        )
+
+    return SystemSchedulerHealthResponse(
+        status=status,
+        checked_at=checked_at,
+        scheduler_running=scheduler_running,
+        last_heartbeat=metrics.last_heartbeat,
+        heartbeat_age_seconds=_seconds_since(checked_at, metrics.last_heartbeat),
+        heartbeat_ttl_seconds=SCHEDULER_HEARTBEAT_TTL_SECONDS,
+        total_success_count_24h=total_success_count_24h,
+        total_failure_count_24h=total_failure_count_24h,
+        jobs=jobs,
     )

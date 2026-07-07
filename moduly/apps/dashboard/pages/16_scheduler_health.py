@@ -21,6 +21,11 @@ from moduly.apps.dashboard.api_client import (
     run_scheduler_job_once as api_run_scheduler_job_once,
 )
 from moduly.apps.dashboard.auth import get_auth_token, require_page_access
+from moduly.apps.dashboard.scheduler_health_view import (
+    manual_run_confirmation_text,
+    manual_run_impact_label,
+    manual_run_requires_confirmation,
+)
 from moduly.apps.dashboard.scheduler_log_view import (
     extract_error_log_blocks,
     extract_manual_run_log_content,
@@ -241,6 +246,7 @@ def _build_manual_jobs_dataframe(rows: list[dict[str, object]]) -> pd.DataFrame:
             {
                 "typ": "job" if row.get("is_scheduled") else "vnitrni krok",
                 "job": _job_display_name(row),
+                "dopad": manual_run_impact_label(row),
                 "popis": str(row.get("description") or "-"),
                 "stav": str(row.get("last_status") or "unknown"),
                 "posledni_beh": _format_timestamp(row.get("last_run")),
@@ -477,24 +483,28 @@ def _render_manual_run_section(access_token: str, rows: list[dict[str, object]])
     manual_run_in_progress = _manual_run_is_polling()
 
     with st.form("scheduler_manual_run_form"):
-        select_col, action_col = st.columns([4, 1.2])
-        with select_col:
-            selected_job_id = st.selectbox(
-                "Vyber job nebo vnitrni krok pro jednorazove spusteni",
-                options=job_ids,
-                format_func=lambda job_id: _job_display_name(jobs_by_id[job_id]),
-            )
-        with action_col:
-            st.write("")
-            st.write("")
-            submit_run = st.form_submit_button(
-                "Spustit jednou",
-                width="stretch",
-                disabled=manual_run_in_progress,
+        selected_job_id = st.selectbox(
+            "Vyber job nebo vnitrni krok pro jednorazove spusteni",
+            options=job_ids,
+            format_func=lambda job_id: _job_display_name(jobs_by_id[job_id]),
+        )
+        selected_row = jobs_by_id[selected_job_id]
+        requires_confirmation = manual_run_requires_confirmation(selected_row)
+        confirmed_impact = True
+        if requires_confirmation:
+            st.warning(manual_run_confirmation_text(selected_row))
+            confirmed_impact = st.checkbox(
+                "Potvrzuji provozni dopad a chci tento cil spustit.",
+                key=f"scheduler_manual_run_confirm_{selected_job_id}",
             )
 
+        submit_run = st.form_submit_button(
+            "Spustit jednou",
+            width="stretch",
+            disabled=manual_run_in_progress or (requires_confirmation and not confirmed_impact),
+        )
+
         if submit_run:
-            selected_row = jobs_by_id[selected_job_id]
             try:
                 _trigger_manual_job_run(access_token, selected_row)
             except DashboardApiError as exc:

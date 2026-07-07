@@ -180,19 +180,32 @@ def _get_previous_month_period(reference_date: date | None = None) -> ReportPeri
 
 def _build_monthly_report_dataframe(period: ReportPeriod) -> pd.DataFrame:
     with ENGINE_PG.connect() as conn:
-        devices = conn.execute(
-            text(
-                """
-                SELECT identifikace
-                FROM evidence."vodoměry"
-                ORDER BY identifikace
-                """
-            )
-        ).scalars().all()
+        devices = _load_report_device_identifiers(conn, period)
         start_map = _load_last_valid_measurements_before(conn, devices, period.period_start)
         end_map = _load_last_valid_measurements_before(conn, devices, period.period_end)
 
     return _build_consumption_dataframe(devices, start_map, end_map)
+
+
+def _load_report_device_identifiers(conn, period: ReportPeriod) -> list[str]:
+    return list(
+        conn.execute(
+            text(
+                """
+                SELECT DISTINCT identifikace
+                FROM monitoring."Mereni_vodomery_vse"
+                WHERE identifikace IS NOT NULL
+                  AND btrim(identifikace) <> ''
+                  AND platne = TRUE
+                  AND date < :period_end
+                ORDER BY identifikace
+                """
+            ),
+            {"period_end": period.period_end},
+        )
+        .scalars()
+        .all()
+    )
 
 
 def _build_monthly_report_dataset(period: ReportPeriod) -> tuple[pd.DataFrame, tuple[BranchControlReport, ...]]:

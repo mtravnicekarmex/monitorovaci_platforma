@@ -8223,3 +8223,622 @@ Known risks or accepted gaps:
 - The current scheduled-task account remains broader than least privilege.
 - The launcher does not independently restart a child process that fails after
   startup.
+
+### 2026-07-07 11:57 +02:00 - Pre-restart handoff after monthly_job fix
+
+Reason for restart:
+- Reload FastAPI, Streamlit, scheduler, and Caddy through the normal startup
+  task so all current working-tree changes are active in runtime.
+- Make the new `Health systemu` scheduler endpoint available in the running
+  FastAPI process.
+- Load the `monthly_job` fix into the scheduler process before any manual
+  monthly report retry.
+
+Current task/conversation state:
+- Completed: diagnosed the `monthly_job` alert from `2026-07-01 06:20:05
+  +02:00`. The failing target was
+  `send_monthly_vodomery_consumption_report`.
+- Completed: root cause was a stale query for `identifikace` in
+  `evidence."vodomery"` / `evidence."vodoměry"`; the current evidence table
+  no longer has that application identifier column.
+- Completed: changed the monthly all-vodomery consumption report to load
+  device identifiers from `monitoring."Mereni_vodomery_vse"` instead of the
+  QGIS/evidence layer.
+- Completed: added a regression test preventing this report from returning to
+  the evidence-table identifier query.
+- Completed earlier: added the third incremental `Health systemu` check for
+  scheduler summary through admin FastAPI route
+  `GET /health/system/scheduler` and the Streamlit dashboard block.
+- Pending: restart workstation, then verify runtime health, the new
+  `Health systemu` scheduler block, and the monthly report data-building path.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and
+  `SESSION_NOTES.md`; run `git status --short --untracked-files=all`; verify
+  runtime health; then run the post-restart checks below.
+
+Working tree and deployment:
+- Current time captured before restart: `2026-07-07 11:57:25 +02:00`.
+- Branch: `master`.
+- `HEAD`: `9e94e13c257a55cda85b61ac259b6bc28580c801`.
+- No git commit was created for this handoff.
+- `git status --short --untracked-files=all` before this handoff:
+  - `M SESSION_NOTES.md`
+  - `M moduly/apps/dashboard/api_client.py`
+  - `M moduly/apps/dashboard/pages/37_system_health.py`
+  - `M moduly/mereni/vodomery/reporting/monthly_consumption_report.py`
+  - `M services/api/routes/system_health.py`
+  - `M services/api/schemas/admin.py`
+  - `M services/api/services/system_health.py`
+  - `M tests/test_api_authorization_regression.py`
+  - `M tests/test_system_health.py`
+  - `?? tests/test_monthly_consumption_report.py`
+- Files changed by the latest monthly-job fix:
+  - `moduly/mereni/vodomery/reporting/monthly_consumption_report.py`
+  - `tests/test_monthly_consumption_report.py`
+- Files already changed by the preceding `Health systemu` scheduler work:
+  - `moduly/apps/dashboard/api_client.py`
+  - `moduly/apps/dashboard/pages/37_system_health.py`
+  - `services/api/routes/system_health.py`
+  - `services/api/schemas/admin.py`
+  - `services/api/services/system_health.py`
+  - `tests/test_api_authorization_regression.py`
+  - `tests/test_system_health.py`
+  - `SESSION_NOTES.md`
+- Runtime deployment state: running FastAPI was not restarted after adding
+  `/health/system/scheduler`; the route may return HTTP 404 until restart.
+  Running scheduler was not restarted after the monthly report fix; it may
+  still use the old report code until restart.
+- Tracked/runtime Caddyfile synchronization was not changed by this work.
+
+Verification already run:
+- `.venv\Scripts\python.exe -m pytest tests\test_monthly_consumption_report.py
+  tests\test_scheduler.py::test_monthly_job_calls_all_monthly_reports -q
+  --tb=short` reported `2 passed`.
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\mereni\vodomery\reporting\monthly_consumption_report.py
+  tests\test_monthly_consumption_report.py`
+- `.venv-production\Scripts\python.exe -m py_compile
+  moduly\mereni\vodomery\reporting\monthly_consumption_report.py`
+- Real PostgreSQL read-only monthly dataframe check for period
+  `2026-06-01T00:00:00` to `2026-07-01T00:00:00` returned `row_count=58`,
+  `with_consumption=58`, `missing_start=0`, and `missing_end=0`.
+- `git diff --check` reported no whitespace errors, only expected
+  LF-to-CRLF warnings.
+- Earlier `Health systemu` scheduler work verification:
+  `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_api_authorization_regression.py
+  tests\test_dashboard_navigation_config.py
+  tests\test_dashboard_responsive.py -q --tb=short` reported `207 passed`.
+
+Sensitive/runtime artifacts:
+- Do not print, read, delete, revert, stage, or commit raw values from ignored
+  local `.env`, dashboard/API tokens, passwords, cookies, authentication audit
+  logs, ProgramData security artifacts, or local leftover SmartFuelPass session
+  JSON files.
+- Do not print raw SmartFuelPass portal data, raw device photo filesystem
+  paths, process command lines, environment variables, bearer tokens, dashboard
+  session cookie values, or protected API response bodies.
+- Do not print raw meter/source data rows while checking the monthly report;
+  use aggregate counts and safe status fields.
+- Do not create a production code-integrity baseline from this dirty working
+  tree unless the user explicitly approves that exact state.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and its
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP `80`/`443` and admin `127.0.0.1:2019`.
+- No listener should remain on temporary ports `8010` or `8011`.
+
+Expected application state after restart:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL is
+  available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- FastAPI `GET /health/system/runtime` without bearer token: HTTP 401 JSON.
+- FastAPI `GET /health/system/proxy` without bearer token: HTTP 401 JSON.
+- FastAPI `GET /health/system/scheduler` without bearer token: HTTP 401 JSON,
+  proving the new scheduler route is registered.
+- `Health systemu` dashboard page loads without traceback; `Runtime po
+  restartu`, `Proxy a routovani`, and `Scheduler` blocks display live data.
+- Scheduler block expected values: overall `OK`, `Scheduler bezi` = `ANO`,
+  heartbeat age below the configured TTL, zero 24h failures unless a real job
+  failed after restart, and 9 scheduled jobs.
+- The monthly vodomery consumption report data-builder should no longer query
+  `evidence."vodomery"` / `evidence."vodoměry"` for `identifikace`.
+- Do not manually run `monthly_job` or
+  `send_monthly_vodomery_consumption_report` without explicit user
+  confirmation after restart, because the send path can email recipients.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task last run/result/settings, process tree,
+  listeners, and no temporary ports `8010` or `8011`.
+- Confirm API live/ready, Streamlit health, Caddy admin health, scheduler
+  heartbeat, and current runtime log freshness.
+- Confirm scheduler metrics show `scheduler_running=true`, recent
+  `last_heartbeat`, and a fresh `quarter_hour_job` observation after boot once
+  the next scheduled quarter-hour run has had time to execute.
+- Confirm tracked root `Caddyfile` and runtime
+  `C:\Program Files\Caddy\Caddyfile` still have matching SHA-256 hashes, then
+  validate runtime Caddy config.
+- Verify local Caddy hostname routing with SNI/Host routing if direct public
+  hostname requests from the workstation still time out.
+- Log in to `https://monitoring.armexholding.cz` without printing cookie or
+  token values.
+- Open `Health systemu` and confirm the `Scheduler` block displays live data
+  and no traceback.
+- Exercise `GET /health/system/scheduler` through the dashboard/API path and
+  check only safe status fields, heartbeat metadata, 24h totals, and job
+  summary statuses.
+- Re-run targeted tests:
+  `.venv\Scripts\python.exe -m pytest tests\test_monthly_consumption_report.py
+  tests\test_scheduler.py::test_monthly_job_calls_all_monthly_reports
+  tests\test_system_health.py tests\test_api_authorization_regression.py
+  tests\test_dashboard_navigation_config.py tests\test_dashboard_responsive.py
+  -q --tb=short`
+- Run the read-only monthly dataframe check for reference date `2026-07-07`
+  and confirm aggregate output remains `row_count=58`, `with_consumption=58`,
+  `missing_start=0`, and `missing_end=0` unless new data changed since this
+  handoff.
+- Only after user confirmation, retry the relevant monthly report send or
+  manual scheduler step.
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- Current changes are uncommitted and depend on the working tree being
+  preserved across restart.
+- The new FastAPI scheduler route and monthly report fix will not exist in
+  runtime until the startup task has restarted the API/scheduler processes from
+  the current working tree.
+- Immediately after boot, `quarter_hour_job` may not yet have a post-boot
+  observation until its next scheduled minute runs.
+- `monthly_job` failed before subsequent monthly report steps on
+  `2026-07-01`; those emails may still need a controlled manual retry after
+  restart.
+- Direct public hostname reachability from the workstation may still require
+  local Caddy Host/SNI verification through loopback.
+- The current scheduled-task account remains broader than least privilege.
+- The launcher does not independently restart a child process that fails after
+  startup.
+
+### 2026-07-07
+
+Scope:
+- Added the third incremental `Health systemu` check: scheduler summary.
+- Reused existing scheduler metrics as the safe source of truth instead of
+  reading process command lines or raw logs.
+
+Changed:
+- Added admin API route `GET /health/system/scheduler`.
+- Added sanitized scheduler health schema and collector with heartbeat age,
+  heartbeat TTL, 24h success/failure totals, and scheduled-job summaries.
+- The summary degrades on stale/missing scheduler heartbeat, missing job next
+  run metadata, recent 24h failures, or stale `quarter_hour_job`; historical
+  last-status errors outside the current 24h failure window are shown in
+  detail but do not degrade the post-restart summary.
+- Added dashboard API helper and a new `Scheduler` block on `Health systemu`.
+- Added system health and authorization regression tests for the new endpoint.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile services\api\services\system_health.py
+  services\api\routes\system_health.py services\api\schemas\admin.py
+  moduly\apps\dashboard\api_client.py
+  moduly\apps\dashboard\pages\37_system_health.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_api_authorization_regression.py
+  tests\test_dashboard_navigation_config.py
+  tests\test_dashboard_responsive.py -q --tb=short` reported 207 passed.
+- Local collector call returned scheduler `status=ok`, running scheduler,
+  recent heartbeat, zero 24h failures, and 9 scheduled jobs.
+- `git diff --check` reported no whitespace errors, only expected
+  LF-to-CRLF warnings.
+
+Not verified:
+- Live dashboard rendering of the new scheduler block through the running
+  FastAPI process. The running production API must restart or reload before
+  `/health/system/scheduler` is registered in that process.
+
+Decisions/notes:
+- No new durable decision was needed; this implements the already planned
+  scheduler check under DEC-048.
+
+### 2026-07-07 09:57 +02:00 - Pre-restart handoff after Health systemu scheduler check
+
+Reason for restart:
+- Reload FastAPI, Streamlit, scheduler, and Caddy through the normal startup
+  task so the new admin endpoint `GET /health/system/scheduler` is registered
+  in the running FastAPI process.
+- Allow the `Health systemu` dashboard page to load the new `Scheduler` block
+  from the live API instead of showing the controlled "endpoint not available
+  yet" state.
+
+Current task/conversation state:
+- Completed: the user confirmed the standalone `Health scheduleru` page
+  displays correctly.
+- Completed: added the third incremental `Health systemu` check for scheduler
+  summary using existing scheduler metrics.
+- Completed: added admin API route `GET /health/system/scheduler` and response
+  schemas for heartbeat age, heartbeat TTL, 24h success/failure totals, and
+  scheduled-job summaries.
+- Completed: added dashboard API helper and the `Scheduler` block on
+  `Health systemu`.
+- Completed: added system health and authorization regression tests.
+- Pending: restart workstation, then verify the running FastAPI process
+  exposes `/health/system/scheduler` and the dashboard scheduler block renders
+  live data.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and
+  `SESSION_NOTES.md`; run `git status --short --untracked-files=all`; verify
+  runtime health, then test `Health systemu` runtime, proxy, and scheduler
+  blocks.
+
+Working tree and deployment:
+- Current time captured before restart: `2026-07-07 09:57:44 +02:00`.
+- Branch: `master`.
+- `HEAD`: `9e94e13c257a55cda85b61ac259b6bc28580c801`.
+- No git commit was created for this handoff.
+- `git status --short --untracked-files=all` before this handoff:
+  - `M SESSION_NOTES.md`
+  - `M moduly/apps/dashboard/api_client.py`
+  - `M moduly/apps/dashboard/pages/37_system_health.py`
+  - `M services/api/routes/system_health.py`
+  - `M services/api/schemas/admin.py`
+  - `M services/api/services/system_health.py`
+  - `M tests/test_api_authorization_regression.py`
+  - `M tests/test_system_health.py`
+- Files changed by the latest `Health systemu` scheduler work:
+  - `moduly/apps/dashboard/api_client.py`
+  - `moduly/apps/dashboard/pages/37_system_health.py`
+  - `services/api/routes/system_health.py`
+  - `services/api/schemas/admin.py`
+  - `services/api/services/system_health.py`
+  - `tests/test_api_authorization_regression.py`
+  - `tests/test_system_health.py`
+  - `SESSION_NOTES.md`
+- Runtime deployment state: running FastAPI was not restarted after adding
+  `/health/system/scheduler`; the new route may return HTTP 404 until the
+  startup task restarts the API process from the current working tree.
+- `main.py` remains the scheduler entry point and should be relaunched by the
+  startup task as part of the standard runtime set.
+- Tracked/runtime Caddyfile synchronization was not changed by this work.
+
+Verification already run:
+- `.venv\Scripts\python.exe -m py_compile services\api\services\system_health.py
+  services\api\routes\system_health.py services\api\schemas\admin.py
+  moduly\apps\dashboard\api_client.py
+  moduly\apps\dashboard\pages\37_system_health.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_api_authorization_regression.py
+  tests\test_dashboard_navigation_config.py
+  tests\test_dashboard_responsive.py -q --tb=short` reported 207 passed.
+- Local collector call returned scheduler `status=ok`, `scheduler_running=True`,
+  recent heartbeat, zero 24h failures, and 9 scheduled jobs.
+- `git diff --check` reported no whitespace errors, only expected
+  LF-to-CRLF warnings.
+
+Sensitive/runtime artifacts:
+- Do not print, read, delete, revert, stage, or commit raw values from ignored
+  local `.env`, dashboard/API tokens, passwords, cookies, authentication audit
+  logs, ProgramData security artifacts, or local leftover SmartFuelPass session
+  JSON files.
+- Do not print raw SmartFuelPass portal data, raw device photo filesystem paths,
+  process command lines, environment variables, bearer tokens, dashboard
+  session cookie values, or response bodies from protected API checks.
+- Do not create a production code-integrity baseline from this dirty working
+  tree unless the user explicitly approves that exact state.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and its
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP `80`/`443` and admin `127.0.0.1:2019`.
+- No listener should remain on temporary ports `8010` or `8011`.
+
+Expected application state after restart:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL is
+  available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- FastAPI `GET /health/system/runtime` without bearer token: HTTP 401 JSON,
+  proving the runtime route remains registered.
+- FastAPI `GET /health/system/proxy` without bearer token: HTTP 401 JSON,
+  proving the proxy route remains registered.
+- FastAPI `GET /health/system/scheduler` without bearer token: HTTP 401 JSON,
+  proving the new scheduler route is registered.
+- FastAPI `GET /health/system/scheduler` with a valid admin bearer token:
+  HTTP 200 and safe JSON with `status`, `checked_at`, heartbeat metadata, 24h
+  success/failure totals, and scheduled-job summaries.
+- Non-admin bearer token for `GET /health/system/scheduler`: HTTP 403.
+- `Health systemu` dashboard page loads without traceback; `Runtime po
+  restartu`, `Proxy a routovani`, and `Scheduler` blocks all display live data.
+- Scheduler block expected values: overall `OK`, `Scheduler bezi` = `ANO`,
+  heartbeat age below the configured TTL, zero 24h failures unless a real job
+  failed after restart, and 9 scheduled jobs.
+- `Health scheduleru` page remains available and displays correctly.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- HTTPS dashboard: HTTP 200.
+- Protected API without bearer token: HTTP 401 JSON.
+- Map image without cookie: HTTP 401 JSON.
+- Public `/docs`, `/redoc`, and `/openapi.json`: HTTP 404 at Caddy layer.
+- Public response security headers present on the local Caddy hostname path:
+  HSTS, `nosniff`, `Referrer-Policy`, `X-Frame-Options`,
+  `Permissions-Policy`, and CSP report-only; `Server` and `Via` absent.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task last run/result/settings, process tree,
+  listeners, and no temporary ports `8010` or `8011`.
+- Confirm API live/ready, Streamlit health, Caddy admin health, scheduler
+  heartbeat, and current runtime log freshness.
+- Confirm scheduler metrics show `scheduler_running=true`, recent
+  `last_heartbeat`, and a fresh `quarter_hour_job` observation after boot once
+  the next scheduled quarter-hour run has had time to execute.
+- Confirm tracked root `Caddyfile` and runtime
+  `C:\Program Files\Caddy\Caddyfile` still have matching SHA-256 hashes, then
+  validate runtime Caddy config.
+- Verify local Caddy hostname routing with SNI/Host routing if direct public
+  hostname requests from the workstation still time out.
+- Log in to `https://monitoring.armexholding.cz` without printing cookie or
+  token values.
+- Open `Health systemu` and confirm the `Scheduler` block displays live data
+  and no traceback.
+- Exercise `GET /health/system/scheduler` through the dashboard/API path and
+  check only safe status fields, heartbeat metadata, 24h totals, and job
+  summary statuses.
+- Re-run targeted tests:
+  `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_api_authorization_regression.py
+  tests\test_dashboard_navigation_config.py
+  tests\test_dashboard_responsive.py -q --tb=short`
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- Current changes are uncommitted and depend on the working tree being
+  preserved across restart.
+- The new FastAPI scheduler route will not exist in runtime until the startup
+  task has restarted the API process from the current working tree.
+- Immediately after boot, `quarter_hour_job` may not yet have a post-boot
+  observation until its next scheduled minute runs.
+- Direct public hostname reachability from the workstation may still require
+  local Caddy Host/SNI verification through loopback.
+- The current scheduled-task account remains broader than least privilege.
+- The launcher does not independently restart a child process that fails after
+  startup.
+
+### 2026-07-07 12:00 +02:00 - Active pre-restart marker
+
+Use the detailed handoff `2026-07-07 11:57 +02:00 - Pre-restart handoff after
+monthly_job fix` as the current pre-restart state. It records the active dirty
+working tree, the `monthly_job` fix, the pending `Health systemu` scheduler
+runtime reload, expected post-restart processes/listeners, sensitive-artifact
+constraints, and exact post-restart verification steps.
+
+### 2026-07-07 12:50 +02:00 - Pre-restart handoff after Scheduler Health manual-run guard
+
+Reason for restart:
+- Reload FastAPI, Streamlit, scheduler, and Caddy through the normal startup
+  task after the post-restart checks and the latest `Health scheduleru` UI
+  hardening.
+- Activate the new Streamlit `Health scheduleru` manual-run confirmation guard
+  in the running dashboard process.
+
+Current task/conversation state:
+- Completed: post-restart runtime verification after the `monthly_job` fix and
+  `Health systemu` scheduler API work.
+- Completed: confirmed FastAPI `/health/system/scheduler` is registered in the
+  running API by returning HTTP 401 without bearer token.
+- Completed: confirmed scheduler heartbeat after boot and a post-boot
+  `quarter_hour_job` success.
+- Completed: confirmed the monthly vodomery consumption dataframe for
+  reference date `2026-07-07` builds June 2026 aggregates from the measurement
+  table with `row_count=58`, `with_consumption=58`, `missing_start=0`, and
+  `missing_end=0`.
+- Completed: added a `Health scheduleru` UI guard that labels manual-run
+  impact and requires an explicit checkbox before running scheduled jobs,
+  import/sync/scoring/report/email-like steps, while leaving low-risk checks
+  such as `check_database_availability` available without extra confirmation.
+- Pending: restart workstation, then verify the updated `Health scheduleru`
+  page in an authenticated browser session.
+- Pending: only after deliberate operator confirmation, use a low-risk manual
+  target such as `check_database_availability` to verify the manual-run
+  progress/log panel. Do not run data-changing or email/report jobs casually.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and
+  `SESSION_NOTES.md`; run `git status --short --untracked-files=all`; then run
+  the post-restart checks below.
+
+Working tree and deployment:
+- Current time captured before restart: `2026-07-07 12:50:30 +02:00`.
+- Branch: `master`.
+- `HEAD`: `9e94e13c257a55cda85b61ac259b6bc28580c801`.
+- No git commit was created for this handoff.
+- `git status --short --untracked-files=all` before this handoff:
+  - `M SESSION_NOTES.md`
+  - `M moduly/apps/dashboard/api_client.py`
+  - `M moduly/apps/dashboard/pages/16_scheduler_health.py`
+  - `M moduly/apps/dashboard/pages/37_system_health.py`
+  - `M moduly/mereni/vodomery/reporting/monthly_consumption_report.py`
+  - `M services/api/routes/system_health.py`
+  - `M services/api/schemas/admin.py`
+  - `M services/api/services/system_health.py`
+  - `M tests/test_api_authorization_regression.py`
+  - `M tests/test_system_health.py`
+  - `?? moduly/apps/dashboard/scheduler_health_view.py`
+  - `?? tests/test_dashboard_scheduler_health_view.py`
+  - `?? tests/test_monthly_consumption_report.py`
+- Files changed by the latest `Health scheduleru` guard:
+  - `moduly/apps/dashboard/pages/16_scheduler_health.py`
+  - `moduly/apps/dashboard/scheduler_health_view.py`
+  - `tests/test_dashboard_scheduler_health_view.py`
+- Files already changed by preceding `Health systemu` scheduler work:
+  - `moduly/apps/dashboard/api_client.py`
+  - `moduly/apps/dashboard/pages/37_system_health.py`
+  - `services/api/routes/system_health.py`
+  - `services/api/schemas/admin.py`
+  - `services/api/services/system_health.py`
+  - `tests/test_api_authorization_regression.py`
+  - `tests/test_system_health.py`
+  - `SESSION_NOTES.md`
+- Files already changed by the monthly-job fix:
+  - `moduly/mereni/vodomery/reporting/monthly_consumption_report.py`
+  - `tests/test_monthly_consumption_report.py`
+- Runtime deployment state: the current running Streamlit process was started
+  before the latest `Health scheduleru` guard and may not show the new
+  checkbox/impact UI until this restart. The running FastAPI process already
+  exposes `/health/system/scheduler`.
+- Tracked root `Caddyfile` SHA-256 before restart:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Runtime `C:\Program Files\Caddy\Caddyfile` SHA-256 before restart:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Root/runtime Caddyfile hashes match, and runtime Caddy validation reported
+  `Valid configuration`.
+- Startup task `API_dashboard_caddy` last ran at `2026-07-07 12:03:40 +02:00`
+  with result `0`.
+- Existing listener state before restart:
+  - Caddy owns TCP `80`, `443`, and `127.0.0.1:2019`, PID `10988`.
+  - FastAPI listens on `127.0.0.1:8000`, PID `9988`.
+  - Streamlit listens on `127.0.0.1:8001`, PID `10892`.
+  - Tailscale owns expected interface-specific `443` listeners, PID `7200`.
+  - No listeners are present on temporary ports `8010` or `8011`.
+- Runtime health before restart:
+  - FastAPI `/health/live`: HTTP 200.
+  - FastAPI `/health/ready`: HTTP 200.
+  - Streamlit `/_stcore/health`: HTTP 200.
+  - Caddy admin `/config/`: HTTP 200.
+  - FastAPI `/health/system/scheduler` without bearer token: HTTP 401 JSON.
+- Scheduler metrics before restart:
+  - `scheduler_running=True`.
+  - `last_heartbeat=2026-07-07T12:48:46.140735`.
+  - `quarter_hour_job` last run `2026-07-07T12:47:09.002516`, status
+    `success`, next run `2026-07-07T13:05:05+02:00`.
+  - Metrics currently contain 42 job/internal-step records.
+
+Verification already run:
+- `.venv\Scripts\python.exe -m pytest tests\test_monthly_consumption_report.py
+  tests\test_scheduler.py::test_monthly_job_calls_all_monthly_reports
+  tests\test_system_health.py tests\test_api_authorization_regression.py
+  tests\test_dashboard_navigation_config.py tests\test_dashboard_responsive.py
+  -q --tb=short` reported `209 passed`.
+- `.venv\Scripts\python.exe -m pytest tests\test_dashboard_scheduler_health_view.py
+  tests\test_dashboard_scheduler_log_view.py tests\test_scheduler_metrics.py
+  tests\test_dashboard_navigation_config.py -q --tb=short` reported
+  `38 passed`.
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\apps\dashboard\scheduler_health_view.py
+  moduly\apps\dashboard\pages\16_scheduler_health.py
+  tests\test_dashboard_scheduler_health_view.py` passed.
+- `.venv-production\Scripts\python.exe -m py_compile
+  moduly\apps\dashboard\scheduler_health_view.py
+  moduly\apps\dashboard\pages\16_scheduler_health.py` passed.
+- Read-only monthly dataframe check for period `2026-06-01T00:00:00` to
+  `2026-07-01T00:00:00` returned `row_count=58`, `with_consumption=58`,
+  `missing_start=0`, and `missing_end=0`.
+- `git diff --check` reported no whitespace errors, only expected LF-to-CRLF
+  warnings.
+
+Sensitive/runtime artifacts:
+- Do not print, read, delete, revert, stage, or commit raw values from ignored
+  local `.env`, dashboard/API tokens, passwords, cookies, authentication audit
+  logs, ProgramData security artifacts, local leftover SmartFuelPass session
+  JSON files, or protected API response bodies.
+- Do not print raw SmartFuelPass portal data, raw device photo filesystem
+  paths, process command lines, environment variables, bearer tokens, dashboard
+  session cookie values, or raw meter/source rows.
+- Do not create a production code-integrity baseline from this dirty working
+  tree unless the user explicitly approves that exact state.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and its
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP `80`/`443` and admin `127.0.0.1:2019`.
+- Tailscale interface-specific `443` listeners may remain in addition.
+- No listener should remain on temporary ports `8010` or `8011`.
+
+Expected application state after restart:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL is
+  available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- FastAPI `GET /health/system/runtime`, `/health/system/proxy`, and
+  `/health/system/scheduler` without bearer token: HTTP 401 JSON.
+- `Health systemu` dashboard page loads without traceback; `Runtime po
+  restartu`, `Proxy a routovani`, and `Scheduler` blocks display live data.
+- `Health scheduleru` page remains available and the manual-run table includes
+  the `dopad` column.
+- In `Health scheduleru`, selecting a high-impact target such as a scheduled
+  job, report/email step, import/sync/scoring step, or `sync_charge_sessions_to_db`
+  displays a warning and keeps `Spustit jednou` disabled until the confirmation
+  checkbox is checked.
+- In `Health scheduleru`, selecting low-risk `check_database_availability`
+  does not require the new confirmation checkbox.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- HTTPS dashboard through local Caddy hostname/SNI route: HTTP 200.
+- Protected API without bearer token: HTTP 401 JSON.
+- Map image without cookie: HTTP 401 JSON.
+- Public `/docs`, `/redoc`, and `/openapi.json`: HTTP 404 at Caddy layer.
+- Public response security headers remain present on the local Caddy hostname
+  path: HSTS, `nosniff`, `Referrer-Policy`, `X-Frame-Options`,
+  `Permissions-Policy`, and CSP report-only; `Server` and `Via` absent.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task last run/result/settings, process tree,
+  listeners, and no temporary ports `8010` or `8011`.
+- Confirm API live/ready, Streamlit health, Caddy admin health, scheduler
+  heartbeat, and current runtime log freshness.
+- Confirm scheduler metrics show `scheduler_running=true`, recent
+  `last_heartbeat`, and a fresh `quarter_hour_job` observation after boot once
+  the next scheduled quarter-hour run has had time to execute.
+- Confirm tracked root `Caddyfile` and runtime
+  `C:\Program Files\Caddy\Caddyfile` still have matching SHA-256 hashes, then
+  validate runtime Caddy config.
+- Verify local Caddy hostname routing with SNI/Host routing if direct public
+  hostname requests from the workstation still time out.
+- Log in to `https://monitoring.armexholding.cz` without printing cookie or
+  token values.
+- Open `Health systemu` and confirm the `Scheduler` block displays live data
+  and no traceback.
+- Open `Health scheduleru` and confirm the new manual-run `dopad` column and
+  checkbox behavior for both high-impact and low-risk targets.
+- If manually testing the progress/log panel, prefer `check_database_availability`
+  and do not run data-changing or email/report targets without explicit
+  operator confirmation.
+- Re-run targeted tests:
+  `.venv\Scripts\python.exe -m pytest tests\test_dashboard_scheduler_health_view.py
+  tests\test_dashboard_scheduler_log_view.py tests\test_scheduler_metrics.py
+  tests\test_dashboard_navigation_config.py tests\test_monthly_consumption_report.py
+  tests\test_scheduler.py::test_monthly_job_calls_all_monthly_reports
+  tests\test_system_health.py tests\test_api_authorization_regression.py
+  tests\test_dashboard_responsive.py -q --tb=short`
+- Run the read-only monthly dataframe check for reference date `2026-07-07`
+  and confirm aggregate output remains `row_count=58`,
+  `with_consumption=58`, `missing_start=0`, and `missing_end=0` unless new
+  data changed since this handoff.
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- Current changes are uncommitted and depend on the working tree being
+  preserved across restart.
+- The latest `Health scheduleru` guard will not be visible in the running
+  dashboard until Streamlit restarts from the current working tree.
+- Immediately after boot, `quarter_hour_job` may not yet have a post-boot
+  observation until its next scheduled minute runs.
+- Direct public hostname reachability from the workstation may still require
+  local Caddy Host/SNI verification through loopback.
+- The current scheduled-task account remains broader than least privilege.
+- The launcher does not independently restart a child process that fails after
+  startup.

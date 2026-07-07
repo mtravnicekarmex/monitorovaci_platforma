@@ -15,6 +15,7 @@ from moduly.apps.dashboard.api_client import (
     DashboardApiError,
     get_system_proxy_health as api_get_system_proxy_health,
     get_system_runtime_health as api_get_system_runtime_health,
+    get_system_scheduler_health as api_get_system_scheduler_health,
 )
 from moduly.apps.dashboard.auth import get_auth_token, require_page_access
 
@@ -38,7 +39,7 @@ SYSTEM_HEALTH_SECTIONS = (
 
 
 SYSTEM_HEALTH_SECTIONS = tuple(
-    item for item in SYSTEM_HEALTH_SECTIONS if item[0] != "Proxy"
+    item for item in SYSTEM_HEALTH_SECTIONS if item[0] not in {"Proxy", "Scheduler"}
 )
 
 
@@ -64,6 +65,11 @@ def load_system_runtime_health(access_token: str) -> dict[str, object]:
 @st.cache_data(ttl=30)
 def load_system_proxy_health(access_token: str) -> dict[str, object]:
     return api_get_system_proxy_health(access_token)
+
+
+@st.cache_data(ttl=30)
+def load_system_scheduler_health(access_token: str) -> dict[str, object]:
+    return api_get_system_scheduler_health(access_token)
 
 
 def _parse_datetime(value: object) -> object:
@@ -95,6 +101,18 @@ def _format_timestamp(value: object) -> str:
 def _status_label(value: object) -> str:
     status = str(value or "error").lower()
     return STATUS_LABELS.get(status, status.upper())
+
+
+def _format_seconds(value: object) -> str:
+    if value in (None, ""):
+        return "-"
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if seconds < 60:
+        return f"{seconds:.0f} s"
+    return f"{seconds / 60:.1f} min"
 
 
 def _status_message(status: str) -> None:
@@ -167,6 +185,28 @@ def _proxy_headers_dataframe(rows: list[dict[str, object]]) -> pd.DataFrame:
     )
 
 
+def _scheduler_jobs_dataframe(rows: list[dict[str, object]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(
+        [
+            {
+                "stav": _status_label(row.get("status")),
+                "job": str(row.get("label") or row.get("job_id") or "-"),
+                "job_id": str(row.get("job_id") or "-"),
+                "posledni_stav": str(row.get("last_status") or "unknown"),
+                "posledni_beh": _format_timestamp(row.get("last_run")),
+                "dalsi_beh": _format_timestamp(row.get("next_run")),
+                "uspechy_24h": int(row.get("success_count_24h") or 0),
+                "chyby_24h": int(row.get("failure_count_24h") or 0),
+                "detail": str(row.get("detail") or "-"),
+            }
+            for row in rows
+        ]
+    )
+
+
 def _proxy_status_message(status: str) -> None:
     if status == "ok":
         st.success("Proxy a verejne routovani jsou v ocekavanem stavu.")
@@ -174,6 +214,17 @@ def _proxy_status_message(status: str) -> None:
         st.warning("Proxy check ma neuplna nebo nedostupna metadata.")
     else:
         st.error("Proxy check nasel neocekavanou verejnou odpoved nebo hlavicku.")
+
+
+def _scheduler_status_message(status: str, scheduler_running: bool) -> None:
+    if not scheduler_running:
+        st.error("Scheduler neposila aktualni heartbeat.")
+    elif status == "ok":
+        st.success("Scheduler heartbeat a metriky jobu jsou v ocekavanem stavu.")
+    elif status == "degraded":
+        st.warning("Scheduler bezi, ale nektere metriky vyzaduji kontrolu.")
+    else:
+        st.error("Scheduler health check nasel chybovy stav.")
 
 
 def _render_runtime_load_error(exc: DashboardApiError) -> None:
@@ -196,6 +247,16 @@ def _render_proxy_load_error(exc: DashboardApiError) -> None:
         return
 
     st.error("Nepodarilo se nacist proxy health.")
+    st.exception(exc)
+
+
+def _render_scheduler_load_error(exc: DashboardApiError) -> None:
+    if exc.status_code == 404:
+        st.warning("Scheduler system health endpoint zatim neni dostupny v bezicim API.")
+        st.caption("Po restartu nebo reloadu FastAPI se blok scheduler kontrol zacne plnit daty.")
+        return
+
+    st.error("Nepodarilo se nacist scheduler system health.")
     st.exception(exc)
 
 
@@ -309,6 +370,51 @@ def _render_proxy_section(access_token: str) -> None:
         st.dataframe(headers_dataframe, width="stretch", hide_index=True)
 
 
+def _render_scheduler_section(access_token: str) -> None:
+    st.subheader("Scheduler")
+    st.caption(
+        "Kontroluje heartbeat scheduleru a souhrnne metriky planovanych jobu. "
+        "Detailni logy a rucni spousteni zustavaji na strance Health scheduleru."
+    )
+
+    refresh_col, _spacer = st.columns([1, 4])
+    with refresh_col:
+        if st.button("Obnovit scheduler", width="stretch"):
+            load_system_scheduler_health.clear()
+            st.rerun()
+
+    try:
+        payload = load_system_scheduler_health(access_token)
+    except DashboardApiError as exc:
+        _render_scheduler_load_error(exc)
+        return
+
+    status = str(payload.get("status") or "error").lower()
+    scheduler_running = bool(payload.get("scheduler_running"))
+    jobs = [dict(row) for row in list(payload.get("jobs") or ())]
+    job_errors = sum(1 for row in jobs if str(row.get("status") or "error").lower() != "ok")
+
+    status_col, running_col, heartbeat_col, errors_col = st.columns(4)
+    status_col.metric("Celkovy stav", _status_label(status))
+    running_col.metric("Scheduler bezi", "ANO" if scheduler_running else "NE")
+    heartbeat_col.metric("Stari heartbeatu", _format_seconds(payload.get("heartbeat_age_seconds")))
+    errors_col.metric("Chyby 24h", str(payload.get("total_failure_count_24h") or 0))
+
+    st.caption(
+        f"Posledni kontrola API: {_format_timestamp(payload.get('checked_at'))} | "
+        f"posledni heartbeat: {_format_timestamp(payload.get('last_heartbeat'))} | "
+        f"TTL heartbeatu: {_format_seconds(payload.get('heartbeat_ttl_seconds'))} | "
+        f"joby mimo OK: {job_errors}"
+    )
+    _scheduler_status_message(status, scheduler_running)
+
+    jobs_dataframe = _scheduler_jobs_dataframe(jobs)
+    if jobs_dataframe.empty:
+        st.info("Backend nevratil zadne scheduler joby ke kontrole.")
+    else:
+        st.dataframe(jobs_dataframe, width="stretch", hide_index=True)
+
+
 def render_page() -> None:
     access_token = _require_access_token()
 
@@ -318,6 +424,8 @@ def render_page() -> None:
     _render_runtime_section(access_token)
     st.divider()
     _render_proxy_section(access_token)
+    st.divider()
+    _render_scheduler_section(access_token)
 
     st.divider()
     st.subheader("Další plánované kontroly")

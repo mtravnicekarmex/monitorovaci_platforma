@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from moduly.apps.dashboard.api_client import (
     DashboardApiError,
+    get_system_proxy_health as api_get_system_proxy_health,
     get_system_runtime_health as api_get_system_runtime_health,
 )
 from moduly.apps.dashboard.auth import get_auth_token, require_page_access
@@ -36,6 +37,11 @@ SYSTEM_HEALTH_SECTIONS = (
 )
 
 
+SYSTEM_HEALTH_SECTIONS = tuple(
+    item for item in SYSTEM_HEALTH_SECTIONS if item[0] != "Proxy"
+)
+
+
 STATUS_LABELS = {
     "ok": "OK",
     "degraded": "VAROVÁNÍ",
@@ -53,6 +59,11 @@ def _require_access_token() -> str:
 @st.cache_data(ttl=30)
 def load_system_runtime_health(access_token: str) -> dict[str, object]:
     return api_get_system_runtime_health(access_token)
+
+
+@st.cache_data(ttl=30)
+def load_system_proxy_health(access_token: str) -> dict[str, object]:
+    return api_get_system_proxy_health(access_token)
 
 
 def _parse_datetime(value: object) -> object:
@@ -115,6 +126,56 @@ def _listener_dataframe(rows: list[dict[str, object]]) -> pd.DataFrame:
     )
 
 
+def _proxy_routes_dataframe(rows: list[dict[str, object]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(
+        [
+            {
+                "stav": _status_label(row.get("status")),
+                "kontrola": str(row.get("label") or row.get("key") or "-"),
+                "metoda": str(row.get("method") or "-"),
+                "schema": str(row.get("scheme") or "-"),
+                "cesta": str(row.get("path") or "-"),
+                "ocekavano": row.get("expected_status_code"),
+                "skutecne": row.get("actual_status_code") or "-",
+                "content-type": str(row.get("actual_content_type") or "-"),
+                "location": str(row.get("actual_location") or "-"),
+                "detail": str(row.get("detail") or "-"),
+            }
+            for row in rows
+        ]
+    )
+
+
+def _proxy_headers_dataframe(rows: list[dict[str, object]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(
+        [
+            {
+                "stav": _status_label(row.get("status")),
+                "hlavicka": str(row.get("header_name") or row.get("key") or "-"),
+                "ocekavano": str(row.get("expected") or "-"),
+                "pritomno": "ANO" if bool(row.get("present")) else "NE",
+                "detail": str(row.get("detail") or "-"),
+            }
+            for row in rows
+        ]
+    )
+
+
+def _proxy_status_message(status: str) -> None:
+    if status == "ok":
+        st.success("Proxy a verejne routovani jsou v ocekavanem stavu.")
+    elif status == "degraded":
+        st.warning("Proxy check ma neuplna nebo nedostupna metadata.")
+    else:
+        st.error("Proxy check nasel neocekavanou verejnou odpoved nebo hlavicku.")
+
+
 def _render_runtime_load_error(exc: DashboardApiError) -> None:
     if exc.status_code == 404:
         st.warning("Runtime health endpoint zatím není dostupný v běžícím API.")
@@ -125,6 +186,16 @@ def _render_runtime_load_error(exc: DashboardApiError) -> None:
         return
 
     st.error("Nepodařilo se načíst runtime health.")
+    st.exception(exc)
+
+
+def _render_proxy_load_error(exc: DashboardApiError) -> None:
+    if exc.status_code == 404:
+        st.warning("Proxy health endpoint zatim neni dostupny v bezicim API.")
+        st.caption("Po restartu nebo reloadu FastAPI se blok proxy kontrol zacne plnit daty.")
+        return
+
+    st.error("Nepodarilo se nacist proxy health.")
     st.exception(exc)
 
 
@@ -188,6 +259,56 @@ def _render_runtime_section(access_token: str) -> None:
         st.dataframe(temporary_dataframe, width="stretch", hide_index=True)
 
 
+def _render_proxy_section(access_token: str) -> None:
+    st.subheader("Proxy a routovani")
+    st.caption(
+        "Kontroluje lokalni Caddy hostname routing, blokovani dokumentacnich cest, "
+        "chranene API bez prihlaseni a verejne bezpecnostni hlavicky."
+    )
+
+    refresh_col, _spacer = st.columns([1, 4])
+    with refresh_col:
+        if st.button("Obnovit proxy", width="stretch"):
+            load_system_proxy_health.clear()
+            st.rerun()
+
+    try:
+        payload = load_system_proxy_health(access_token)
+    except DashboardApiError as exc:
+        _render_proxy_load_error(exc)
+        return
+
+    status = str(payload.get("status") or "error").lower()
+    routes = [dict(row) for row in list(payload.get("routes") or ())]
+    headers = [dict(row) for row in list(payload.get("headers") or ())]
+
+    route_errors = sum(1 for row in routes if str(row.get("status") or "error").lower() != "ok")
+    header_errors = sum(1 for row in headers if str(row.get("status") or "error").lower() != "ok")
+
+    status_col, host_col, route_col, header_col = st.columns(4)
+    status_col.metric("Celkovy stav", _status_label(status))
+    host_col.metric("Public host", str(payload.get("public_host") or "-"))
+    route_col.metric("Routy mimo OK", str(route_errors))
+    header_col.metric("Hlavicky mimo OK", str(header_errors))
+
+    st.caption(f"Posledni kontrola API: {_format_timestamp(payload.get('checked_at'))}")
+    _proxy_status_message(status)
+
+    st.markdown("**Verejne routy**")
+    routes_dataframe = _proxy_routes_dataframe(routes)
+    if routes_dataframe.empty:
+        st.info("Backend nevratil zadne proxy routy ke kontrole.")
+    else:
+        st.dataframe(routes_dataframe, width="stretch", hide_index=True)
+
+    st.markdown("**Bezpecnostni hlavicky**")
+    headers_dataframe = _proxy_headers_dataframe(headers)
+    if headers_dataframe.empty:
+        st.info("Backend nevratil zadne hlavicky ke kontrole.")
+    else:
+        st.dataframe(headers_dataframe, width="stretch", hide_index=True)
+
+
 def render_page() -> None:
     access_token = _require_access_token()
 
@@ -195,6 +316,8 @@ def render_page() -> None:
     st.caption("Admin přehled porestartových kontrol provozních částí platformy.")
 
     _render_runtime_section(access_token)
+    st.divider()
+    _render_proxy_section(access_token)
 
     st.divider()
     st.subheader("Další plánované kontroly")

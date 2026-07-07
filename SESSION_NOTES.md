@@ -7948,3 +7948,278 @@ Known risks or accepted gaps:
 - The current scheduled-task account remains broader than least privilege.
 - The launcher does not independently restart a child process that fails after
   startup.
+
+### 2026-07-07 07:56 +02:00 - Post-restart verification after Health systemu runtime check
+
+Scope:
+- Verified the production runtime after the 2026-07-07 workstation restart for
+  the new admin-only `Health systemu` runtime check.
+- Kept checks to safe statuses, timestamps, listener summaries, and test
+  results; no cookies, bearer tokens, credentials, raw process command lines,
+  environment values, portal rows, or device photo paths were printed.
+
+Verified:
+- `git status --short --untracked-files=all` was clean before this note was
+  appended.
+- Windows last boot time: `2026-07-07 07:43:38 +02:00`.
+- Startup scheduled task `API_dashboard_caddy` last ran at
+  `2026-07-07 07:43:49 +02:00` with result `0`.
+- Expected listeners are present: Caddy on `80`, `443`, and
+  `127.0.0.1:2019`; FastAPI on `127.0.0.1:8000`; Streamlit on
+  `127.0.0.1:8001`.
+- No listener was present on temporary ports `8010` or `8011`.
+- Additional `443` listeners on Tailscale addresses are owned by
+  `tailscaled.exe`, separate from the public Caddy listener.
+- API `/health/live` and `/health/ready`, Streamlit `/_stcore/health`, and
+  Caddy admin `/config/` returned HTTP 200.
+- `GET /health/system/runtime` without a bearer token returned HTTP 401 JSON,
+  confirming that the post-restart FastAPI route is registered instead of
+  returning the previous HTTP 404.
+- The user confirmed the `Health systemu` dashboard page appears without an
+  error after restart.
+- Local Caddy hostname routing via SNI/Host to `127.0.0.1` verified:
+  dashboard HTTP 200, `users-exist` HTTP 200, protected API without bearer
+  HTTP 401 JSON, map image without cookie HTTP 401 JSON, `/docs`, `/redoc`,
+  and `/openapi.json` HTTP 404, and HTTP-to-HTTPS redirect HTTP 308.
+- Public response security headers were present on the local Caddy hostname
+  path: HSTS, `nosniff`, `Referrer-Policy`, `X-Frame-Options`,
+  `Permissions-Policy`, and CSP report-only. `Server` and `Via` headers were
+  absent.
+- Tracked root `Caddyfile` and runtime
+  `C:\Program Files\Caddy\Caddyfile` have matching SHA-256 hashes, and
+  `caddy validate --config "C:\Program Files\Caddy\Caddyfile"` reported a
+  valid configuration.
+- `.venv-production` passed `pip check` and
+  `scripts/verify_production_environment.py`.
+- Scheduler metrics show `scheduler_running=true`, heartbeat
+  `2026-07-07T07:54:11.203611`, and `quarter_hour_job` success at
+  `2026-07-07T07:47:11.629926`, after the `07:43:38` boot.
+- Scheduler failure timestamp metrics were empty during this check.
+- Targeted tests passed:
+  `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_api_authorization_regression.py
+  tests\test_dashboard_navigation_config.py
+  tests\test_dashboard_responsive.py -q --tb=short` reported 196 passed.
+- `git diff --check` reported no whitespace errors before this note was
+  appended.
+
+Not verified:
+- A direct live HTTP 200 call to `GET /health/system/runtime` with an admin
+  bearer token was not made from the shell because the check intentionally did
+  not read or print dashboard cookies or bearer tokens.
+- A live non-admin HTTP 403 call to `GET /health/system/runtime` was not made;
+  this remains covered by the authorization regression tests.
+- Direct public hostname reachability through external DNS/NAT was not
+  re-tested from the workstation; routing was verified through local Caddy
+  SNI/Host resolution, and the user confirmed the dashboard page rendered.
+
+Decisions/notes:
+- The previous dashboard-visible `DashboardApiError: Not Found` state is
+  resolved after restart because the new FastAPI route is now registered.
+- No DECISION update is needed for this verification-only session.
+
+### 2026-07-07
+
+Scope:
+- Added the second incremental `Health systemu` check: proxy and public
+  routing health.
+- Kept the check backend-owned and admin-only; browser/Streamlit does not run
+  local shell, filesystem, or raw network probes directly.
+
+Changed:
+- Added admin API route `GET /health/system/proxy`.
+- Added sanitized Caddy proxy checks for local hostname routing through
+  `127.0.0.1` with the production Host/SNI value.
+- The proxy check verifies dashboard HTTP 200, public `users-exist` HTTP 200,
+  protected API without bearer HTTP 401, map image without cookie HTTP 401,
+  `/docs`, `/redoc`, and `/openapi.json` HTTP 404, and HTTP-to-HTTPS redirect
+  HTTP 308.
+- The proxy check verifies selected public response headers are present and
+  that `Server` and `Via` are absent, without returning response bodies.
+- Added dashboard API helper and a new `Proxy a routovani` block on
+  `Health systemu`.
+- Added service, route, and authorization tests for the new proxy endpoint.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile services\api\services\system_health.py
+  services\api\routes\system_health.py services\api\schemas\admin.py
+  moduly\apps\dashboard\api_client.py
+  moduly\apps\dashboard\pages\37_system_health.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_api_authorization_regression.py
+  tests\test_dashboard_navigation_config.py
+  tests\test_dashboard_responsive.py -q --tb=short` reported 201 passed.
+- Local collector call returned proxy `status=ok`; all expected route checks
+  and header checks were `ok`.
+- `git diff --check` reported no whitespace errors, only expected
+  LF-to-CRLF warnings.
+
+Not verified:
+- Live dashboard rendering of the new proxy block through the running FastAPI
+  process. The running production API must restart or reload before
+  `/health/system/proxy` is registered in that process.
+
+Decisions/notes:
+- No new durable decision was needed; this implements the already planned
+  second `Health systemu` check.
+
+### 2026-07-07 08:52 +02:00 - Pre-restart handoff after Health systemu proxy check
+
+Reason for restart:
+- Reload FastAPI, Streamlit, scheduler, and Caddy through the normal startup
+  task so the new admin endpoint `GET /health/system/proxy` is registered in
+  the running FastAPI process.
+- Allow the `Health systemu` dashboard page to load the new `Proxy a routovani`
+  block from the live API instead of showing the controlled "endpoint not
+  available yet" state.
+
+Current task/conversation state:
+- Completed: post-restart verification confirmed the first
+  `Health systemu` runtime block is live after the previous restart.
+- Completed: added the second `Health systemu` check for Caddy proxy routing
+  and public response headers.
+- Completed: added admin API route `GET /health/system/proxy` and response
+  schemas for route/header statuses.
+- Completed: added backend local Caddy Host/SNI checks through `127.0.0.1`
+  for dashboard, public auth bootstrap, protected API, map image auth,
+  documentation aliases, HTTP redirect, and selected public headers.
+- Completed: added dashboard API helper and the `Proxy a routovani` block on
+  `Health systemu`.
+- Completed: added system health and authorization regression tests.
+- Pending: restart workstation, then verify the running FastAPI process exposes
+  `/health/system/proxy` and the dashboard proxy block renders live data.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and
+  `SESSION_NOTES.md`; run `git status --short --untracked-files=all`; verify
+  runtime health, then test `Health systemu` runtime and proxy blocks.
+
+Working tree and deployment:
+- Current time captured before restart: `2026-07-07 08:52:09 +02:00`.
+- Branch: `master`.
+- `HEAD`: `cae679396fd1c0879d5aec919c1c7ca4660164d2`.
+- No git commit was created for this handoff.
+- `git status --short --untracked-files=all` before this handoff:
+  - `M SESSION_NOTES.md`
+  - `M moduly/apps/dashboard/api_client.py`
+  - `M moduly/apps/dashboard/pages/37_system_health.py`
+  - `M services/api/routes/system_health.py`
+  - `M services/api/schemas/admin.py`
+  - `M services/api/services/system_health.py`
+  - `M tests/test_api_authorization_regression.py`
+  - `M tests/test_system_health.py`
+- Files changed by the latest `Health systemu` proxy work:
+  - `moduly/apps/dashboard/api_client.py`
+  - `moduly/apps/dashboard/pages/37_system_health.py`
+  - `services/api/routes/system_health.py`
+  - `services/api/schemas/admin.py`
+  - `services/api/services/system_health.py`
+  - `tests/test_api_authorization_regression.py`
+  - `tests/test_system_health.py`
+  - `SESSION_NOTES.md`
+- Runtime deployment state: running FastAPI was not restarted after adding
+  `/health/system/proxy`; the new route may return HTTP 404 until the startup
+  task restarts the API process from the current working tree.
+- Tracked/runtime Caddyfile synchronization was not changed by this work.
+
+Verification already run:
+- `.venv\Scripts\python.exe -m py_compile services\api\services\system_health.py
+  services\api\routes\system_health.py services\api\schemas\admin.py
+  moduly\apps\dashboard\api_client.py
+  moduly\apps\dashboard\pages\37_system_health.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_api_authorization_regression.py
+  tests\test_dashboard_navigation_config.py
+  tests\test_dashboard_responsive.py -q --tb=short` reported 201 passed.
+- Local collector call returned proxy `status=ok`; route checks reported:
+  dashboard HTTP 200, `users-exist` HTTP 200, protected API without bearer
+  HTTP 401, map image without cookie HTTP 401, `/docs`, `/redoc`, and
+  `/openapi.json` HTTP 404, and HTTP-to-HTTPS redirect HTTP 308.
+- Local collector header checks reported HSTS, `nosniff`, `Referrer-Policy`,
+  `X-Frame-Options`, `Permissions-Policy`, and CSP report-only present, with
+  `Server` and `Via` absent.
+- `git diff --check` reported no whitespace errors, only expected
+  LF-to-CRLF warnings.
+
+Sensitive/runtime artifacts:
+- Do not print, read, delete, revert, stage, or commit raw values from ignored
+  local `.env`, dashboard/API tokens, passwords, cookies, authentication audit
+  logs, ProgramData security artifacts, or local leftover SmartFuelPass session
+  JSON files.
+- Do not print raw SmartFuelPass portal data, raw device photo filesystem paths,
+  process command lines, environment variables, bearer tokens, dashboard
+  session cookie values, or response bodies from protected API checks.
+- Do not create a production code-integrity baseline from this dirty working
+  tree unless the user explicitly approves that exact state.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and its
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP `80`/`443` and admin `127.0.0.1:2019`.
+- No listener should remain on temporary ports `8010` or `8011`.
+
+Expected application state after restart:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL is
+  available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- FastAPI `GET /health/system/runtime` without bearer token: HTTP 401 JSON,
+  proving the runtime route remains registered.
+- FastAPI `GET /health/system/proxy` without bearer token: HTTP 401 JSON,
+  proving the new proxy route is registered.
+- FastAPI `GET /health/system/proxy` with a valid admin bearer token:
+  HTTP 200 and safe JSON with `status`, `checked_at`, `public_host`, route
+  statuses, and header statuses.
+- Non-admin bearer token for `GET /health/system/proxy`: HTTP 403.
+- `Health systemu` dashboard page loads without traceback; `Runtime po
+  restartu` and `Proxy a routovani` blocks both display live data.
+- Proxy block expected values: overall `OK`, public host
+  `monitoring.armexholding.cz`, zero routes outside OK, zero headers outside
+  OK.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- HTTPS dashboard: HTTP 200.
+- Protected API without bearer token: HTTP 401 JSON.
+- Map image without cookie: HTTP 401 JSON.
+- Public `/docs`, `/redoc`, and `/openapi.json`: HTTP 404 at Caddy layer.
+- Public response security headers present on the local Caddy hostname path:
+  HSTS, `nosniff`, `Referrer-Policy`, `X-Frame-Options`,
+  `Permissions-Policy`, and CSP report-only; `Server` and `Via` absent.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task last run/result/settings, process tree,
+  listeners, and no temporary ports `8010` or `8011`.
+- Confirm API live/ready, Streamlit health, Caddy admin health, scheduler
+  heartbeat, and current runtime log freshness.
+- Confirm tracked root `Caddyfile` and runtime
+  `C:\Program Files\Caddy\Caddyfile` still have matching SHA-256 hashes, then
+  validate runtime Caddy config.
+- Verify local Caddy hostname routing with SNI/Host routing if direct public
+  hostname requests from the workstation still time out.
+- Log in to `https://monitoring.armexholding.cz` without printing cookie or
+  token values.
+- Open `Health systemu` and confirm the `Proxy a routovani` block displays
+  live data and no traceback.
+- Exercise `GET /health/system/proxy` through the dashboard/API path and check
+  only safe status fields, expected HTTP codes, and header presence summaries.
+- Re-run targeted tests:
+  `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_api_authorization_regression.py
+  tests\test_dashboard_navigation_config.py
+  tests\test_dashboard_responsive.py -q --tb=short`
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- Current changes are uncommitted and depend on the working tree being
+  preserved across restart.
+- The new FastAPI proxy route will not exist in runtime until the startup task
+  has restarted the API process from the current working tree.
+- Direct public hostname reachability from the workstation may still require
+  local Caddy Host/SNI verification through loopback.
+- The current scheduled-task account remains broader than least privilege.
+- The launcher does not independently restart a child process that fails after
+  startup.

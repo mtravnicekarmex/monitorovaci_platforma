@@ -2,13 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import http.client
 import json
 import platform
 import re
+import socket
+import ssl
 import subprocess
 from typing import Any
 
 from services.api.schemas.admin import (
+    SystemProxyHeaderStatus,
+    SystemProxyHealthResponse,
+    SystemProxyRouteStatus,
     SystemRuntimeBootStatus,
     SystemRuntimeHealthResponse,
     SystemRuntimeListenerStatus,
@@ -19,6 +25,9 @@ from services.api.schemas.admin import (
 STARTUP_TASK_NAME = "API_dashboard_caddy"
 RUNTIME_CHECK_PORTS = (80, 443, 2019, 8000, 8001, 8010, 8011)
 TEMPORARY_PORTS = (8010, 8011)
+PUBLIC_DASHBOARD_HOST = "monitoring.armexholding.cz"
+LOCAL_CADDY_HOST = "127.0.0.1"
+LOCAL_CADDY_TIMEOUT_SECONDS = 8
 
 
 @dataclass(frozen=True)
@@ -35,6 +44,155 @@ EXPECTED_LISTENERS = (
     ListenerExpectation("caddy_admin", "Caddy admin", 2019, "127.0.0.1"),
     ListenerExpectation("fastapi", "FastAPI", 8000, "127.0.0.1"),
     ListenerExpectation("streamlit", "Streamlit", 8001, "127.0.0.1"),
+)
+
+
+@dataclass(frozen=True)
+class ProxyRouteExpectation:
+    key: str
+    label: str
+    method: str
+    scheme: str
+    host: str
+    connect_host: str
+    local_port: int
+    path: str
+    expected_status_code: int
+    expected_content_type_prefix: str | None = None
+    expected_location: str | None = None
+
+
+@dataclass(frozen=True)
+class ProxyHeaderExpectation:
+    key: str
+    header_name: str
+    expected_present: bool
+    required_value: str | None = None
+    required_contains: str | None = None
+
+
+@dataclass(frozen=True)
+class LocalHttpResponse:
+    status_code: int
+    headers: dict[str, str]
+
+
+PROXY_ROUTE_EXPECTATIONS = (
+    ProxyRouteExpectation(
+        key="https_dashboard",
+        label="HTTPS dashboard",
+        method="GET",
+        scheme="https",
+        host=PUBLIC_DASHBOARD_HOST,
+        connect_host=LOCAL_CADDY_HOST,
+        local_port=443,
+        path="/",
+        expected_status_code=200,
+        expected_content_type_prefix="text/html",
+    ),
+    ProxyRouteExpectation(
+        key="users_exist",
+        label="Public auth bootstrap",
+        method="GET",
+        scheme="https",
+        host=PUBLIC_DASHBOARD_HOST,
+        connect_host=LOCAL_CADDY_HOST,
+        local_port=443,
+        path="/api/v1/auth/users-exist",
+        expected_status_code=200,
+        expected_content_type_prefix="application/json",
+    ),
+    ProxyRouteExpectation(
+        key="protected_api_no_bearer",
+        label="Protected API without bearer",
+        method="GET",
+        scheme="https",
+        host=PUBLIC_DASHBOARD_HOST,
+        connect_host=LOCAL_CADDY_HOST,
+        local_port=443,
+        path="/api/v1/auth/me",
+        expected_status_code=401,
+        expected_content_type_prefix="application/json",
+    ),
+    ProxyRouteExpectation(
+        key="map_image_no_cookie",
+        label="Map image without cookie",
+        method="GET",
+        scheme="https",
+        host=PUBLIC_DASHBOARD_HOST,
+        connect_host=LOCAL_CADDY_HOST,
+        local_port=443,
+        path="/api/v1/map/images?layer_id=healthcheck&device_id=healthcheck",
+        expected_status_code=401,
+        expected_content_type_prefix="application/json",
+    ),
+    ProxyRouteExpectation(
+        key="docs_blocked",
+        label="Docs blocked",
+        method="GET",
+        scheme="https",
+        host=PUBLIC_DASHBOARD_HOST,
+        connect_host=LOCAL_CADDY_HOST,
+        local_port=443,
+        path="/docs",
+        expected_status_code=404,
+    ),
+    ProxyRouteExpectation(
+        key="redoc_blocked",
+        label="Redoc blocked",
+        method="GET",
+        scheme="https",
+        host=PUBLIC_DASHBOARD_HOST,
+        connect_host=LOCAL_CADDY_HOST,
+        local_port=443,
+        path="/redoc",
+        expected_status_code=404,
+    ),
+    ProxyRouteExpectation(
+        key="openapi_blocked",
+        label="OpenAPI blocked",
+        method="GET",
+        scheme="https",
+        host=PUBLIC_DASHBOARD_HOST,
+        connect_host=LOCAL_CADDY_HOST,
+        local_port=443,
+        path="/openapi.json",
+        expected_status_code=404,
+    ),
+    ProxyRouteExpectation(
+        key="http_redirect",
+        label="HTTP to HTTPS redirect",
+        method="GET",
+        scheme="http",
+        host=PUBLIC_DASHBOARD_HOST,
+        connect_host=LOCAL_CADDY_HOST,
+        local_port=80,
+        path="/",
+        expected_status_code=308,
+        expected_location=f"https://{PUBLIC_DASHBOARD_HOST}/",
+    ),
+)
+
+
+PROXY_HEADER_EXPECTATIONS = (
+    ProxyHeaderExpectation("hsts", "Strict-Transport-Security", True),
+    ProxyHeaderExpectation("nosniff", "X-Content-Type-Options", True, required_value="nosniff"),
+    ProxyHeaderExpectation(
+        "referrer_policy",
+        "Referrer-Policy",
+        True,
+        required_value="strict-origin-when-cross-origin",
+    ),
+    ProxyHeaderExpectation("x_frame_options", "X-Frame-Options", True, required_value="SAMEORIGIN"),
+    ProxyHeaderExpectation(
+        "permissions_policy",
+        "Permissions-Policy",
+        True,
+        required_contains="geolocation=(self)",
+    ),
+    ProxyHeaderExpectation("csp_report_only", "Content-Security-Policy-Report-Only", True),
+    ProxyHeaderExpectation("server", "Server", False),
+    ProxyHeaderExpectation("via", "Via", False),
 )
 
 
@@ -303,6 +461,158 @@ def _build_temporary_listener_statuses(rows: list[dict[str, Any]]) -> list[Syste
     return statuses
 
 
+def _request_local_host(
+    expectation: ProxyRouteExpectation,
+    *,
+    timeout_seconds: int = LOCAL_CADDY_TIMEOUT_SECONDS,
+) -> LocalHttpResponse:
+    connection = http.client.HTTPConnection(
+        expectation.host,
+        expectation.local_port,
+        timeout=timeout_seconds,
+    )
+    pending_socket: socket.socket | ssl.SSLSocket | None = None
+
+    try:
+        pending_socket = socket.create_connection(
+            (expectation.connect_host, expectation.local_port),
+            timeout=timeout_seconds,
+        )
+        if expectation.scheme == "https":
+            pending_socket = ssl.create_default_context().wrap_socket(
+                pending_socket,
+                server_hostname=expectation.host,
+            )
+
+        connection.sock = pending_socket
+        pending_socket = None
+        connection.request(
+            expectation.method,
+            expectation.path,
+            headers={
+                "Host": expectation.host,
+                "Accept": "*/*",
+                "User-Agent": "monitoring-system-health",
+            },
+        )
+        response = connection.getresponse()
+        headers = {name.lower(): value for name, value in response.getheaders()}
+        response.read(1024)
+        return LocalHttpResponse(status_code=int(response.status), headers=headers)
+    except (OSError, TimeoutError, ssl.SSLError, http.client.HTTPException) as exc:
+        raise SystemHealthProbeError("Local Caddy request failed.") from exc
+    finally:
+        if pending_socket is not None:
+            pending_socket.close()
+        connection.close()
+
+
+def _build_proxy_route_status(expectation: ProxyRouteExpectation) -> SystemProxyRouteStatus:
+    try:
+        response = _request_local_host(expectation)
+    except SystemHealthProbeError:
+        return SystemProxyRouteStatus(
+            key=expectation.key,
+            label=expectation.label,
+            status="error",
+            method=expectation.method,
+            scheme=expectation.scheme,
+            host=expectation.host,
+            path=expectation.path,
+            expected_status_code=expectation.expected_status_code,
+            expected_content_type_prefix=expectation.expected_content_type_prefix,
+            expected_location=expectation.expected_location,
+            detail="Local Caddy route request failed.",
+        )
+
+    details: list[str] = []
+    content_type = response.headers.get("content-type")
+    location = response.headers.get("location")
+
+    if response.status_code != expectation.expected_status_code:
+        details.append("Unexpected HTTP status.")
+    if expectation.expected_content_type_prefix:
+        expected_prefix = expectation.expected_content_type_prefix.lower()
+        if not content_type or not content_type.lower().startswith(expected_prefix):
+            details.append("Unexpected content type.")
+    if expectation.expected_location is not None and location != expectation.expected_location:
+        details.append("Unexpected redirect location.")
+
+    status = "error" if details else "ok"
+    return SystemProxyRouteStatus(
+        key=expectation.key,
+        label=expectation.label,
+        status=status,
+        method=expectation.method,
+        scheme=expectation.scheme,
+        host=expectation.host,
+        path=expectation.path,
+        expected_status_code=expectation.expected_status_code,
+        actual_status_code=response.status_code,
+        expected_content_type_prefix=expectation.expected_content_type_prefix,
+        actual_content_type=content_type,
+        expected_location=expectation.expected_location,
+        actual_location=location,
+        detail="; ".join(details) if details else "Route returned the expected response.",
+    )
+
+
+def _header_lookup(headers: dict[str, str], header_name: str) -> str | None:
+    return headers.get(header_name.lower())
+
+
+def _build_proxy_header_statuses() -> list[SystemProxyHeaderStatus]:
+    probe_expectation = PROXY_ROUTE_EXPECTATIONS[0]
+    try:
+        response = _request_local_host(probe_expectation)
+    except SystemHealthProbeError:
+        return [
+            SystemProxyHeaderStatus(
+                key=expectation.key,
+                header_name=expectation.header_name,
+                status="error",
+                expected="present" if expectation.expected_present else "absent",
+                present=False,
+                detail="Header probe request failed.",
+            )
+            for expectation in PROXY_HEADER_EXPECTATIONS
+        ]
+
+    statuses: list[SystemProxyHeaderStatus] = []
+    for expectation in PROXY_HEADER_EXPECTATIONS:
+        value = _header_lookup(response.headers, expectation.header_name)
+        present = value is not None
+        details: list[str] = []
+        if expectation.expected_present and not present:
+            details.append("Expected header is missing.")
+        elif not expectation.expected_present and present:
+            details.append("Header should be stripped.")
+        elif expectation.required_value is not None and value is not None:
+            if value.lower() != expectation.required_value.lower():
+                details.append("Header value does not match the expected policy.")
+        elif expectation.required_contains is not None and value is not None:
+            if expectation.required_contains.lower() not in value.lower():
+                details.append("Header value does not contain the expected policy.")
+
+        statuses.append(
+            SystemProxyHeaderStatus(
+                key=expectation.key,
+                header_name=expectation.header_name,
+                status="error" if details else "ok",
+                expected="present" if expectation.expected_present else "absent",
+                present=present,
+                detail="; ".join(details)
+                if details
+                else (
+                    "Header is present with the expected policy."
+                    if expectation.expected_present
+                    else "Header is absent as expected."
+                ),
+            )
+        )
+    return statuses
+
+
 def collect_system_runtime_health() -> SystemRuntimeHealthResponse:
     checked_at = datetime.now().astimezone()
     boot = _read_windows_boot_time()
@@ -326,4 +636,24 @@ def collect_system_runtime_health() -> SystemRuntimeHealthResponse:
         startup_task=startup_task,
         expected_listeners=expected_listeners,
         temporary_listeners=temporary_listeners,
+    )
+
+
+def collect_system_proxy_health() -> SystemProxyHealthResponse:
+    checked_at = datetime.now().astimezone()
+    routes = [_build_proxy_route_status(expectation) for expectation in PROXY_ROUTE_EXPECTATIONS]
+    headers = _build_proxy_header_statuses()
+
+    status = _worst_status(
+        [
+            *(item.status for item in routes),
+            *(item.status for item in headers),
+        ]
+    )
+    return SystemProxyHealthResponse(
+        status=status,
+        checked_at=checked_at,
+        public_host=PUBLIC_DASHBOARD_HOST,
+        routes=routes,
+        headers=headers,
     )

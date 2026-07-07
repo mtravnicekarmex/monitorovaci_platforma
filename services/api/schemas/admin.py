@@ -214,3 +214,37 @@ class SystemRuntimeHealthResponse(BaseModel):
     startup_task: SystemRuntimeStartupTaskStatus
     expected_listeners: list[SystemRuntimeListenerStatus]
     temporary_listeners: list[SystemRuntimeListenerStatus]
+
+
+class SystemProxyRouteStatus(BaseModel):
+    key: str
+    label: str
+    status: str = Field(..., pattern="^(ok|degraded|error)$")
+    method: str
+    scheme: str
+    host: str
+    path: str
+    expected_status_code: int = Field(ge=100, le=599)
+    actual_status_code: int | None = Field(default=None, ge=100, le=599)
+    expected_content_type_prefix: str | None = None
+    actual_content_type: str | None = None
+    expected_location: str | None = None
+    actual_location: str | None = None
+    detail: str
+
+
+class SystemProxyHeaderStatus(BaseModel):
+    key: str
+    header_name: str
+    status: str = Field(..., pattern="^(ok|degraded|error)$")
+    expected: str = Field(..., pattern="^(present|absent)$")
+    present: bool
+    detail: str
+
+
+class SystemProxyHealthResponse(BaseModel):
+    status: str = Field(..., pattern="^(ok|degraded|error)$")
+    checked_at: datetime
+    public_host: str
+    routes: list[SystemProxyRouteStatus]
+    headers: list[SystemProxyHeaderStatus]

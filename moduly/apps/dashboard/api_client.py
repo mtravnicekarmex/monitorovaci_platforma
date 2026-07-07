@@ -408,6 +408,15 @@ def get_system_runtime_health(access_token: str) -> dict[str, object]:
     return dict(response.json())
 
 
+def get_system_proxy_health(access_token: str) -> dict[str, object]:
+    response = _request(
+        "GET",
+        "/health/system/proxy",
+        access_token=access_token,
+    )
+    return dict(response.json())
+
+
 def get_scheduler_log(
     access_token: str,
     *,

@@ -7,6 +7,8 @@ from core.scheduler.job_schedule import get_scheduler_job_specs
 from core.scheduler.metrics import JobMetrics
 from services.api.routes import system_health as system_health_route
 from services.api.schemas.admin import (
+    SystemDatabaseHealthResponse,
+    SystemPostgresConnectionStatus,
     SystemSchedulerHealthResponse,
     SystemProxyHealthResponse,
     SystemRuntimeBootStatus,
@@ -226,6 +228,113 @@ def test_collect_system_proxy_health_reports_unexpected_route_and_header(monkeyp
     assert headers_by_key["server"].present is True
 
 
+class _FakeMappingResult:
+    def __init__(self, *, one=None, all_rows=None):
+        self._one = one
+        self._all_rows = all_rows or []
+
+    def one(self):
+        return self._one
+
+    def all(self):
+        return self._all_rows
+
+
+class _FakeResult:
+    def __init__(self, *, one=None, all_rows=None):
+        self._mapping_result = _FakeMappingResult(one=one, all_rows=all_rows)
+
+    def mappings(self):
+        return self._mapping_result
+
+
+class _FakePostgresSession:
+    def __init__(self, *, metadata, schema_rows):
+        self.metadata = metadata
+        self.schema_rows = schema_rows
+        self.closed = False
+
+    def execute(self, statement):
+        statement_text = str(statement)
+        if "CURRENT_TIMESTAMP" in statement_text:
+            return _FakeResult(one=self.metadata)
+        if "pg_namespace" in statement_text:
+            return _FakeResult(all_rows=self.schema_rows)
+        raise AssertionError(f"Unexpected SQL: {statement_text}")
+
+    def close(self):
+        self.closed = True
+
+
+def _postgres_metadata(*, read_only: str = "off") -> dict[str, object]:
+    return {
+        "server_time": datetime(2026, 7, 7, 7, 0),
+        "server_timezone": "UTC",
+        "server_version": "16.3",
+        "transaction_read_only": read_only,
+    }
+
+
+def _postgres_schema_rows(*, omit_schema: str | None = None) -> list[dict[str, object]]:
+    return [
+        {"schema_name": schema_name, "table_count": index + 1}
+        for index, schema_name in enumerate(system_health.EXPECTED_POSTGRES_SCHEMAS)
+        if schema_name != omit_schema
+    ]
+
+
+def test_collect_system_database_health_reports_ok(monkeypatch):
+    session = _FakePostgresSession(
+        metadata=_postgres_metadata(),
+        schema_rows=_postgres_schema_rows(),
+    )
+    monkeypatch.setattr(system_health, "get_session_pg", lambda: session)
+
+    response = system_health.collect_system_database_health()
+
+    assert response.status == "ok"
+    assert response.postgres.connected is True
+    assert response.postgres.status == "ok"
+    assert response.postgres.transaction_read_only is False
+    assert response.postgres.latency_ms is not None
+    assert {schema.schema_name: schema.present for schema in response.expected_schemas} == {
+        schema_name: True for schema_name in system_health.EXPECTED_POSTGRES_SCHEMAS
+    }
+    assert session.closed is True
+
+
+def test_collect_system_database_health_reports_read_only_and_missing_schema(monkeypatch):
+    session = _FakePostgresSession(
+        metadata=_postgres_metadata(read_only="on"),
+        schema_rows=_postgres_schema_rows(omit_schema="web_search"),
+    )
+    monkeypatch.setattr(system_health, "get_session_pg", lambda: session)
+
+    response = system_health.collect_system_database_health()
+    schemas_by_name = {schema.schema_name: schema for schema in response.expected_schemas}
+
+    assert response.status == "error"
+    assert response.postgres.status == "error"
+    assert response.postgres.transaction_read_only is True
+    assert schemas_by_name["web_search"].status == "error"
+    assert schemas_by_name["web_search"].present is False
+    assert session.closed is True
+
+
+def test_collect_system_database_health_reports_connection_failure(monkeypatch):
+    def fail_session():
+        raise system_health.SQLAlchemyError("database unavailable")
+
+    monkeypatch.setattr(system_health, "get_session_pg", fail_session)
+
+    response = system_health.collect_system_database_health()
+
+    assert response.status == "error"
+    assert response.postgres.connected is False
+    assert response.postgres.latency_ms is None
+    assert all(schema.status == "degraded" for schema in response.expected_schemas)
+
+
 def _fake_scheduler_jobs(
     *,
     reference_time: datetime,
@@ -391,6 +500,35 @@ def test_system_scheduler_health_route_delegates_to_service(monkeypatch):
     )
 
     response = system_health_route.get_system_scheduler_health(
+        current_user=SimpleNamespace(is_admin=True)
+    )
+
+    assert response is expected
+
+
+def test_system_database_health_route_delegates_to_service(monkeypatch):
+    expected = SystemDatabaseHealthResponse(
+        status="ok",
+        checked_at=datetime(2026, 7, 7, 7, 0),
+        postgres=SystemPostgresConnectionStatus(
+            status="ok",
+            connected=True,
+            latency_ms=2.5,
+            server_time=datetime(2026, 7, 7, 7, 0),
+            server_timezone="UTC",
+            server_version="16.3",
+            transaction_read_only=False,
+            detail="ok",
+        ),
+        expected_schemas=[],
+    )
+    monkeypatch.setattr(
+        system_health_route,
+        "collect_system_database_health",
+        lambda: expected,
+    )
+
+    response = system_health_route.get_system_database_health(
         current_user=SimpleNamespace(is_admin=True)
     )
 

@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from moduly.apps.dashboard.api_client import (
     DashboardApiError,
+    get_system_database_health as api_get_system_database_health,
     get_system_proxy_health as api_get_system_proxy_health,
     get_system_runtime_health as api_get_system_runtime_health,
     get_system_scheduler_health as api_get_system_scheduler_health,
@@ -39,7 +40,7 @@ SYSTEM_HEALTH_SECTIONS = (
 
 
 SYSTEM_HEALTH_SECTIONS = tuple(
-    item for item in SYSTEM_HEALTH_SECTIONS if item[0] not in {"Proxy", "Scheduler"}
+    item for item in SYSTEM_HEALTH_SECTIONS if item[0] not in {"Proxy", "Scheduler", "Databáze"}
 )
 
 
@@ -70,6 +71,11 @@ def load_system_proxy_health(access_token: str) -> dict[str, object]:
 @st.cache_data(ttl=30)
 def load_system_scheduler_health(access_token: str) -> dict[str, object]:
     return api_get_system_scheduler_health(access_token)
+
+
+@st.cache_data(ttl=30)
+def load_system_database_health(access_token: str) -> dict[str, object]:
+    return api_get_system_database_health(access_token)
 
 
 def _parse_datetime(value: object) -> object:
@@ -113,6 +119,23 @@ def _format_seconds(value: object) -> str:
     if seconds < 60:
         return f"{seconds:.0f} s"
     return f"{seconds / 60:.1f} min"
+
+
+def _format_milliseconds(value: object) -> str:
+    if value in (None, ""):
+        return "-"
+    try:
+        return f"{float(value):.1f} ms"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _format_bool(value: object) -> str:
+    if value is True:
+        return "ANO"
+    if value is False:
+        return "NE"
+    return "-"
 
 
 def _status_message(status: str) -> None:
@@ -207,6 +230,24 @@ def _scheduler_jobs_dataframe(rows: list[dict[str, object]]) -> pd.DataFrame:
     )
 
 
+def _postgres_schema_dataframe(rows: list[dict[str, object]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(
+        [
+            {
+                "stav": _status_label(row.get("status")),
+                "schema": str(row.get("schema_name") or "-"),
+                "pritomno": "ANO" if bool(row.get("present")) else "NE",
+                "pocet_tabulek": row.get("table_count") if row.get("table_count") is not None else "-",
+                "detail": str(row.get("detail") or "-"),
+            }
+            for row in rows
+        ]
+    )
+
+
 def _proxy_status_message(status: str) -> None:
     if status == "ok":
         st.success("Proxy a verejne routovani jsou v ocekavanem stavu.")
@@ -225,6 +266,15 @@ def _scheduler_status_message(status: str, scheduler_running: bool) -> None:
         st.warning("Scheduler bezi, ale nektere metriky vyzaduji kontrolu.")
     else:
         st.error("Scheduler health check nasel chybovy stav.")
+
+
+def _database_status_message(status: str) -> None:
+    if status == "ok":
+        st.success("PostgreSQL je dostupny a ocekavana schemata jsou pritomna.")
+    elif status == "degraded":
+        st.warning("PostgreSQL check ma neuplna metadata nebo varovani.")
+    else:
+        st.error("PostgreSQL check nasel nedostupnost, read-only stav nebo chybejici schema.")
 
 
 def _render_runtime_load_error(exc: DashboardApiError) -> None:
@@ -257,6 +307,16 @@ def _render_scheduler_load_error(exc: DashboardApiError) -> None:
         return
 
     st.error("Nepodarilo se nacist scheduler system health.")
+    st.exception(exc)
+
+
+def _render_database_load_error(exc: DashboardApiError) -> None:
+    if exc.status_code == 404:
+        st.warning("Database system health endpoint zatim neni dostupny v bezicim API.")
+        st.caption("Po restartu nebo reloadu FastAPI se blok PostgreSQL kontrol zacne plnit daty.")
+        return
+
+    st.error("Nepodarilo se nacist database system health.")
     st.exception(exc)
 
 
@@ -415,6 +475,53 @@ def _render_scheduler_section(access_token: str) -> None:
         st.dataframe(jobs_dataframe, width="stretch", hide_index=True)
 
 
+def _render_database_section(access_token: str) -> None:
+    st.subheader("PostgreSQL")
+    st.caption(
+        "Kontroluje dostupnost PostgreSQL, jednoduchou metadata query, read-only stav "
+        "a pritomnost ocekavanych schemat. Vystup neobsahuje DSN, host, uzivatele ani raw data."
+    )
+
+    refresh_col, _spacer = st.columns([1, 4])
+    with refresh_col:
+        if st.button("Obnovit PostgreSQL", width="stretch"):
+            load_system_database_health.clear()
+            st.rerun()
+
+    try:
+        payload = load_system_database_health(access_token)
+    except DashboardApiError as exc:
+        _render_database_load_error(exc)
+        return
+
+    status = str(payload.get("status") or "error").lower()
+    postgres = dict(payload.get("postgres") or {})
+    schemas = [dict(row) for row in list(payload.get("expected_schemas") or ())]
+    missing_schemas = sum(1 for row in schemas if not bool(row.get("present")))
+
+    status_col, connected_col, latency_col, read_only_col = st.columns(4)
+    status_col.metric("Celkovy stav", _status_label(status))
+    connected_col.metric("Pripojeni", "ANO" if bool(postgres.get("connected")) else "NE")
+    latency_col.metric("Latence query", _format_milliseconds(postgres.get("latency_ms")))
+    read_only_col.metric("Read-only", _format_bool(postgres.get("transaction_read_only")))
+
+    st.caption(
+        f"Posledni kontrola API: {_format_timestamp(payload.get('checked_at'))} | "
+        f"server time: {_format_timestamp(postgres.get('server_time'))} | "
+        f"timezone: {str(postgres.get('server_timezone') or '-')} | "
+        f"server version: {str(postgres.get('server_version') or '-')} | "
+        f"chybejici schemata: {missing_schemas}"
+    )
+    _database_status_message(status)
+    st.write(str(postgres.get("detail") or "-"))
+
+    schemas_dataframe = _postgres_schema_dataframe(schemas)
+    if schemas_dataframe.empty:
+        st.info("Backend nevratil zadna PostgreSQL schemata ke kontrole.")
+    else:
+        st.dataframe(schemas_dataframe, width="stretch", hide_index=True)
+
+
 def render_page() -> None:
     access_token = _require_access_token()
 
@@ -426,6 +533,8 @@ def render_page() -> None:
     _render_proxy_section(access_token)
     st.divider()
     _render_scheduler_section(access_token)
+    st.divider()
+    _render_database_section(access_token)
 
     st.divider()
     st.subheader("Další plánované kontroly")

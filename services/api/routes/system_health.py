@@ -4,12 +4,14 @@ from fastapi import APIRouter, Depends
 
 from services.api.core.dependencies import get_current_admin_user
 from services.api.schemas.admin import (
+    SystemDatabaseHealthResponse,
     SystemProxyHealthResponse,
     SystemRuntimeHealthResponse,
     SystemSchedulerHealthResponse,
 )
 from services.api.services.dashboard_auth import DashboardUserContext
 from services.api.services.system_health import (
+    collect_system_database_health,
     collect_system_proxy_health,
     collect_system_runtime_health,
     collect_system_scheduler_health,
@@ -65,3 +67,19 @@ def get_system_scheduler_health(
 ) -> SystemSchedulerHealthResponse:
     del current_user
     return collect_system_scheduler_health()
+
+
+@router.get(
+    "/database",
+    response_model=SystemDatabaseHealthResponse,
+    summary="System database health",
+    description=(
+        "Vraci bezpecny admin souhrn PostgreSQL dostupnosti, read-only stavu "
+        "a pritomnosti ocekavanych schemat bez DSN, prihlasovacich udaju nebo raw dat."
+    ),
+)
+def get_system_database_health(
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> SystemDatabaseHealthResponse:
+    del current_user
+    return collect_system_database_health()

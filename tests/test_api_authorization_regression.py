@@ -39,6 +39,7 @@ EXPECTED_ADMIN_OPERATIONS = {
     ("GET", "/health/scheduler"),
     ("GET", "/health/scheduler/log"),
     ("POST", "/health/scheduler/jobs/{job_id}/run"),
+    ("GET", "/health/system/database"),
     ("GET", "/health/system/proxy"),
     ("GET", "/health/system/runtime"),
     ("GET", "/health/system/scheduler"),

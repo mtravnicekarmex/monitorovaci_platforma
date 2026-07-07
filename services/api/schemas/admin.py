@@ -273,3 +273,29 @@ class SystemSchedulerHealthResponse(BaseModel):
     total_success_count_24h: int = Field(ge=0)
     total_failure_count_24h: int = Field(ge=0)
     jobs: list[SystemSchedulerJobStatus]
+
+
+class SystemPostgresConnectionStatus(BaseModel):
+    status: str = Field(..., pattern="^(ok|degraded|error)$")
+    connected: bool
+    latency_ms: float | None = Field(default=None, ge=0)
+    server_time: datetime | None = None
+    server_timezone: str | None = None
+    server_version: str | None = None
+    transaction_read_only: bool | None = None
+    detail: str
+
+
+class SystemPostgresSchemaStatus(BaseModel):
+    schema_name: str
+    status: str = Field(..., pattern="^(ok|degraded|error)$")
+    present: bool
+    table_count: int | None = Field(default=None, ge=0)
+    detail: str
+
+
+class SystemDatabaseHealthResponse(BaseModel):
+    status: str = Field(..., pattern="^(ok|degraded|error)$")
+    checked_at: datetime
+    postgres: SystemPostgresConnectionStatus
+    expected_schemas: list[SystemPostgresSchemaStatus]

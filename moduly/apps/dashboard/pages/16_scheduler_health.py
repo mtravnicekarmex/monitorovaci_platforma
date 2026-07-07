@@ -482,34 +482,37 @@ def _render_manual_run_section(access_token: str, rows: list[dict[str, object]])
     job_ids = list(jobs_by_id)
     manual_run_in_progress = _manual_run_is_polling()
 
-    with st.form("scheduler_manual_run_form"):
-        selected_job_id = st.selectbox(
-            "Vyber job nebo vnitrni krok pro jednorazove spusteni",
-            options=job_ids,
-            format_func=lambda job_id: _job_display_name(jobs_by_id[job_id]),
-        )
-        selected_row = jobs_by_id[selected_job_id]
-        requires_confirmation = manual_run_requires_confirmation(selected_row)
-        confirmed_impact = True
-        if requires_confirmation:
-            st.warning(manual_run_confirmation_text(selected_row))
-            confirmed_impact = st.checkbox(
-                "Potvrzuji provozni dopad a chci tento cil spustit.",
-                key=f"scheduler_manual_run_confirm_{selected_job_id}",
-            )
-
-        submit_run = st.form_submit_button(
-            "Spustit jednou",
-            width="stretch",
-            disabled=manual_run_in_progress or (requires_confirmation and not confirmed_impact),
+    # These controls must stay outside a form. Form widget changes are submitted
+    # only by the submit button, so a disabled submit button cannot react to the
+    # confirmation checkbox becoming checked.
+    selected_job_id = st.selectbox(
+        "Vyber job nebo vnitrni krok pro jednorazove spusteni",
+        options=job_ids,
+        format_func=lambda job_id: _job_display_name(jobs_by_id[job_id]),
+        key="scheduler_manual_run_selected_job_id",
+    )
+    selected_row = jobs_by_id[selected_job_id]
+    requires_confirmation = manual_run_requires_confirmation(selected_row)
+    confirmed_impact = True
+    if requires_confirmation:
+        st.warning(manual_run_confirmation_text(selected_row))
+        confirmed_impact = st.checkbox(
+            "Potvrzuji provozni dopad a chci tento cil spustit.",
+            key=f"scheduler_manual_run_confirm_{selected_job_id}",
         )
 
-        if submit_run:
-            try:
-                _trigger_manual_job_run(access_token, selected_row)
-            except DashboardApiError as exc:
-                st.error(f"Nepodarilo se spustit job `{selected_job_id}`.")
-                st.exception(exc)
+    submit_run = st.button(
+        "Spustit jednou",
+        width="stretch",
+        disabled=manual_run_in_progress or (requires_confirmation and not confirmed_impact),
+    )
+
+    if submit_run:
+        try:
+            _trigger_manual_job_run(access_token, selected_row)
+        except DashboardApiError as exc:
+            st.error(f"Nepodarilo se spustit job `{selected_job_id}`.")
+            st.exception(exc)
 
 
 def _render_scheduler_log_section(access_token: str) -> None:

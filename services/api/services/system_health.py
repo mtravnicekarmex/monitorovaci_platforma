@@ -9,8 +9,13 @@ import re
 import socket
 import ssl
 import subprocess
+from time import perf_counter
 from typing import Any
 
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+
+from core.db.connect import get_session_pg
 from core.scheduler.job_schedule import get_scheduler_job_specs
 from core.scheduler.metrics import (
     JobMetrics,
@@ -18,6 +23,9 @@ from core.scheduler.metrics import (
     get_metrics_store,
 )
 from services.api.schemas.admin import (
+    SystemDatabaseHealthResponse,
+    SystemPostgresConnectionStatus,
+    SystemPostgresSchemaStatus,
     SystemSchedulerHealthResponse,
     SystemSchedulerJobStatus,
     SystemProxyHeaderStatus,
@@ -38,6 +46,14 @@ LOCAL_CADDY_HOST = "127.0.0.1"
 LOCAL_CADDY_TIMEOUT_SECONDS = 8
 SCHEDULER_CORE_JOB_ID = "quarter_hour_job"
 SCHEDULER_CORE_JOB_MAX_AGE_SECONDS = 45 * 60
+EXPECTED_POSTGRES_SCHEMAS = (
+    "dashboard",
+    "dbo",
+    "evidence",
+    "monitoring",
+    "revize",
+    "web_search",
+)
 
 
 @dataclass(frozen=True)
@@ -252,6 +268,61 @@ def _normalize_json_rows(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return [item for item in payload if isinstance(item, dict)]
     return []
+
+
+def _parse_postgres_read_only(value: Any) -> bool | None:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"on", "true", "1", "yes"}:
+        return True
+    if normalized in {"off", "false", "0", "no"}:
+        return False
+    return None
+
+
+def _unchecked_postgres_schema_statuses(detail: str) -> list[SystemPostgresSchemaStatus]:
+    return [
+        SystemPostgresSchemaStatus(
+            schema_name=schema_name,
+            status="degraded",
+            present=False,
+            table_count=None,
+            detail=detail,
+        )
+        for schema_name in EXPECTED_POSTGRES_SCHEMAS
+    ]
+
+
+def _build_postgres_schema_statuses(
+    rows: list[dict[str, Any]],
+) -> list[SystemPostgresSchemaStatus]:
+    counts_by_schema: dict[str, int] = {}
+    for row in rows:
+        schema_name = str(row.get("schema_name") or "").strip()
+        if not schema_name:
+            continue
+        try:
+            table_count = int(row.get("table_count") or 0)
+        except (TypeError, ValueError):
+            table_count = 0
+        counts_by_schema[schema_name] = max(0, table_count)
+
+    statuses: list[SystemPostgresSchemaStatus] = []
+    for schema_name in EXPECTED_POSTGRES_SCHEMAS:
+        present = schema_name in counts_by_schema
+        statuses.append(
+            SystemPostgresSchemaStatus(
+                schema_name=schema_name,
+                status="ok" if present else "error",
+                present=present,
+                table_count=counts_by_schema.get(schema_name),
+                detail=(
+                    "Expected PostgreSQL schema is present."
+                    if present
+                    else "Expected PostgreSQL schema is missing."
+                ),
+            )
+        )
+    return statuses
 
 
 def _run_powershell_json(script: str, *, timeout_seconds: int = 10) -> Any:
@@ -762,4 +833,103 @@ def collect_system_scheduler_health() -> SystemSchedulerHealthResponse:
         total_success_count_24h=total_success_count_24h,
         total_failure_count_24h=total_failure_count_24h,
         jobs=jobs,
+    )
+
+
+def collect_system_database_health() -> SystemDatabaseHealthResponse:
+    checked_at = datetime.now().astimezone()
+    schema_list_sql = ", ".join(f"'{schema_name}'" for schema_name in EXPECTED_POSTGRES_SCHEMAS)
+    session = None
+
+    try:
+        session = get_session_pg()
+        started_at = perf_counter()
+        metadata = (
+            session.execute(
+                text(
+                    """
+                    SELECT
+                        CURRENT_TIMESTAMP AS server_time,
+                        current_setting('TimeZone') AS server_timezone,
+                        current_setting('server_version') AS server_version,
+                        current_setting('transaction_read_only') AS transaction_read_only
+                    """
+                )
+            )
+            .mappings()
+            .one()
+        )
+        latency_ms = round((perf_counter() - started_at) * 1000, 2)
+        schema_rows = (
+            session.execute(
+                text(
+                    f"""
+                    SELECT
+                        n.nspname AS schema_name,
+                        COUNT(c.oid)::int AS table_count
+                    FROM pg_namespace n
+                    LEFT JOIN pg_class c
+                      ON c.relnamespace = n.oid
+                     AND c.relkind IN ('r', 'p')
+                    WHERE n.nspname IN ({schema_list_sql})
+                    GROUP BY n.nspname
+                    ORDER BY n.nspname
+                    """
+                )
+            )
+            .mappings()
+            .all()
+        )
+    except (OSError, RuntimeError, SQLAlchemyError):
+        postgres = SystemPostgresConnectionStatus(
+            status="error",
+            connected=False,
+            latency_ms=None,
+            server_time=None,
+            server_timezone=None,
+            server_version=None,
+            transaction_read_only=None,
+            detail="PostgreSQL connection or metadata query failed.",
+        )
+        return SystemDatabaseHealthResponse(
+            status="error",
+            checked_at=checked_at,
+            postgres=postgres,
+            expected_schemas=_unchecked_postgres_schema_statuses(
+                "Schema presence was not checked because PostgreSQL was unavailable."
+            ),
+        )
+    finally:
+        if session is not None:
+            session.close()
+
+    read_only = _parse_postgres_read_only(metadata.get("transaction_read_only"))
+    if read_only is True:
+        postgres_status = "error"
+        postgres_detail = "PostgreSQL is reachable but reports a read-only transaction state."
+    elif read_only is None:
+        postgres_status = "degraded"
+        postgres_detail = "PostgreSQL is reachable but read-only state could not be parsed."
+    else:
+        postgres_status = "ok"
+        postgres_detail = "PostgreSQL metadata query succeeded."
+
+    postgres = SystemPostgresConnectionStatus(
+        status=postgres_status,
+        connected=True,
+        latency_ms=latency_ms,
+        server_time=_parse_datetime(metadata.get("server_time")),
+        server_timezone=str(metadata.get("server_timezone") or ""),
+        server_version=str(metadata.get("server_version") or ""),
+        transaction_read_only=read_only,
+        detail=postgres_detail,
+    )
+    schema_statuses = _build_postgres_schema_statuses([dict(row) for row in schema_rows])
+    status = _worst_status([postgres.status, *(item.status for item in schema_statuses)])
+
+    return SystemDatabaseHealthResponse(
+        status=status,
+        checked_at=checked_at,
+        postgres=postgres,
+        expected_schemas=schema_statuses,
     )

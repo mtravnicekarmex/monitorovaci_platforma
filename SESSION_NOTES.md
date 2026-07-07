@@ -224,6 +224,36 @@ Known risks or accepted gaps:
 
 ## Session Log
 
+### 2026-06-25
+
+Scope:
+- Added configurable conditional styling for map-layer features.
+- Kept existing map-layer and device authorization behavior unchanged.
+
+Changed:
+- `Sprava / Mapove vrstvy` now includes a `Zobrazovat na zaklade podminek`
+  section that builds `style.conditionalStyle`.
+- Conditional style supports one property-based condition with operators
+  `equals`, `not_equals`, `is_empty`, and `is_not_empty`.
+- The conditional property is automatically added to `property_columns` when
+  a layer is created or updated.
+- Leaflet rendering now computes style per feature for points, lines, and
+  polygons.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile services\api\services\map_layers.py
+  moduly\apps\dashboard\pages\35_mapove_vrstvy.py
+  moduly\apps\dashboard\map_shared.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_map_layers_service.py
+  tests\test_device_map_service.py tests\test_map_routes.py
+  tests\test_dashboard_map_shared.py tests\test_dashboard_map_page_layout.py
+  tests\test_dashboard_navigation_config.py -q --tb=short` passed 84 tests.
+- `git diff --check` reported no whitespace errors, only expected
+  LF-to-CRLF warnings.
+
+Not verified:
+- Live browser configuration and rendering of a real conditional map layer.
+
 ### 2026-06-25 08:20 +02:00 - Post-restart verification for KAMERY map photos
 
 Scope:
@@ -7339,6 +7369,582 @@ Known risks or accepted gaps:
   LAN remains a separate task.
 - Existing unrelated SmartFuelPass/security hardening changes are still
   present in the dirty working tree.
+- The current scheduled-task account remains broader than least privilege.
+- The launcher does not independently restart a child process that fails after
+  startup.
+
+### 2026-06-26
+
+Scope:
+- Extended map-layer conditional styling to support multiple rules.
+- Corrected SmartFuelPass weekly report period/detail behavior.
+- Switched the SmartFuelPass weekly email/PDF report source from live portal
+  scraping to synchronized PostgreSQL rows.
+
+Changed:
+- `Sprava / Mapove vrstvy` now stores multiple conditional style rules in
+  `style.conditionalStyle.rules`; Leaflet applies the first matching rule and
+  keeps the prior single-condition format compatible.
+- Map-layer create/update automatically adds all conditional-rule columns to
+  `property_columns`.
+- SmartFuelPass weekly periods now use the previous completed calendar week
+  Monday-Sunday and filter by session end time.
+- SmartFuelPass PDF now includes a detailed `Poslední týden` section.
+- `send_charge_sessions_report_email` now builds reports from
+  `monitoring.smartfuelpass_relace`.
+- SmartFuelPass sync now upserts existing `id_relace` rows and persists
+  `connector_id`.
+- Added DEC-047 and updated AGENTS SmartFuelPass operating context.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile services\api\services\map_layers.py
+  moduly\apps\dashboard\pages\35_mapove_vrstvy.py
+  moduly\apps\dashboard\map_shared.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_map_routes.py
+  tests\test_map_layers_service.py tests\test_device_map_service.py
+  tests\test_dashboard_map_shared.py tests\test_dashboard_map_page_layout.py
+  tests\test_dashboard_navigation_config.py -q --tb=short` passed 86 tests.
+- `.venv\Scripts\python.exe -m pytest tests\test_smartfuelpass_service.py
+  tests\test_smartfuelpass_sync.py -q --tb=short` passed 30 tests.
+- `.venv\Scripts\python.exe -m pytest tests\test_scheduler.py -q --tb=short
+  -k "smartfuelpass or daily_job"` passed 7 tests.
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\apps\smartfuelpass\service.py moduly\apps\smartfuelpass\sync.py
+  moduly\apps\smartfuelpass\database\models.py
+  moduly\apps\smartfuelpass\database\db_init.py
+  moduly\apps\smartfuelpass\__init__.py core\scheduler\scheduler.py`
+- `git diff --check` reported no whitespace errors, only expected
+  LF-to-CRLF warnings.
+
+Not verified:
+- Live dashboard configuration/rendering of multiple conditional map rules.
+- Live SmartFuelPass portal sync, PostgreSQL migration of `connector_id`, or
+  real weekly email/PDF delivery.
+
+Decisions/notes:
+- `daily_job` remains the SmartFuelPass portal ingestion path after midnight.
+- Weekly SmartFuelPass reports read synchronized database rows rather than the
+  portal.
+
+### 2026-06-26 12:16 +02:00 - Pre-restart handoff after SmartFuelPass DB-report pipeline
+
+Reason for restart:
+- Reload FastAPI, Streamlit, scheduler, and Caddy through the normal startup
+  task so current map and SmartFuelPass code changes become active in runtime
+  processes.
+- Preserve restart context after changing the SmartFuelPass weekly report data
+  source and map conditional styling behavior.
+
+Current task/conversation state:
+- Completed: map-layer conditional styling supports multiple rules, such as
+  coloring `stav = bez_vody`, `stav = tece`, and `stav = stoji` differently.
+- Completed: SmartFuelPass weekly report period now means the previous closed
+  Monday-Sunday calendar week and uses session end time for period filters.
+- Completed: SmartFuelPass weekly PDF includes a `Poslední týden` detail
+  section.
+- Completed: SmartFuelPass weekly email report now builds from
+  `monitoring.smartfuelpass_relace` instead of live portal scraping.
+- Completed: SmartFuelPass sync now updates existing `id_relace` rows and
+  persists `connector_id`.
+- Pending: restart/reload runtime processes and verify the live dashboard map
+  and SmartFuelPass database-backed report path.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and
+  `SESSION_NOTES.md`; run `git status --short --untracked-files=all`; verify
+  runtime health, then run the change-specific checks below.
+
+Working tree and deployment:
+- Current time captured before restart: `2026-06-26 12:16:50 +02:00`.
+- Branch: `master`.
+- `HEAD`: `c52270d20c4473d501f474c04d6c3fc2080febf5`.
+- No git commit was created for this handoff.
+- `git status --short --untracked-files=all` before documentation updates:
+  - `M SESSION_NOTES.md`
+  - `M moduly/apps/dashboard/map_shared.py`
+  - `M moduly/apps/dashboard/pages/35_mapove_vrstvy.py`
+  - `M moduly/apps/smartfuelpass/__init__.py`
+  - `M moduly/apps/smartfuelpass/database/db_init.py`
+  - `M moduly/apps/smartfuelpass/database/models.py`
+  - `M moduly/apps/smartfuelpass/service.py`
+  - `M moduly/apps/smartfuelpass/sync.py`
+  - `M services/api/services/map_layers.py`
+  - `M tests/test_dashboard_map_shared.py`
+  - `M tests/test_map_layers_service.py`
+  - `M tests/test_smartfuelpass_service.py`
+  - `M tests/test_smartfuelpass_sync.py`
+- Documentation files changed by this handoff:
+  - `AGENTS.md`
+  - `DECISIONS.md`
+  - `SESSION_NOTES.md`
+- Runtime deployment state was not checked in this handoff. Existing running
+  FastAPI, Streamlit, and scheduler processes may still be using older code
+  until restart.
+- Tracked/runtime Caddyfile synchronization was not changed by this work.
+
+Verification already run:
+- `.venv\Scripts\python.exe -m py_compile services\api\services\map_layers.py
+  moduly\apps\dashboard\pages\35_mapove_vrstvy.py
+  moduly\apps\dashboard\map_shared.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_map_routes.py
+  tests\test_map_layers_service.py tests\test_device_map_service.py
+  tests\test_dashboard_map_shared.py tests\test_dashboard_map_page_layout.py
+  tests\test_dashboard_navigation_config.py -q --tb=short` passed 86 tests.
+- `.venv\Scripts\python.exe -m pytest tests\test_smartfuelpass_service.py
+  tests\test_smartfuelpass_sync.py -q --tb=short` passed 30 tests.
+- `.venv\Scripts\python.exe -m pytest tests\test_scheduler.py -q --tb=short
+  -k "smartfuelpass or daily_job"` passed 7 tests.
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\apps\smartfuelpass\service.py moduly\apps\smartfuelpass\sync.py
+  moduly\apps\smartfuelpass\database\models.py
+  moduly\apps\smartfuelpass\database\db_init.py
+  moduly\apps\smartfuelpass\__init__.py core\scheduler\scheduler.py`
+- `git diff --check` reported no whitespace errors, only expected
+  LF-to-CRLF warnings.
+
+Sensitive/runtime artifacts:
+- Do not print, read, delete, revert, stage, or commit raw values from ignored
+  local `.env`, dashboard/API tokens, passwords, cookies, authentication audit
+  logs, ProgramData security artifacts, or local leftover SmartFuelPass session
+  JSON files.
+- Do not print raw SmartFuelPass portal data, raw device photo filesystem paths,
+  cookies, bearer tokens, or dashboard session cookie values while verifying.
+- Do not create a production code-integrity baseline from this dirty working
+  tree unless the user explicitly approves that exact state.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and its
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP `80`/`443` and admin `127.0.0.1:2019`.
+- No listener should remain on temporary ports `8010` or `8011`.
+
+Expected application state after restart:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL is
+  available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- HTTPS dashboard: HTTP 200.
+- Protected API without bearer token: HTTP 401 JSON.
+- Scheduler manual spec for `sync_charge_sessions_to_db` remains available and
+  tied to the `daily_job` lock.
+- `daily_job` should continue to run after midnight and sync SmartFuelPass
+  portal rows into PostgreSQL.
+- The next SmartFuelPass sync or weekly report call should run
+  `ensure_smartfuelpass_tables()` and add `monitoring.smartfuelpass_relace.connector_id`
+  if it does not already exist.
+- SmartFuelPass weekly report email generation should read from
+  `monitoring.smartfuelpass_relace`, not from the portal.
+- `Mapove vrstvy` conditional styles should accept multiple rules and
+  `Mapove podklady / Mapa` should render the first matching style rule.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task last run/result/settings, process tree,
+  listeners, and no temporary ports `8010` or `8011`.
+- Confirm API live/ready, Streamlit health, Caddy admin health, scheduler
+  heartbeat, and current runtime log freshness.
+- Confirm `.venv-production` exact-lock verification and `pip check` if
+  reviewing production runtime startup.
+- Log in to `https://monitoring.armexholding.cz` without printing cookie or
+  token values.
+- In `Sprava / Mapove vrstvy`, verify a layer can save multiple conditional
+  rules for a status column and that all conditional columns are present in
+  `property_columns`.
+- In `Mapove podklady / Mapa`, verify the configured status values render with
+  distinct styles.
+- Verify SmartFuelPass DB schema contains `connector_id` after
+  `ensure_smartfuelpass_tables()` has run.
+- Run or wait for the next `daily_job` SmartFuelPass sync; verify only safe
+  counts/timestamps and that existing rows can be updated by `id_relace`.
+- Generate a SmartFuelPass report through the database-backed path without
+  sending real email unless explicitly approved; verify period boundaries and
+  counts against safe aggregate SQL only.
+- Re-run targeted tests:
+  `.venv\Scripts\python.exe -m pytest tests\test_smartfuelpass_service.py
+  tests\test_smartfuelpass_sync.py tests\test_scheduler.py -q --tb=short
+  -k "smartfuelpass or daily_job"`
+- Re-run map tests:
+  `.venv\Scripts\python.exe -m pytest tests\test_map_routes.py
+  tests\test_map_layers_service.py tests\test_device_map_service.py
+  tests\test_dashboard_map_shared.py tests\test_dashboard_map_page_layout.py
+  tests\test_dashboard_navigation_config.py -q --tb=short`
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- Live browser rendering of multiple conditional map styles has not been
+  verified.
+- Live SmartFuelPass portal sync, DB migration of `connector_id`, and real
+  weekly email delivery have not been verified.
+- Current changes are uncommitted and depend on the working tree being
+  preserved across restart.
+- Runtime Caddy deployment state was not checked in this handoff.
+- The current scheduled-task account remains broader than least privilege.
+- The launcher does not independently restart a child process that fails after
+  startup.
+
+### 2026-06-26 13:41 +02:00 - Post-restart verification after SmartFuelPass DB-report pipeline
+
+Scope:
+- Performed post-restart runtime and change-specific checks after the
+  2026-06-26 12:16 +02:00 restart handoff.
+- Kept checks to safe statuses, metadata, and aggregates; no cookies, tokens,
+  portal rows, device photo paths, or email contents were printed.
+
+Verified:
+- Windows last boot time: `2026-06-26 12:22:26 +02:00`.
+- Startup scheduled task `API_dashboard_caddy` last ran at
+  `2026-06-26 12:22:36 +02:00` with result `0`.
+- Expected listeners are present: FastAPI `127.0.0.1:8000`, Streamlit
+  `127.0.0.1:8001`, Caddy `80`, `443`, and Caddy admin `127.0.0.1:2019`.
+- No listener was present on temporary ports `8010` or `8011`.
+- Additional `443` listeners on Tailscale addresses are owned by
+  `tailscaled.exe`, separate from the public Caddy listener.
+- API `/health/live` and `/health/ready`, Streamlit `/_stcore/health`, and
+  Caddy admin `/config/` returned HTTP 200.
+- Direct public requests to `monitoring.armexholding.cz` from this workstation
+  timed out, but local Caddy hostname routing via `curl --resolve` verified:
+  dashboard HTTP 200, `users-exist` HTTP 200, protected API without bearer
+  HTTP 401 JSON, map image without cookie HTTP 401 JSON, `/docs`, `/redoc`,
+  and `/openapi.json` HTTP 404, and HTTP-to-HTTPS redirect HTTP 308.
+- Public response security headers were present on the local Caddy hostname
+  path; `Server` and `Via` headers were absent.
+- Tracked root `Caddyfile` and runtime
+  `C:\Program Files\Caddy\Caddyfile` have matching SHA-256 hashes, and
+  `caddy validate --config "C:\Program Files\Caddy\Caddyfile"` reported a
+  valid configuration.
+- `.venv-production` passed `pip check` and
+  `scripts/verify_production_environment.py`.
+- Scheduler metrics show `scheduler_running=true`, heartbeat
+  `2026-06-26T13:32:42.157787`, and `quarter_hour_job` success at
+  `2026-06-26T13:35:09.270859` with next run
+  `2026-06-26T13:47:05+02:00`.
+- Scheduler metrics show `daily_job`, `smartfuelpass_weekly_report_job`,
+  `sync_charge_sessions_to_db`, and `send_charge_sessions_report_email` with
+  zero failures in the last 24 hours.
+- `monitoring.smartfuelpass_relace.connector_id` exists.
+- Safe aggregate SQL showed `monitoring.smartfuelpass_relace` has 21 rows,
+  0 rows with non-empty `connector_id`, and `ended_at` range
+  `2026-02-11 17:25:00` through `2026-06-23 14:22:00`.
+- Database-backed SmartFuelPass report builder ran without sending email or
+  rendering/sending a real PDF. It produced `last_week` period
+  `2026-06-15T00:00:00` through `2026-06-21T23:59:59.999999`, with safe
+  aggregate counts only: `source_rows=21`, `valid_rows=21`,
+  `invalid_rows=0`, `last_week_sessions=1`, `previous_month_sessions=8`,
+  `total_sessions=21`.
+- Targeted SmartFuelPass/scheduler tests passed:
+  `.venv\Scripts\python.exe -m pytest tests\test_smartfuelpass_service.py
+  tests\test_smartfuelpass_sync.py tests\test_scheduler.py -q --tb=short
+  -k "smartfuelpass or daily_job"` reported 37 passed and 45 deselected.
+- Targeted map tests passed:
+  `.venv\Scripts\python.exe -m pytest tests\test_map_routes.py
+  tests\test_map_layers_service.py tests\test_device_map_service.py
+  tests\test_dashboard_map_shared.py tests\test_dashboard_map_page_layout.py
+  tests\test_dashboard_navigation_config.py -q --tb=short` reported
+  86 passed.
+- `git diff --check` reported no whitespace errors, only expected
+  LF-to-CRLF warnings.
+
+Not verified:
+- Authenticated browser login, session reload persistence, `Sprava / Mapove
+  vrstvy` multi-rule save flow, and `Mapove podklady / Mapa` live conditional
+  style rendering were not verified in the browser during this shell-only
+  check.
+- Direct public hostname reachability from this workstation remained timed out;
+  Caddy routing was verified locally with SNI/Host routing through loopback.
+- A new live SmartFuelPass portal sync after the restart was not run. The next
+  scheduled `daily_job` should verify updated `connector_id` ingestion after
+  midnight; current synced rows have the column but no non-empty connector
+  values.
+- Real SmartFuelPass weekly email/PDF delivery was not performed.
+
+Working tree:
+- `git status --short --untracked-files=all` before this post-restart note
+  still showed the expected modified files from the SmartFuelPass/map work:
+  `AGENTS.md`, `DECISIONS.md`, `SESSION_NOTES.md`,
+  `moduly/apps/dashboard/map_shared.py`,
+  `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`,
+  SmartFuelPass service/sync/model/bootstrap files,
+  `services/api/services/map_layers.py`, and related tests.
+
+Follow-up:
+- Verify authenticated dashboard map conditional styling in a real browser.
+- Let the next `daily_job` run, then check safe SmartFuelPass aggregate counts
+  for non-empty `connector_id` values and updated `id_relace` upserts.
+
+### 2026-07-07
+
+Scope:
+- Began incremental implementation of the admin-only `Health systemu` dashboard
+  page for post-restart and operational checks.
+- Agreed to proceed one check at a time: describe the item, data source,
+  display, and safety limits; implement it; verify it; then move to the next
+  item.
+
+Planned order:
+- Runtime startup health: Windows boot time, startup scheduled task metadata,
+  expected listeners on `80`, `443`, `127.0.0.1:2019`, `127.0.0.1:8000`, and
+  `127.0.0.1:8001`, plus absence of temporary listeners on `8010` and `8011`.
+- Proxy/routing health: local Caddy hostname routing, protected API statuses,
+  documentation aliases, HTTP redirect, and reviewed public headers.
+- Scheduler health: existing scheduler metrics, heartbeat freshness, key job
+  statuses, and log freshness.
+- Production environment health: `.venv-production` lock verification and
+  `pip check` result through a safe backend probe.
+- Database and SmartFuelPass health: schema metadata and safe aggregate counts,
+  without raw portal rows or sensitive values.
+
+Safety notes:
+- Health checks must run through authenticated admin FastAPI endpoints, not
+  directly in browser JavaScript or Streamlit shell commands.
+- Responses must contain safe statuses, timestamps, listener summaries, and
+  aggregates only. Do not expose secrets, environment values, bearer tokens,
+  cookie values, raw process command lines, raw portal rows, raw device photo
+  paths, or credential file contents.
+
+Changed:
+- Added admin API route `GET /health/system/runtime`.
+- Added sanitized system health service for Windows boot time, startup task
+  result, expected listeners, and temporary listener absence.
+- Added dashboard API client helper `get_system_runtime_health`.
+- Connected the first `Runtime po restartu` block on `Health systemu`.
+- Added tests for runtime health status construction, route delegation,
+  dashboard navigation, and authorization inventory.
+- Fixed Streamlit dashboard entrypoint module reload handling so a module that
+  disappeared from `sys.modules` during hot-reload is imported again instead
+  of raising `ImportError`.
+- Updated `Health systemu` runtime block to handle HTTP 404 from
+  `/health/system/runtime` as a controlled "API runtime not reloaded yet"
+  warning instead of showing a traceback.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile services\api\services\system_health.py
+  services\api\routes\system_health.py services\api\schemas\admin.py
+  services\api\main.py moduly\apps\dashboard\api_client.py
+  moduly\apps\dashboard\pages\37_system_health.py
+  moduly\apps\dashboard\navigation_config.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_api_authorization_regression.py
+  tests\test_dashboard_navigation_config.py -q --tb=short` reported
+  192 passed.
+- Local runtime collector returned `status=ok` on 2026-07-07 07:27 +02:00:
+  boot time available, startup task last result `0`, expected listeners present
+  on `80`, `443`, `127.0.0.1:2019`, `127.0.0.1:8000`, and
+  `127.0.0.1:8001`, and no listeners on `8010` or `8011`.
+- `.venv\Scripts\python.exe -m py_compile moduly\apps\dashboard\login.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_dashboard_responsive.py -q
+  --tb=short` reported 4 passed.
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\apps\dashboard\pages\37_system_health.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_dashboard_navigation_config.py -q --tb=short` reported
+  26 passed.
+
+Not verified:
+- Authenticated browser rendering of the new `Health systemu` page.
+- Live Streamlit hot-reload recovery in an authenticated browser session.
+- Runtime health data through the dashboard before FastAPI has been restarted
+  or reloaded with the new `/health/system/runtime` route.
+
+### 2026-07-07 07:40 +02:00 - Pre-restart handoff after Health systemu runtime check
+
+Reason for restart:
+- Reload FastAPI, Streamlit, scheduler, and Caddy through the normal startup
+  task so the new admin endpoint `GET /health/system/runtime` is registered in
+  the running FastAPI process.
+- Clear the current dashboard-visible `DashboardApiError: Not Found` state on
+  `Health systemu`, which is expected while Streamlit has loaded the new page
+  but FastAPI is still running the older route set.
+
+Current task/conversation state:
+- Completed: documented the incremental `Health systemu` plan in
+  `AGENTS.md`, `DECISIONS.md`, and `SESSION_NOTES.md`.
+- Completed: added admin-only `Health systemu` dashboard page in the footer
+  navigation after `Health scheduleru`.
+- Completed: added `GET /health/system/runtime` and sanitized backend runtime
+  probes for Windows boot time, startup scheduled task result, expected
+  listeners, and absence of temporary listeners.
+- Completed: connected the dashboard `Runtime po restartu` block to the new
+  API endpoint.
+- Completed: added controlled handling for HTTP 404 from
+  `/health/system/runtime`, so a not-yet-reloaded FastAPI runtime shows a
+  warning instead of a traceback.
+- Completed: fixed Streamlit dashboard entrypoint module reload handling for
+  modules missing from `sys.modules` during hot-reload.
+- Pending: restart workstation, then verify the running FastAPI process exposes
+  `/health/system/runtime` and the `Health systemu` page renders live runtime
+  data.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and
+  `SESSION_NOTES.md`; run `git status --short --untracked-files=all`; verify
+  runtime health, then test the `Health systemu` page and endpoint.
+
+Working tree and deployment:
+- Current time captured before restart: `2026-07-07 07:40:03 +02:00`.
+- Branch: `master`.
+- `HEAD`: `c52270d20c4473d501f474c04d6c3fc2080febf5`.
+- No git commit was created for this handoff.
+- `git status --short --untracked-files=all` before this handoff:
+  - `M AGENTS.md`
+  - `M DECISIONS.md`
+  - `M SESSION_NOTES.md`
+  - `M moduly/apps/dashboard/api_client.py`
+  - `M moduly/apps/dashboard/login.py`
+  - `M moduly/apps/dashboard/map_shared.py`
+  - `M moduly/apps/dashboard/navigation_config.py`
+  - `M moduly/apps/dashboard/pages/35_mapove_vrstvy.py`
+  - `M moduly/apps/smartfuelpass/__init__.py`
+  - `M moduly/apps/smartfuelpass/database/db_init.py`
+  - `M moduly/apps/smartfuelpass/database/models.py`
+  - `M moduly/apps/smartfuelpass/service.py`
+  - `M moduly/apps/smartfuelpass/sync.py`
+  - `M services/api/main.py`
+  - `M services/api/schemas/admin.py`
+  - `M services/api/services/map_layers.py`
+  - `M tests/test_api_authorization_regression.py`
+  - `M tests/test_dashboard_map_shared.py`
+  - `M tests/test_dashboard_navigation_config.py`
+  - `M tests/test_dashboard_responsive.py`
+  - `M tests/test_map_layers_service.py`
+  - `M tests/test_smartfuelpass_service.py`
+  - `M tests/test_smartfuelpass_sync.py`
+  - `?? moduly/apps/dashboard/pages/37_system_health.py`
+  - `?? services/api/routes/system_health.py`
+  - `?? services/api/services/system_health.py`
+  - `?? tests/test_system_health.py`
+- Files changed by the latest `Health systemu` work:
+  - `AGENTS.md`
+  - `DECISIONS.md`
+  - `SESSION_NOTES.md`
+  - `moduly/apps/dashboard/api_client.py`
+  - `moduly/apps/dashboard/login.py`
+  - `moduly/apps/dashboard/navigation_config.py`
+  - `moduly/apps/dashboard/pages/37_system_health.py`
+  - `services/api/main.py`
+  - `services/api/routes/system_health.py`
+  - `services/api/schemas/admin.py`
+  - `services/api/services/system_health.py`
+  - `tests/test_api_authorization_regression.py`
+  - `tests/test_dashboard_navigation_config.py`
+  - `tests/test_dashboard_responsive.py`
+  - `tests/test_system_health.py`
+- Existing unrelated or earlier in-progress files from map/SmartFuelPass work
+  remain modified and must not be reverted during post-restart verification.
+- Runtime deployment state: Streamlit can load the new `Health systemu` page
+  from the working tree; running FastAPI still returns HTTP 404 for
+  `/health/system/runtime` until restart/reload registers the new route.
+- Tracked/runtime Caddyfile synchronization was not changed by this work.
+
+Verification already run:
+- `.venv\Scripts\python.exe -m py_compile services\api\services\system_health.py
+  services\api\routes\system_health.py services\api\schemas\admin.py
+  services\api\main.py moduly\apps\dashboard\api_client.py
+  moduly\apps\dashboard\pages\37_system_health.py
+  moduly\apps\dashboard\navigation_config.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_api_authorization_regression.py
+  tests\test_dashboard_navigation_config.py -q --tb=short` reported
+  192 passed.
+- Local runtime collector returned `status=ok` on 2026-07-07 07:27 +02:00:
+  boot time available, startup task last result `0`, expected listeners present
+  on `80`, `443`, `127.0.0.1:2019`, `127.0.0.1:8000`, and
+  `127.0.0.1:8001`, and no listeners on `8010` or `8011`.
+- `.venv\Scripts\python.exe -m py_compile moduly\apps\dashboard\login.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_dashboard_responsive.py -q
+  --tb=short` reported 4 passed.
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\apps\dashboard\pages\37_system_health.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_dashboard_navigation_config.py -q --tb=short` reported
+  26 passed.
+- `git diff --check` reported no whitespace errors, only expected
+  LF-to-CRLF warnings.
+
+Sensitive/runtime artifacts:
+- Do not print, read, delete, revert, stage, or commit raw values from ignored
+  local `.env`, dashboard/API tokens, passwords, cookies, authentication audit
+  logs, ProgramData security artifacts, or local leftover SmartFuelPass session
+  JSON files.
+- Do not print raw SmartFuelPass portal data, raw device photo filesystem paths,
+  process command lines, environment variables, bearer tokens, or dashboard
+  session cookie values while verifying.
+- Do not create a production code-integrity baseline from this dirty working
+  tree unless the user explicitly approves that exact state.
+
+Expected processes and listeners after restart:
+- Windows Task Scheduler runs `API_dashboard_caddy` at system startup and its
+  latest run result becomes `0`.
+- One rotating-log wrapper owns one non-reload Uvicorn child on
+  `127.0.0.1:8000`.
+- One rotating-log wrapper owns one Streamlit child on `127.0.0.1:8001`.
+- One scheduler runtime runs `main.py`, holds the `scheduler_process` lock,
+  and updates `core/scheduler/logs/scheduler_metrics.json`.
+- One Caddy runtime owns TCP `80`/`443` and admin `127.0.0.1:2019`.
+- No listener should remain on temporary ports `8010` or `8011`.
+
+Expected application state after restart:
+- FastAPI `/health/live` and `/health/ready`: HTTP 200 while PostgreSQL is
+  available.
+- Streamlit `/_stcore/health` and Caddy admin endpoint: HTTP 200.
+- FastAPI `GET /health/system/runtime` with a valid admin bearer token:
+  HTTP 200 and safe JSON with `status`, boot metadata, startup task metadata,
+  expected listeners, and temporary listeners.
+- FastAPI `GET /health/system/runtime` without bearer token: HTTP 401.
+- Non-admin bearer token for `GET /health/system/runtime`: HTTP 403.
+- `Health systemu` dashboard page loads without traceback and the
+  `Runtime po restartu` block shows live runtime data instead of the
+  "API runtime not reloaded yet" warning.
+- Runtime block expected values: startup task result `0`, expected listeners
+  present on `80`, `443`, `127.0.0.1:2019`, `127.0.0.1:8000`, and
+  `127.0.0.1:8001`, and no listeners on `8010` or `8011`.
+- HTTP hostname route: HTTP 308 to HTTPS.
+- HTTPS dashboard: HTTP 200.
+- Protected API without bearer token: HTTP 401 JSON.
+- Public `/docs`, `/redoc`, and `/openapi.json`: HTTP 404 at Caddy layer.
+
+Required post-restart checks:
+- Confirm boot time, scheduled-task last run/result/settings, process tree,
+  listeners, and no temporary ports `8010` or `8011`.
+- Confirm API live/ready, Streamlit health, Caddy admin health, scheduler
+  heartbeat, and current runtime log freshness.
+- Confirm `.venv-production` exact-lock verification and `pip check` if
+  reviewing production runtime startup.
+- Confirm tracked root `Caddyfile` and runtime
+  `C:\Program Files\Caddy\Caddyfile` still have matching SHA-256 hashes, then
+  validate runtime Caddy config.
+- Verify local Caddy hostname routing with SNI/Host routing if direct public
+  hostname requests from the workstation still time out.
+- Log in to `https://monitoring.armexholding.cz` without printing cookie or
+  token values.
+- Open `Health systemu` and confirm the `Runtime po restartu` block displays
+  live data and no traceback.
+- Exercise `GET /health/system/runtime` through the dashboard/API path and
+  check only safe status fields and listener summaries.
+- Re-run targeted tests:
+  `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_api_authorization_regression.py
+  tests\test_dashboard_navigation_config.py
+  tests\test_dashboard_responsive.py -q --tb=short`
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- Current changes are uncommitted and depend on the working tree being
+  preserved across restart.
+- The new FastAPI route will not exist in runtime until the startup task has
+  restarted the API process from the current working tree.
+- Authenticated browser rendering of `Health systemu` has only been partially
+  checked: the page loads, but runtime data is pending FastAPI restart.
+- Direct public hostname reachability from the workstation previously timed
+  out; local Caddy hostname routing through loopback may still be needed for
+  server-side verification.
+- Existing unrelated SmartFuelPass/map changes remain in the dirty working
+  tree and should not be reverted as part of post-restart checks.
 - The current scheduled-task account remains broader than least privilege.
 - The launcher does not independently restart a child process that fails after
   startup.

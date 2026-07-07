@@ -302,6 +302,14 @@ PAGES: tuple[DashboardPage, ...] = (
         admin_only=True,
     ),
     DashboardPage(
+        key="system_health",
+        path="pages/37_system_health.py",
+        title="Health systému",
+        icon="🖥️",
+        sidebar_location="footer",
+        admin_only=True,
+    ),
+    DashboardPage(
         key="outlier_review",
         path="pages/17_outlier_review.py",
         title="Review outlieru",

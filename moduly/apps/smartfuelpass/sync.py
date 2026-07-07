@@ -60,6 +60,7 @@ def build_charge_sessions_sync_rows(dataframe: pd.DataFrame) -> tuple[list[dict[
                 "tarif": None if str(row.tariff_label).strip() in {"", "-"} else str(row.tariff_label).strip(),
                 "battery_status": None if pd.isna(row.battery_status) else int(row.battery_status),
                 "suma": round(float(row.amount_czk), 2),
+                "connector_id": str(row.connector_id).strip() or None,
                 "started_at": started_at,
                 "ended_at": ended_at,
                 **build_charge_session_interval_time_columns(started_at, ended_at),
@@ -87,7 +88,12 @@ def upsert_charge_sessions_sync_rows(
         return 0
 
     stmt = insert(SmartFuelPassRelace).values(rows)
-    stmt = stmt.on_conflict_do_nothing(index_elements=["id_relace"])
+    update_columns = {
+        column.name: getattr(stmt.excluded, column.name)
+        for column in SmartFuelPassRelace.__table__.columns
+        if column.name not in {"id_relace", "imported_at"}
+    }
+    stmt = stmt.on_conflict_do_update(index_elements=["id_relace"], set_=update_columns)
     result = db_session.execute(stmt)
     db_session.commit()
     return int(result.rowcount or 0)

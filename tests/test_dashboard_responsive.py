@@ -37,5 +37,6 @@ def test_dashboard_entrypoint_applies_responsive_styles_to_every_page():
     source = LOGIN_PAGE_PATH.read_text(encoding="utf-8")
 
     assert "from moduly.apps.dashboard import responsive as dashboard_responsive" in source
-    assert "dashboard_responsive = importlib.reload(dashboard_responsive)" in source
+    assert "def _reload_dashboard_module(module):" in source
+    assert "dashboard_responsive = _reload_dashboard_module(dashboard_responsive)" in source
     assert source.index("dashboard_responsive.render_responsive_page_styles()") < source.index("current_page.run()")

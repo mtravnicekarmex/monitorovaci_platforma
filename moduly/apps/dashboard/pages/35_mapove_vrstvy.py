@@ -39,6 +39,10 @@ DEFAULT_STYLE = {
     "fillOpacity": 0.2,
     "radius": 6,
 }
+CONDITIONAL_STYLE_KEY = "conditionalStyle"
+CONDITIONAL_STYLE_OPERATORS = ("equals", "not_equals", "is_empty", "is_not_empty")
+CONDITIONAL_VALUE_TYPES = ("boolean", "text", "number")
+MAX_CONDITIONAL_RULES = 10
 
 
 @st.cache_data(ttl=60)
@@ -90,6 +94,233 @@ def _style_number(value: object, fallback: float) -> float:
         return fallback
 
 
+def _conditional_value_type(value: object) -> str:
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return "number"
+    return "text"
+
+
+def _state_value(*keys: str, default: object = None) -> object:
+    for key in keys:
+        if key in st.session_state:
+            return st.session_state[key]
+    return default
+
+
+def _parse_conditional_value(prefix: str, operator: str) -> object | None:
+    if operator in {"is_empty", "is_not_empty"}:
+        return None
+
+    value_type = str(_state_value(f"{prefix}_value_type", f"{prefix}_conditional_value_type", default="boolean"))
+    if value_type == "boolean":
+        return str(_state_value(f"{prefix}_value_bool", f"{prefix}_conditional_value_bool", default="true")) == "true"
+    if value_type == "number":
+        raw_value = str(_state_value(f"{prefix}_value", f"{prefix}_conditional_value", default="")).strip()
+        if not raw_value:
+            raise ValueError("Hodnota podminky je povinna.")
+        number_value = float(raw_value)
+        return int(number_value) if number_value.is_integer() else number_value
+    return str(_state_value(f"{prefix}_value", f"{prefix}_conditional_value", default="")).strip()
+
+
+def _conditional_rules_from_style(conditional_style: dict[str, object]) -> list[dict[str, object]]:
+    rules = conditional_style.get("rules")
+    if isinstance(rules, list):
+        parsed_rules = [dict(rule) for rule in rules if isinstance(rule, dict)]
+        if parsed_rules:
+            return parsed_rules[:MAX_CONDITIONAL_RULES]
+    if conditional_style.get("property"):
+        return [conditional_style]
+    return []
+
+
+def _style_subset_from_state(prefix: str) -> dict[str, object]:
+    return {
+        "color": st.session_state.get(f"{prefix}_color", DEFAULT_STYLE["color"]),
+        "fillColor": st.session_state.get(f"{prefix}_fill", DEFAULT_STYLE["fillColor"]),
+        "weight": float(st.session_state.get(f"{prefix}_weight", DEFAULT_STYLE["weight"])),
+        "fillOpacity": float(st.session_state.get(f"{prefix}_fill_opacity", DEFAULT_STYLE["fillOpacity"])),
+        "radius": float(st.session_state.get(f"{prefix}_radius", DEFAULT_STYLE["radius"])),
+    }
+
+
+def render_compact_style_editor(prefix: str, style: dict[str, object], *, label: str) -> None:
+    st.caption(label)
+    merged_style = {**DEFAULT_STYLE, **style}
+    color_col, fill_col, weight_col, opacity_col, radius_col = st.columns(5)
+    color_col.color_picker(
+        "Barva linie",
+        value=_safe_color(merged_style.get("color"), str(DEFAULT_STYLE["color"])),
+        key=f"{prefix}_color",
+    )
+    fill_col.color_picker(
+        "Barva vyplne",
+        value=_safe_color(merged_style.get("fillColor"), str(DEFAULT_STYLE["fillColor"])),
+        key=f"{prefix}_fill",
+    )
+    weight_col.number_input(
+        "Tloustka",
+        min_value=0.0,
+        max_value=20.0,
+        value=_style_number(merged_style.get("weight"), float(DEFAULT_STYLE["weight"])),
+        step=0.5,
+        key=f"{prefix}_weight",
+    )
+    opacity_col.slider(
+        "Pruhlednost vyplne",
+        min_value=0.0,
+        max_value=1.0,
+        value=_style_number(merged_style.get("fillOpacity"), float(DEFAULT_STYLE["fillOpacity"])),
+        step=0.05,
+        key=f"{prefix}_fill_opacity",
+    )
+    radius_col.number_input(
+        "Radius bodu",
+        min_value=1.0,
+        max_value=30.0,
+        value=_style_number(merged_style.get("radius"), float(DEFAULT_STYLE["radius"])),
+        step=1.0,
+        key=f"{prefix}_radius",
+    )
+
+
+def render_conditional_style_editor(prefix: str, style: dict[str, object]) -> None:
+    conditional_style = style.get(CONDITIONAL_STYLE_KEY)
+    if not isinstance(conditional_style, dict):
+        conditional_style = {}
+    rules = _conditional_rules_from_style(conditional_style)
+    enabled = bool(rules)
+
+    st.markdown("#### Zobrazovat na zaklade podminek")
+    st.checkbox(
+        "Zapnout podminene stylovani",
+        value=enabled,
+        key=f"{prefix}_conditional_enabled",
+    )
+    if not st.session_state.get(f"{prefix}_conditional_enabled", enabled):
+        return
+
+    rule_count = st.number_input(
+        "Pocet podminek",
+        min_value=1,
+        max_value=MAX_CONDITIONAL_RULES,
+        value=max(1, len(rules)),
+        step=1,
+        key=f"{prefix}_conditional_rule_count",
+    )
+    for rule_index in range(int(rule_count)):
+        rule = rules[rule_index] if rule_index < len(rules) else {}
+        operator = str(rule.get("operator") or "equals")
+        if operator not in CONDITIONAL_STYLE_OPERATORS:
+            operator = "equals"
+        value = rule.get("value", True)
+        value_type = _conditional_value_type(value)
+        st.caption(f"Podminka {rule_index + 1}")
+        condition_cols = st.columns([2, 1, 1, 2])
+        condition_cols[0].text_input(
+            "Sloupec podminky",
+            value=str(rule.get("property") or ""),
+            key=f"{prefix}_conditional_rule_{rule_index}_property",
+        )
+        operator = condition_cols[1].selectbox(
+            "Operator",
+            options=list(CONDITIONAL_STYLE_OPERATORS),
+            index=CONDITIONAL_STYLE_OPERATORS.index(operator),
+            key=f"{prefix}_conditional_rule_{rule_index}_operator",
+        )
+        value_type = condition_cols[2].selectbox(
+            "Typ hodnoty",
+            options=list(CONDITIONAL_VALUE_TYPES),
+            index=CONDITIONAL_VALUE_TYPES.index(value_type),
+            key=f"{prefix}_conditional_rule_{rule_index}_value_type",
+            disabled=operator in {"is_empty", "is_not_empty"},
+        )
+        if value_type == "boolean":
+            condition_cols[3].selectbox(
+                "Hodnota",
+                options=["true", "false"],
+                index=0 if bool(value) else 1,
+                key=f"{prefix}_conditional_rule_{rule_index}_value_bool",
+                disabled=operator in {"is_empty", "is_not_empty"},
+            )
+        else:
+            condition_cols[3].text_input(
+                "Hodnota",
+                value="" if value is None else str(value),
+                key=f"{prefix}_conditional_rule_{rule_index}_value",
+                disabled=operator in {"is_empty", "is_not_empty"},
+            )
+
+        render_compact_style_editor(
+            f"{prefix}_conditional_rule_{rule_index}_style",
+            dict(rule.get("style") or rule.get("match") or {}),
+            label="Styl pri splneni podminky",
+        )
+
+    use_base_fallback = "fallback" not in conditional_style
+    st.checkbox(
+        "Pri nesplneni pouzit zakladni styl vrstvy",
+        value=use_base_fallback,
+        key=f"{prefix}_conditional_use_base_fallback",
+    )
+    if not st.session_state.get(f"{prefix}_conditional_use_base_fallback", use_base_fallback):
+        render_compact_style_editor(
+            f"{prefix}_conditional_fallback",
+            dict(conditional_style.get("fallback") or {}),
+            label="Styl pri nesplneni podminky",
+        )
+
+
+def _conditional_rule_payload_from_state(prefix: str, rule_index: int) -> dict[str, object]:
+    property_name = str(st.session_state.get(f"{prefix}_conditional_rule_{rule_index}_property", "")).strip()
+    if not property_name:
+        raise ValueError(f"Sloupec podminky {rule_index + 1} je povinny.")
+
+    operator = str(st.session_state.get(f"{prefix}_conditional_rule_{rule_index}_operator", "equals"))
+    if operator not in CONDITIONAL_STYLE_OPERATORS:
+        raise ValueError(f"Neplatny operator podminky {rule_index + 1}.")
+
+    rule: dict[str, object] = {
+        "property": property_name,
+        "operator": operator,
+        "style": _style_subset_from_state(f"{prefix}_conditional_rule_{rule_index}_style"),
+    }
+    value = _parse_conditional_value(f"{prefix}_conditional_rule_{rule_index}", operator)
+    if value is not None:
+        rule["value"] = value
+    return rule
+
+
+def _conditional_style_payload_from_state(prefix: str) -> dict[str, object] | None:
+    if not st.session_state.get(f"{prefix}_conditional_enabled", False):
+        return None
+
+    rule_count = int(st.session_state.get(f"{prefix}_conditional_rule_count", 1))
+    rule_count = max(1, min(rule_count, MAX_CONDITIONAL_RULES))
+    conditional_style: dict[str, object] = {
+        "rules": [_conditional_rule_payload_from_state(prefix, index) for index in range(rule_count)]
+    }
+
+    if not st.session_state.get(f"{prefix}_conditional_use_base_fallback", True):
+        conditional_style["fallback"] = _style_subset_from_state(f"{prefix}_conditional_fallback")
+
+    return conditional_style
+
+
+def _conditional_style_properties(style: dict[str, object]) -> list[str]:
+    conditional_style = style.get(CONDITIONAL_STYLE_KEY)
+    if not isinstance(conditional_style, dict):
+        return []
+    properties: list[str] = []
+    for rule in _conditional_rules_from_style(conditional_style):
+        property_name = str(rule.get("property") or "").strip()
+        if property_name and property_name not in properties:
+            properties.append(property_name)
+    return properties
+
+
 def render_style_editor(prefix: str, style: dict[str, object]) -> None:
     merged_style = {**DEFAULT_STYLE, **style}
     color_col, fill_col, weight_col, opacity_col, radius_col = st.columns(5)
@@ -132,7 +363,7 @@ def render_style_editor(prefix: str, style: dict[str, object]) -> None:
     advanced_style = {
         key: value
         for key, value in style.items()
-        if key not in {"color", "fillColor", "weight", "fillOpacity", "radius"}
+        if key not in {"color", "fillColor", "weight", "fillOpacity", "radius", CONDITIONAL_STYLE_KEY}
     }
     st.text_area(
         "Dalsi styl JSON",
@@ -140,12 +371,14 @@ def render_style_editor(prefix: str, style: dict[str, object]) -> None:
         help="Volitelne doplnkove Leaflet styl hodnoty. Musi jit o JSON objekt.",
         key=f"{prefix}_style_extra",
     )
+    render_conditional_style_editor(prefix, style)
 
 
 def _style_payload_from_state(prefix: str) -> dict[str, object]:
     advanced_json = str(st.session_state.get(f"{prefix}_style_extra", "{}"))
     parsed_advanced = _json_to_dict(advanced_json, field_name="Dalsi styl JSON")
-    return {
+    parsed_advanced.pop(CONDITIONAL_STYLE_KEY, None)
+    style = {
         **parsed_advanced,
         "color": st.session_state.get(f"{prefix}_style_color", DEFAULT_STYLE["color"]),
         "fillColor": st.session_state.get(f"{prefix}_style_fill", DEFAULT_STYLE["fillColor"]),
@@ -153,6 +386,10 @@ def _style_payload_from_state(prefix: str) -> dict[str, object]:
         "fillOpacity": float(st.session_state.get(f"{prefix}_style_fill_opacity", DEFAULT_STYLE["fillOpacity"])),
         "radius": float(st.session_state.get(f"{prefix}_style_radius", DEFAULT_STYLE["radius"])),
     }
+    conditional_style = _conditional_style_payload_from_state(prefix)
+    if conditional_style is not None:
+        style[CONDITIONAL_STYLE_KEY] = conditional_style
+    return style
 
 
 def build_payload(prefix: str, current: dict[str, object] | None = None) -> dict[str, object]:
@@ -162,6 +399,11 @@ def build_payload(prefix: str, current: dict[str, object] | None = None) -> dict
         field_name="Aliasy vlastnosti",
     )
     style = _style_payload_from_state(prefix)
+
+    property_columns = _csv_to_list(str(st.session_state.get(f"{prefix}_property_columns", "")))
+    for conditional_property in _conditional_style_properties(style):
+        if conditional_property not in property_columns:
+            property_columns.append(conditional_property)
 
     return {
         "layer_id": str(st.session_state.get(f"{prefix}_layer_id", "")).strip(),
@@ -173,7 +415,7 @@ def build_payload(prefix: str, current: dict[str, object] | None = None) -> dict
         "identifier_column": str(st.session_state.get(f"{prefix}_identifier_column", "")).strip(),
         "source_srid": int(st.session_state.get(f"{prefix}_source_srid", 3857)),
         "target_srid": int(st.session_state.get(f"{prefix}_target_srid", 4326)),
-        "property_columns": _csv_to_list(str(st.session_state.get(f"{prefix}_property_columns", ""))),
+        "property_columns": property_columns,
         "property_aliases": property_aliases,
         "filter_columns": _csv_to_list(str(st.session_state.get(f"{prefix}_filter_columns", ""))),
         "popup_columns": _csv_to_list(str(st.session_state.get(f"{prefix}_popup_columns", ""))),

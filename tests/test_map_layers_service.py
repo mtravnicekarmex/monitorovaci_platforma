@@ -7,6 +7,7 @@ from services.api.services.map_layers import (
     DEFAULT_MAP_LAYER_SEEDS,
     _load_layer_filter_options,
     _normalize_requested_filters,
+    _prepare_record_values,
     load_map_feature_image_file,
     load_requested_map_features,
     load_requested_map_filter_options,
@@ -66,6 +67,89 @@ def test_map_layer_record_to_config_preserves_runtime_metadata():
     assert config.default_visible is False
     assert config.show_photo is True
     assert config.draw_order == 50
+
+
+def test_prepare_record_values_adds_conditional_style_property_column(monkeypatch):
+    monkeypatch.setattr(
+        "services.api.services.map_layers._table_columns",
+        lambda _schema, _table: {"geom", "id", "name", "bez_vody"},
+    )
+
+    values = _prepare_record_values(
+        layer_id="potrubi",
+        title="Potrubi",
+        layer_kind="context",
+        source_schema="evidence",
+        source_table="POTRUBI",
+        geometry_column="geom",
+        identifier_column="id",
+        source_srid=3857,
+        target_srid=4326,
+        property_columns=["id", "name"],
+        property_aliases={},
+        filter_columns=[],
+        popup_columns=["id", "name"],
+        style={
+            "color": "#2563eb",
+            "conditionalStyle": {
+                "property": "bez_vody",
+                "operator": "equals",
+                "value": True,
+                "match": {"color": "#dc2626"},
+            },
+        },
+        device_section_key=None,
+        restrict_to_allowed_devices=False,
+        map_enabled=True,
+        default_visible=True,
+        show_photo=False,
+        is_active=True,
+        draw_order=100,
+    )
+
+    assert values["property_columns"] == ["id", "name", "bez_vody"]
+
+
+def test_prepare_record_values_adds_multiple_conditional_style_property_columns(monkeypatch):
+    monkeypatch.setattr(
+        "services.api.services.map_layers._table_columns",
+        lambda _schema, _table: {"geom", "id", "name", "stav", "priorita"},
+    )
+
+    values = _prepare_record_values(
+        layer_id="potrubi",
+        title="Potrubi",
+        layer_kind="context",
+        source_schema="evidence",
+        source_table="POTRUBI",
+        geometry_column="geom",
+        identifier_column="id",
+        source_srid=3857,
+        target_srid=4326,
+        property_columns=["id", "name"],
+        property_aliases={},
+        filter_columns=[],
+        popup_columns=["id", "name"],
+        style={
+            "color": "#2563eb",
+            "conditionalStyle": {
+                "rules": [
+                    {"property": "stav", "operator": "equals", "value": "bez_vody", "style": {"color": "#dc2626"}},
+                    {"property": "stav", "operator": "equals", "value": "tece", "style": {"color": "#16a34a"}},
+                    {"property": "priorita", "operator": "equals", "value": 1, "style": {"weight": 5}},
+                ],
+            },
+        },
+        device_section_key=None,
+        restrict_to_allowed_devices=False,
+        map_enabled=True,
+        default_visible=True,
+        show_photo=False,
+        is_active=True,
+        draw_order=100,
+    )
+
+    assert values["property_columns"] == ["id", "name", "stav", "priorita"]
 
 
 def test_list_map_layers_admin_requires_admin():

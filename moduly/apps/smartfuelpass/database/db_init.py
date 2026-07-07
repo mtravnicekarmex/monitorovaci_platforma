@@ -17,6 +17,7 @@ def ensure_smartfuelpass_tables() -> None:
             text(
                 """
                 ALTER TABLE monitoring.smartfuelpass_relace
+                    ADD COLUMN IF NOT EXISTS connector_id VARCHAR(128),
                     ADD COLUMN IF NOT EXISTS source_started_at TIMESTAMP WITHOUT TIME ZONE,
                     ADD COLUMN IF NOT EXISTS source_ended_at TIMESTAMP WITHOUT TIME ZONE,
                     ADD COLUMN IF NOT EXISTS started_at_utc TIMESTAMP WITH TIME ZONE,

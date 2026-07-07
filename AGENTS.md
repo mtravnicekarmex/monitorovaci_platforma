@@ -43,6 +43,10 @@ At the end of every substantive session:
 - `services/api/core/config.py`: FastAPI runtime settings, including token and CORS configuration.
 - `services/api/core/tokens.py`: custom HMAC bearer token implementation.
 - `services/api/core/dependencies.py`: API authentication, admin, section, and device access dependencies.
+- `services/api/routes/system_health.py`: admin-only system health API routes
+  for safe post-restart/runtime checks.
+- `services/api/services/system_health.py`: sanitized Windows runtime probes
+  for boot time, startup task, expected listeners, and temporary listeners.
 - `services/api/routes/map.py`: general map API for layer catalog, features, filter options, and authorized device images.
 - `services/api/services/map_layers.py`: map-layer metadata, access checks, filtering, distinct filter options, and image proxy orchestration.
 - `services/api/services/device_map.py`: GeoJSON map feature loading, device detail enrichment, and map image file resolution.
@@ -53,8 +57,19 @@ At the end of every substantive session:
 - `moduly/apps/dashboard/map_shared.py`: shared Leaflet map HTML rendering and map API payload helpers.
 - `moduly/apps/dashboard/database/models.py`: dashboard user and permission model.
 - `moduly/apps/dashboard/database/db_init.py`: dashboard and feature table bootstrap.
+- `moduly/apps/dashboard/pages/37_system_health.py`: Streamlit admin page for
+  safe system health and post-restart verification checks.
 - `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`: Streamlit admin page for map layer configuration.
 - `moduly/apps/dashboard/pages/36_mapove_podklady.py`: Streamlit `Mapove podklady / Mapa` page.
+- `moduly/apps/smartfuelpass/service.py`: SmartFuelPass portal access,
+  charge-session report construction, PDF/email rendering, and database-backed
+  weekly report assembly.
+- `moduly/apps/smartfuelpass/sync.py`: SmartFuelPass charge-session sync from
+  the portal into PostgreSQL.
+- `moduly/apps/smartfuelpass/database/models.py`: SmartFuelPass PostgreSQL
+  ORM model for `monitoring.smartfuelpass_relace`.
+- `moduly/apps/smartfuelpass/database/db_init.py`: SmartFuelPass table and
+  migration bootstrap, including additive schema changes.
 - `frontend_next/`: experimental Next.js MVP. It is not the active production dashboard and is not currently used in daily operation. Treat it as a future migration/prototype area, not as the source of truth for current dashboard behavior.
 - `.streamlit/config.toml`: Streamlit server and navigation settings.
 - `Caddyfile`: tracked mirror of the deployed public proxy configuration at `C:\Program Files\Caddy\Caddyfile`.
@@ -147,6 +162,14 @@ Known hygiene topics to handle only after explicit approval:
 - SmartFuelPass automation logs in with configured credentials for each portal
   run. Do not restore JSON cookie/session persistence or
   `SMARTFUELPASS_SESSION_COOKIES_PATH`.
+- SmartFuelPass charge-session data is synchronized into PostgreSQL by
+  `daily_job` after midnight. Weekly SmartFuelPass reports must be built from
+  `monitoring.smartfuelpass_relace`, not by reading the portal directly during
+  report email delivery.
+- SmartFuelPass sync upserts by `id_relace`; existing rows should be updated
+  when the portal later corrects or enriches a session.
+- SmartFuelPass weekly report periods use the previous completed calendar week
+  from Monday through Sunday and filter by session end time.
 - `Mapove podklady` uses general FastAPI map endpoints and admin-configured metadata in `dashboard.Map_Layers`.
 - Map feature images must be resolved server-side from `layer_id` and device identifier; do not expose an endpoint that serves arbitrary client-supplied file paths.
 - Browser map image loading must use same-origin `/api/v1/map/images` through Caddy, which routes `/api/*` to FastAPI and other requests to Streamlit.
@@ -342,6 +365,11 @@ Known job families:
 - General map UI belongs to `moduly/apps/dashboard/pages/36_mapove_podklady.py`; map-layer administration belongs to `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`.
 - Shared map rendering and request helpers belong in `moduly/apps/dashboard/map_shared.py`.
 - All active Streamlit dashboard pages use the shared mobile layout from `moduly/apps/dashboard/responsive.py` through the common `login.py` entry point.
+- `Health systemu` is an admin-only dashboard page for post-restart and
+  operational health checks. It must use authenticated FastAPI endpoints and
+  display safe statuses, timestamps, listener summaries, and aggregates only.
+  Do not expose secrets, environment values, bearer tokens, cookie values,
+  raw process command lines, raw portal rows, or raw device photo paths.
 - Desktop remains the default layout; mobile rules apply below the shared `720px` breakpoint.
 - On mobile, general page columns stack vertically, metric rows use two cards per row, and tables, charts, forms, dialogs, tabs, images, and action buttons must remain usable without page-level horizontal overflow.
 - Mobile map geolocation stays in the browser, is requested only after a user action, and must not be persisted or sent to the API.
@@ -361,6 +389,8 @@ Known job families:
 - `kalorimetry`: heat meter imports, normalization, and outlier review.
 - `manometry`: pressure measurements, imports, dashboard/API surfaces.
 - `smartfuelpass`: fuel/card import and reporting workflow with browser/session artifacts.
+  Daily portal sync persists charge sessions to PostgreSQL; weekly reporting
+  reads the synchronized database rows.
 - `web_search`: monitored web search and result persistence.
 
 Water event types currently include examples such as:

@@ -23,6 +23,7 @@ class SmartFuelPassRelace(Base):
     tarif: Mapped[str | None] = mapped_column(String(255), nullable=True)
     battery_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
     suma: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    connector_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
     ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
     source_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)

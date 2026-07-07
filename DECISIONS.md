@@ -1062,3 +1062,64 @@ Implications:
 - Logout and invalid-cookie cleanup must expire both current dashboard cookies.
 - Do not restore a browser-configured cross-origin image API override; map
   images should still load from the dashboard origin under `/api/v1/map/images`.
+
+## DEC-048: System Health Dashboard Uses Safe Admin Checks
+
+Date: 2026-07-07
+
+Decision: The new `Health systemu` dashboard page will collect post-restart
+and operational checks through authenticated admin FastAPI endpoints. Checks
+will be added incrementally, one reviewed item at a time.
+
+Rationale: The post-restart shell checklist is useful but should be repeatable
+from the dashboard without exposing secrets or raw operational data. FastAPI is
+the right boundary for browser-facing operational checks because it can apply
+admin authorization, sanitize outputs, and keep workstation-specific probing
+server-side.
+
+Implications:
+
+- `Health systemu` lives in the Streamlit footer navigation as an admin-only
+  page near `Health scheduleru`.
+- Each check should have an explicit data source, status semantics, and display
+  format before implementation.
+- Browser code must not run local process, filesystem, PowerShell, or database
+  probes directly.
+- System health API responses must avoid secrets, environment values, bearer
+  tokens, cookie values, raw process command lines, raw portal rows, raw device
+  photo paths, and credential file contents.
+- The first implemented check is runtime startup health: Windows boot time,
+  startup scheduled task metadata, expected listeners, and absence of temporary
+  listeners.
+- Future checks can add proxy/routing, scheduler, production environment,
+  database metadata, SmartFuelPass aggregates, and security scan status after
+  separate review.
+
+## DEC-047: SmartFuelPass Weekly Reports Use Synced PostgreSQL Rows
+
+Date: 2026-06-26
+
+Decision: SmartFuelPass nabíjecí relace se stahují denně po půlnoci v
+`daily_job` do PostgreSQL tabulky `monitoring.smartfuelpass_relace`. Týdenní
+SmartFuelPass email/PDF report se staví z těchto synchronizovaných databázových
+řádků, ne přímým čtením portálu v okamžiku odesílání reportu.
+
+Rationale: Denní databázový sync vytváří stabilní zdroj pravdy pro reporting.
+Týdenní report pak není závislý na aktuálním stavu HTML tabulky portálu,
+stránkování, dočasném filtrování portálu, ani na dalším portálovém loginu při
+odesílání emailu.
+
+Implications:
+
+- `daily_job` zůstává odpovědný za stažení SmartFuelPass relací z portálu a
+  jejich upsert do PostgreSQL.
+- `smartfuelpass_weekly_report_job` volá emailový report, který čte z
+  `monitoring.smartfuelpass_relace`.
+- Synchronizace relací aktualizuje existující záznam podle `id_relace`, aby se
+  opravené nebo doplněné hodnoty z portálu promítly do databáze.
+- Týdenní období reportu je předchozí uzavřený kalendářní týden
+  pondělí-neděle a report filtruje období podle ukončení relace.
+- Schéma `monitoring.smartfuelpass_relace` obsahuje `connector_id`, aby report
+  z databáze mohl počítat unikátní konektory.
+- Přímý portálový builder zůstává diagnostická/ruční cesta, ale nesmí být
+  výchozím zdrojem týdenního emailového reportu.

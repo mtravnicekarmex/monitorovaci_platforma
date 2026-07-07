@@ -47,14 +47,24 @@ def test_scheduler_health_footer_page_is_after_alerting():
     assert footer_page_keys.index("scheduler_health") < footer_page_keys.index("muj_ucet")
 
 
-def test_shared_outlier_review_footer_page_is_after_scheduler_health():
+def test_system_health_footer_page_is_after_scheduler_health():
     footer_page_keys = [page.key for page in get_dashboard_pages("footer")]
 
     assert "scheduler_health" in footer_page_keys
+    assert "system_health" in footer_page_keys
+    assert "outlier_review" in footer_page_keys
+    assert footer_page_keys.index("scheduler_health") < footer_page_keys.index("system_health")
+    assert footer_page_keys.index("system_health") < footer_page_keys.index("outlier_review")
+
+
+def test_shared_outlier_review_footer_page_is_after_system_health():
+    footer_page_keys = [page.key for page in get_dashboard_pages("footer")]
+
+    assert "system_health" in footer_page_keys
     assert "outlier_review" in footer_page_keys
     assert "vodomery_outlier_review" not in footer_page_keys
     assert "plynomery_outlier_review" not in footer_page_keys
-    assert footer_page_keys.index("scheduler_health") < footer_page_keys.index("outlier_review")
+    assert footer_page_keys.index("system_health") < footer_page_keys.index("outlier_review")
 
 
 def test_manometry_section_and_page_are_configurable():

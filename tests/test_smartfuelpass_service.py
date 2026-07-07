@@ -2,6 +2,7 @@ import datetime
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -477,11 +478,18 @@ def test_fetch_charge_sessions_dataframe_uses_login_timeout_for_auto_login(monke
     assert fake_context.closed is True
 
 
-def test_last_completed_week_period_uses_previous_seven_full_days():
+def test_last_completed_week_period_uses_previous_calendar_week():
     start, end = service.last_completed_week_period(datetime.datetime(2026, 4, 14, 8, 30))
 
-    assert start == datetime.datetime(2026, 4, 7, 0, 0)
-    assert end == datetime.datetime(2026, 4, 13, 23, 59, 59, 999999)
+    assert start == datetime.datetime(2026, 4, 6, 0, 0)
+    assert end == datetime.datetime(2026, 4, 12, 23, 59, 59, 999999)
+
+
+def test_last_completed_week_period_is_stable_during_current_week():
+    start, end = service.last_completed_week_period(datetime.datetime(2026, 4, 17, 18, 15))
+
+    assert start == datetime.datetime(2026, 4, 6, 0, 0)
+    assert end == datetime.datetime(2026, 4, 12, 23, 59, 59, 999999)
 
 
 def test_current_month_period_uses_month_start_and_reference_time():
@@ -664,8 +672,8 @@ def test_build_charge_sessions_report_html_contains_summary_sections():
     assert ">Tarif<" in html
     assert ">Cena<" in html
     assert "120,50 Kč" in html
-    assert html.count("11.04.2026 13:56 - 14:29") == 1
-    assert "<h2>Poslední týden</h2>" not in html
+    assert html.count("11.04.2026 13:56 - 14:29") == 2
+    assert "<h2>Poslední týden</h2>" in html
     assert "První relace:" not in html
     assert "Poslední relace:" not in html
     assert "Souhrn za poslední týden" not in html
@@ -780,6 +788,68 @@ def test_load_main_table_error_includes_url_and_selector_counts(monkeypatch):
     assert "table:visible=0" in message
 
 
+def test_build_charge_sessions_report_from_database_uses_synced_rows(monkeypatch):
+    class FakeQuery:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def order_by(self, *args):
+            return self
+
+        def all(self):
+            return self.rows
+
+    class FakeSession:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def query(self, model):
+            return FakeQuery(self.rows)
+
+    rows = [
+        SimpleNamespace(
+            id_relace="rel-001",
+            kwh=33.489,
+            tarif="ARMEX HOLDING 15Kč + 20,00%",
+            battery_status=79,
+            suma=120.50,
+            connector_id="A1",
+            started_at=datetime.datetime(2026, 4, 11, 13, 56),
+            ended_at=datetime.datetime(2026, 4, 11, 14, 29),
+            lokace="Armex - Budova E",
+            rychlost_nabijeni=60.889,
+        ),
+        SimpleNamespace(
+            id_relace="rel-002",
+            kwh=15.0,
+            tarif="ARMEX HOLDING 15Kč",
+            battery_status=86,
+            suma=210.0,
+            connector_id="A2",
+            started_at=datetime.datetime(2026, 4, 2, 10, 50),
+            ended_at=datetime.datetime(2026, 4, 2, 11, 20),
+            lokace="Ústí nad Labem",
+            rychlost_nabijeni=30.0,
+        ),
+    ]
+    monkeypatch.setattr(service, "ensure_smartfuelpass_tables", lambda: None)
+
+    report = service.build_charge_sessions_report_from_database(
+        db_session=FakeSession(rows),
+        reference_datetime=datetime.datetime(2026, 4, 14, 8, 30),
+        subject_name="ARMEX HOLDING, a.s.",
+    )
+
+    assert report.source_row_count == 2
+    assert report.invalid_row_count == 0
+    assert report.last_week.session_count == 1
+    assert report.last_week.connector_count == 1
+    assert report.last_week_rows[0].connector_id == "A1"
+    assert report.last_week_rows[0].date_range_label == "11.04.2026 13:56 - 14:29"
+    assert report.last_week_rows[0].kwh_label == "33,489 kWh"
+    assert report.current_month_rows[-1].location_name == "Ústí nad Labem"
+
+
 def test_send_charge_sessions_report_email_generates_pdf_and_sends_attachment(monkeypatch, tmp_path):
     dataframe = pd.DataFrame(
         [
@@ -813,8 +883,13 @@ def test_send_charge_sessions_report_email_generates_pdf_and_sends_attachment(mo
 
     monkeypatch.setattr(
         service,
-        "build_charge_sessions_report_from_portal",
+        "build_charge_sessions_report_from_database",
         lambda **kwargs: report,
+    )
+    monkeypatch.setattr(
+        service,
+        "build_charge_sessions_report_from_portal",
+        lambda **kwargs: pytest.fail("weekly email report must use synced database rows"),
     )
     monkeypatch.setattr(
         service,

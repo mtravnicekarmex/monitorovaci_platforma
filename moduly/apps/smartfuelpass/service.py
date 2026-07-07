@@ -21,9 +21,13 @@ from decouple import config
 
 from app.channels.email import send_email_outlook
 from app.time_utils import utc_now_naive
+from core.db.connect import get_session_pg
+from moduly.apps.smartfuelpass.database.db_init import ensure_smartfuelpass_tables
+from moduly.apps.smartfuelpass.database.models import SmartFuelPassRelace
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page, Playwright
+    from sqlalchemy.orm import Session
 
 
 DEFAULT_BASE_URL = "https://portal.smartfuelpass.com/"
@@ -1313,8 +1317,9 @@ def _format_charge_session_period(started_at: datetime | None, ended_at: datetim
 def last_completed_week_period(reference: datetime | None = None) -> tuple[datetime, datetime]:
     current = reference or datetime.now()
     start_of_today = current.replace(hour=0, minute=0, second=0, microsecond=0)
-    period_start = start_of_today - timedelta(days=7)
-    period_end = start_of_today - timedelta(microseconds=1)
+    start_of_current_week = start_of_today - timedelta(days=start_of_today.weekday())
+    period_start = start_of_current_week - timedelta(days=7)
+    period_end = start_of_current_week - timedelta(microseconds=1)
     return period_start, period_end
 
 
@@ -1340,6 +1345,12 @@ def current_month_period(reference: datetime | None = None) -> tuple[datetime, d
 def format_czk(value: float) -> str:
     whole, fraction = f"{value:.2f}".split(".")
     return f"{int(whole):,}".replace(",", " ") + f",{fraction} Kč"
+
+
+def _format_kwh_label(value: object) -> str:
+    if value is None or pd.isna(value):
+        return "-"
+    return f"{float(value):.3f}".replace(".", ",") + " kWh"
 
 
 def _resolve_dataframe_column(columns: Iterable[object], aliases: Iterable[str], *, required: bool = True) -> str | None:
@@ -1438,6 +1449,9 @@ def _prepare_charge_sessions_dataframe(dataframe: pd.DataFrame) -> tuple[pd.Data
         prepared[ended_column].map(_extract_first_datetime)
         if ended_column
         else pd.Series([None] * len(prepared), index=prepared.index)
+    )
+    prepared["period_at"] = pd.to_datetime(prepared["ended_at"], errors="coerce").combine_first(
+        prepared["session_at"]
     )
     prepared["location_name"] = (
         prepared[location_column].map(_clean_location_name)
@@ -1552,41 +1566,42 @@ def _build_period_summary(
         total_amount=round(float(dataframe["amount_czk"].sum()), 2),
         location_count=_non_empty_unique_count(dataframe["location_name"]),
         connector_count=_non_empty_unique_count(dataframe["connector_id"]),
-        first_session_at=dataframe["session_at"].min().to_pydatetime(),
-        last_session_at=dataframe["session_at"].max().to_pydatetime(),
+        first_session_at=dataframe["period_at"].min().to_pydatetime(),
+        last_session_at=dataframe["period_at"].max().to_pydatetime(),
     )
 
 
-def build_charge_sessions_report(
-    dataframe: pd.DataFrame,
+def _build_charge_sessions_report_from_prepared(
+    prepared: pd.DataFrame,
     *,
+    source_row_count: int,
+    invalid_row_count: int,
     reference_datetime: datetime | None = None,
     subject_name: str | None = None,
 ) -> SmartFuelPassChargeSessionsReport:
     resolved_reference = reference_datetime or datetime.now()
-    prepared, invalid_row_count = _prepare_charge_sessions_dataframe(dataframe)
 
     last_week_start, last_week_end = last_completed_week_period(resolved_reference)
     current_month_start, current_month_end = current_month_period(resolved_reference)
     previous_month_start, previous_month_end = previous_month_period(resolved_reference)
 
     last_week_rows = prepared[
-        prepared["session_at"].between(last_week_start, last_week_end, inclusive="both")
+        prepared["period_at"].between(last_week_start, last_week_end, inclusive="both")
     ].copy()
     current_month_rows = prepared[
-        prepared["session_at"].between(current_month_start, current_month_end, inclusive="both")
+        prepared["period_at"].between(current_month_start, current_month_end, inclusive="both")
     ].copy()
     previous_month_rows = prepared[
-        prepared["session_at"].between(previous_month_start, previous_month_end, inclusive="both")
+        prepared["period_at"].between(previous_month_start, previous_month_end, inclusive="both")
     ].copy()
 
-    total_start = None if prepared.empty else prepared["session_at"].min().to_pydatetime()
-    total_end = None if prepared.empty else prepared["session_at"].max().to_pydatetime()
+    total_start = None if prepared.empty else prepared["period_at"].min().to_pydatetime()
+    total_end = None if prepared.empty else prepared["period_at"].max().to_pydatetime()
 
     return SmartFuelPassChargeSessionsReport(
         subject_name=subject_name or _smartfuel_report_subject_name(),
         generated_at=resolved_reference,
-        source_row_count=int(len(dataframe)),
+        source_row_count=int(source_row_count),
         valid_row_count=int(len(prepared)),
         invalid_row_count=invalid_row_count,
         last_week=_build_period_summary(
@@ -1613,6 +1628,96 @@ def build_charge_sessions_report(
         last_week_rows=_build_charge_session_rows(last_week_rows),
         current_month_rows=_build_charge_session_rows(current_month_rows),
         previous_month_rows=_build_charge_session_rows(previous_month_rows),
+    )
+
+
+def build_charge_sessions_report(
+    dataframe: pd.DataFrame,
+    *,
+    reference_datetime: datetime | None = None,
+    subject_name: str | None = None,
+) -> SmartFuelPassChargeSessionsReport:
+    prepared, invalid_row_count = _prepare_charge_sessions_dataframe(dataframe)
+    return _build_charge_sessions_report_from_prepared(
+        prepared,
+        source_row_count=int(len(dataframe)),
+        invalid_row_count=invalid_row_count,
+        reference_datetime=reference_datetime,
+        subject_name=subject_name,
+    )
+
+
+def _charge_sessions_db_dataframe(db_session: "Session") -> pd.DataFrame:
+    rows = (
+        db_session.query(SmartFuelPassRelace)
+        .order_by(SmartFuelPassRelace.ended_at.asc(), SmartFuelPassRelace.id_relace.asc())
+        .all()
+    )
+    return pd.DataFrame(
+        [
+            {
+                "session_at": row.ended_at,
+                "period_at": row.ended_at,
+                "occurred_at_label": row.ended_at.strftime("%d.%m.%Y %H:%M") if row.ended_at else "",
+                "amount_czk": float(row.suma or 0),
+                "amount_label": format_czk(float(row.suma or 0)),
+                "started_at": row.started_at,
+                "ended_at": row.ended_at,
+                "location_name": row.lokace or "-",
+                "connector_id": row.connector_id or "",
+                "kwh_label": _format_kwh_label(row.kwh),
+                "kwh": None if row.kwh is None else float(row.kwh),
+                "battery_status": row.battery_status,
+                "tariff_label": row.tarif or "-",
+                "id_relace": row.id_relace,
+                "price_label": format_czk(float(row.suma or 0)),
+                "date_range_label": _format_charge_session_period(row.started_at, row.ended_at),
+                "rychlost_nabijeni": None if row.rychlost_nabijeni is None else float(row.rychlost_nabijeni),
+            }
+            for row in rows
+        ]
+    )
+
+
+def build_charge_sessions_report_from_database(
+    *,
+    db_session: "Session" | None = None,
+    reference_datetime: datetime | None = None,
+    subject_name: str | None = None,
+) -> SmartFuelPassChargeSessionsReport:
+    ensure_smartfuelpass_tables()
+    owns_session = db_session is None
+    session = db_session or get_session_pg()
+    try:
+        dataframe = _charge_sessions_db_dataframe(session)
+    finally:
+        if owns_session:
+            session.close()
+
+    if dataframe.empty:
+        prepared = pd.DataFrame(
+            columns=[
+                "session_at",
+                "period_at",
+                "amount_czk",
+                "location_name",
+                "connector_id",
+            ]
+        )
+    else:
+        prepared = dataframe.copy()
+        prepared["session_at"] = pd.to_datetime(prepared["session_at"], errors="coerce")
+        prepared["period_at"] = pd.to_datetime(prepared["period_at"], errors="coerce")
+        prepared = prepared[prepared["period_at"].notna()].copy()
+        prepared.sort_values("period_at", inplace=True)
+        prepared.reset_index(drop=True, inplace=True)
+
+    return _build_charge_sessions_report_from_prepared(
+        prepared,
+        source_row_count=int(len(dataframe)),
+        invalid_row_count=int(len(dataframe) - len(prepared)),
+        reference_datetime=reference_datetime,
+        subject_name=subject_name,
     )
 
 
@@ -1924,6 +2029,7 @@ def build_charge_sessions_report_html(report: SmartFuelPassChargeSessionsReport)
     {_build_summary_card(report.total)}
   </div>
 
+  {_build_rows_section("Poslední týden", report.last_week_rows)}
   {_build_rows_section("Tento měsíc", report.current_month_rows)}
   {_build_rows_section("Minulý měsíc", report.previous_month_rows)}
 </body>
@@ -1978,11 +2084,10 @@ def send_charge_sessions_report_email(
     headless: bool = True,
 ) -> dict[str, Any]:
     resolved_recipients = tuple(recipients or _smartfuel_weekly_report_recipients())
-    report = build_charge_sessions_report_from_portal(
-        cookie_path=cookie_path,
+    _ = cookie_path, headless
+    report = build_charge_sessions_report_from_database(
         reference_datetime=reference_datetime,
         subject_name=subject_name,
-        headless=headless,
     )
     pdf_bytes = render_charge_sessions_report_pdf(report)
     pdf_filename = _build_charge_sessions_report_pdf_filename(report)

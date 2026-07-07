@@ -140,6 +140,79 @@ def test_leaflet_map_html_uses_configured_layer_style_and_default_visibility():
     assert "layerConfig.popup_columns" in html
 
 
+def test_leaflet_map_html_supports_conditional_feature_style():
+    payload = {
+        "primary_layer_id": "potrubi",
+        "layers": [
+            {
+                "layer_id": "potrubi",
+                "title": "Potrubi",
+                "style": {
+                    "color": "#2563eb",
+                    "weight": 3,
+                    "conditionalStyle": {
+                        "property": "bez_vody",
+                        "operator": "equals",
+                        "value": True,
+                        "match": {"color": "#dc2626", "weight": 5},
+                        "fallback": {"color": "#2563eb", "weight": 3},
+                    },
+                },
+                "feature_collection": {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "LineString", "coordinates": [[14.1, 50.7], [14.2, 50.8]]},
+                            "properties": {"id": "P-1", "bez_vody": True},
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert "conditionalStyle" in html
+    assert "function conditionMatches" in html
+    assert "function featureStyle" in html
+    assert "delete style.conditionalStyle" in html
+    assert "style: (feature) => featureStyle(feature, layerId, layerConfig)" in html
+    assert "pointToLayer: (feature, latlng) => L.circleMarker(latlng, markerStyle(feature, layerId, layerConfig))" in html
+
+
+def test_leaflet_map_html_supports_multiple_conditional_feature_styles():
+    payload = {
+        "primary_layer_id": "potrubi",
+        "layers": [
+            {
+                "layer_id": "potrubi",
+                "title": "Potrubi",
+                "style": {
+                    "color": "#2563eb",
+                    "conditionalStyle": {
+                        "rules": [
+                            {"property": "stav", "operator": "equals", "value": "bez_vody", "style": {"color": "#dc2626"}},
+                            {"property": "stav", "operator": "equals", "value": "tece", "style": {"color": "#16a34a"}},
+                            {"property": "stav", "operator": "equals", "value": "stoji", "style": {"color": "#ca8a04"}},
+                        ],
+                        "fallback": {"color": "#64748b"},
+                    },
+                },
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            }
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert "function conditionalRules" in html
+    assert "Array.isArray(conditionalStyle.rules)" in html
+    assert "const matchedRule = conditionalRules(conditionalStyle).find" in html
+    assert "? (matchedRule.style || matchedRule.match)" in html
+
+
 def test_leaflet_map_html_renders_foto_as_popup_image_only_when_present():
     payload = {
         "primary_layer_id": "vodomery",

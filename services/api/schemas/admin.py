@@ -178,3 +178,39 @@ class SchedulerLogResponse(BaseModel):
     lines_returned: int = Field(ge=0)
     content: str
     updated_at: datetime | None = None
+
+
+class SystemRuntimeBootStatus(BaseModel):
+    status: str = Field(..., pattern="^(ok|degraded|error)$")
+    boot_time: datetime | None = None
+    detail: str
+
+
+class SystemRuntimeStartupTaskStatus(BaseModel):
+    task_name: str
+    status: str = Field(..., pattern="^(ok|degraded|error)$")
+    last_run_time: datetime | None = None
+    next_run_time: datetime | None = None
+    last_task_result: int | None = None
+    detail: str
+
+
+class SystemRuntimeListenerStatus(BaseModel):
+    key: str
+    label: str
+    status: str = Field(..., pattern="^(ok|degraded|error)$")
+    expected: bool
+    present: bool
+    local_address: str | None = None
+    local_port: int = Field(ge=1, le=65535)
+    process_ids: list[int] = Field(default_factory=list)
+    detail: str
+
+
+class SystemRuntimeHealthResponse(BaseModel):
+    status: str = Field(..., pattern="^(ok|degraded|error)$")
+    checked_at: datetime
+    boot: SystemRuntimeBootStatus
+    startup_task: SystemRuntimeStartupTaskStatus
+    expected_listeners: list[SystemRuntimeListenerStatus]
+    temporary_listeners: list[SystemRuntimeListenerStatus]

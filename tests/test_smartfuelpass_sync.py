@@ -23,6 +23,7 @@ def test_smartfuelpass_relace_model_has_interval_time_semantics_columns():
         "source_ended_at",
         "started_at_utc",
         "ended_at_utc",
+        "connector_id",
         "time_basis",
         "source_timezone",
         "started_utc_offset_minutes",
@@ -95,6 +96,7 @@ def test_build_charge_sessions_sync_rows_extracts_requested_fields():
         "tarif": "ARMEX HOLDING 15Kč + 20,00%",
         "battery_status": 79,
         "suma": 532.47,
+        "connector_id": None,
         "started_at": datetime.datetime(2026, 5, 1, 16, 43),
         "ended_at": datetime.datetime(2026, 5, 1, 17, 5),
         "source_started_at": datetime.datetime(2026, 5, 1, 16, 43),
@@ -117,6 +119,7 @@ def test_build_charge_sessions_sync_rows_extracts_requested_fields():
         "tarif": "ARMEX HOLDING 15Kč",
         "battery_status": 86,
         "suma": 217.78,
+        "connector_id": None,
         "started_at": datetime.datetime(2026, 4, 29, 12, 17),
         "ended_at": datetime.datetime(2026, 4, 29, 12, 32),
         "source_started_at": datetime.datetime(2026, 4, 29, 12, 17),
@@ -174,7 +177,7 @@ def test_upsert_charge_sessions_sync_rows_executes_single_statement_and_commits(
     assert len(fake_session.statements) == 1
     assert fake_session.statements[0].table.name == "smartfuelpass_relace"
     assert fake_session.statements[0].table.schema == "monitoring"
-    assert "DO NOTHING" in str(fake_session.statements[0])
+    assert "DO UPDATE" in str(fake_session.statements[0])
 
 
 def test_sync_charge_sessions_to_db_fetches_rows_through_retry_helper_and_closes_owned_session(monkeypatch):

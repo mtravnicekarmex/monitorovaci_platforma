@@ -168,6 +168,33 @@ def _clean_style(value: dict[str, object] | None) -> dict[str, object]:
     return {str(key).strip(): item for key, item in value.items() if str(key).strip()}
 
 
+def _conditional_style_properties(style: dict[str, object]) -> list[str]:
+    conditional_style = style.get("conditionalStyle")
+    if not isinstance(conditional_style, dict):
+        return []
+    raw_rules = conditional_style.get("rules")
+    rules = raw_rules if isinstance(raw_rules, list) else [conditional_style]
+    properties: list[str] = []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        property_name = str(rule.get("property") or "").strip()
+        if property_name and property_name not in properties:
+            properties.append(property_name)
+    return properties
+
+
+def _ensure_conditional_style_property_column(
+    property_columns: list[str],
+    style: dict[str, object],
+) -> list[str]:
+    cleaned_columns = list(property_columns)
+    for property_name in _conditional_style_properties(style):
+        if property_name not in cleaned_columns:
+            cleaned_columns.append(property_name)
+    return cleaned_columns
+
+
 def _table_columns(source_schema: str, source_table: str) -> set[str]:
     session = get_session_pg()
     try:
@@ -319,6 +346,12 @@ def _prepare_record_values(
     if cleaned_layer_kind not in VALID_LAYER_KINDS:
         raise MapLayerOperationError("layer_kind musi byt context nebo device.")
 
+    cleaned_style = _clean_style(style)
+    cleaned_property_columns = _ensure_conditional_style_property_column(
+        _clean_list(property_columns),
+        cleaned_style,
+    )
+
     values: dict[str, object] = {
         "layer_id": cleaned_layer_id,
         "title": _clean_text(title, field_name="title"),
@@ -329,11 +362,11 @@ def _prepare_record_values(
         "identifier_column": _clean_text(identifier_column, field_name="identifier_column"),
         "source_srid": int(source_srid),
         "target_srid": int(target_srid),
-        "property_columns": _clean_list(property_columns),
+        "property_columns": cleaned_property_columns,
         "property_aliases": _clean_aliases(property_aliases),
         "filter_columns": _clean_list(filter_columns),
         "popup_columns": _clean_list(popup_columns),
-        "style": _clean_style(style),
+        "style": cleaned_style,
         "device_section_key": (device_section_key or "").strip() or None,
         "restrict_to_allowed_devices": bool(restrict_to_allowed_devices),
         "map_enabled": bool(map_enabled),

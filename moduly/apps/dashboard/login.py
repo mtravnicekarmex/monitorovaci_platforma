@@ -14,11 +14,20 @@ if str(PROJECT_ROOT) not in sys.path:
 from moduly.apps.dashboard import auth as dashboard_auth
 
 
+def _reload_dashboard_module(module):
+    module_name = getattr(module, "__name__", "")
+    if not module_name:
+        return module
+    if sys.modules.get(module_name) is not module:
+        return importlib.import_module(module_name)
+    return importlib.reload(module)
+
+
 if not getattr(dashboard_auth, "LOGIN_CLIENT_IP_FORWARDING_ENABLED", False):
     from moduly.apps.dashboard import api_client as dashboard_api_client
 
-    importlib.reload(dashboard_api_client)
-    dashboard_auth = importlib.reload(dashboard_auth)
+    _reload_dashboard_module(dashboard_api_client)
+    dashboard_auth = _reload_dashboard_module(dashboard_auth)
 
 
 from moduly.apps.dashboard.auth import (
@@ -39,7 +48,7 @@ from moduly.apps.dashboard.navigation_config import format_page_label, get_page_
 from moduly.apps.dashboard import responsive as dashboard_responsive
 
 
-dashboard_responsive = importlib.reload(dashboard_responsive)
+dashboard_responsive = _reload_dashboard_module(dashboard_responsive)
 
 
 st.set_page_config(

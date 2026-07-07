@@ -698,14 +698,95 @@ def build_leaflet_map_html(
     }}
 
     function layerStyle(layerId, layerConfig) {{
-      return {{
+      const style = {{
         ...defaultLayerStyle(layerId),
         ...(layerConfig.style || {{}})
       }};
+      delete style.conditionalStyle;
+      return style;
     }}
 
-    function markerStyle(layerId, layerConfig) {{
-      const style = layerStyle(layerId, layerConfig);
+    function conditionalRules(conditionalStyle) {{
+      if (!conditionalStyle || typeof conditionalStyle !== "object") {{
+        return [];
+      }}
+      if (Array.isArray(conditionalStyle.rules)) {{
+        return conditionalStyle.rules.filter((rule) => rule && typeof rule === "object");
+      }}
+      return [conditionalStyle];
+    }}
+
+    function isEmptyValue(value) {{
+      return value === null || value === undefined || String(value).trim() === "";
+    }}
+
+    function normalizeConditionValue(value) {{
+      if (typeof value === "boolean" || typeof value === "number") {{
+        return value;
+      }}
+      if (typeof value === "string") {{
+        const trimmed = value.trim();
+        const lowered = trimmed.toLowerCase();
+        if (lowered === "true") {{
+          return true;
+        }}
+        if (lowered === "false") {{
+          return false;
+        }}
+        if (trimmed !== "" && !Number.isNaN(Number(trimmed))) {{
+          return Number(trimmed);
+        }}
+        return trimmed;
+      }}
+      return value;
+    }}
+
+    function conditionMatches(properties, conditionalStyle) {{
+      if (!conditionalStyle || typeof conditionalStyle !== "object") {{
+        return false;
+      }}
+      const propertyName = String(conditionalStyle.property || "");
+      if (!propertyName) {{
+        return false;
+      }}
+      const actual = properties[propertyName];
+      const operator = String(conditionalStyle.operator || "equals");
+      if (operator === "is_empty") {{
+        return isEmptyValue(actual);
+      }}
+      if (operator === "is_not_empty") {{
+        return !isEmptyValue(actual);
+      }}
+      const normalizedActual = normalizeConditionValue(actual);
+      const normalizedExpected = normalizeConditionValue(conditionalStyle.value);
+      if (operator === "not_equals") {{
+        return normalizedActual !== normalizedExpected;
+      }}
+      return normalizedActual === normalizedExpected;
+    }}
+
+    function featureStyle(feature, layerId, layerConfig) {{
+      const baseStyle = layerStyle(layerId, layerConfig);
+      const conditionalStyle = (layerConfig.style || {{}}).conditionalStyle;
+      if (!conditionalStyle || typeof conditionalStyle !== "object") {{
+        return baseStyle;
+      }}
+      const properties = (feature && feature.properties) || {{}};
+      const matchedRule = conditionalRules(conditionalStyle).find((rule) => conditionMatches(properties, rule));
+      const styleOverride = matchedRule
+        ? (matchedRule.style || matchedRule.match)
+        : conditionalStyle.fallback;
+      if (!styleOverride || typeof styleOverride !== "object") {{
+        return baseStyle;
+      }}
+      return {{
+        ...baseStyle,
+        ...styleOverride
+      }};
+    }}
+
+    function markerStyle(feature, layerId, layerConfig) {{
+      const style = featureStyle(feature, layerId, layerConfig);
       if (layerId === "budovy") {{
         return {{
           radius: style.radius || 5,
@@ -757,8 +838,8 @@ def build_leaflet_map_html(
       const title = String(layerConfig.title || layerId);
       const featureCollection = layerConfig.feature_collection || {{ type: "FeatureCollection", features: [] }};
       const leafletLayer = L.geoJSON(featureCollection, {{
-      pointToLayer: (_feature, latlng) => L.circleMarker(latlng, markerStyle(layerId, layerConfig)),
-      style: layerStyle(layerId, layerConfig),
+      pointToLayer: (feature, latlng) => L.circleMarker(latlng, markerStyle(feature, layerId, layerConfig)),
+      style: (feature) => featureStyle(feature, layerId, layerConfig),
       onEachFeature: (feature, leafletLayer) => {{
         leafletLayer.bindPopup(popupHtml(feature.properties || {{}}, layerId, layerConfig));
         leafletLayer.on("popupopen", (event) => loadPopupPhotos(event.popup.getElement()));

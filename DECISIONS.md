@@ -1123,3 +1123,38 @@ Implications:
   z databáze mohl počítat unikátní konektory.
 - Přímý portálový builder zůstává diagnostická/ruční cesta, ale nesmí být
   výchozím zdrojem týdenního emailového reportu.
+
+## DEC-049: Prediction Models Move Toward A Shared Core
+
+Date: 2026-07-08
+
+Decision: Meter prediction work will move incrementally toward a shared
+prediction core with media-specific adapters, candidate model plugins, and
+rolling weekly backtests for every candidate. The migration will proceed one
+documented checklist step at a time.
+
+Rationale: Vodomery currently have multiple candidate models selected during
+weekly rebuild, but the implementation is domain-specific and validates over a
+single recent window. Future tuning should compare candidates consistently
+across water, gas, and electricity while preserving each medium's data
+semantics.
+
+Implications:
+
+- `moduly/mereni/prediction/` is the intended home for shared prediction
+  contracts, rolling backtest logic, candidate selection, and reusable metrics.
+- Each medium should expose a small adapter for measurements, profile storage,
+  active model lookup, scoring integration, and selection metadata.
+- Candidate models should be implemented behind a common interface so new
+  models can be measured without changing dashboard/report consumers.
+- Vodomery are the first migration target. Existing models 1-3 must keep
+  compatible outputs and production behavior until an explicit step changes
+  selection behavior.
+- A fourth vodomery candidate may be added as a 12-month seasonal yearly blend.
+  It should initially be measured in rebuild reports without being eligible for
+  automatic activation until enough weekly backtest evidence is reviewed.
+- Rolling weekly backtests should evaluate all candidates with coverage, MAE,
+  RMSE, bias, and a normalized error metric such as WAPE.
+- The active implementation checklist lives in `SESSION_NOTES.md`; do not
+  skip ahead or mark a step done until implementation and targeted
+  verification for that step are complete.

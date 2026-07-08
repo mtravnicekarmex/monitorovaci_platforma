@@ -150,6 +150,49 @@ These are recognized topics, not approved changes:
 - Decide whether `.gitignore` should ignore nested electric-meter data artifacts such as `moduly/mereni/elektromery/data/old/*.ts`.
 - Decide whether context-file updates should be committed together with code changes or as separate documentation commits.
 
+## Active Multi-Step Plan: Shared Prediction Core
+
+Date opened: 2026-07-08
+
+Objective:
+- Move meter prediction toward a shared core with media-specific adapters,
+  candidate model plugins, and rolling weekly backtests, while preserving
+  current production behavior until each step is explicitly completed.
+
+Rules:
+- Implement only the next unchecked step unless the user explicitly changes
+  the plan.
+- Mark a step complete only after code/docs changes and targeted verification
+  for that step are done.
+- Do not enable a new candidate model for automatic production selection until
+  the checklist reaches the explicit enablement step.
+
+Checklist:
+- [ ] 1. Create shared prediction contracts and data classes under
+  `moduly/mereni/prediction/` with no production behavior change.
+- [ ] 2. Add rolling weekly backtest scaffolding and unit tests on synthetic
+  data, including coverage, MAE, RMSE, bias, and WAPE-style normalized error.
+- [ ] 3. Add the first `vodomery` media adapter around existing tables,
+  measurement filters, profile storage, active model lookup, and selection
+  metadata, preserving current outputs.
+- [ ] 4. Move existing vodomery candidate models 1-3 behind the shared
+  candidate interface without changing active-model behavior.
+- [ ] 5. Add `Model 4 - seasonal yearly blend` for vodomery using a 12-month
+  training window, robust seasonal/day-of-week/slot blend, and fallback
+  profiles. Keep it measured only and not eligible for automatic activation.
+- [ ] 6. Extend weekly vodomery rebuild reporting/storage so all candidates
+  show rolling backtest metrics and whether they are eligible for selection.
+- [ ] 7. Review several weekly rebuild results and only then decide whether
+  Model 4, or any future measured-only candidate, may become eligible for
+  automatic selection.
+- [ ] 8. Adapt the shared prediction core to `plynomery`, preserving current
+  baseline/weather-aware behavior and gas-specific expected-zero/outlier
+  semantics.
+- [ ] 9. Design `elektromery` candidates after reviewing electricity source
+  cadence, calendar/tariff behavior, imports, and reporting semantics.
+- [ ] 10. Add cross-media dashboard/report views for candidate performance only
+  after the shared core has at least vodomery and one more medium integrated.
+
 ## Session Log Template
 
 Use this format for future entries:

@@ -159,6 +159,11 @@ Known hygiene topics to handle only after explicit approval:
   503 until that initialization succeeds.
 - Streamlit remains the active dashboard unless a task explicitly targets the experimental Next.js area.
 - Shared behavior should live in modules/services, not in duplicated page logic.
+- Prediction model work should proceed toward the shared core described in
+  `DECISIONS.md` and the active checklist in `SESSION_NOTES.md`: shared
+  contracts, media-specific adapters, candidate model plugins, and rolling
+  weekly backtests. Implement one checklist step at a time and mark it complete
+  only after targeted verification.
 - SmartFuelPass automation logs in with configured credentials for each portal
   run. Do not restore JSON cookie/session persistence or
   `SMARTFUELPASS_SESSION_COOKIES_PATH`.

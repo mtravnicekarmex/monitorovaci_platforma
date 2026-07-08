@@ -43,6 +43,7 @@ EXPECTED_ADMIN_OPERATIONS = {
     ("GET", "/health/system/proxy"),
     ("GET", "/health/system/runtime"),
     ("GET", "/health/system/scheduler"),
+    ("GET", "/health/system/smartfuelpass"),
     ("GET", "/api/v1/admin/device-options"),
     ("GET", "/api/v1/admin/users"),
     ("POST", "/api/v1/admin/users"),

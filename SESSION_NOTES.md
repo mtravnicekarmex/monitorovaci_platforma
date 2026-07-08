@@ -9192,3 +9192,269 @@ the active dirty working tree, the `Health scheduleru` manual-run confirmation
 fix, the new `Health systemu` PostgreSQL check, the current runtime/deployment
 state, expected post-restart processes/listeners, sensitive-artifact
 constraints, and exact post-restart verification steps.
+
+### 2026-07-07 15:20 +02:00 - Post-restart verification after Health systemu PostgreSQL check
+
+Scope:
+- Verified runtime state after workstation restart and activation of
+  `GET /health/system/database`.
+
+Verified:
+- Current Git state before this note was clean at
+  `15ad5df` (`master`, `origin/master`); the dirty working-tree changes from
+  the pre-restart handoff were committed before this check.
+- Windows boot time was `2026-07-07 13:44:09 +02:00`.
+- Startup task `API_dashboard_caddy` last ran at
+  `2026-07-07 13:44:18 +02:00` with result `0`.
+- Expected listeners were present: Caddy on TCP `80`, `443`, and
+  `127.0.0.1:2019`; FastAPI on `127.0.0.1:8000`; Streamlit on
+  `127.0.0.1:8001`; Tailscale retained expected interface-specific `443`
+  listeners.
+- No listeners were present on temporary ports `8010` or `8011`.
+- FastAPI `/health/live` and `/health/ready` returned HTTP 200.
+- Unauthenticated `/health/system/runtime`, `/health/system/proxy`,
+  `/health/system/scheduler`, and `/health/system/database` returned HTTP 401;
+  the database route is now registered in the running API.
+- Streamlit `/_stcore/health` and Caddy admin `/config/` returned HTTP 200.
+- Unauthenticated map-image request returned HTTP 401.
+- Scheduler metrics reported `scheduler_running=True`, heartbeat
+  `2026-07-07T15:14:24.773694`, `quarter_hour_job` success at
+  `2026-07-07T15:05:09.147380`, `failure_count_24h=0`, and
+  `success_count_24h=96`.
+- Root `Caddyfile` and runtime `C:\Program Files\Caddy\Caddyfile` SHA-256
+  hashes matched:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Runtime Caddy validation reported `Valid configuration`.
+- Local Caddy hostname/SNI route through `127.0.0.1` returned HTTPS dashboard
+  HTTP 200, HTTP-to-HTTPS redirect HTTP 308, `users-exist` HTTP 200,
+  protected `/auth/me` HTTP 401, map image without cookie HTTP 401, and
+  `/docs`, `/redoc`, `/openapi.json` HTTP 404.
+- Public response headers through local Caddy SNI included HSTS, `nosniff`,
+  `Referrer-Policy`, `X-Frame-Options`, `Permissions-Policy`, and CSP
+  report-only; `Server` and `Via` were absent.
+- Direct sanitized PostgreSQL collector returned `status=ok`,
+  `connected=True`, `transaction_read_only=False`, latency about `71 ms`, and
+  all expected schemas present: `dashboard`, `dbo`, `evidence`, `monitoring`,
+  `revize`, and `web_search`.
+- Targeted tests passed:
+  `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_api_authorization_regression.py
+  tests\test_dashboard_navigation_config.py tests\test_dashboard_responsive.py
+  tests\test_dashboard_scheduler_health_view.py
+  tests\test_dashboard_scheduler_log_view.py tests\test_scheduler_metrics.py
+  -q --tb=short` reported `229 passed`.
+- `git diff --check` reported no whitespace errors.
+
+Not verified:
+- Authenticated browser verification of `Health systemu` and `Health
+  scheduleru` pages was not performed in this shell session.
+- Admin-token HTTP 200 and non-admin HTTP 403 checks for
+  `/health/system/database` were not run because no bearer token was used.
+- Direct public hostname requests from this workstation timed out; local Caddy
+  hostname/SNI verification through `127.0.0.1` succeeded and was used instead.
+- ProgramData API/dashboard/Caddy log files did not receive fresh writes during
+  these health checks; process creation times after boot and live health
+  endpoints were used as the runtime freshness signal.
+
+Follow-up:
+- Continue with the planned SmartFuelPass adjustment after reviewing the
+  relevant code path.
+
+### 2026-07-08 08:26 +02:00 - SmartFuelPass Health systemu sync and reporting summary
+
+Scope:
+- Added a safe admin-only SmartFuelPass health check for database sync,
+  report-period coverage, and scheduler job summaries.
+
+Changed files:
+- `services/api/schemas/admin.py`
+- `services/api/services/system_health.py`
+- `services/api/routes/system_health.py`
+- `moduly/apps/dashboard/api_client.py`
+- `moduly/apps/dashboard/pages/37_system_health.py`
+- `tests/test_system_health.py`
+- `tests/test_api_authorization_regression.py`
+
+Implementation notes:
+- Added `GET /health/system/smartfuelpass`, protected by admin authentication.
+- The service checks `monitoring.smartfuelpass_relace` read-only and returns
+  only aggregates: table status, import freshness, session counts, amount
+  totals, period summaries, and scheduler metric summaries for SmartFuelPass
+  sync/report jobs.
+- The dashboard `Health systemu` page now renders the SmartFuelPass block
+  instead of listing it under planned controls.
+- No raw portal rows, relation identifiers, credentials, tokens, cookies, or
+  detailed operational records are exposed.
+- Running production services need their normal workstation restart path before
+  the new route/page block is available in the live API/dashboard process.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile services\api\services\system_health.py services\api\routes\system_health.py services\api\schemas\admin.py moduly\apps\dashboard\api_client.py moduly\apps\dashboard\pages\37_system_health.py tests\test_system_health.py tests\test_api_authorization_regression.py`
+  passed.
+- `.venv-production\Scripts\python.exe -m py_compile services\api\services\system_health.py services\api\routes\system_health.py services\api\schemas\admin.py moduly\apps\dashboard\api_client.py moduly\apps\dashboard\pages\37_system_health.py`
+  passed.
+- `.venv\Scripts\python.exe -m pytest tests\test_system_health.py tests\test_api_authorization_regression.py tests\test_smartfuelpass_service.py tests\test_smartfuelpass_sync.py -q --tb=short`
+  reported `223 passed`.
+- `.venv\Scripts\python.exe -m pytest tests\test_dashboard_navigation_config.py tests\test_dashboard_responsive.py -q --tb=short`
+  reported `26 passed`.
+- `git diff --check` reported no whitespace errors before this note.
+- Direct production-environment collector check reported SmartFuelPass
+  `status=ok`, table present, 22 total sessions, zero missing UTC end values,
+  latest import `2026-07-06 22:17:21.474904`, and both SmartFuelPass scheduler
+  metrics in success state.
+
+Not verified:
+- Authenticated browser rendering of the new dashboard block was not performed.
+- Live HTTP checks for `/health/system/smartfuelpass` were not run because the
+  currently running API process has not yet loaded the new route.
+- Local `.venv` database configuration did not see the SmartFuelPass table, so
+  the production `.venv-production` collector result is the relevant deployment
+  signal for this check.
+
+### 2026-07-08 09:00 +02:00 - Pre-restart handoff after SmartFuelPass Health systemu check
+
+Reason for restart:
+- Load the new SmartFuelPass `Health systemu` API route and dashboard block
+  into the production FastAPI and Streamlit processes through the supported
+  workstation restart path.
+
+Current Git state:
+- Branch: `master`
+- HEAD: `15ad5dfbba631f636b44fc04f9b18c5b16b0ffb1`
+- Working tree is intentionally dirty with the current SmartFuelPass health
+  changes and session notes:
+  - `SESSION_NOTES.md`
+  - `moduly/apps/dashboard/api_client.py`
+  - `moduly/apps/dashboard/pages/37_system_health.py`
+  - `services/api/routes/system_health.py`
+  - `services/api/schemas/admin.py`
+  - `services/api/services/system_health.py`
+  - `tests/test_api_authorization_regression.py`
+  - `tests/test_system_health.py`
+
+Completed before restart:
+- Added admin-only `GET /health/system/smartfuelpass`.
+- Added read-only SmartFuelPass health collection for database sync status,
+  report-period summaries, import freshness, and scheduler metrics.
+- Added the SmartFuelPass block to the Streamlit `Health systemu` page.
+- Updated API client and authorization/system-health tests.
+- Kept `main.py` unchanged; scheduler startup remains through the existing
+  entry point and central scheduler wiring.
+
+Verification before restart:
+- `.venv\Scripts\python.exe -m py_compile services\api\services\system_health.py services\api\routes\system_health.py services\api\schemas\admin.py moduly\apps\dashboard\api_client.py moduly\apps\dashboard\pages\37_system_health.py tests\test_system_health.py tests\test_api_authorization_regression.py`
+  passed.
+- `.venv-production\Scripts\python.exe -m py_compile services\api\services\system_health.py services\api\routes\system_health.py services\api\schemas\admin.py moduly\apps\dashboard\api_client.py moduly\apps\dashboard\pages\37_system_health.py`
+  passed.
+- `.venv\Scripts\python.exe -m pytest tests\test_system_health.py tests\test_api_authorization_regression.py tests\test_smartfuelpass_service.py tests\test_smartfuelpass_sync.py -q --tb=short`
+  reported `223 passed`.
+- `.venv\Scripts\python.exe -m pytest tests\test_dashboard_navigation_config.py tests\test_dashboard_responsive.py -q --tb=short`
+  reported `26 passed`.
+- `git diff --check` reported no whitespace errors, with only expected LF/CRLF
+  warnings.
+- Direct `.venv-production` SmartFuelPass collector check reported
+  `status=ok`, table present, `22` total sessions, `0` missing UTC end values,
+  latest import `2026-07-06 22:17:21.474904`, sync metric `ok:success`,
+  weekly report metric `ok:success`, and period counts:
+  last completed week `0`, current month `1`, previous month `4`, total `22`.
+
+Runtime state before restart:
+- Windows boot time: `2026-07-07 13:44:09 +02:00`.
+- Startup task `API_dashboard_caddy` state `Ready`, last run
+  `2026-07-07 13:44:18 +02:00`, last result `0`.
+- Expected listeners were present:
+  - Caddy public listeners on TCP `80` and `443` owned by PID `11596`.
+  - Caddy admin on `127.0.0.1:2019` owned by PID `11596`.
+  - FastAPI on `127.0.0.1:8000` owned by PID `9352`.
+  - Streamlit on `127.0.0.1:8001` owned by PID `11200`.
+  - Tailscale retained interface-specific TCP `443` listeners owned by
+    PID `7064`.
+- No listeners were present on temporary ports `8010` or `8011`.
+- Caddy PID `11596` was visible with creation time
+  `2026-07-07 13:44:30 +02:00`. Windows did not expose API/Streamlit process
+  paths or start times from this session, so listener ownership is the recorded
+  process evidence for those services.
+- FastAPI `/health/live` and `/health/ready` returned HTTP `200`.
+- Streamlit `/_stcore/health` returned HTTP `200`.
+- Caddy admin `/config/` returned HTTP `200`.
+- Unauthenticated `/health/system/smartfuelpass` on the currently running API
+  returned HTTP `404`, as expected before the process has loaded the new route.
+- Scheduler metrics reported `scheduler_running=True`, heartbeat
+  `2026-07-08T08:54:30.618706`, `quarter_hour_job` success at
+  `2026-07-08T08:47:08.950298`, next run `2026-07-08T09:05:05+02:00`,
+  `failure_count_24h=0`, and `success_count_24h=96`.
+- SmartFuelPass sync scheduler metric reported success at
+  `2026-07-08T00:17:25.861323`, duration `129.71` seconds,
+  `success_count_24h=1`, and `failure_count_24h=0`.
+- SmartFuelPass weekly report metric reported success at
+  `2026-07-07T06:55:09.631677`, next run
+  `2026-07-14T06:55:05+02:00`, and `failure_count_24h=0`.
+
+Sensitive-artifact constraints:
+- Do not read or print SmartFuelPass cookie/session JSON payloads.
+- Do not print `.env` values, ProgramData credential files, bearer tokens,
+  cookie values, portal credentials, raw portal rows, raw relation identifiers,
+  or raw device photo paths.
+- The SmartFuelPass health check must remain aggregate-only.
+
+Expected post-restart processes and listeners:
+- Startup task `API_dashboard_caddy` should run after boot and return result
+  `0`.
+- Scheduler process should start from `main.py`.
+- FastAPI should listen on `127.0.0.1:8000`.
+- Streamlit should listen on `127.0.0.1:8001`.
+- Caddy should listen on TCP `80`, TCP `443`, and admin
+  `127.0.0.1:2019`.
+- Temporary ports `8010` and `8011` should remain unused.
+- Tailscale may still own interface-specific TCP `443` listeners.
+
+Required post-restart checks:
+- Confirm Windows boot time, scheduled-task state, last run/result, relevant
+  processes, expected listeners, and absence of temporary listeners.
+- Confirm FastAPI `/health/live` and `/health/ready`, Streamlit
+  `/_stcore/health`, and Caddy admin `/config/` return HTTP `200`.
+- Confirm unauthenticated `/health/system/runtime`, `/health/system/proxy`,
+  `/health/system/scheduler`, `/health/system/database`, and
+  `/health/system/smartfuelpass` return HTTP `401`. The SmartFuelPass route
+  returning `401` instead of the pre-restart `404` is the route-registration
+  signal.
+- Confirm unauthenticated map image access still returns HTTP `401`.
+- Confirm local Caddy routing for `https://monitoring.armexholding.cz`:
+  dashboard HTTP `200`, HTTP-to-HTTPS redirect HTTP `308`, `users-exist`
+  HTTP `200`, protected `/auth/me` HTTP `401`, and `/docs`, `/redoc`,
+  `/openapi.json` HTTP `404`. If direct public hostname requests time out from
+  the workstation, use local Caddy Host/SNI verification through loopback.
+- Confirm public response headers still include HSTS, `nosniff`,
+  `Referrer-Policy`, `X-Frame-Options`, `Permissions-Policy`, and CSP
+  report-only, with `Server` and `Via` absent.
+- Confirm root `Caddyfile` and runtime
+  `C:\Program Files\Caddy\Caddyfile` still have matching SHA-256 hashes, then
+  validate the runtime Caddy configuration.
+- Confirm scheduler metrics show `scheduler_running=True`, a post-boot
+  heartbeat, and a fresh `quarter_hour_job` observation after the next
+  scheduled quarter-hour slot has run.
+- Run the `.venv-production` SmartFuelPass collector check again and expect
+  `status=ok`, table present, sync/report metrics in success state, and safe
+  aggregate period counts. Counts may change if a new sync runs before the
+  check.
+- Log in to `https://monitoring.armexholding.cz` without printing cookie or
+  token values, open `Health systemu`, and confirm the SmartFuelPass block
+  renders without traceback and exposes only aggregate data.
+- Re-run targeted tests:
+  `.venv\Scripts\python.exe -m pytest tests\test_system_health.py tests\test_api_authorization_regression.py tests\test_smartfuelpass_service.py tests\test_smartfuelpass_sync.py tests\test_dashboard_navigation_config.py tests\test_dashboard_responsive.py -q --tb=short`
+- Run `git diff --check` and finish with
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with deviations and accepted
+  gaps.
+
+Known risks or accepted gaps:
+- The current SmartFuelPass health changes are uncommitted and depend on the
+  dirty working tree being preserved across restart.
+- Live SmartFuelPass route registration and authenticated browser rendering are
+  not verified until after restart.
+- Local `.venv` database configuration did not see the SmartFuelPass table;
+  `.venv-production` is the relevant deployment signal for this check.
+- Immediately after boot, `quarter_hour_job` may not yet have a post-boot
+  observation until its next scheduled minute runs.
+- The scheduled task starts the process set but does not supervise later child
+  process exits; recovery remains the supported full-workstation restart path.

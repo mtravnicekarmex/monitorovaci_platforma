@@ -8,6 +8,7 @@ from services.api.schemas.admin import (
     SystemProxyHealthResponse,
     SystemRuntimeHealthResponse,
     SystemSchedulerHealthResponse,
+    SystemSmartFuelPassHealthResponse,
 )
 from services.api.services.dashboard_auth import DashboardUserContext
 from services.api.services.system_health import (
@@ -15,6 +16,7 @@ from services.api.services.system_health import (
     collect_system_proxy_health,
     collect_system_runtime_health,
     collect_system_scheduler_health,
+    collect_system_smartfuelpass_health,
 )
 
 
@@ -83,3 +85,20 @@ def get_system_database_health(
 ) -> SystemDatabaseHealthResponse:
     del current_user
     return collect_system_database_health()
+
+
+@router.get(
+    "/smartfuelpass",
+    response_model=SystemSmartFuelPassHealthResponse,
+    summary="System SmartFuelPass health",
+    description=(
+        "Vraci bezpecny admin souhrn SmartFuelPass databazoveho syncu, "
+        "reportovacich obdobi a agregovanych poctu bez raw portalovych radku, "
+        "identifikatoru relaci, tokenu nebo prihlasovacich udaju."
+    ),
+)
+def get_system_smartfuelpass_health(
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> SystemSmartFuelPassHealthResponse:
+    del current_user
+    return collect_system_smartfuelpass_health()

@@ -22,10 +22,19 @@ from core.scheduler.metrics import (
     SCHEDULER_HEARTBEAT_TTL_SECONDS,
     get_metrics_store,
 )
+from moduly.apps.smartfuelpass.service import (
+    current_month_period,
+    last_completed_week_period,
+    previous_month_period,
+)
 from services.api.schemas.admin import (
     SystemDatabaseHealthResponse,
     SystemPostgresConnectionStatus,
     SystemPostgresSchemaStatus,
+    SystemSmartFuelPassHealthResponse,
+    SystemSmartFuelPassJobMetricStatus,
+    SystemSmartFuelPassPeriodSummary,
+    SystemSmartFuelPassTableStatus,
     SystemSchedulerHealthResponse,
     SystemSchedulerJobStatus,
     SystemProxyHeaderStatus,
@@ -46,6 +55,9 @@ LOCAL_CADDY_HOST = "127.0.0.1"
 LOCAL_CADDY_TIMEOUT_SECONDS = 8
 SCHEDULER_CORE_JOB_ID = "quarter_hour_job"
 SCHEDULER_CORE_JOB_MAX_AGE_SECONDS = 45 * 60
+SMARTFUELPASS_SYNC_JOB_ID = "sync_charge_sessions_to_db"
+SMARTFUELPASS_WEEKLY_REPORT_JOB_ID = "smartfuelpass_weekly_report_job"
+SMARTFUELPASS_TABLE_MAX_IMPORT_AGE_SECONDS = 36 * 60 * 60
 EXPECTED_POSTGRES_SCHEMAS = (
     "dashboard",
     "dbo",
@@ -833,6 +845,323 @@ def collect_system_scheduler_health() -> SystemSchedulerHealthResponse:
         total_success_count_24h=total_success_count_24h,
         total_failure_count_24h=total_failure_count_24h,
         jobs=jobs,
+    )
+
+
+def _empty_smartfuelpass_period_summary(
+    *,
+    key: str,
+    label: str,
+    start: datetime | None,
+    end: datetime | None,
+) -> SystemSmartFuelPassPeriodSummary:
+    return SystemSmartFuelPassPeriodSummary(
+        key=key,
+        label=label,
+        start=start,
+        end=end,
+        session_count=0,
+        total_amount=0.0,
+        location_count=0,
+        connector_count=0,
+        first_session_at=None,
+        last_session_at=None,
+    )
+
+
+def _empty_smartfuelpass_period_summaries(
+    reference_datetime: datetime,
+) -> list[SystemSmartFuelPassPeriodSummary]:
+    last_week_start, last_week_end = last_completed_week_period(reference_datetime)
+    current_month_start, current_month_end = current_month_period(reference_datetime)
+    previous_month_start, previous_month_end = previous_month_period(reference_datetime)
+    return [
+        _empty_smartfuelpass_period_summary(
+            key="last_week",
+            label="Posledni uzavreny tyden",
+            start=last_week_start,
+            end=last_week_end,
+        ),
+        _empty_smartfuelpass_period_summary(
+            key="current_month",
+            label="Tento mesic",
+            start=current_month_start,
+            end=current_month_end,
+        ),
+        _empty_smartfuelpass_period_summary(
+            key="previous_month",
+            label="Minuly mesic",
+            start=previous_month_start,
+            end=previous_month_end,
+        ),
+        _empty_smartfuelpass_period_summary(
+            key="total",
+            label="Celkem",
+            start=None,
+            end=None,
+        ),
+    ]
+
+
+def _build_smartfuelpass_job_metric_status(
+    job_id: str,
+    label: str,
+    metrics: JobMetrics | None,
+) -> SystemSmartFuelPassJobMetricStatus:
+    resolved_metrics = metrics or JobMetrics()
+    last_status = str(resolved_metrics.last_status or "unknown")
+    last_status_lower = last_status.lower()
+    details: list[str] = []
+    status = "ok"
+
+    if resolved_metrics.last_run is None:
+        status = "degraded"
+        details.append("Scheduler metrics do not contain a recorded run for this job.")
+    if resolved_metrics.failure_count_24h > 0:
+        status = "degraded"
+        details.append("Scheduler metrics contain failures in the last 24 hours.")
+    if last_status_lower.startswith("error"):
+        status = "error"
+        details.append("Last recorded run ended with error.")
+    elif last_status_lower == "unknown":
+        status = "degraded"
+        details.append("Last recorded status is unknown.")
+
+    return SystemSmartFuelPassJobMetricStatus(
+        job_id=job_id,
+        label=label,
+        status=status,
+        last_status=last_status,
+        last_run=resolved_metrics.last_run,
+        success_count_24h=max(0, int(resolved_metrics.success_count_24h)),
+        failure_count_24h=max(0, int(resolved_metrics.failure_count_24h)),
+        last_duration_seconds=resolved_metrics.last_duration_seconds,
+        detail=" ".join(details) if details else "Scheduler metrics are in the expected state.",
+    )
+
+
+def _build_smartfuelpass_table_status(
+    row: dict[str, Any],
+    *,
+    now: datetime,
+) -> SystemSmartFuelPassTableStatus:
+    total_session_count = max(0, int(row.get("total_session_count") or 0))
+    sessions_with_utc_count = max(0, int(row.get("sessions_with_utc_count") or 0))
+    missing_ended_at_utc_count = max(0, int(row.get("missing_ended_at_utc_count") or 0))
+    last_imported_at = _parse_datetime(row.get("last_imported_at"))
+    last_import_age_seconds = _seconds_since(now, last_imported_at)
+
+    details: list[str] = []
+    status = "ok"
+    if total_session_count <= 0:
+        status = "degraded"
+        details.append("SmartFuelPass sync table is present but contains no synced sessions.")
+    if last_imported_at is None:
+        status = "degraded"
+        details.append("Last import timestamp is not available.")
+    elif (
+        last_import_age_seconds is not None
+        and last_import_age_seconds > SMARTFUELPASS_TABLE_MAX_IMPORT_AGE_SECONDS
+    ):
+        status = "degraded"
+        details.append("Last synced database import is older than the expected daily sync window.")
+    if missing_ended_at_utc_count > 0:
+        status = "degraded"
+        details.append("Some synced sessions are missing normalized UTC end time.")
+
+    return SystemSmartFuelPassTableStatus(
+        status=status,
+        table_present=True,
+        total_session_count=total_session_count,
+        sessions_with_utc_count=sessions_with_utc_count,
+        missing_ended_at_utc_count=missing_ended_at_utc_count,
+        first_session_at=_parse_datetime(row.get("first_session_at")),
+        last_session_at=_parse_datetime(row.get("last_session_at")),
+        last_imported_at=last_imported_at,
+        last_import_age_seconds=last_import_age_seconds,
+        total_amount=round(float(row.get("total_amount") or 0), 2),
+        location_count=max(0, int(row.get("location_count") or 0)),
+        connector_count=max(0, int(row.get("connector_count") or 0)),
+        detail=" ".join(details) if details else "SmartFuelPass sync table and timestamps are in the expected state.",
+    )
+
+
+def _missing_smartfuelpass_table_status() -> SystemSmartFuelPassTableStatus:
+    return SystemSmartFuelPassTableStatus(
+        status="error",
+        table_present=False,
+        total_session_count=0,
+        sessions_with_utc_count=0,
+        missing_ended_at_utc_count=0,
+        first_session_at=None,
+        last_session_at=None,
+        last_imported_at=None,
+        last_import_age_seconds=None,
+        total_amount=0.0,
+        location_count=0,
+        connector_count=0,
+        detail="SmartFuelPass sync table monitoring.smartfuelpass_relace is missing.",
+    )
+
+
+def _failed_smartfuelpass_table_status() -> SystemSmartFuelPassTableStatus:
+    return SystemSmartFuelPassTableStatus(
+        status="error",
+        table_present=False,
+        total_session_count=0,
+        sessions_with_utc_count=0,
+        missing_ended_at_utc_count=0,
+        first_session_at=None,
+        last_session_at=None,
+        last_imported_at=None,
+        last_import_age_seconds=None,
+        total_amount=0.0,
+        location_count=0,
+        connector_count=0,
+        detail="SmartFuelPass database summary query failed.",
+    )
+
+
+def _query_smartfuelpass_period_summary(
+    session,
+    *,
+    key: str,
+    label: str,
+    start: datetime | None,
+    end: datetime | None,
+) -> SystemSmartFuelPassPeriodSummary:
+    row = (
+        session.execute(
+            text(
+                """
+                SELECT
+                    COUNT(*)::int AS session_count,
+                    COALESCE(SUM(suma), 0)::float AS total_amount,
+                    COUNT(DISTINCT NULLIF(btrim(lokace), ''))::int AS location_count,
+                    COUNT(DISTINCT NULLIF(btrim(connector_id), ''))::int AS connector_count,
+                    MIN(ended_at) AS first_session_at,
+                    MAX(ended_at) AS last_session_at
+                FROM monitoring.smartfuelpass_relace
+                WHERE (:start_at IS NULL OR ended_at >= :start_at)
+                  AND (:end_at IS NULL OR ended_at <= :end_at)
+                """
+            ),
+            {"start_at": start, "end_at": end},
+        )
+        .mappings()
+        .one()
+    )
+    return SystemSmartFuelPassPeriodSummary(
+        key=key,
+        label=label,
+        start=start,
+        end=end,
+        session_count=max(0, int(row.get("session_count") or 0)),
+        total_amount=round(float(row.get("total_amount") or 0), 2),
+        location_count=max(0, int(row.get("location_count") or 0)),
+        connector_count=max(0, int(row.get("connector_count") or 0)),
+        first_session_at=_parse_datetime(row.get("first_session_at")),
+        last_session_at=_parse_datetime(row.get("last_session_at")),
+    )
+
+
+def _query_smartfuelpass_period_summaries(
+    session,
+    *,
+    reference_datetime: datetime,
+) -> list[SystemSmartFuelPassPeriodSummary]:
+    last_week_start, last_week_end = last_completed_week_period(reference_datetime)
+    current_month_start, current_month_end = current_month_period(reference_datetime)
+    previous_month_start, previous_month_end = previous_month_period(reference_datetime)
+    periods = (
+        ("last_week", "Posledni uzavreny tyden", last_week_start, last_week_end),
+        ("current_month", "Tento mesic", current_month_start, current_month_end),
+        ("previous_month", "Minuly mesic", previous_month_start, previous_month_end),
+        ("total", "Celkem", None, None),
+    )
+    return [
+        _query_smartfuelpass_period_summary(
+            session,
+            key=key,
+            label=label,
+            start=start,
+            end=end,
+        )
+        for key, label, start, end in periods
+    ]
+
+
+def collect_system_smartfuelpass_health() -> SystemSmartFuelPassHealthResponse:
+    reference_datetime = datetime.now()
+    checked_at = reference_datetime.astimezone()
+    metrics = get_metrics_store(refresh_from_disk=True)
+    sync_job = _build_smartfuelpass_job_metric_status(
+        SMARTFUELPASS_SYNC_JOB_ID,
+        "Databazovy sync relaci",
+        metrics.jobs.get(SMARTFUELPASS_SYNC_JOB_ID),
+    )
+    weekly_report_job = _build_smartfuelpass_job_metric_status(
+        SMARTFUELPASS_WEEKLY_REPORT_JOB_ID,
+        "Tydenni email report",
+        metrics.jobs.get(SMARTFUELPASS_WEEKLY_REPORT_JOB_ID),
+    )
+
+    session = None
+    try:
+        session = get_session_pg()
+        table_present = bool(
+            session.execute(
+                text("SELECT to_regclass('monitoring.smartfuelpass_relace') IS NOT NULL")
+            ).scalar()
+        )
+        if not table_present:
+            table = _missing_smartfuelpass_table_status()
+            report_periods = _empty_smartfuelpass_period_summaries(reference_datetime)
+        else:
+            aggregate_row = (
+                session.execute(
+                    text(
+                        """
+                        SELECT
+                            COUNT(*)::int AS total_session_count,
+                            COUNT(ended_at_utc)::int AS sessions_with_utc_count,
+                            COALESCE(SUM(CASE WHEN ended_at_utc IS NULL THEN 1 ELSE 0 END), 0)::int
+                                AS missing_ended_at_utc_count,
+                            MIN(ended_at) AS first_session_at,
+                            MAX(ended_at) AS last_session_at,
+                            MAX(imported_at) AS last_imported_at,
+                            COALESCE(SUM(suma), 0)::float AS total_amount,
+                            COUNT(DISTINCT NULLIF(btrim(lokace), ''))::int AS location_count,
+                            COUNT(DISTINCT NULLIF(btrim(connector_id), ''))::int AS connector_count
+                        FROM monitoring.smartfuelpass_relace
+                        """
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            table = _build_smartfuelpass_table_status(dict(aggregate_row), now=checked_at)
+            report_periods = _query_smartfuelpass_period_summaries(
+                session,
+                reference_datetime=reference_datetime,
+            )
+    except (OSError, RuntimeError, SQLAlchemyError):
+        table = _failed_smartfuelpass_table_status()
+        report_periods = _empty_smartfuelpass_period_summaries(reference_datetime)
+    finally:
+        if session is not None:
+            session.close()
+
+    status = _worst_status([table.status, sync_job.status, weekly_report_job.status])
+    return SystemSmartFuelPassHealthResponse(
+        status=status,
+        checked_at=checked_at,
+        source="monitoring.smartfuelpass_relace",
+        period_basis="ended_at",
+        table=table,
+        sync_job=sync_job,
+        weekly_report_job=weekly_report_job,
+        report_periods=report_periods,
     )
 
 

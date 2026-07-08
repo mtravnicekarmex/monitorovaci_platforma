@@ -17,6 +17,7 @@ from moduly.apps.dashboard.api_client import (
     get_system_proxy_health as api_get_system_proxy_health,
     get_system_runtime_health as api_get_system_runtime_health,
     get_system_scheduler_health as api_get_system_scheduler_health,
+    get_system_smartfuelpass_health as api_get_system_smartfuelpass_health,
 )
 from moduly.apps.dashboard.auth import get_auth_token, require_page_access
 
@@ -41,6 +42,10 @@ SYSTEM_HEALTH_SECTIONS = (
 
 SYSTEM_HEALTH_SECTIONS = tuple(
     item for item in SYSTEM_HEALTH_SECTIONS if item[0] not in {"Proxy", "Scheduler", "Databáze"}
+)
+
+SYSTEM_HEALTH_SECTIONS = tuple(
+    item for item in SYSTEM_HEALTH_SECTIONS if item[0] != "SmartFuelPass"
 )
 
 
@@ -76,6 +81,11 @@ def load_system_scheduler_health(access_token: str) -> dict[str, object]:
 @st.cache_data(ttl=30)
 def load_system_database_health(access_token: str) -> dict[str, object]:
     return api_get_system_database_health(access_token)
+
+
+@st.cache_data(ttl=30)
+def load_system_smartfuelpass_health(access_token: str) -> dict[str, object]:
+    return api_get_system_smartfuelpass_health(access_token)
 
 
 def _parse_datetime(value: object) -> object:
@@ -126,6 +136,16 @@ def _format_milliseconds(value: object) -> str:
         return "-"
     try:
         return f"{float(value):.1f} ms"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _format_amount(value: object) -> str:
+    if value in (None, ""):
+        return "-"
+    try:
+        whole, fraction = f"{float(value):.2f}".split(".")
+        return f"{int(whole):,}".replace(",", " ") + f",{fraction} Kc"
     except (TypeError, ValueError):
         return str(value)
 
@@ -248,6 +268,50 @@ def _postgres_schema_dataframe(rows: list[dict[str, object]]) -> pd.DataFrame:
     )
 
 
+def _smartfuelpass_period_dataframe(rows: list[dict[str, object]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(
+        [
+            {
+                "obdobi": str(row.get("label") or row.get("key") or "-"),
+                "start": _format_timestamp(row.get("start")),
+                "konec": _format_timestamp(row.get("end")),
+                "relace": int(row.get("session_count") or 0),
+                "castka": _format_amount(row.get("total_amount")),
+                "lokace": int(row.get("location_count") or 0),
+                "konektory": int(row.get("connector_count") or 0),
+                "prvni_relace": _format_timestamp(row.get("first_session_at")),
+                "posledni_relace": _format_timestamp(row.get("last_session_at")),
+            }
+            for row in rows
+        ]
+    )
+
+
+def _smartfuelpass_job_dataframe(rows: list[dict[str, object]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(
+        [
+            {
+                "stav": _status_label(row.get("status")),
+                "job": str(row.get("label") or row.get("job_id") or "-"),
+                "job_id": str(row.get("job_id") or "-"),
+                "posledni_stav": str(row.get("last_status") or "unknown"),
+                "posledni_beh": _format_timestamp(row.get("last_run")),
+                "uspechy_24h": int(row.get("success_count_24h") or 0),
+                "chyby_24h": int(row.get("failure_count_24h") or 0),
+                "trvani": _format_seconds(row.get("last_duration_seconds")),
+                "detail": str(row.get("detail") or "-"),
+            }
+            for row in rows
+        ]
+    )
+
+
 def _proxy_status_message(status: str) -> None:
     if status == "ok":
         st.success("Proxy a verejne routovani jsou v ocekavanem stavu.")
@@ -275,6 +339,15 @@ def _database_status_message(status: str) -> None:
         st.warning("PostgreSQL check ma neuplna metadata nebo varovani.")
     else:
         st.error("PostgreSQL check nasel nedostupnost, read-only stav nebo chybejici schema.")
+
+
+def _smartfuelpass_status_message(status: str) -> None:
+    if status == "ok":
+        st.success("SmartFuelPass databazovy sync a souhrny jsou v ocekavanem stavu.")
+    elif status == "degraded":
+        st.warning("SmartFuelPass check ma varovani ve freshnosti syncu nebo metrikach.")
+    else:
+        st.error("SmartFuelPass check nasel chybu databazoveho syncu nebo scheduler metrik.")
 
 
 def _render_runtime_load_error(exc: DashboardApiError) -> None:
@@ -317,6 +390,16 @@ def _render_database_load_error(exc: DashboardApiError) -> None:
         return
 
     st.error("Nepodarilo se nacist database system health.")
+    st.exception(exc)
+
+
+def _render_smartfuelpass_load_error(exc: DashboardApiError) -> None:
+    if exc.status_code == 404:
+        st.warning("SmartFuelPass system health endpoint zatim neni dostupny v bezicim API.")
+        st.caption("Po restartu nebo reloadu FastAPI se blok SmartFuelPass kontrol zacne plnit daty.")
+        return
+
+    st.error("Nepodarilo se nacist SmartFuelPass system health.")
     st.exception(exc)
 
 
@@ -522,6 +605,65 @@ def _render_database_section(access_token: str) -> None:
         st.dataframe(schemas_dataframe, width="stretch", hide_index=True)
 
 
+def _render_smartfuelpass_section(access_token: str) -> None:
+    st.subheader("SmartFuelPass")
+    st.caption(
+        "Kontroluje databazovy sync relaci, scheduler metriky sync/report jobu "
+        "a bezpecne agregovane souhrny reportovacich obdobi. Vystup neobsahuje raw relace ani portalova data."
+    )
+
+    refresh_col, _spacer = st.columns([1, 4])
+    with refresh_col:
+        if st.button("Obnovit SmartFuelPass", width="stretch"):
+            load_system_smartfuelpass_health.clear()
+            st.rerun()
+
+    try:
+        payload = load_system_smartfuelpass_health(access_token)
+    except DashboardApiError as exc:
+        _render_smartfuelpass_load_error(exc)
+        return
+
+    status = str(payload.get("status") or "error").lower()
+    table = dict(payload.get("table") or {})
+    sync_job = dict(payload.get("sync_job") or {})
+    weekly_report_job = dict(payload.get("weekly_report_job") or {})
+    periods = [dict(row) for row in list(payload.get("report_periods") or ())]
+
+    status_col, rows_col, import_col, failures_col = st.columns(4)
+    status_col.metric("Celkovy stav", _status_label(status))
+    rows_col.metric("Relace v DB", str(table.get("total_session_count") or 0))
+    import_col.metric("Posledni import", _format_timestamp(table.get("last_imported_at")))
+    failures_col.metric(
+        "Chyby jobu 24h",
+        str((sync_job.get("failure_count_24h") or 0) + (weekly_report_job.get("failure_count_24h") or 0)),
+    )
+
+    st.caption(
+        f"Posledni kontrola API: {_format_timestamp(payload.get('checked_at'))} | "
+        f"zdroj: {str(payload.get('source') or '-')} | "
+        f"basis obdobi: {str(payload.get('period_basis') or '-')} | "
+        f"stari importu: {_format_seconds(table.get('last_import_age_seconds'))} | "
+        f"missing UTC end: {int(table.get('missing_ended_at_utc_count') or 0)}"
+    )
+    _smartfuelpass_status_message(status)
+    st.write(str(table.get("detail") or "-"))
+
+    st.markdown("**Reportovaci obdobi a bezpecne souhrny**")
+    periods_dataframe = _smartfuelpass_period_dataframe(periods)
+    if periods_dataframe.empty:
+        st.info("Backend nevratil zadne SmartFuelPass souhrny obdobi.")
+    else:
+        st.dataframe(periods_dataframe, width="stretch", hide_index=True)
+
+    st.markdown("**Scheduler metriky SmartFuelPass**")
+    jobs_dataframe = _smartfuelpass_job_dataframe([sync_job, weekly_report_job])
+    if jobs_dataframe.empty:
+        st.info("Backend nevratil zadne SmartFuelPass scheduler metriky.")
+    else:
+        st.dataframe(jobs_dataframe, width="stretch", hide_index=True)
+
+
 def render_page() -> None:
     access_token = _require_access_token()
 
@@ -535,6 +677,11 @@ def render_page() -> None:
     _render_scheduler_section(access_token)
     st.divider()
     _render_database_section(access_token)
+    st.divider()
+    _render_smartfuelpass_section(access_token)
+
+    if not SYSTEM_HEALTH_SECTIONS:
+        return
 
     st.divider()
     st.subheader("Další plánované kontroly")

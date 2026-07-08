@@ -299,3 +299,55 @@ class SystemDatabaseHealthResponse(BaseModel):
     checked_at: datetime
     postgres: SystemPostgresConnectionStatus
     expected_schemas: list[SystemPostgresSchemaStatus]
+
+
+class SystemSmartFuelPassTableStatus(BaseModel):
+    status: str = Field(..., pattern="^(ok|degraded|error)$")
+    table_present: bool
+    total_session_count: int = Field(ge=0)
+    sessions_with_utc_count: int = Field(ge=0)
+    missing_ended_at_utc_count: int = Field(ge=0)
+    first_session_at: datetime | None = None
+    last_session_at: datetime | None = None
+    last_imported_at: datetime | None = None
+    last_import_age_seconds: float | None = Field(default=None, ge=0)
+    total_amount: float = Field(ge=0)
+    location_count: int = Field(ge=0)
+    connector_count: int = Field(ge=0)
+    detail: str
+
+
+class SystemSmartFuelPassJobMetricStatus(BaseModel):
+    job_id: str
+    label: str
+    status: str = Field(..., pattern="^(ok|degraded|error)$")
+    last_status: str
+    last_run: datetime | None = None
+    success_count_24h: int = Field(ge=0)
+    failure_count_24h: int = Field(ge=0)
+    last_duration_seconds: float | None = None
+    detail: str
+
+
+class SystemSmartFuelPassPeriodSummary(BaseModel):
+    key: str
+    label: str
+    start: datetime | None = None
+    end: datetime | None = None
+    session_count: int = Field(ge=0)
+    total_amount: float = Field(ge=0)
+    location_count: int = Field(ge=0)
+    connector_count: int = Field(ge=0)
+    first_session_at: datetime | None = None
+    last_session_at: datetime | None = None
+
+
+class SystemSmartFuelPassHealthResponse(BaseModel):
+    status: str = Field(..., pattern="^(ok|degraded|error)$")
+    checked_at: datetime
+    source: str
+    period_basis: str
+    table: SystemSmartFuelPassTableStatus
+    sync_job: SystemSmartFuelPassJobMetricStatus
+    weekly_report_job: SystemSmartFuelPassJobMetricStatus
+    report_periods: list[SystemSmartFuelPassPeriodSummary]

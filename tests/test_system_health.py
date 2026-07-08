@@ -10,6 +10,10 @@ from services.api.schemas.admin import (
     SystemDatabaseHealthResponse,
     SystemPostgresConnectionStatus,
     SystemSchedulerHealthResponse,
+    SystemSmartFuelPassHealthResponse,
+    SystemSmartFuelPassJobMetricStatus,
+    SystemSmartFuelPassPeriodSummary,
+    SystemSmartFuelPassTableStatus,
     SystemProxyHealthResponse,
     SystemRuntimeBootStatus,
     SystemRuntimeHealthResponse,
@@ -266,6 +270,39 @@ class _FakePostgresSession:
         self.closed = True
 
 
+class _FakeScalarResult:
+    def __init__(self, value):
+        self.value = value
+
+    def scalar(self):
+        return self.value
+
+
+class _FakeSmartFuelPassSession:
+    def __init__(self, *, table_present=True, aggregate_row=None, period_rows=None):
+        self.table_present = table_present
+        self.aggregate_row = aggregate_row or {}
+        self.period_rows = list(period_rows or [])
+        self.period_index = 0
+        self.closed = False
+
+    def execute(self, statement, params=None):
+        del params
+        statement_text = str(statement)
+        if "to_regclass('monitoring.smartfuelpass_relace')" in statement_text:
+            return _FakeScalarResult(self.table_present)
+        if "total_session_count" in statement_text:
+            return _FakeResult(one=self.aggregate_row)
+        if "session_count" in statement_text and "FROM monitoring.smartfuelpass_relace" in statement_text:
+            row = self.period_rows[self.period_index]
+            self.period_index += 1
+            return _FakeResult(one=row)
+        raise AssertionError(f"Unexpected SQL: {statement_text}")
+
+    def close(self):
+        self.closed = True
+
+
 def _postgres_metadata(*, read_only: str = "off") -> dict[str, object]:
     return {
         "server_time": datetime(2026, 7, 7, 7, 0),
@@ -333,6 +370,152 @@ def test_collect_system_database_health_reports_connection_failure(monkeypatch):
     assert response.postgres.connected is False
     assert response.postgres.latency_ms is None
     assert all(schema.status == "degraded" for schema in response.expected_schemas)
+
+
+def _smartfuelpass_aggregate_row(reference_time: datetime) -> dict[str, object]:
+    return {
+        "total_session_count": 4,
+        "sessions_with_utc_count": 4,
+        "missing_ended_at_utc_count": 0,
+        "first_session_at": datetime(2026, 6, 29, 10, 0),
+        "last_session_at": datetime(2026, 7, 7, 14, 30),
+        "last_imported_at": reference_time - timedelta(hours=1),
+        "total_amount": 1234.5,
+        "location_count": 2,
+        "connector_count": 3,
+    }
+
+
+def _smartfuelpass_period_rows() -> list[dict[str, object]]:
+    return [
+        {
+            "session_count": 2,
+            "total_amount": 500.0,
+            "location_count": 1,
+            "connector_count": 2,
+            "first_session_at": datetime(2026, 6, 29, 10, 0),
+            "last_session_at": datetime(2026, 7, 5, 12, 0),
+        },
+        {
+            "session_count": 1,
+            "total_amount": 250.0,
+            "location_count": 1,
+            "connector_count": 1,
+            "first_session_at": datetime(2026, 7, 7, 14, 30),
+            "last_session_at": datetime(2026, 7, 7, 14, 30),
+        },
+        {
+            "session_count": 1,
+            "total_amount": 484.5,
+            "location_count": 1,
+            "connector_count": 1,
+            "first_session_at": datetime(2026, 6, 29, 10, 0),
+            "last_session_at": datetime(2026, 6, 29, 10, 0),
+        },
+        {
+            "session_count": 4,
+            "total_amount": 1234.5,
+            "location_count": 2,
+            "connector_count": 3,
+            "first_session_at": datetime(2026, 6, 29, 10, 0),
+            "last_session_at": datetime(2026, 7, 7, 14, 30),
+        },
+    ]
+
+
+def _fake_smartfuelpass_metrics(reference_time: datetime):
+    class FakeMetricsStore:
+        jobs = {
+            system_health.SMARTFUELPASS_SYNC_JOB_ID: JobMetrics(
+                last_run=reference_time - timedelta(hours=1),
+                last_status="success",
+                last_duration_seconds=125.5,
+                success_count_24h=1,
+                failure_count_24h=0,
+            ),
+            system_health.SMARTFUELPASS_WEEKLY_REPORT_JOB_ID: JobMetrics(
+                last_run=reference_time - timedelta(hours=2),
+                last_status="success",
+                last_duration_seconds=4.2,
+                success_count_24h=1,
+                failure_count_24h=0,
+            ),
+        }
+
+    return FakeMetricsStore()
+
+
+def test_collect_system_smartfuelpass_health_reports_ok(monkeypatch):
+    reference_time = datetime.now()
+    session = _FakeSmartFuelPassSession(
+        aggregate_row=_smartfuelpass_aggregate_row(reference_time),
+        period_rows=_smartfuelpass_period_rows(),
+    )
+    monkeypatch.setattr(system_health, "get_session_pg", lambda: session)
+    monkeypatch.setattr(
+        system_health,
+        "get_metrics_store",
+        lambda *args, **kwargs: _fake_smartfuelpass_metrics(reference_time),
+    )
+
+    response = system_health.collect_system_smartfuelpass_health()
+
+    assert response.status == "ok"
+    assert response.source == "monitoring.smartfuelpass_relace"
+    assert response.period_basis == "ended_at"
+    assert response.table.table_present is True
+    assert response.table.total_session_count == 4
+    assert response.table.missing_ended_at_utc_count == 0
+    assert response.sync_job.status == "ok"
+    assert response.weekly_report_job.status == "ok"
+    assert {period.key for period in response.report_periods} == {
+        "last_week",
+        "current_month",
+        "previous_month",
+        "total",
+    }
+    assert {period.key: period.session_count for period in response.report_periods}["last_week"] == 2
+    assert session.closed is True
+
+
+def test_collect_system_smartfuelpass_health_reports_missing_table(monkeypatch):
+    reference_time = datetime.now()
+    session = _FakeSmartFuelPassSession(table_present=False)
+    monkeypatch.setattr(system_health, "get_session_pg", lambda: session)
+    monkeypatch.setattr(
+        system_health,
+        "get_metrics_store",
+        lambda *args, **kwargs: _fake_smartfuelpass_metrics(reference_time),
+    )
+
+    response = system_health.collect_system_smartfuelpass_health()
+
+    assert response.status == "error"
+    assert response.table.table_present is False
+    assert response.table.total_session_count == 0
+    assert all(period.session_count == 0 for period in response.report_periods)
+    assert session.closed is True
+
+
+def test_collect_system_smartfuelpass_health_reports_query_failure(monkeypatch):
+    reference_time = datetime.now()
+
+    def fail_session():
+        raise system_health.SQLAlchemyError("database unavailable")
+
+    monkeypatch.setattr(system_health, "get_session_pg", fail_session)
+    monkeypatch.setattr(
+        system_health,
+        "get_metrics_store",
+        lambda *args, **kwargs: _fake_smartfuelpass_metrics(reference_time),
+    )
+
+    response = system_health.collect_system_smartfuelpass_health()
+
+    assert response.status == "error"
+    assert response.table.status == "error"
+    assert response.table.table_present is False
+    assert "query failed" in response.table.detail
 
 
 def _fake_scheduler_jobs(
@@ -529,6 +712,69 @@ def test_system_database_health_route_delegates_to_service(monkeypatch):
     )
 
     response = system_health_route.get_system_database_health(
+        current_user=SimpleNamespace(is_admin=True)
+    )
+
+    assert response is expected
+
+
+def test_system_smartfuelpass_health_route_delegates_to_service(monkeypatch):
+    expected = SystemSmartFuelPassHealthResponse(
+        status="ok",
+        checked_at=datetime(2026, 7, 8, 7, 0),
+        source="monitoring.smartfuelpass_relace",
+        period_basis="ended_at",
+        table=SystemSmartFuelPassTableStatus(
+            status="ok",
+            table_present=True,
+            total_session_count=1,
+            sessions_with_utc_count=1,
+            missing_ended_at_utc_count=0,
+            last_imported_at=datetime(2026, 7, 8, 0, 20),
+            last_import_age_seconds=3600,
+            total_amount=100.0,
+            location_count=1,
+            connector_count=1,
+            detail="ok",
+        ),
+        sync_job=SystemSmartFuelPassJobMetricStatus(
+            job_id="sync_charge_sessions_to_db",
+            label="Databazovy sync relaci",
+            status="ok",
+            last_status="success",
+            last_run=datetime(2026, 7, 8, 0, 20),
+            success_count_24h=1,
+            failure_count_24h=0,
+            detail="ok",
+        ),
+        weekly_report_job=SystemSmartFuelPassJobMetricStatus(
+            job_id="smartfuelpass_weekly_report_job",
+            label="Tydenni email report",
+            status="ok",
+            last_status="success",
+            last_run=datetime(2026, 7, 7, 6, 55),
+            success_count_24h=1,
+            failure_count_24h=0,
+            detail="ok",
+        ),
+        report_periods=[
+            SystemSmartFuelPassPeriodSummary(
+                key="last_week",
+                label="Posledni uzavreny tyden",
+                session_count=1,
+                total_amount=100.0,
+                location_count=1,
+                connector_count=1,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        system_health_route,
+        "collect_system_smartfuelpass_health",
+        lambda: expected,
+    )
+
+    response = system_health_route.get_system_smartfuelpass_health(
         current_user=SimpleNamespace(is_admin=True)
     )
 

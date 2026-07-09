@@ -1174,8 +1174,16 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
     def fake_get_runtime_model_version():
         return 2
 
-    def fake_score_new_measurements(*, model_version, bootstrap_to_latest_if_missing=False):
+    def fake_score_new_measurements(
+        *,
+        model_version,
+        bootstrap_to_latest_if_missing=False,
+        use_per_identifier_selection=False,
+        selection_mode=None,
+    ):
         assert bootstrap_to_latest_if_missing is True
+        assert use_per_identifier_selection is (model_version == 2)
+        assert selection_mode == scheduler.SELECTION_MODE_ACTIVE
         return model_version
 
     def fake_detect_events_from_scores(*, model_version, bootstrap_to_latest_if_missing=False):
@@ -1256,6 +1264,100 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
     ]
     assert alert_payloads == [([2], [20])]
     assert plynomery_alert_payloads == [([101], [202])]
+
+
+def test_vodomery_manual_scoring_step_uses_per_identifier_selection_for_active_model(monkeypatch):
+    calls = []
+
+    def fake_score_new_measurements(
+        *,
+        model_version,
+        bootstrap_to_latest_if_missing=False,
+        use_per_identifier_selection=False,
+        selection_mode=None,
+    ):
+        calls.append(
+            {
+                "model_version": model_version,
+                "bootstrap": bootstrap_to_latest_if_missing,
+                "use_per_identifier_selection": use_per_identifier_selection,
+                "selection_mode": selection_mode,
+            }
+        )
+
+    monkeypatch.setattr(scheduler, "get_runtime_model_version", lambda: 3)
+    monkeypatch.setattr(scheduler, "get_candidate_model_versions", lambda: (1, 2, 3))
+    monkeypatch.setattr(scheduler, "score_new_measurements", fake_score_new_measurements)
+
+    scheduler._run_vodomery_scoring_step()
+
+    assert calls == [
+        {
+            "model_version": 1,
+            "bootstrap": True,
+            "use_per_identifier_selection": False,
+            "selection_mode": scheduler.SELECTION_MODE_ACTIVE,
+        },
+        {
+            "model_version": 2,
+            "bootstrap": True,
+            "use_per_identifier_selection": False,
+            "selection_mode": scheduler.SELECTION_MODE_ACTIVE,
+        },
+        {
+            "model_version": 3,
+            "bootstrap": True,
+            "use_per_identifier_selection": True,
+            "selection_mode": scheduler.SELECTION_MODE_ACTIVE,
+        },
+    ]
+
+
+def test_vodomery_manual_alerting_step_uses_per_identifier_selection(monkeypatch):
+    captured = {}
+
+    def fake_score_new_measurements(
+        *,
+        model_version,
+        bootstrap_to_latest_if_missing=False,
+        use_per_identifier_selection=False,
+        selection_mode=None,
+    ):
+        captured["score"] = {
+            "model_version": model_version,
+            "bootstrap": bootstrap_to_latest_if_missing,
+            "use_per_identifier_selection": use_per_identifier_selection,
+            "selection_mode": selection_mode,
+        }
+
+    monkeypatch.setattr(scheduler, "get_runtime_model_version", lambda: 3)
+    monkeypatch.setattr(scheduler, "score_new_measurements", fake_score_new_measurements)
+    monkeypatch.setattr(
+        scheduler,
+        "detect_events_from_scores",
+        lambda *, model_version, bootstrap_to_latest_if_missing: {
+            "active_event_ids": [11],
+            "resolved_event_ids": [22],
+        },
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "process_vodomery_alerts",
+        lambda **kwargs: captured.update({"alerts": kwargs}),
+    )
+
+    scheduler._run_vodomery_alerting_step()
+
+    assert captured["score"] == {
+        "model_version": 3,
+        "bootstrap": True,
+        "use_per_identifier_selection": True,
+        "selection_mode": scheduler.SELECTION_MODE_ACTIVE,
+    }
+    assert captured["alerts"] == {
+        "active_event_ids": [11],
+        "resolved_event_ids": [22],
+    }
 
 
 def test_daily_job_runs_meteo_sync_as_last_step(monkeypatch):

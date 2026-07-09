@@ -1,9 +1,24 @@
+from collections import defaultdict
+
+from decouple import config
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from moduly.mereni.vodomery.database.models import *
 from core.db.connect import ENGINE_PG
 from app.time_utils import utc_now_naive
+from moduly.mereni.prediction.storage import (
+    PredictionSelectedModelSnapshot,
+    SELECTION_MODE_ACTIVE,
+    normalize_selection_mode,
+)
+from moduly.mereni.vodomery.database.model_validation import (
+    get_active_vodomery_model_version,
+)
+
+
+VODOMERY_MEDIUM_KEY = "vodomery"
+PER_IDENTIFIER_SELECTION_ENV = "VODOMERY_PER_IDENTIFIER_MODEL_SELECTION_ENABLED"
 
 
 
@@ -12,6 +27,8 @@ def score_new_measurements(
     batch_size: int = 1000,
     *,
     bootstrap_to_latest_if_missing: bool = False,
+    use_per_identifier_selection: bool | None = None,
+    selection_mode: str = SELECTION_MODE_ACTIVE,
 ):
     """
     Ultra-efektivní inkrementální scoring (FINÁLNÍ VERZE)
@@ -45,28 +62,25 @@ def score_new_measurements(
 
         last_id = state.last_measurement_id
 
+        per_identifier_selection_enabled = _per_identifier_selection_enabled(
+            session,
+            model_version=model_version,
+            use_per_identifier_selection=use_per_identifier_selection,
+        )
+
         # -------------------------------------------------
         # 2️⃣ Preload baseline profilů (1 dotaz)
         # -------------------------------------------------
-        profiles = session.execute(
-            select(VodomeryProfilesAnomaly).where(
-                VodomeryProfilesAnomaly.model_version == model_version
-            )
-        ).scalars().all()
+        profiles = _load_profiles(session, {model_version})
 
         if not profiles:
             print("No baseline profiles found.")
             return
 
-        profile_cache = {
-            (
-                p.identifikace,
-                p.interval_minutes,
-                p.day_of_week,
-                p.slot,
-            ): p
-            for p in profiles
-        }
+        profile_cache = _build_profile_cache(
+            profiles,
+            default_model_version=model_version,
+        )
 
         # -------------------------------------------------
         # 3️⃣ Načti nové measurementy (PK scan)
@@ -89,6 +103,24 @@ def score_new_measurements(
             print("No new measurements to score.")
             return 0
 
+        snapshots_by_identifier = {}
+        if per_identifier_selection_enabled:
+            snapshots_by_identifier = _load_selected_model_snapshots(
+                session,
+                measurements=measurements,
+                selection_mode=selection_mode,
+            )
+            selected_profile_versions = _selected_profile_versions(
+                snapshots_by_identifier,
+            )
+            profile_source_versions = {model_version, *selected_profile_versions}
+            if profile_source_versions != {model_version}:
+                profiles = _load_profiles(session, profile_source_versions)
+                profile_cache = _build_profile_cache(
+                    profiles,
+                    default_model_version=model_version,
+                )
+
         rows_to_insert = []
         max_processed_id = last_id
 
@@ -97,14 +129,19 @@ def score_new_measurements(
         # -------------------------------------------------
         for m in measurements:
 
-            key = (
-                m.identifikace,
-                m.interval_minutes,
-                m.day_of_week,
-                m.slot,
+            profile_model_version = _profile_model_version_for_measurement(
+                m,
+                snapshots_by_identifier=snapshots_by_identifier,
+                default_model_version=model_version,
+            )
+            key = _profile_cache_key(
+                profile_model_version,
+                m,
             )
 
             profile = profile_cache.get(key)
+            if not profile and profile_model_version != model_version:
+                profile = profile_cache.get(_profile_cache_key(model_version, m))
             if not profile:
                 continue
 
@@ -227,3 +264,146 @@ def backfill_vodomery_scores(model_version: int = 1, batch_size: int = 5000):
 
 
 # backfill_vodomery_scores(model_version=1, batch_size=3000)
+
+
+def _per_identifier_selection_enabled(
+    session,
+    *,
+    model_version: int,
+    use_per_identifier_selection: bool | None,
+) -> bool:
+    if use_per_identifier_selection is not None:
+        return bool(use_per_identifier_selection)
+
+    enabled = config(PER_IDENTIFIER_SELECTION_ENV, default=False, cast=bool)
+    if not enabled:
+        return False
+
+    active_model_version = get_active_vodomery_model_version(
+        session=session,
+        default=model_version,
+    )
+    return int(active_model_version) == int(model_version)
+
+
+def _load_profiles(session, model_versions):
+    versions = tuple(sorted({int(version) for version in model_versions}))
+    if not versions:
+        return []
+
+    if len(versions) == 1:
+        condition = VodomeryProfilesAnomaly.model_version == versions[0]
+    else:
+        condition = VodomeryProfilesAnomaly.model_version.in_(versions)
+
+    return (
+        session.execute(select(VodomeryProfilesAnomaly).where(condition))
+        .scalars()
+        .all()
+    )
+
+
+def _build_profile_cache(profiles, *, default_model_version: int):
+    profile_cache = {}
+    for profile in profiles:
+        profile_model_version = int(
+            getattr(profile, "model_version", default_model_version)
+        )
+        profile_cache[
+            _profile_cache_key(
+                profile_model_version,
+                profile,
+            )
+        ] = profile
+    return profile_cache
+
+
+def _profile_cache_key(model_version: int, item):
+    return (
+        int(model_version),
+        item.identifikace,
+        item.interval_minutes,
+        item.day_of_week,
+        item.slot,
+    )
+
+
+def _load_selected_model_snapshots(
+    session,
+    *,
+    measurements,
+    selection_mode: str,
+):
+    identifiers = sorted(
+        {
+            measurement.identifikace
+            for measurement in measurements
+            if getattr(measurement, "identifikace", None)
+        }
+    )
+    dated_measurements = [
+        measurement
+        for measurement in measurements
+        if getattr(measurement, "date", None) is not None
+    ]
+    if not identifiers or not dated_measurements:
+        return {}
+
+    min_date = min(measurement.date for measurement in dated_measurements)
+    max_date = max(measurement.date for measurement in dated_measurements)
+    snapshot = PredictionSelectedModelSnapshot
+    rows = (
+        session.execute(
+            select(snapshot).where(
+                snapshot.medium_key == VODOMERY_MEDIUM_KEY,
+                snapshot.selection_mode == normalize_selection_mode(selection_mode),
+                snapshot.identifier.in_(identifiers),
+                snapshot.forecast_period_start <= max_date,
+                snapshot.forecast_period_end > min_date,
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    snapshots_by_identifier = defaultdict(list)
+    for row in rows:
+        snapshots_by_identifier[row.identifier].append(row)
+
+    for identifier_rows in snapshots_by_identifier.values():
+        identifier_rows.sort(
+            key=lambda row: row.forecast_period_start,
+            reverse=True,
+        )
+    return dict(snapshots_by_identifier)
+
+
+def _selected_profile_versions(snapshots_by_identifier) -> set[int]:
+    return {
+        int(snapshot.selected_model_version)
+        for snapshots in snapshots_by_identifier.values()
+        for snapshot in snapshots
+    }
+
+
+def _profile_model_version_for_measurement(
+    measurement,
+    *,
+    snapshots_by_identifier,
+    default_model_version: int,
+) -> int:
+    if not snapshots_by_identifier:
+        return int(default_model_version)
+
+    measurement_date = getattr(measurement, "date", None)
+    if measurement_date is None:
+        return int(default_model_version)
+
+    for snapshot in snapshots_by_identifier.get(measurement.identifikace, ()):
+        if (
+            snapshot.forecast_period_start <= measurement_date
+            and measurement_date < snapshot.forecast_period_end
+        ):
+            return int(snapshot.selected_model_version)
+
+    return int(default_model_version)

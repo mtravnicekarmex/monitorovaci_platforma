@@ -40,14 +40,16 @@ class FakeQuery:
 
 
 class FakeSession:
-    def __init__(self, *, state, measurements, profile_rows=None):
+    def __init__(self, *, state, measurements, profile_rows=None, snapshot_rows=None):
         self.state = state
         self.measurements = measurements
         self.profile_rows = profile_rows or []
+        self.snapshot_rows = snapshot_rows or []
         self.insert_statement = None
         self.insert_rows = None
         self.update_statement = None
         self.commit_calls = 0
+        self.snapshot_select_count = 0
 
     def __enter__(self):
         return self
@@ -81,6 +83,9 @@ class FakeSession:
                 plynomery_anomaly.PlynomeryProfilesAnomaly,
             ):
                 return FakeScalarResult(self.profile_rows)
+            if entity is vodomery_anomaly.PredictionSelectedModelSnapshot:
+                self.snapshot_select_count += 1
+                return FakeScalarResult(self.snapshot_rows)
 
         self.update_statement = statement
         return FakeScalarResult([])
@@ -119,6 +124,7 @@ def test_vodomery_scoring_uses_conflict_safe_insert(monkeypatch):
     )
 
     monkeypatch.setattr(vodomery_anomaly, "Session", lambda *args, **kwargs: session)
+    monkeypatch.setattr(vodomery_anomaly, "config", lambda *args, **kwargs: False)
 
     inserted = vodomery_anomaly.score_new_measurements(model_version=1, batch_size=10)
 
@@ -145,6 +151,145 @@ def test_vodomery_scoring_uses_conflict_safe_insert(monkeypatch):
     assert "ON CONFLICT (MEASUREMENT_ID, MODEL_VERSION) DO NOTHING" in _normalize_sql(
         session.insert_statement
     )
+
+
+def test_vodomery_scoring_keeps_global_profile_when_selection_disabled(monkeypatch):
+    global_profile = SimpleNamespace(
+        model_version=3,
+        identifikace="L1_V1",
+        interval_minutes=15,
+        day_of_week=3,
+        slot=48,
+        mean=10.0,
+        std=2.0,
+        median=10.0,
+        p10=8.0,
+        p90=12.0,
+    )
+    selected_profile = SimpleNamespace(
+        model_version=2,
+        identifikace="L1_V1",
+        interval_minutes=15,
+        day_of_week=3,
+        slot=48,
+        mean=16.0,
+        std=1.0,
+        median=16.0,
+        p10=12.0,
+        p90=20.0,
+    )
+    measurement = SimpleNamespace(
+        id=201,
+        identifikace="L1_V1",
+        interval_minutes=15,
+        day_of_week=3,
+        slot=48,
+        delta=17.0,
+        date=datetime.datetime(2026, 7, 9, 12, 0),
+    )
+    snapshot = SimpleNamespace(
+        identifier="L1_V1",
+        selected_model_version=2,
+        forecast_period_start=datetime.datetime(2026, 7, 6),
+        forecast_period_end=datetime.datetime(2026, 7, 13),
+    )
+    session = FakeSession(
+        state=SimpleNamespace(model_version=3, last_measurement_id=200),
+        measurements=[measurement],
+        profile_rows=[global_profile, selected_profile],
+        snapshot_rows=[snapshot],
+    )
+
+    monkeypatch.setattr(vodomery_anomaly, "Session", lambda *args, **kwargs: session)
+
+    inserted = vodomery_anomaly.score_new_measurements(
+        model_version=3,
+        batch_size=10,
+        use_per_identifier_selection=False,
+    )
+
+    assert inserted == 1
+    assert session.snapshot_select_count == 0
+    assert session.insert_rows[0]["expected_mean"] == 10.0
+    assert session.insert_rows[0]["model_version"] == 3
+
+
+def test_vodomery_scoring_can_use_per_identifier_selected_profile(monkeypatch):
+    global_profile = SimpleNamespace(
+        model_version=3,
+        identifikace="L1_V1",
+        interval_minutes=15,
+        day_of_week=3,
+        slot=48,
+        mean=10.0,
+        std=2.0,
+        median=10.0,
+        p10=8.0,
+        p90=12.0,
+    )
+    selected_profile = SimpleNamespace(
+        model_version=2,
+        identifikace="L1_V1",
+        interval_minutes=15,
+        day_of_week=3,
+        slot=48,
+        mean=16.0,
+        std=1.0,
+        median=16.0,
+        p10=12.0,
+        p90=20.0,
+    )
+    measurement = SimpleNamespace(
+        id=202,
+        identifikace="L1_V1",
+        interval_minutes=15,
+        day_of_week=3,
+        slot=48,
+        delta=17.0,
+        date=datetime.datetime(2026, 7, 9, 12, 0),
+    )
+    snapshot = SimpleNamespace(
+        identifier="L1_V1",
+        selected_model_version=2,
+        forecast_period_start=datetime.datetime(2026, 7, 6),
+        forecast_period_end=datetime.datetime(2026, 7, 13),
+    )
+    session = FakeSession(
+        state=SimpleNamespace(model_version=3, last_measurement_id=200),
+        measurements=[measurement],
+        profile_rows=[global_profile, selected_profile],
+        snapshot_rows=[snapshot],
+    )
+
+    monkeypatch.setattr(vodomery_anomaly, "Session", lambda *args, **kwargs: session)
+
+    inserted = vodomery_anomaly.score_new_measurements(
+        model_version=3,
+        batch_size=10,
+        use_per_identifier_selection=True,
+        selection_mode="dry_run",
+    )
+
+    assert inserted == 1
+    assert session.snapshot_select_count == 1
+    assert session.insert_rows == [
+        {
+            "measurement_id": 202,
+            "identifikace": "L1_V1",
+            "date": datetime.datetime(2026, 7, 9, 12, 0),
+            "actual_value": 17.0,
+            "expected_mean": 16.0,
+            "expected_std": 1.0,
+            "expected_median": 16.0,
+            "expected_p10": 12.0,
+            "expected_p90": 20.0,
+            "deviation": 1.0,
+            "z_score": 1.0,
+            "is_anomaly": False,
+            "severity": None,
+            "model_version": 3,
+        }
+    ]
 
 
 def test_plynomery_scoring_uses_conflict_safe_insert(monkeypatch):

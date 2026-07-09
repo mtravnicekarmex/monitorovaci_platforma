@@ -153,11 +153,13 @@ These are recognized topics, not approved changes:
 ## Active Multi-Step Plan: Shared Prediction Core
 
 Date opened: 2026-07-08
+Date revised: 2026-07-09
 
 Objective:
-- Move meter prediction toward a shared core with media-specific adapters,
-  candidate model plugins, and rolling weekly backtests, while preserving
-  current production behavior until each step is explicitly completed.
+- Move meter prediction toward a universal pipeline with media-specific
+  adapters, candidate model plugins, configurable forecast periods, rolling
+  backtests, and per-identifier model selection, while preserving current
+  production behavior until each step is explicitly completed.
 
 Rules:
 - Implement only the next unchecked step unless the user explicitly changes
@@ -166,32 +168,67 @@ Rules:
   for that step are done.
 - Do not enable a new candidate model for automatic production selection until
   the checklist reaches the explicit enablement step.
+- Vodomery production scoring uses `active` per-identifier selected-model
+  snapshots when scoring the global active model. The global active model
+  remains the safe fallback and score `model_version`; non-active candidate
+  scoring remains pure per-candidate scoring for comparison.
+- Forecast-period length is part of the shared pipeline contract: vodomery use
+  weekly periods first, while future elektromery prediction will use monthly
+  next-month periods calculated around the middle of the current calendar
+  month.
+- Candidate model parameter variants should be registered as candidates when
+  they can produce materially different forecasts.
+- The detailed architecture and rollout plan lives in
+  `PREDICTION_PIPELINE_PLAN.md`.
 
 Checklist:
-- [ ] 1. Create shared prediction contracts and data classes under
+- [x] 1. Create shared prediction contracts and data classes under
   `moduly/mereni/prediction/` with no production behavior change.
-- [ ] 2. Add rolling weekly backtest scaffolding and unit tests on synthetic
+- [x] 2. Add rolling weekly backtest scaffolding and unit tests on synthetic
   data, including coverage, MAE, RMSE, bias, and WAPE-style normalized error.
-- [ ] 3. Add the first `vodomery` media adapter around existing tables,
+- [x] 3. Add the first `vodomery` media adapter around existing tables,
   measurement filters, profile storage, active model lookup, and selection
   metadata, preserving current outputs.
-- [ ] 4. Move existing vodomery candidate models 1-3 behind the shared
+- [x] 4. Move existing vodomery candidate models 1-3 behind the shared
   candidate interface without changing active-model behavior.
-- [ ] 5. Add `Model 4 - seasonal yearly blend` for vodomery using a 12-month
+- [x] 5. Add `Model 4 - seasonal yearly blend` for vodomery using a 12-month
   training window, robust seasonal/day-of-week/slot blend, and fallback
   profiles. Keep it measured only and not eligible for automatic activation.
-- [ ] 6. Extend weekly vodomery rebuild reporting/storage so all candidates
+- [x] 6. Extend weekly vodomery rebuild reporting/storage so all candidates
   show rolling backtest metrics and whether they are eligible for selection.
-- [ ] 7. Review several weekly rebuild results and only then decide whether
-  Model 4, or any future measured-only candidate, may become eligible for
-  automatic selection.
-- [ ] 8. Adapt the shared prediction core to `plynomery`, preserving current
+- [x] 7. Add per-identifier rolling backtest storage and report summaries for
+  vodomery candidate models, keeping per-identifier activation disabled.
+- [x] 8. Define shared forecast-period and per-identifier selection contracts,
+  including selected-model decision objects, fallback reasons, and tests. No
+  production scoring behavior change.
+- [x] 9. Add generic storage/bootstrap for selected model snapshots by medium,
+  identifier, and forecast period, with audit fields and historical immutability
+  rules.
+- [x] 10. Wire vodomery weekly rebuild to persist per-identifier selected-model
+  snapshots for the next weekly period in dry-run mode. Scoring still uses the
+  current global active model.
+- [x] 11. Extend the vodomery rebuild report with selected-vs-global model
+  comparison, fallback counts, measured-only would-win counts, and worst
+  identifiers by selected eligible rolling WAPE.
+- [x] 12. Add vodomery scoring/profile lookup support for per-identifier
+  selection behind an explicit feature flag or configuration switch, default
+  disabled.
+- [x] 13. Enable vodomery per-identifier model selection in production after a
+  reviewed dry-run rebuild, keeping the global active model as fallback.
+- [ ] 14. Generalize forecast-period and rolling-backtest handling so the shared
+  pipeline supports both weekly and monthly periods.
+- [ ] 15. Extract a reusable media pipeline runner so adding a new model or a
+  parameter variant requires plugin registration and adapter metadata rather
+  than edits to scheduler/report core.
+- [ ] 16. Adapt the shared prediction pipeline to `plynomery`, preserving current
   baseline/weather-aware behavior and gas-specific expected-zero/outlier
   semantics.
-- [ ] 9. Design `elektromery` candidates after reviewing electricity source
-  cadence, calendar/tariff behavior, imports, and reporting semantics.
-- [ ] 10. Add cross-media dashboard/report views for candidate performance only
-  after the shared core has at least vodomery and one more medium integrated.
+- [ ] 17. Design and integrate `elektromery` candidates with monthly next-month
+  prediction, after reviewing electricity source cadence, calendar/tariff
+  behavior, imports, and reporting semantics.
+- [ ] 18. Add cross-media dashboard/report views for candidate and
+  per-identifier selection performance only after the shared core has vodomery
+  and at least one more medium integrated.
 
 ## Session Log Template
 
@@ -266,6 +303,1105 @@ Known risks or accepted gaps:
 ```
 
 ## Session Log
+
+### 2026-07-08
+
+Scope:
+- Completed step 1 of the shared prediction core plan.
+
+Changed:
+- Added `moduly/mereni/prediction/` with shared prediction contracts,
+  dataclasses, and protocols for candidate models and media adapters.
+- Added lightweight unit tests for the new contracts.
+- Marked checklist step 1 complete.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile moduly\mereni\prediction\__init__.py
+  moduly\mereni\prediction\contracts.py tests\test_prediction_contracts.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_prediction_contracts.py -q
+  --tb=short` reported `4 passed`.
+
+Not verified:
+- No production scheduler/API/dashboard behavior was exercised because step 1
+  only adds unused shared contracts.
+
+Follow-up:
+- Continue with step 2: rolling weekly backtest scaffolding and synthetic-data
+  tests.
+
+### 2026-07-08 - Shared prediction core step 2
+
+Scope:
+- Completed step 2 of the shared prediction core plan.
+
+Changed:
+- Added rolling weekly backtest scaffolding in
+  `moduly/mereni/prediction/backtest.py`.
+- Added fold generation, metric calculation, backtest result serialization,
+  and a protocol for candidates that can produce validation predictions.
+- Added synthetic-data tests for weekly folds, coverage, MAE, RMSE, bias, WAPE,
+  zero-actual WAPE handling, and aggregated rolling backtest results.
+- Marked checklist step 2 complete.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile moduly\mereni\prediction\__init__.py
+  moduly\mereni\prediction\contracts.py moduly\mereni\prediction\backtest.py
+  tests\test_prediction_contracts.py tests\test_prediction_backtest.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_prediction_contracts.py
+  tests\test_prediction_backtest.py -q --tb=short` reported `10 passed`.
+
+Not verified:
+- No production scheduler/API/dashboard behavior was exercised because step 2
+  only adds unused shared backtest scaffolding.
+
+Follow-up:
+- Continue with step 3: add the first `vodomery` media adapter around existing
+  tables and metadata while preserving current outputs.
+
+### 2026-07-08 - Shared prediction core step 3
+
+Scope:
+- Completed step 3 of the shared prediction core plan.
+- Recorded the future direction that model selection should eventually support
+  per-identifier best-model assignment, while current global activation stays
+  unchanged.
+
+Changed:
+- Added generic `PredictionSelectionMetadata`.
+- Added `moduly/mereni/vodomery/prediction_adapter.py` with a vodomery media
+  adapter around existing measurement, profile, active-model, and selection
+  metadata tables.
+- Added tests for vodomery adapter active-model lookup injection, current
+  quality filters, observation serialization, selection metadata serialization,
+  and profile row mapping.
+- Marked checklist step 3 complete.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile moduly\mereni\prediction\__init__.py
+  moduly\mereni\prediction\contracts.py moduly\mereni\prediction\backtest.py
+  moduly\mereni\vodomery\prediction_adapter.py
+  tests\test_prediction_contracts.py tests\test_prediction_backtest.py
+  tests\test_vodomery_prediction_adapter.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_prediction_contracts.py
+  tests\test_prediction_backtest.py tests\test_vodomery_prediction_adapter.py
+  -q --tb=short` reported `15 passed`.
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction.py
+  tests\test_prediction_contracts.py tests\test_prediction_backtest.py
+  tests\test_vodomery_prediction_adapter.py -q --tb=short` reported
+  `18 passed`.
+
+Not verified:
+- The adapter was not called from scheduler/API/dashboard production paths.
+  That is intentional for step 3.
+
+Follow-up:
+- Continue with step 4: move existing vodomery candidate models 1-3 behind
+  the shared candidate interface without changing active-model behavior.
+
+### 2026-07-08 - Shared prediction core step 4
+
+Scope:
+- Completed step 4 of the shared prediction core plan.
+
+Changed:
+- Existing vodomery candidate models 1-3 now expose shared
+  `PredictionCandidateSpec` metadata through a `VodomeryCandidateModelPlugin`
+  registry.
+- `vodomery_prediction.rebuild_profiles` still uses the same model versions,
+  model names, SQL profile builders, validation logic, and global active-model
+  selection semantics.
+- Added tests for shared candidate metadata and plugin-based rebuild dispatch.
+- Marked checklist step 4 complete.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile moduly\mereni\prediction\__init__.py
+  moduly\mereni\prediction\contracts.py moduly\mereni\prediction\backtest.py
+  moduly\mereni\vodomery\prediction_adapter.py
+  moduly\mereni\vodomery\vodomery_prediction.py
+  tests\test_prediction_contracts.py tests\test_prediction_backtest.py
+  tests\test_vodomery_prediction_adapter.py tests\test_vodomery_prediction.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction.py
+  tests\test_prediction_contracts.py tests\test_prediction_backtest.py
+  tests\test_vodomery_prediction_adapter.py -q --tb=short` reported
+  `20 passed`.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  tests\test_vodomery_prediction.py tests\test_prediction_contracts.py
+  tests\test_prediction_backtest.py tests\test_vodomery_prediction_adapter.py
+  -q --tb=short` reported `21 passed`.
+
+Not verified:
+- No live database profile rebuild was run. Step 4 preserves the existing SQL
+  builders and only changes the in-process candidate dispatch wrapper.
+
+Follow-up:
+- Continue with step 5: add measured-only vodomery `Model 4 - seasonal yearly
+  blend` using a 12-month training window.
+
+### 2026-07-08 - Shared prediction core step 5
+
+Scope:
+- Completed step 5 of the shared prediction core plan.
+
+Changed:
+- Added measured-only vodomery `Model 4 - seasonal yearly blend` with model
+  version `4`, key `seasonal_yearly_blend`, and a 12-month training window.
+- Model 4 builds eval/deploy anomaly profiles from a seasonal day-of-year,
+  day-of-week, workday, slot, and interval fallback blend.
+- Model 4 deploy profiles use the last 12 months ending at rebuild time; its
+  validation profiles use the 12 months before the validation window.
+- Full weekly rebuilds now calculate Model 4 metrics, but automatic selection
+  ignores candidates with `selection_enabled=False`.
+- Default runtime/scoring candidate versions remain `1`, `2`, and `3`, so
+  quarter-hour scoring and alerting do not start using measured-only Model 4.
+- Marked checklist step 5 complete.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile moduly\mereni\vodomery\vodomery_prediction.py
+  tests\test_vodomery_prediction.py moduly\mereni\prediction\__init__.py
+  moduly\mereni\prediction\contracts.py moduly\mereni\prediction\backtest.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction.py
+  tests\test_prediction_contracts.py tests\test_prediction_backtest.py
+  tests\test_vodomery_prediction_adapter.py -q --tb=short` reported
+  `24 passed`.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_scheduler.py::test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  tests\test_vodomery_prediction.py tests\test_prediction_contracts.py
+  tests\test_prediction_backtest.py tests\test_vodomery_prediction_adapter.py
+  -q --tb=short` reported `26 passed`.
+
+Not verified:
+- No live PostgreSQL profile rebuild was run. The new Model 4 SQL is covered
+  by unit-level statement/parameter checks only.
+
+Follow-up:
+- Continue with step 6: extend weekly vodomery rebuild reporting/storage so
+  all candidates show rolling backtest metrics and eligibility.
+
+### 2026-07-08 - Shared prediction core step 6
+
+Scope:
+- Completed step 6 of the shared prediction core plan.
+
+Changed:
+- Weekly vodomery full rebuild now calculates rolling weekly backtest metrics
+  for every candidate model, including measured-only Model 4.
+- Rolling backtest uses eight 7-day folds, candidate-specific training
+  windows, temporary profile model versions, and weighted aggregate coverage,
+  MAE, RMSE, bias, and WAPE.
+- `monitoring.vodomery_model_selection_candidates` now stores model key,
+  training/validation window lengths, selection eligibility, and rolling
+  backtest metrics through additive `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
+  bootstrap logic.
+- The vodomery model rebuild email table now shows eligibility, rolling fold
+  count, rolling coverage, rolling WAPE, rolling MAE, rolling RMSE, and
+  rolling bias.
+- Marked checklist step 6 complete.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile moduly\mereni\vodomery\vodomery_prediction.py
+  moduly\mereni\vodomery\database\models.py
+  moduly\mereni\vodomery\database\model_validation.py
+  moduly\mereni\vodomery\reporting\model_rebuild_report.py
+  tests\test_vodomery_prediction.py tests\test_vodomery_model_rebuild_report.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction.py
+  tests\test_vodomery_model_rebuild_report.py tests\test_prediction_contracts.py
+  tests\test_prediction_backtest.py tests\test_vodomery_prediction_adapter.py
+  -q --tb=short` reported `28 passed`.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_scheduler.py::test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  tests\test_vodomery_prediction.py tests\test_vodomery_model_rebuild_report.py
+  tests\test_prediction_contracts.py tests\test_prediction_backtest.py
+  tests\test_vodomery_prediction_adapter.py -q --tb=short` reported
+  `30 passed`.
+
+Not verified:
+- No live PostgreSQL weekly rebuild was run, so the additive migration and
+  rolling metrics have not yet been exercised against the real production
+  tables/data.
+
+Follow-up:
+- Continue with step 7: review several weekly rebuild results before deciding
+  whether Model 4 or another measured-only candidate can become eligible for
+  automatic selection.
+
+### 2026-07-08 - Manual vodomery model rebuild after step 6
+
+Scope:
+- Ran a live vodomery prediction profile rebuild with the new candidate setup
+  and sent the vodomery model rebuild email report.
+
+Executed:
+- `.venv-production\Scripts\python.exe` called
+  `moduly.mereni.vodomery.vodomery_prediction.rebuild_profiles()`.
+- The resulting payload was passed to
+  `send_vodomery_model_rebuild_report(result)`.
+
+Result:
+- New `selection_run_id`: `27`.
+- Active model remained `Model 3 - recency weighted blend` (`model_version=3`).
+- Previous active model was also `Model 3 - recency weighted blend`.
+- The rebuild evaluated 4 candidates; Model 4 stayed `selection_enabled=False`
+  and was not selected.
+- Email report returned `recipient_count=1`.
+- Candidate summary:
+  - Model 1: coverage `1.0`, MAE `0.11829`, rolling WAPE `12.004258`,
+    profiles `37800`.
+  - Model 2: coverage `1.0`, MAE `0.110231`, rolling WAPE `11.936217`,
+    profiles `37800`.
+  - Model 3: coverage `1.0`, MAE `0.037606`, rolling WAPE `4.455449`,
+    profiles `37800`, selected.
+  - Model 4: coverage `1.0`, MAE `0.073065`, rolling WAPE `8.741695`,
+    profiles `37800`, measured only.
+
+Notes:
+- An earlier attempt hit the shell timeout before commit; PostgreSQL sequence
+  values may therefore show a skipped selection run id.
+- No email addresses, credentials, tokens, cookie values, or raw measurement
+  rows were printed.
+
+### 2026-07-08 - Added measured-only vodomery Model 5
+
+Scope:
+- Added a new long-window vodomery prediction candidate after the first live
+  step-6 rebuild showed Model 3 still performing best.
+
+Changed:
+- Added `Model 5 - long recency weighted blend` with model version `5`, key
+  `recency_weighted_long_blend`, a 12-month training window, and a 90-day
+  recency half-life.
+- Model 5 reuses the Model 3 recency-weighted blend SQL with configurable
+  half-life and is included in full weekly rebuild metrics and rolling
+  backtests.
+- Model 5 is `selection_enabled=False`; runtime scoring candidates remain
+  models `1`, `2`, and `3`.
+
+Verified:
+- Targeted verification is recorded in the final response for the session
+  that added the candidate.
+
+Not verified:
+- No live weekly rebuild or email was run for Model 5 yet.
+
+Follow-up:
+- Continue step 7 by reviewing weekly rebuild results for measured-only
+  candidates before enabling any new automatic selection path.
+
+### 2026-07-09 - Manual vodomery model rebuild with Model 5
+
+Scope:
+- Ran a live vodomery prediction profile rebuild with measured-only Model 5
+  included and sent the vodomery model rebuild email report.
+
+Executed:
+- `.venv-production\Scripts\python.exe` called
+  `moduly.mereni.vodomery.vodomery_prediction.rebuild_profiles()`.
+- The resulting payload was passed to
+  `send_vodomery_model_rebuild_report(result)`.
+
+Result:
+- New `selection_run_id`: `28`.
+- Active model remained `Model 3 - recency weighted blend` (`model_version=3`).
+- Previous active model was also `Model 3 - recency weighted blend`.
+- The rebuild evaluated 5 candidates; Models 4 and 5 stayed
+  `selection_enabled=False` and were not selected.
+- Email report returned `recipient_count=1`.
+- Candidate summary:
+  - Model 1: coverage `1.0`, MAE `0.10238`, rolling WAPE `11.750575`,
+    profiles `37800`.
+  - Model 2: coverage `1.0`, MAE `0.10228`, rolling WAPE `11.608925`,
+    profiles `37800`.
+  - Model 3: coverage `1.0`, MAE `0.032789`, rolling WAPE `4.30433`,
+    profiles `37800`, selected.
+  - Model 4: coverage `1.0`, MAE `0.072911`, rolling WAPE `8.618235`,
+    profiles `37800`, measured only.
+  - Model 5: coverage `1.0`, MAE `0.289074`, rolling WAPE `27.021159`,
+    profiles `37800`, measured only.
+
+Notes:
+- Two initial process-launch attempts failed before importing the application
+  code, so they did not rebuild profiles or send email.
+- No email addresses, credentials, tokens, cookie values, or raw measurement
+  rows were printed.
+
+### 2026-07-09 - Shared prediction core step 7
+
+Scope:
+- Completed step 7 of the shared prediction core plan.
+- Added per-identifier rolling backtest metrics for vodomery candidate models
+  as preparation for future per-identifier model selection.
+
+Changed:
+- Added `monitoring.vodomery_model_selection_device_candidates` ORM/storage
+  for candidate model metrics by `identifikace`.
+- Full vodomery weekly rebuild now computes rolling metrics both globally and
+  per odběrné místo for every candidate.
+- Each per-identifier candidate row records coverage, matched count, MAE,
+  RMSE, bias, WAPE, eligibility, and whether it was the best candidate for
+  that identifier in the backtest.
+- The vodomery model rebuild email now includes a compact per-odběrné místo
+  summary: winner counts by model and worst identifiers by best-model rolling
+  WAPE.
+- Per-identifier activation remains disabled; the global active model
+  selection path is unchanged.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile moduly\mereni\vodomery\vodomery_prediction.py
+  moduly\mereni\vodomery\database\models.py
+  moduly\mereni\vodomery\database\model_validation.py
+  moduly\mereni\vodomery\reporting\model_rebuild_report.py
+  tests\test_vodomery_prediction.py tests\test_vodomery_model_rebuild_report.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction.py
+  tests\test_vodomery_model_rebuild_report.py tests\test_prediction_contracts.py
+  tests\test_prediction_backtest.py tests\test_vodomery_prediction_adapter.py
+  -q --tb=short` reported `33 passed`.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_scheduler.py::test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  tests\test_vodomery_prediction.py tests\test_vodomery_model_rebuild_report.py
+  tests\test_prediction_contracts.py tests\test_prediction_backtest.py
+  tests\test_vodomery_prediction_adapter.py -q --tb=short` reported
+  `35 passed`.
+
+Not verified:
+- No live PostgreSQL weekly rebuild was run after this storage/report
+  extension. The next live rebuild will create the new per-identifier table if
+  needed and populate it.
+
+Decisions/notes:
+- Prediction rebuild runtime is not treated as a limiting factor because jobs
+  run outside working peak hours.
+- Vodomery remain the pipeline pilot before electricity prediction work.
+- Future electricity prediction cadence is monthly: calculate around the
+  middle of the calendar month for the entire following calendar month.
+
+Follow-up:
+- Continue step 8 by reviewing weekly rebuild results and per-identifier
+  winners before enabling any new automatic selection path.
+
+### 2026-07-09 - Manual vodomery model rebuild after step 7
+
+Scope:
+- Ran a live vodomery prediction profile rebuild after adding per-identifier
+  rolling backtest storage and report summaries.
+- Sent the vodomery model rebuild email report from the rebuild result.
+
+Executed:
+- `.venv-production\Scripts\python.exe` called
+  `moduly.mereni.vodomery.vodomery_prediction.rebuild_profiles()`.
+- The resulting payload was passed to
+  `send_vodomery_model_rebuild_report(result)`.
+
+Result:
+- New `selection_run_id`: `29`.
+- Active model remained `Model 3 - recency weighted blend` (`model_version=3`).
+- Previous active model was also `Model 3 - recency weighted blend`.
+- The rebuild evaluated 5 candidates; Models 4 and 5 stayed
+  `selection_enabled=False` and were not selected globally.
+- Email report returned `recipient_count=1`.
+- Per-identifier candidate rows returned in the rebuild payload: `290`
+  across `58` identifiers.
+- Best-model rows by identifier: `58`.
+- Per-identifier winner counts:
+  - Model 1: `2`.
+  - Model 2: `27`.
+  - Model 3: `5`.
+  - Model 4 measured-only: `7`.
+  - Model 5 measured-only: `17`.
+- Candidate summary:
+  - Model 1: coverage `1.0`, MAE `0.102371`, rolling WAPE `11.743962`,
+    profiles `37800`.
+  - Model 2: coverage `1.0`, MAE `0.102272`, rolling WAPE `11.602401`,
+    profiles `37800`.
+  - Model 3: coverage `1.0`, MAE `0.0328`, rolling WAPE `4.3017`,
+    profiles `37800`, selected.
+  - Model 4: coverage `1.0`, MAE `0.072908`, rolling WAPE `8.613523`,
+    profiles `37800`, measured only.
+  - Model 5: coverage `1.0`, MAE `0.289029`, rolling WAPE `27.005077`,
+    profiles `37800`, measured only.
+
+Notes:
+- One initial process-launch attempt failed before importing the application
+  code, so it did not rebuild profiles or send email.
+- No email addresses, credentials, tokens, cookie values, or raw measurement
+  rows were printed.
+
+### 2026-07-09 - Per-identifier prediction selection plan
+
+Scope:
+- Created the implementation plan for production per-identifier model selection
+  and multi-media prediction pipeline rollout.
+
+Changed:
+- Added `PREDICTION_PIPELINE_PLAN.md` with target architecture, forecast-period
+  rules, candidate plugin expectations, selection policy, storage/reporting
+  shape, and rollout sequence.
+- Added DEC-050 for per-identifier and horizon-aware prediction selection.
+- Revised the active shared prediction core checklist so steps 8-18 now cover
+  shared selection contracts, selected-model storage, vodomery dry-run
+  snapshots, reporting, feature-flagged scoring lookup, production enablement,
+  weekly/monthly horizon generalization, reusable pipeline runner, and later
+  `plynomery`/`elektromery` integration.
+- Updated `AGENTS.md` so future sessions know about
+  `PREDICTION_PIPELINE_PLAN.md`.
+
+Verified:
+- Documentation-only change; code tests were not run.
+
+Next step:
+- Start checklist step 8: shared forecast-period and per-identifier selection
+  contracts with tests, without changing production scoring behavior.
+
+### 2026-07-09 - Shared prediction core step 8
+
+Scope:
+- Completed step 8 of the shared prediction core plan.
+- Added shared forecast-period and per-identifier selected-model decision
+  contracts without changing production scoring behavior.
+
+Changed:
+- Added `PredictionForecastCadence`, `PredictionForecastPeriodDefinition`,
+  and `PredictionForecastPeriod` to describe weekly, monthly, or custom
+  forecast horizons in the shared prediction core.
+- Added `PredictionSelectionFallbackReason` and
+  `PredictionSelectedModelDecision` to represent the selected model for one
+  medium, identifier, and forecast period, including global-model fallback
+  reasons and selected metrics.
+- Exported the new contracts from `moduly.mereni.prediction`.
+- Added unit tests for cadence serialization, period validation,
+  selected-model serialization, global fallback behavior, and invalid fallback
+  decisions.
+- Marked checklist step 8 complete.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\mereni\prediction\contracts.py
+  moduly\mereni\prediction\__init__.py tests\test_prediction_contracts.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_prediction_contracts.py
+  tests\test_prediction_backtest.py tests\test_vodomery_prediction_adapter.py
+  -q --tb=short` reported `21 passed`.
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction.py
+  tests\test_vodomery_model_rebuild_report.py tests\test_prediction_contracts.py
+  tests\test_prediction_backtest.py tests\test_vodomery_prediction_adapter.py
+  -q --tb=short` reported `39 passed`.
+
+Not changed:
+- No production scoring, scheduler, database storage, or report behavior was
+  changed in this step.
+
+Follow-up:
+- Continue with step 9: add generic selected-model snapshot storage/bootstrap
+  by medium, identifier, and forecast period.
+
+### 2026-07-09 - Shared prediction core step 9
+
+Scope:
+- Completed step 9 of the shared prediction core plan.
+- Added generic selected-model snapshot storage/bootstrap for future
+  per-identifier model selection.
+
+Changed:
+- Added `moduly/mereni/prediction/storage.py` with
+  `monitoring.prediction_selected_model_snapshots` ORM metadata, bootstrap,
+  immutable insert helper, lookup statement, load helper, and row/contract
+  serializers.
+- Snapshot identity is medium, identifier, forecast-period start/end, cadence,
+  and selection mode. This supports separate `dry_run` and `active` snapshots.
+- Inserts use PostgreSQL `ON CONFLICT DO NOTHING` against the snapshot identity,
+  so an existing historical snapshot is not overwritten.
+- Snapshot rows keep selected model, global fallback model, fallback reason,
+  metrics, metadata JSON, selection run id, selection mode, and created-at
+  audit timestamp.
+- Exported storage helpers from `moduly.mereni.prediction`.
+- Added `tests/test_prediction_storage.py`.
+- Updated `AGENTS.md` project map with the new shared storage module.
+- Marked checklist step 9 complete.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\mereni\prediction\contracts.py
+  moduly\mereni\prediction\storage.py moduly\mereni\prediction\__init__.py
+  tests\test_prediction_contracts.py tests\test_prediction_storage.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_prediction_contracts.py
+  tests\test_prediction_storage.py tests\test_prediction_backtest.py
+  tests\test_vodomery_prediction_adapter.py -q --tb=short` reported
+  `32 passed`.
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction.py
+  tests\test_vodomery_model_rebuild_report.py tests\test_prediction_contracts.py
+  tests\test_prediction_storage.py tests\test_prediction_backtest.py
+  tests\test_vodomery_prediction_adapter.py -q --tb=short` reported
+  `50 passed`.
+
+Not changed:
+- The generic snapshot table is not yet called from vodomery rebuild, scoring,
+  scheduler, or reporting. That is step 10.
+
+Follow-up:
+- Continue with step 10: wire vodomery weekly rebuild to persist
+  per-identifier selected-model snapshots for the next weekly period in
+  `dry_run` mode while scoring still uses the current global active model.
+
+### 2026-07-09 - Shared prediction core step 10
+
+Scope:
+- Completed step 10 of the shared prediction core plan.
+- Wired vodomery weekly rebuild to persist per-identifier selected-model
+  snapshots for the next weekly forecast period in `dry_run` mode.
+
+Changed:
+- `rebuild_profiles()` now ensures the generic selected-model snapshot table
+  during full vodomery rebuilds.
+- Full vodomery rebuild creates a weekly forecast period from rebuild time to
+  rebuild time plus seven days.
+- Per-identifier dry-run decisions select the best selection-enabled candidate
+  by rolling WAPE when coverage is above the configured threshold.
+- When no safe eligible candidate exists, the dry-run decision falls back to
+  the global selected model and records a fallback reason.
+- Full rebuild persists dry-run selected-model decisions through
+  `persist_selected_model_decisions`.
+- Rebuild result payload now includes `forecast_period`,
+  `selected_model_snapshot_mode`, and `selected_model_snapshot_count`.
+- Added tests for weekly forecast-period construction, dry-run eligible-model
+  selection, coverage fallback, and full rebuild snapshot persistence.
+- Marked checklist step 10 complete.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\mereni\vodomery\vodomery_prediction.py
+  moduly\mereni\prediction\storage.py moduly\mereni\prediction\contracts.py
+  moduly\mereni\prediction\__init__.py tests\test_vodomery_prediction.py
+  tests\test_prediction_storage.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction.py
+  tests\test_prediction_storage.py tests\test_prediction_contracts.py
+  tests\test_prediction_backtest.py tests\test_vodomery_prediction_adapter.py
+  -q --tb=short` reported `53 passed`.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_scheduler.py::test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  tests\test_vodomery_prediction.py tests\test_vodomery_model_rebuild_report.py
+  tests\test_prediction_contracts.py tests\test_prediction_storage.py
+  tests\test_prediction_backtest.py tests\test_vodomery_prediction_adapter.py
+  -q --tb=short` reported `56 passed`.
+
+Not changed:
+- Vodomery scoring still uses the current global active model. No runtime path
+  reads `active` per-identifier snapshots yet.
+- The rebuild report does not yet compare selected-vs-global snapshot results;
+  that is step 11.
+
+Follow-up:
+- Continue with step 11: extend the vodomery rebuild report with
+  selected-vs-global model comparison, fallback counts, measured-only
+  would-win counts, and worst identifiers by selected eligible rolling WAPE.
+
+### 2026-07-09 - Shared prediction core step 11
+
+Scope:
+- Completed step 11 of the shared prediction core plan.
+- Extended the vodomery weekly rebuild email report with dry-run
+  per-identifier selected-model diagnostics.
+
+Changed:
+- `rebuild_profiles()` now includes serialized `selected_model_snapshots` in
+  the rebuild result payload so the report can compare dry-run decisions
+  without querying the database again.
+- `send_vodomery_model_rebuild_report()` now returns
+  `selected_model_snapshot_count` together with candidate/device counts.
+- The vodomery model rebuild email now includes a
+  `Dry-run per-odberne misto selection` section with selected-vs-global counts,
+  fallback reason counts, measured-only would-win counts, selected-model
+  counts, forecast-period metadata, and worst selected eligible identifiers by
+  rolling WAPE.
+- Added report test coverage for the new dry-run selection section and rebuild
+  test coverage for the serialized snapshot payload.
+- Marked checklist step 11 complete.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\mereni\vodomery\reporting\model_rebuild_report.py
+  moduly\mereni\vodomery\vodomery_prediction.py
+  tests\test_vodomery_model_rebuild_report.py tests\test_vodomery_prediction.py`
+  passed.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_vodomery_model_rebuild_report.py tests\test_vodomery_prediction.py
+  tests\test_prediction_storage.py tests\test_prediction_contracts.py
+  tests\test_prediction_backtest.py tests\test_vodomery_prediction_adapter.py
+  -q --tb=short` reported `54 passed`.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_scheduler.py::test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  tests\test_vodomery_prediction.py tests\test_vodomery_model_rebuild_report.py
+  tests\test_prediction_contracts.py tests\test_prediction_storage.py
+  tests\test_prediction_backtest.py tests\test_vodomery_prediction_adapter.py
+  -q --tb=short` reported `56 passed`.
+
+Not changed:
+- Vodomery scoring still uses the current global active model. No runtime path
+  reads `active` per-identifier snapshots yet.
+- A live weekly rebuild/email was not run during this implementation step.
+
+Follow-up:
+- Continue with step 12: add vodomery scoring/profile lookup support for
+  per-identifier selection behind an explicit feature flag or configuration
+  switch, default disabled.
+
+### 2026-07-09 - Manual vodomery model rebuild after step 11
+
+Scope:
+- Ran a live vodomery prediction profile rebuild after adding the dry-run
+  per-identifier selection report section.
+- Sent the vodomery model rebuild email report.
+
+Executed:
+- `.venv-production\Scripts\python.exe` called
+  `moduly.mereni.vodomery.vodomery_prediction.rebuild_profiles()`.
+- The resulting payload was passed to
+  `send_vodomery_model_rebuild_report(result)`.
+
+Result:
+- New `selection_run_id`: `30`.
+- Active model remained `Model 3 - recency weighted blend` (`model_version=3`).
+- Previous active model was also `Model 3 - recency weighted blend`.
+- Forecast period in the dry-run selection payload:
+  `2026-07-09 11:35 - 2026-07-16 11:35`.
+- The rebuild evaluated 5 candidates and 290 per-identifier candidate rows.
+- Dry-run selected-model snapshots persisted: `58`.
+- Selected-vs-global dry-run summary:
+  - same as global model: `15`;
+  - different from global model: `43`;
+  - fallback to global model: `5`.
+- Selected dry-run model counts:
+  - Model 1: `1`;
+  - Model 2: `42`;
+  - Model 3: `15`.
+- Fallback reason counts:
+  - `no_identifier_metrics`: `5`.
+- Measured-only would-win counts:
+  - Model 4: `7`;
+  - Model 5: `17`.
+- Email report returned `recipient_count=1`,
+  `candidate_count=5`, `device_candidate_count=290`, and
+  `selected_model_snapshot_count=58`.
+- Candidate summary:
+  - Model 1: coverage `1.0`, MAE `0.102386`, rolling WAPE `11.752645`,
+    profiles `37800`.
+  - Model 2: coverage `1.0`, MAE `0.102286`, rolling WAPE `11.611093`,
+    profiles `37800`, selected devices `58`.
+  - Model 3: coverage `1.0`, MAE `0.032874`, rolling WAPE `4.299733`,
+    profiles `37800`, selected.
+  - Model 4: coverage `1.0`, MAE `0.072918`, rolling WAPE `8.618299`,
+    profiles `37800`, measured only.
+  - Model 5: coverage `1.0`, MAE `0.289025`, rolling WAPE `27.024664`,
+    profiles `37800`, measured only.
+
+Notes:
+- Two initial process-launch attempts failed because of shell quoting before
+  importing application code. They did not rebuild profiles or send email.
+- No email addresses, credentials, tokens, cookie values, or raw measurement
+  rows were printed.
+
+### 2026-07-09 - Vodomery model rebuild email body clarification
+
+Scope:
+- Improved the vodomery model rebuild email body after reviewing the delivered
+  step-11 test email.
+
+Changed:
+- Full `rebuild_profiles()` results now include `rebuild_duration_seconds` so
+  the report can show how long model recalculation took.
+- The top report summary now includes `Rebuild duration` near `Selection run`.
+- The main `Model` table now has an inline explanation for every column and
+  key term, including eligibility, measured-only candidates, rolling metrics,
+  WAPE, and `Selected devices`.
+- The per-identifier rolling backtest summary table now includes an
+  `Odberna mista` column listing identifiers for each best model.
+- The per-identifier detail table now lists all available best-model rows
+  instead of only the capped worst rows.
+- Added inline explanations below the per-identifier tables.
+- Renamed and explained the dry-run selection section so it is clear that it
+  is a stored proposal for the next forecast period and does not yet affect
+  production scoring.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\mereni\vodomery\reporting\model_rebuild_report.py
+  moduly\mereni\vodomery\vodomery_prediction.py
+  tests\test_vodomery_model_rebuild_report.py tests\test_vodomery_prediction.py`
+  passed.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_vodomery_model_rebuild_report.py tests\test_vodomery_prediction.py
+  -q --tb=short` reported `22 passed`.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  tests\test_vodomery_model_rebuild_report.py tests\test_vodomery_prediction.py
+  tests\test_prediction_contracts.py tests\test_prediction_storage.py
+  tests\test_prediction_backtest.py tests\test_vodomery_prediction_adapter.py
+  -q --tb=short` reported `55 passed`.
+
+Not run:
+- A new live rebuild/email was not sent after this email-body clarification.
+
+### 2026-07-09 - Manual vodomery model rebuild after email body clarification
+
+Scope:
+- Ran a live vodomery prediction profile rebuild after clarifying the email
+  body and sent the vodomery model rebuild email report.
+
+Executed:
+- `.venv-production\Scripts\python.exe` called
+  `moduly.mereni.vodomery.vodomery_prediction.rebuild_profiles()`.
+- The resulting payload was passed to
+  `send_vodomery_model_rebuild_report(result)`.
+- Only the model rebuild report path was run; the full `weekly_job` was not
+  run to avoid sending unrelated weekly reports.
+
+Result:
+- New `selection_run_id`: `31`.
+- Active model remained `Model 3 - recency weighted blend` (`model_version=3`).
+- Previous active model was also `Model 3 - recency weighted blend`.
+- Forecast period in the dry-run selection payload:
+  `2026-07-09 12:19 - 2026-07-16 12:19`.
+- Rebuild duration reported by the payload: `713.794` seconds.
+- The rebuild evaluated 5 candidates and 290 per-identifier candidate rows.
+- Dry-run selected-model snapshots persisted: `58`.
+- Selected-vs-global dry-run summary:
+  - same as global model: `16`;
+  - different from global model: `42`;
+  - fallback to global model: `4`.
+- Selected dry-run model counts:
+  - Model 2: `42`;
+  - Model 3: `16`.
+- Fallback reason counts:
+  - `no_identifier_metrics`: `4`.
+- Measured-only would-win counts:
+  - Model 4: `7`;
+  - Model 5: `17`.
+- Email report returned `recipient_count=1`,
+  `candidate_count=5`, `device_candidate_count=290`, and
+  `selected_model_snapshot_count=58`.
+- Candidate summary:
+  - Model 1: coverage `1.0`, MAE `0.102392`, rolling WAPE `11.753918`,
+    profiles `37800`.
+  - Model 2: coverage `1.0`, MAE `0.102291`, rolling WAPE `11.612363`,
+    profiles `37800`, selected devices `58`.
+  - Model 3: coverage `1.0`, MAE `0.032879`, rolling WAPE `4.299627`,
+    profiles `37800`, selected.
+  - Model 4: coverage `1.0`, MAE `0.07292`, rolling WAPE `8.619108`,
+    profiles `37800`, measured only.
+  - Model 5: coverage `1.0`, MAE `0.289041`, rolling WAPE `27.027522`,
+    profiles `37800`, measured only.
+
+Notes:
+- One first attempt failed before importing application code because
+  multiline Python code was passed incorrectly to `python -c`. It did not
+  rebuild profiles or send email.
+- The successful background run wrote only PowerShell progress CLIXML to
+  stderr (`Preparing modules for first use`), not an application error.
+- No email addresses, credentials, tokens, cookie values, or raw measurement
+  rows were printed.
+
+### 2026-07-09 - Shared prediction core step 12
+
+Scope:
+- Completed step 12 of the shared prediction core plan.
+- Added vodomery scoring/profile lookup support for per-identifier selected
+  model snapshots, with production behavior still disabled by default.
+
+Changed:
+- `score_new_measurements()` can now optionally resolve the source anomaly
+  profile from `monitoring.prediction_selected_model_snapshots` for the
+  measurement forecast period.
+- The optional lookup is controlled by
+  `VODOMERY_PER_IDENTIFIER_MODEL_SELECTION_ENABLED`; the default is disabled.
+- When enabled, selected per-identifier profile versions affect only expected
+  profile values. Inserted anomaly scores still keep the scoring
+  `model_version` argument so the current active-model event and alerting
+  contract remains intact.
+- Missing selected profiles fall back to the global model profile for the same
+  measurement slot.
+- Added anomaly-scoring tests for default-off behavior and explicit
+  per-identifier profile lookup.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\mereni\vodomery\vodomery_anomaly.py tests\test_anomaly_scoring.py`
+  passed.
+- `.venv\Scripts\python.exe -m pytest tests\test_anomaly_scoring.py -q
+  --tb=short` reported `4 passed`.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_scheduler.py::test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  tests\test_anomaly_scoring.py tests\test_vodomery_prediction.py
+  tests\test_vodomery_model_rebuild_report.py tests\test_prediction_contracts.py
+  tests\test_prediction_storage.py tests\test_prediction_backtest.py
+  tests\test_vodomery_prediction_adapter.py -q --tb=short` reported
+  `60 passed`.
+
+Not verified:
+- No live scoring run or weekly rebuild/email was run for step 12.
+- Production per-identifier selection remains disabled until checklist step 13.
+
+Follow-up:
+- Continue with step 13: enable vodomery per-identifier model selection in
+  production after a reviewed dry-run rebuild, keeping the global active model
+  as fallback.
+
+### 2026-07-09 - Shared prediction core step 13
+
+Scope:
+- Completed step 13 of the shared prediction core plan.
+- Enabled vodomery per-identifier model selection for production scoring while
+  keeping the global active model as fallback.
+
+Changed:
+- Weekly vodomery rebuild now persists selected-model snapshots in `active`
+  mode for the next weekly forecast period.
+- Per-identifier decision metadata now records `selection_mode=active`.
+- `quarter_hour_job`, manual vodomery scoring, and manual vodomery alerting now
+  pass `use_per_identifier_selection=True` only when scoring the global active
+  vodomery model.
+- Non-active vodomery candidate scoring still uses each candidate model's own
+  profiles so comparison data remains available.
+- The vodomery model rebuild email now explains active per-identifier
+  selection and describes the global active model as score-version/fallback,
+  not as the only production source profile.
+- Added scheduler tests for the active-model-only per-identifier scoring path
+  and manual scheduler steps.
+- Added DEC-050 clarification and AGENTS context for the new vodomery scoring
+  contract.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\mereni\vodomery\vodomery_prediction.py
+  moduly\mereni\vodomery\vodomery_anomaly.py
+  moduly\mereni\vodomery\reporting\model_rebuild_report.py
+  core\scheduler\scheduler.py tests\test_vodomery_prediction.py
+  tests\test_vodomery_model_rebuild_report.py tests\test_scheduler.py`
+  passed.
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction.py
+  tests\test_vodomery_model_rebuild_report.py tests\test_anomaly_scoring.py
+  tests\test_scheduler.py::test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  -q --tb=short` reported `28 passed`.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_scheduler.py::test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only
+  tests\test_scheduler.py::test_vodomery_manual_scoring_step_uses_per_identifier_selection_for_active_model
+  tests\test_scheduler.py::test_vodomery_manual_alerting_step_uses_per_identifier_selection
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  -q --tb=short` reported `4 passed`.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_scheduler.py::test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only
+  tests\test_scheduler.py::test_vodomery_manual_scoring_step_uses_per_identifier_selection_for_active_model
+  tests\test_scheduler.py::test_vodomery_manual_alerting_step_uses_per_identifier_selection
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  tests\test_anomaly_scoring.py tests\test_vodomery_prediction.py
+  tests\test_vodomery_model_rebuild_report.py tests\test_prediction_contracts.py
+  tests\test_prediction_storage.py tests\test_prediction_backtest.py
+  tests\test_vodomery_prediction_adapter.py -q --tb=short` reported
+  `62 passed`.
+
+Not verified:
+- No live weekly rebuild/email or live scoring run was performed for step 13.
+- The currently running scheduler process will not use the new code until the
+  normal runtime reload/restart path loads this working tree.
+
+Follow-up:
+- Run a weekly vodomery rebuild with email to persist `active` snapshots for
+  the next forecast period and review the delivered report before relying on
+  the next scheduled scoring cycle.
+- Continue with step 14: generalize forecast-period and rolling-backtest
+  handling for both weekly and monthly periods.
+
+### 2026-07-09 15:51 +02:00 - Pre-restart handoff for active vodomery per-identifier scoring
+
+Reason for restart:
+- Load the step 13 vodomery prediction changes into the production runtime
+  process set through the supported full-workstation restart path.
+- After restart, manually run the targeted vodomery model rebuild/report path
+  with the new active per-identifier selection setting so the next forecast
+  period has `active` selected-model snapshots.
+- Do not run the full scheduler `weekly_job` unless the operator explicitly
+  wants all weekly side effects and emails; the intended post-restart action is
+  the vodomery rebuild plus vodomery model rebuild email.
+
+Current task/conversation state:
+- Completed: shared prediction core steps 1 through 13.
+- Completed: step 13 makes weekly vodomery rebuild persist selected-model
+  snapshots in `active` mode, and scheduler scoring uses per-identifier
+  selection only when scoring the global active vodomery model.
+- Completed: non-active candidate models still score against their own
+  profiles, so ongoing model comparison/backtest data remains available.
+- Completed: the vodomery model rebuild email text now describes the global
+  active model as score-version/fallback and describes active per-identifier
+  selection as the production source-profile choice.
+- Verified before this handoff: py_compile passed for changed prediction,
+  reporting, scheduler, and test modules; targeted pytest reported `28 passed`,
+  focused scheduler pytest reported `4 passed`, and the broader prediction
+  selection suite reported `62 passed`.
+- Pending: workstation restart, post-restart runtime health verification,
+  manual vodomery rebuild/report email, verification that the report arrived,
+  and then continuation with shared prediction core step 14.
+- First action after restart: verify health/listeners/scheduler state, then run
+  the targeted vodomery rebuild/report command from the repository root.
+
+Working tree and deployment:
+- `git status --short --untracked-files=all` at handoff time:
+
+```text
+ M AGENTS.md
+ M DECISIONS.md
+ M SESSION_NOTES.md
+ M core/scheduler/scheduler.py
+ M moduly/mereni/vodomery/database/model_validation.py
+ M moduly/mereni/vodomery/database/models.py
+ M moduly/mereni/vodomery/reporting/model_rebuild_report.py
+ M moduly/mereni/vodomery/vodomery_anomaly.py
+ M moduly/mereni/vodomery/vodomery_prediction.py
+ M tests/test_anomaly_scoring.py
+ M tests/test_scheduler.py
+ M tests/test_vodomery_prediction.py
+?? PREDICTION_PIPELINE_PLAN.md
+?? moduly/mereni/prediction/__init__.py
+?? moduly/mereni/prediction/backtest.py
+?? moduly/mereni/prediction/contracts.py
+?? moduly/mereni/prediction/storage.py
+?? moduly/mereni/vodomery/prediction_adapter.py
+?? tests/test_prediction_backtest.py
+?? tests/test_prediction_contracts.py
+?? tests/test_prediction_storage.py
+?? tests/test_vodomery_model_rebuild_report.py
+?? tests/test_vodomery_prediction_adapter.py
+```
+
+- Relevant changed files:
+  - Prediction docs and durable context: `PREDICTION_PIPELINE_PLAN.md`,
+    `AGENTS.md`, `DECISIONS.md`, `SESSION_NOTES.md`.
+  - Shared prediction package: `moduly/mereni/prediction/__init__.py`,
+    `backtest.py`, `contracts.py`, `storage.py`.
+  - Vodomery adapter, rebuild, scoring, report, and validation:
+    `moduly/mereni/vodomery/prediction_adapter.py`,
+    `moduly/mereni/vodomery/vodomery_prediction.py`,
+    `moduly/mereni/vodomery/vodomery_anomaly.py`,
+    `moduly/mereni/vodomery/reporting/model_rebuild_report.py`,
+    `moduly/mereni/vodomery/database/models.py`,
+    `moduly/mereni/vodomery/database/model_validation.py`.
+  - Scheduler integration: `core/scheduler/scheduler.py`.
+  - Tests: prediction contracts/storage/backtest/adapter, vodomery prediction,
+    rebuild report, anomaly scoring, and scheduler tests.
+- Runtime-deployed state before restart:
+  - Current time captured before restart: `2026-07-09 15:51 +02:00`.
+  - Windows last boot time observed locally: `2026-07-08 09:04:09`.
+  - Startup task `API_dashboard_caddy` was `Ready`; last run
+    `2026-07-08 09:04:18`, result `0`.
+  - Local health checks returned HTTP 200 for FastAPI live, FastAPI ready,
+    Streamlit health, and Caddy admin config.
+  - Listening ports observed: Caddy on `::80`, `::443`, and
+    `127.0.0.1:2019`; FastAPI on `127.0.0.1:8000`; Streamlit on
+    `127.0.0.1:8001`; Tailscale-owned interface-specific `443`; no observed
+    `8010` or `8011` listeners.
+  - The running scheduler/API/dashboard processes may still be old process
+    state and have not loaded the step 13 working-tree code until restart.
+  - No live step 13 rebuild/email or live scoring run has been performed yet.
+  - Root tracked `Caddyfile` is not shown as changed in the handoff git status.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, or commit `.env` values, ProgramData
+  credential files, bearer tokens, cookies, SmartFuelPass session artifacts,
+  raw measurement rows, raw device photo paths/files, or account/session data.
+- Do not read or restore retired SmartFuelPass JSON cookie/session files.
+- Post-restart rebuild/report output may include aggregate model metrics and
+  run identifiers, but avoid printing raw per-measurement data.
+
+Expected processes after restart:
+- FastAPI/Uvicorn: one production runtime on `127.0.0.1:8000`.
+- Streamlit: one production runtime on `127.0.0.1:8001`.
+- Scheduler: one `main.py` runtime holding the `scheduler_process` lock.
+- Caddy: one runtime owning TCP `80`, TCP `443`, and `127.0.0.1:2019`.
+- No temporary `8010` or `8011` listeners unless explicitly started for a
+  separate manual check.
+
+Expected application state:
+- FastAPI `/health/live`: HTTP 200.
+- FastAPI `/health/ready`: HTTP 200 after dashboard table initialization.
+- Streamlit `/_stcore/health`: HTTP 200.
+- Caddy admin `http://127.0.0.1:2019/config/`: HTTP 200.
+- Public HTTP dashboard origin redirects to HTTPS with HTTP 308.
+- Public HTTPS dashboard returns HTTP 200 for the Streamlit shell.
+- Public `/api/v1/auth/users-exist` returns HTTP 200.
+- Public `/api/v1/auth/me` without bearer token returns HTTP 401 JSON.
+- Public `/api/v1/map/images` without a valid dashboard image cookie returns
+  HTTP 401.
+- Public `/docs`, `/redoc`, and `/openapi.json` return HTTP 404 at Caddy.
+- Scheduler metrics show a post-boot heartbeat and expected scheduled jobs.
+- Change-specific expectation: `rebuild_profiles()` returns
+  `selected_model_snapshot_mode == "active"` and writes or confirms active
+  selected-model snapshots for the next weekly vodomery forecast period.
+
+Required post-restart checks:
+- From the repository root, run `git status --short --untracked-files=all` and
+  confirm the dirty worktree is the same expected implementation state.
+- Verify local runtime health with safe status-only probes for:
+  - `http://127.0.0.1:8000/health/live` -> 200.
+  - `http://127.0.0.1:8000/health/ready` -> 200.
+  - `http://127.0.0.1:8001/_stcore/health` -> 200.
+  - `http://127.0.0.1:2019/config/` -> 200.
+- Verify listener state for `80`, `443`, `2019`, `8000`, and `8001`, and
+  confirm there are no unexpected temporary listeners on `8010` or `8011`.
+- Verify Caddy/auth routing on `https://monitoring.armexholding.cz`:
+  - dashboard root -> 200;
+  - `/api/v1/auth/users-exist` -> 200;
+  - `/api/v1/auth/me` without bearer -> 401;
+  - `/api/v1/map/images?layer_id=healthcheck&device_id=healthcheck` without
+    cookie -> 401;
+  - `/docs`, `/redoc`, `/openapi.json` -> 404;
+  - `http://monitoring.armexholding.cz/` -> HTTPS redirect.
+- Verify scheduler state through existing safe scheduler metrics or the
+  `Health systemu` page: running state, recent heartbeat, and no stale lock.
+- Run the targeted vodomery rebuild/report command with the production
+  environment, not the full `weekly_job` unless explicitly requested:
+
+```powershell
+.venv-production\Scripts\python.exe -c "from moduly.mereni.vodomery.vodomery_prediction import rebuild_profiles; from moduly.mereni.vodomery.reporting import send_vodomery_model_rebuild_report; r=rebuild_profiles(); print('selection_run_id=', r.get('selection_run_id')); print('active_model_version=', r.get('active_model_version')); print('active_model_name=', r.get('active_model_name')); print('selected_model_snapshot_mode=', r.get('selected_model_snapshot_mode')); print('selected_model_snapshot_count=', r.get('selected_model_snapshot_count')); print('rebuild_duration_seconds=', r.get('rebuild_duration_seconds')); print(send_vodomery_model_rebuild_report(r))"
+```
+
+- Expected rebuild/report result:
+  - `selected_model_snapshot_mode` is `active`.
+  - `selected_model_snapshot_count` is positive for a new forecast period; it
+    may be `0` only if the same active snapshot period was already inserted and
+    immutability conflict handling skipped duplicates.
+  - `active_model_version` and `active_model_name` are reported from the actual
+    backtest result; do not assume Model 3 without checking the run output.
+  - Email delivery returns the configured recipient count and the recipient
+    confirms the report arrived.
+  - Delivered report contains the active-selection wording, including
+    `Aktivni vyber modelu pro dalsi obdobi`.
+- Optional aggregate database check after rebuild: count selected snapshots by
+  `selection_run_id` and `selection_mode` only; do not print raw identifiers or
+  raw measurement rows unless explicitly requested.
+- Re-run the targeted tests if the post-restart rebuild reveals any code or
+  report issue:
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests\test_scheduler.py::test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only tests\test_scheduler.py::test_vodomery_manual_scoring_step_uses_per_identifier_selection_for_active_model tests\test_scheduler.py::test_vodomery_manual_alerting_step_uses_per_identifier_selection tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report tests\test_anomaly_scoring.py tests\test_vodomery_prediction.py tests\test_vodomery_model_rebuild_report.py tests\test_prediction_contracts.py tests\test_prediction_storage.py tests\test_prediction_backtest.py tests\test_vodomery_prediction_adapter.py -q --tb=short
+```
+
+Known risks or accepted gaps:
+- The working tree is intentionally dirty with the active prediction pipeline
+  implementation; do not revert or clean these changes during restart recovery.
+- Restart must preserve uncommitted files and untracked new modules/tests.
+- The scheduler startup task launches child processes but does not supervise
+  later exits; if a process exits after startup, use the supported recovery
+  model rather than ad hoc process replacement unless explicitly approved.
+- The manual rebuild can take several minutes; recent comparable rebuilds took
+  roughly 12 minutes.
+- Active selected-model snapshots do not exist for step 13 until the manual
+  post-restart rebuild succeeds, unless another operator has already run it.
+- Direct public hostname checks may depend on workstation network/DNS path; if
+  a public check fails, compare with local Caddy checks before changing config.
+- The task account/elevation model remains the currently accepted operational
+  gap and should not be changed as part of this restart.
 
 ### 2026-06-25
 

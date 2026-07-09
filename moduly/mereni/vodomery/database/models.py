@@ -334,17 +334,66 @@ class VodomeryModelSelectionCandidate(Base):
         nullable=False,
     )
     model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
     model_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    training_window_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    validation_window_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    selection_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     validation_total_count: Mapped[int] = mapped_column(Integer, nullable=False)
     matched_validation_count: Mapped[int] = mapped_column(Integer, nullable=False)
     coverage: Mapped[float] = mapped_column(Float, nullable=False)
     mae: Mapped[float | None] = mapped_column(Float, nullable=True)
     rmse: Mapped[float | None] = mapped_column(Float, nullable=True)
     bias: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rolling_backtest_fold_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    rolling_validation_total_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rolling_matched_validation_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rolling_coverage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rolling_mae: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rolling_rmse: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rolling_bias: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rolling_wape: Mapped[float | None] = mapped_column(Float, nullable=True)
     profile_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     selected: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=text("now()"), nullable=False)
 
+
+
+class VodomeryModelSelectionDeviceCandidate(Base):
+    __tablename__ = "vodomery_model_selection_device_candidates"
+    __table_args__ = (
+        UniqueConstraint(
+            "selection_run_id",
+            "model_version",
+            "identifikace",
+            name="uq_model_selection_device_candidate_run_model_ident",
+        ),
+        Index("ix_model_selection_device_candidates_run", "selection_run_id"),
+        Index("ix_model_selection_device_candidates_ident", "identifikace"),
+        Index("ix_model_selection_device_candidates_best", "selection_run_id", "best_for_identifier"),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    selection_run_id: Mapped[int] = mapped_column(
+        ForeignKey("monitoring.vodomery_model_selection_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
+    model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    model_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    selection_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    rolling_backtest_fold_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    rolling_validation_total_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    rolling_matched_validation_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    rolling_coverage: Mapped[float] = mapped_column(Float, nullable=False, server_default=text("0"))
+    rolling_mae: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rolling_rmse: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rolling_bias: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rolling_wape: Mapped[float | None] = mapped_column(Float, nullable=True)
+    best_for_identifier: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=text("now()"), nullable=False)
 
 
 # areálové + SČVK vodoměry se stavem expected zero

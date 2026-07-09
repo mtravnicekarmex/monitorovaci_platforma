@@ -52,6 +52,7 @@ from moduly.mereni.vodomery.vodomery_prediction import (
     rebuild_profiles,
 )
 from moduly.mereni.vodomery.vodomery_anomaly import score_new_measurements
+from moduly.mereni.prediction import SELECTION_MODE_ACTIVE
 from moduly.mereni.vodomery.alerting import process_vodomery_alerts
 from moduly.mereni.vodomery.reporting import (
     send_daily_vodomery_branch_report,
@@ -1348,6 +1349,8 @@ def quarter_hour_job():
             score_new_measurements,
             model_version=model_version,
             bootstrap_to_latest_if_missing=True,
+            use_per_identifier_selection=model_version == active_model_version,
+            selection_mode=SELECTION_MODE_ACTIVE,
         )
         event_result = safe_call(
             detect_events_from_scores,
@@ -1503,10 +1506,13 @@ def monthly_b1_v1_consumption_report_job():
 
 
 def _run_vodomery_scoring_step() -> None:
+    active_model_version = get_runtime_model_version()
     for model_version in get_candidate_model_versions():
         score_new_measurements(
             model_version=model_version,
             bootstrap_to_latest_if_missing=True,
+            use_per_identifier_selection=model_version == active_model_version,
+            selection_mode=SELECTION_MODE_ACTIVE,
         )
 
 
@@ -1523,6 +1529,8 @@ def _run_vodomery_alerting_step() -> None:
     score_new_measurements(
         model_version=active_model_version,
         bootstrap_to_latest_if_missing=True,
+        use_per_identifier_selection=True,
+        selection_mode=SELECTION_MODE_ACTIVE,
     )
     event_result = detect_events_from_scores(
         model_version=active_model_version,

@@ -39,6 +39,9 @@ At the end of every substantive session:
 - `core/scheduler/metrics.py`: scheduler metrics persistence in `core/scheduler/logs/scheduler_metrics.json`.
 - `core/scheduler/database_availability_state.py`: local SQLite state and
   transition-event persistence for PostgreSQL/MSSQL availability.
+- `moduly/mereni/prediction/storage.py`: shared prediction selected-model
+  snapshot ORM/storage for per-medium, per-identifier, per-forecast-period
+  model selection.
 - `services/api/main.py`: FastAPI application entry point and router registration.
 - `services/api/core/config.py`: FastAPI runtime settings, including token and CORS configuration.
 - `services/api/core/tokens.py`: custom HMAC bearer token implementation.
@@ -75,6 +78,9 @@ At the end of every substantive session:
 - `Caddyfile`: tracked mirror of the deployed public proxy configuration at `C:\Program Files\Caddy\Caddyfile`.
 - `DASHBOARD_SECURITY_CHECKLIST.md`: tracked public dashboard security
   remediation plan and status.
+- `PREDICTION_PIPELINE_PLAN.md`: target architecture and rollout plan for the
+  shared prediction pipeline, candidate plugins, forecast horizons, and
+  per-identifier model selection.
 - `SECURITY_SECRET_INVENTORY.md`: non-secret inventory of production secret,
   credential, session, and sensitive runtime artifact locations.
 - `requirements-production.in`: reviewed direct production dependency pins.
@@ -160,10 +166,18 @@ Known hygiene topics to handle only after explicit approval:
 - Streamlit remains the active dashboard unless a task explicitly targets the experimental Next.js area.
 - Shared behavior should live in modules/services, not in duplicated page logic.
 - Prediction model work should proceed toward the shared core described in
-  `DECISIONS.md` and the active checklist in `SESSION_NOTES.md`: shared
-  contracts, media-specific adapters, candidate model plugins, and rolling
-  weekly backtests. Implement one checklist step at a time and mark it complete
-  only after targeted verification.
+  `DECISIONS.md`, `PREDICTION_PIPELINE_PLAN.md`, and the active checklist in
+  `SESSION_NOTES.md`: shared contracts, media-specific adapters, candidate
+  model plugins, configurable forecast periods, rolling backtests, and
+  per-identifier model selection. Implement one checklist step at a time and
+  mark it complete only after targeted verification.
+- Vodomery production scoring now reads `active` per-identifier selected-model
+  snapshots for the globally active model. The selected snapshot controls the
+  source profile per odběrné místo for the forecast period; inserted anomaly
+  scores still use the global active `model_version` so existing event and
+  alert flows remain compatible. Missing or unusable per-identifier selections
+  fall back to the global active model profile. Non-active candidate scoring
+  remains pure per-candidate scoring for comparison.
 - SmartFuelPass automation logs in with configured credentials for each portal
   run. Do not restore JSON cookie/session persistence or
   `SMARTFUELPASS_SESSION_COOKIES_PATH`.

@@ -1158,3 +1158,77 @@ Implications:
 - The active implementation checklist lives in `SESSION_NOTES.md`; do not
   skip ahead or mark a step done until implementation and targeted
   verification for that step are complete.
+
+Clarification (2026-07-08):
+
+- The target architecture should support both global model selection and future
+  per-identifier model selection. Per-identifier activation must remain
+  disabled until the shared backtest, storage, reporting, and operational
+  review steps explicitly support it.
+- After the first live rebuild with rolling metrics, vodomery also add a
+  measured-only `Model 5 - long recency weighted blend` candidate. It reuses
+  the Model 3 recency-weighted blend shape with a 12-month training window and
+  a 90-day half-life, and remains ineligible for automatic activation until
+  weekly results are reviewed.
+- Prediction rebuild runtime is secondary to prediction quality because these
+  jobs run outside operational peak hours. Vodomery are the pilot domain for
+  pipeline quality, including per-identifier backtest storage and reporting
+  before any per-identifier activation.
+- Future electricity prediction should use the same shared pipeline shape, but
+  its operational cadence is monthly: calculate predictions around the middle
+  of the calendar month for the entire following calendar month.
+
+## DEC-050: Prediction Selection Becomes Per-Identifier And Horizon-Aware
+
+Date: 2026-07-09
+
+Decision: The prediction pipeline will move from one global active model per
+medium toward per-identifier model selection for the next forecast period. The
+same shared pipeline must support new candidate models, parameter variants of
+existing models, media-specific adapters, and configurable forecast horizons.
+
+Rationale: The 2026-07-09 vodomery rebuild showed `Model 3 - recency weighted
+blend` as the best global model, while many individual identifiers performed
+better with another candidate. Electricity prediction will need the same
+selection discipline before production use, and its cadence is monthly rather
+than weekly.
+
+Implications:
+
+- The global active model remains an operational fallback and comparison
+  signal, but the target production scoring path is selected model per medium,
+  identifier, and forecast period.
+- Forecast-period semantics are part of the shared contract. Vodomery start
+  with weekly periods; elektromery will use monthly next-month periods
+  calculated around the middle of the current calendar month.
+- Candidate plugins must have stable metadata for model key, version, name,
+  parameters, training window, horizon compatibility, and selection
+  eligibility.
+- A parameter variant of an existing algorithm can be a separate candidate when
+  it produces materially different forecasts.
+- Per-identifier selection must be persisted as a snapshot for the upcoming
+  forecast period. Later rebuilds must not silently rewrite historical
+  selections for already evaluated periods.
+- Measured-only candidates may appear in reports and backtests, but must not
+  be used for production selection until a documented enablement step makes
+  them eligible.
+- Scoring must retain a safe fallback to the global active model when
+  per-identifier selection is missing, below coverage thresholds, or otherwise
+  not eligible.
+- The detailed rollout plan lives in `PREDICTION_PIPELINE_PLAN.md`; the
+  executable step checklist remains in `SESSION_NOTES.md`.
+
+Clarification (2026-07-09):
+
+- Vodomery production scoring is enabled to use `active` per-identifier
+  selected-model snapshots for the current forecast period when scoring the
+  global active model.
+- The selected per-identifier model controls only the source profile used for
+  expected values. Inserted anomaly scores still use the global active
+  `model_version`, preserving the existing event detection and alerting
+  contract.
+- If an `active` snapshot or selected source profile is missing, vodomery
+  scoring falls back to the global active model profile for that measurement
+  slot.
+- Non-active vodomery candidate scoring remains pure per-candidate scoring so
+  comparison and diagnostics stay available.

@@ -3,7 +3,7 @@ from __future__ import annotations
 import calendar
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import datetime
 from time import perf_counter
 from typing import Callable, Sequence
 
@@ -12,13 +12,20 @@ from sqlalchemy import bindparam, insert, text
 from app.time_utils import utc_now_naive
 from core.db.connect import get_session_pg
 from moduly.mereni.prediction import (
+    PredictionCandidateRegistry,
     PredictionForecastCadence,
     PredictionForecastPeriod,
+    PredictionForecastPeriodDefinition,
+    PredictionPipelineRunner,
+    PredictionPipelineSettings,
     PredictionCandidateSpec,
+    PredictionCandidateResult,
     PredictionMetricSummary,
     PredictionSelectedModelDecision,
     PredictionSelectionFallbackReason,
+    PredictionRebuildWindows,
     SELECTION_MODE_ACTIVE,
+    build_prediction_rebuild_windows,
     build_rolling_weekly_folds,
     ensure_prediction_selected_model_snapshot_table,
     persist_selected_model_decisions,
@@ -64,7 +71,22 @@ MODEL_V4_SLOT_WEIGHT_TARGET = 28.0
 MODEL_V5_TRAINING_WINDOW_MONTHS = 12
 MODEL_V5_RECENCY_HALF_LIFE_DAYS = 90.0
 VODOMERY_MEDIUM_KEY = "vodomery"
-VODOMERY_FORECAST_PERIOD_DAYS = 7
+VODOMERY_FORECAST_PERIOD_DEFINITION = PredictionForecastPeriodDefinition(
+    cadence=PredictionForecastCadence.WEEKLY,
+    period_count=1,
+)
+VODOMERY_PIPELINE_SETTINGS = PredictionPipelineSettings(
+    medium_key=VODOMERY_MEDIUM_KEY,
+    forecast_period_definition=VODOMERY_FORECAST_PERIOD_DEFINITION,
+    default_training_window_months=MODEL_SELECTION_TRAINING_MONTHS,
+    default_validation_window_months=MODEL_SELECTION_VALIDATION_MONTHS,
+    candidate_coverage_threshold=MODEL_SELECTION_COVERAGE_THRESHOLD,
+    rolling_backtest_fold_count=MODEL_ROLLING_BACKTEST_FOLD_COUNT,
+    rolling_validation_period=PredictionForecastPeriodDefinition(
+        cadence=PredictionForecastCadence.WEEKLY,
+        period_count=1,
+    ),
+)
 
 STRATEGY_DOW_SLOT_MEAN = "dow_slot_mean"
 STRATEGY_WORKDAY_SLOT_MEAN = "workday_slot_mean"
@@ -100,43 +122,6 @@ class CandidateModelDefinition:
             validation_window_months=self.validation_window_months,
             selection_enabled=self.selection_enabled,
         )
-
-
-CANDIDATE_MODELS: tuple[CandidateModelDefinition, ...] = (
-    CandidateModelDefinition(
-        model_version=MODEL_VERSION_BASELINE,
-        model_key="baseline_mad",
-        model_name="Model 1 - baseline MAD",
-    ),
-    CandidateModelDefinition(
-        model_version=MODEL_VERSION_LEARNING,
-        model_key="adaptive_strategy",
-        model_name="Model 2 - adaptive strategy",
-    ),
-    CandidateModelDefinition(
-        model_version=MODEL_VERSION_HIERARCHICAL,
-        model_key="recency_weighted_blend",
-        model_name="Model 3 - recency weighted blend",
-    ),
-    CandidateModelDefinition(
-        model_version=MODEL_VERSION_SEASONAL_YEARLY,
-        model_key="seasonal_yearly_blend",
-        model_name="Model 4 - seasonal yearly blend",
-        training_window_months=MODEL_V4_TRAINING_WINDOW_MONTHS,
-        selection_enabled=False,
-    ),
-    CandidateModelDefinition(
-        model_version=MODEL_VERSION_LONG_RECENCY,
-        model_key="recency_weighted_long_blend",
-        model_name="Model 5 - long recency weighted blend",
-        training_window_months=MODEL_V5_TRAINING_WINDOW_MONTHS,
-        selection_enabled=False,
-    ),
-)
-MODEL_NAME_BY_VERSION = {
-    definition.model_version: definition.model_name
-    for definition in CANDIDATE_MODELS
-}
 
 
 @dataclass(frozen=True)
@@ -247,6 +232,36 @@ class ModelPerformanceSummary:
     selected_device_count: int | None = None
     validation_candidate_count: int | None = None
 
+    def to_prediction_candidate_result(self) -> PredictionCandidateResult:
+        return PredictionCandidateResult(
+            spec=PredictionCandidateSpec(
+                medium_key=VODOMERY_MEDIUM_KEY,
+                model_version=self.model_version,
+                model_key=self.model_key or f"model_{self.model_version}",
+                model_name=self.model_name,
+                training_window_months=(
+                    self.training_window_months
+                    or VODOMERY_PIPELINE_SETTINGS.default_training_window_months
+                ),
+                validation_window_months=(
+                    self.validation_window_months
+                    or VODOMERY_PIPELINE_SETTINGS.default_validation_window_months
+                ),
+                selection_enabled=self.selection_enabled,
+            ),
+            metrics=PredictionMetricSummary(
+                validation_total_count=self.validation_total_count,
+                matched_validation_count=self.matched_validation_count,
+                coverage=self.coverage,
+                mae=self.mae,
+                rmse=self.rmse,
+                bias=self.bias,
+            ),
+            profile_count=self.profile_count,
+            selected_device_count=self.selected_device_count,
+            validation_candidate_count=self.validation_candidate_count,
+        )
+
     def to_dict(self, *, selected: bool) -> dict[str, object]:
         return {
             "model_version": self.model_version,
@@ -280,6 +295,7 @@ class ModelPerformanceSummary:
 class VodomeryCandidateModelPlugin:
     definition: CandidateModelDefinition
     rebuild_fn: Callable[..., ModelPerformanceSummary]
+    build_backtest_profiles_fn: Callable[..., None]
 
     @property
     def spec(self) -> PredictionCandidateSpec:
@@ -297,35 +313,95 @@ class VodomeryCandidateModelPlugin:
             windows=windows,
         )
 
+    def build_profiles_for_backtest(
+        self,
+        session,
+        *,
+        model_version: int,
+        windows: RebuildWindows,
+    ) -> None:
+        self.build_backtest_profiles_fn(
+            session,
+            definition=self.definition,
+            model_version=model_version,
+            windows=windows,
+        )
+
+
+def _build_vodomery_pipeline_runner() -> PredictionPipelineRunner[VodomeryCandidateModelPlugin]:
+    registry = PredictionCandidateRegistry(
+        medium_key=VODOMERY_MEDIUM_KEY,
+        plugins=(
+            VodomeryCandidateModelPlugin(
+                definition=CandidateModelDefinition(
+                    model_version=MODEL_VERSION_BASELINE,
+                    model_key="baseline_mad",
+                    model_name="Model 1 - baseline MAD",
+                ),
+                rebuild_fn=_rebuild_model_1_candidate,
+                build_backtest_profiles_fn=_build_model_1_profiles_for_backtest,
+            ),
+            VodomeryCandidateModelPlugin(
+                definition=CandidateModelDefinition(
+                    model_version=MODEL_VERSION_LEARNING,
+                    model_key="adaptive_strategy",
+                    model_name="Model 2 - adaptive strategy",
+                ),
+                rebuild_fn=_rebuild_model_2_candidate,
+                build_backtest_profiles_fn=_build_model_2_profiles_for_backtest,
+            ),
+            VodomeryCandidateModelPlugin(
+                definition=CandidateModelDefinition(
+                    model_version=MODEL_VERSION_HIERARCHICAL,
+                    model_key="recency_weighted_blend",
+                    model_name="Model 3 - recency weighted blend",
+                ),
+                rebuild_fn=_rebuild_model_3_candidate,
+                build_backtest_profiles_fn=_build_model_3_profiles_for_backtest,
+            ),
+            VodomeryCandidateModelPlugin(
+                definition=CandidateModelDefinition(
+                    model_version=MODEL_VERSION_SEASONAL_YEARLY,
+                    model_key="seasonal_yearly_blend",
+                    model_name="Model 4 - seasonal yearly blend",
+                    training_window_months=MODEL_V4_TRAINING_WINDOW_MONTHS,
+                    selection_enabled=False,
+                ),
+                rebuild_fn=_rebuild_model_4_candidate,
+                build_backtest_profiles_fn=_build_model_4_profiles_for_backtest,
+            ),
+            VodomeryCandidateModelPlugin(
+                definition=CandidateModelDefinition(
+                    model_version=MODEL_VERSION_LONG_RECENCY,
+                    model_key="recency_weighted_long_blend",
+                    model_name="Model 5 - long recency weighted blend",
+                    training_window_months=MODEL_V5_TRAINING_WINDOW_MONTHS,
+                    selection_enabled=False,
+                ),
+                rebuild_fn=_rebuild_model_5_candidate,
+                build_backtest_profiles_fn=_build_model_5_profiles_for_backtest,
+            ),
+        ),
+    )
+    return PredictionPipelineRunner(
+        settings=VODOMERY_PIPELINE_SETTINGS,
+        registry=registry,
+    )
+
 
 def get_candidate_model_plugins() -> tuple[VodomeryCandidateModelPlugin, ...]:
-    rebuild_functions = {
-        MODEL_VERSION_BASELINE: _rebuild_model_1_candidate,
-        MODEL_VERSION_LEARNING: _rebuild_model_2_candidate,
-        MODEL_VERSION_HIERARCHICAL: _rebuild_model_3_candidate,
-        MODEL_VERSION_SEASONAL_YEARLY: _rebuild_model_4_candidate,
-        MODEL_VERSION_LONG_RECENCY: _rebuild_model_5_candidate,
-    }
-    return tuple(
-        VodomeryCandidateModelPlugin(
-            definition=definition,
-            rebuild_fn=rebuild_functions[definition.model_version],
-        )
-        for definition in CANDIDATE_MODELS
-    )
+    return _build_vodomery_pipeline_runner().list_plugins()
 
 
 def get_candidate_model_definitions(
     *,
     include_measured_only: bool = True,
 ) -> tuple[CandidateModelDefinition, ...]:
-    definitions = tuple(plugin.definition for plugin in get_candidate_model_plugins())
-    if include_measured_only:
-        return definitions
     return tuple(
-        definition
-        for definition in definitions
-        if definition.selection_enabled
+        plugin.definition
+        for plugin in _build_vodomery_pipeline_runner().list_plugins(
+            include_non_selectable=include_measured_only,
+        )
     )
 
 
@@ -333,11 +409,8 @@ def get_candidate_model_specs(
     *,
     include_measured_only: bool = True,
 ) -> tuple[PredictionCandidateSpec, ...]:
-    return tuple(
-        definition.to_prediction_spec()
-        for definition in get_candidate_model_definitions(
-            include_measured_only=include_measured_only,
-        )
+    return _build_vodomery_pipeline_runner().list_specs(
+        include_non_selectable=include_measured_only,
     )
 
 
@@ -345,11 +418,8 @@ def get_candidate_model_versions(
     *,
     include_measured_only: bool = False,
 ) -> tuple[int, ...]:
-    return tuple(
-        definition.model_version
-        for definition in get_candidate_model_definitions(
-            include_measured_only=include_measured_only,
-        )
+    return _build_vodomery_pipeline_runner().list_model_versions(
+        include_non_selectable=include_measured_only,
     )
 
 
@@ -363,19 +433,25 @@ def build_rebuild_windows(
     training_window_months: int = MODEL_SELECTION_TRAINING_MONTHS,
     validation_window_months: int = MODEL_SELECTION_VALIDATION_MONTHS,
 ) -> RebuildWindows:
-    deploy_end = reference_time or utc_now_naive()
-    validation_end = deploy_end
-    validation_start = _subtract_months(validation_end, validation_window_months)
-    train_end = validation_start
-    train_start = _subtract_months(train_end, training_window_months)
-    deploy_start = train_start
+    return _to_vodomery_rebuild_windows(
+        build_prediction_rebuild_windows(
+            reference_time=reference_time or utc_now_naive(),
+            training_window_months=training_window_months,
+            validation_window_months=validation_window_months,
+        )
+    )
+
+
+def _to_vodomery_rebuild_windows(
+    windows: PredictionRebuildWindows,
+) -> RebuildWindows:
     return RebuildWindows(
-        train_start=train_start,
-        train_end=train_end,
-        validation_start=validation_start,
-        validation_end=validation_end,
-        deploy_start=deploy_start,
-        deploy_end=deploy_end,
+        train_start=windows.train.start,
+        train_end=windows.train.end,
+        validation_start=windows.validation.start,
+        validation_end=windows.validation.end,
+        deploy_start=windows.deploy.start,
+        deploy_end=windows.deploy.end,
     )
 
 
@@ -395,13 +471,8 @@ def build_model_2_rebuild_windows(
 def build_vodomery_weekly_forecast_period(
     reference_time: datetime | None = None,
 ) -> PredictionForecastPeriod:
-    start = reference_time or utc_now_naive()
-    end = start + timedelta(days=VODOMERY_FORECAST_PERIOD_DAYS)
-    return PredictionForecastPeriod(
-        start=start,
-        end=end,
-        cadence=PredictionForecastCadence.WEEKLY,
-        label=f"{start:%Y-%m-%d %H:%M} - {end:%Y-%m-%d %H:%M}",
+    return _build_vodomery_pipeline_runner().build_forecast_period(
+        reference_time=reference_time or utc_now_naive(),
     )
 
 
@@ -444,30 +515,17 @@ def select_best_model_summary(
     *,
     coverage_threshold: float = MODEL_SELECTION_COVERAGE_THRESHOLD,
 ) -> ModelPerformanceSummary | None:
-    eligible_summaries = [
-        summary
-        for summary in summaries
-        if summary.selection_enabled
-        and summary.validation_total_count > 0
-        and summary.matched_validation_count > 0
-        and summary.mae is not None
-        and summary.rmse is not None
-        and summary.bias is not None
-    ]
-    if not eligible_summaries:
-        return None
-
-    return min(
-        eligible_summaries,
-        key=lambda summary: (
-            0 if summary.coverage >= coverage_threshold else 1,
-            summary.mae,
-            summary.rmse,
-            abs(summary.bias),
-            -summary.matched_validation_count,
-            summary.model_version,
+    summary_by_version = {summary.model_version: summary for summary in summaries}
+    selected = _build_vodomery_pipeline_runner().select_best_candidate(
+        (
+            summary.to_prediction_candidate_result()
+            for summary in summary_by_version.values()
         ),
+        coverage_threshold=coverage_threshold,
     )
+    if selected is None:
+        return None
+    return summary_by_version[selected.spec.model_version]
 
 
 def rebuild_profiles(
@@ -570,10 +628,7 @@ def rebuild_profiles(
             "active_model_version": selected_summary.model_version,
             "active_model_name": selected_summary.model_name,
             "previous_active_model_version": previous_active_model_version,
-            "previous_active_model_name": MODEL_NAME_BY_VERSION.get(
-                previous_active_model_version,
-                f"Model {previous_active_model_version}",
-            ),
+            "previous_active_model_name": _get_model_name(previous_active_model_version),
             "windows": {
                 "train_start": windows.train_start,
                 "train_end": windows.train_end,
@@ -638,10 +693,11 @@ def _build_windows_for_definition(
     *,
     reference_time: datetime,
 ) -> RebuildWindows:
-    return build_rebuild_windows(
-        reference_time=reference_time,
-        training_window_months=definition.training_window_months,
-        validation_window_months=definition.validation_window_months,
+    return _to_vodomery_rebuild_windows(
+        _build_vodomery_pipeline_runner().build_rebuild_windows(
+            reference_time=reference_time,
+            spec=definition.to_prediction_spec(),
+        )
     )
 
 
@@ -657,14 +713,14 @@ def _get_candidate_model_definition(model_version: int) -> CandidateModelDefinit
 
 
 def _get_candidate_model_plugin(model_version: int) -> VodomeryCandidateModelPlugin | None:
-    return next(
-        (
-            plugin
-            for plugin in get_candidate_model_plugins()
-            if plugin.spec.model_version == model_version
-        ),
-        None,
-    )
+    return _build_vodomery_pipeline_runner().get_plugin(model_version)
+
+
+def _get_model_name(model_version: int) -> str:
+    plugin = _get_candidate_model_plugin(model_version)
+    if plugin is None:
+        return f"Model {model_version}"
+    return plugin.spec.model_name
 
 
 def _rebuild_candidate_model(
@@ -834,6 +890,90 @@ def _build_rolling_backtest_model_version(model_version: int, fold_index: int) -
     return MODEL_ROLLING_BACKTEST_VERSION_OFFSET + model_version * 100 + fold_index
 
 
+def _build_model_1_profiles_for_backtest(
+    session,
+    *,
+    definition: CandidateModelDefinition,
+    model_version: int,
+    windows: RebuildWindows,
+) -> None:
+    _build_v1_profiles(
+        session,
+        model_version=model_version,
+        data_start=windows.train_start,
+        data_end=windows.train_end,
+    )
+
+
+def _build_model_2_profiles_for_backtest(
+    session,
+    *,
+    definition: CandidateModelDefinition,
+    model_version: int,
+    windows: RebuildWindows,
+) -> None:
+    _, selected_by_ident = _select_model_2_strategies_for_windows(
+        session,
+        windows,
+    )
+    _replace_model_2_profiles(
+        session,
+        model_version=model_version,
+        data_start=windows.train_start,
+        data_end=windows.train_end,
+        selected_by_ident=selected_by_ident,
+    )
+
+
+def _build_model_3_profiles_for_backtest(
+    session,
+    *,
+    definition: CandidateModelDefinition,
+    model_version: int,
+    windows: RebuildWindows,
+) -> None:
+    _build_model_3_profiles(
+        session,
+        model_version=model_version,
+        data_start=windows.train_start,
+        data_end=windows.train_end,
+        reference_end=windows.validation_start,
+    )
+
+
+def _build_model_4_profiles_for_backtest(
+    session,
+    *,
+    definition: CandidateModelDefinition,
+    model_version: int,
+    windows: RebuildWindows,
+) -> None:
+    _build_model_4_profiles(
+        session,
+        model_version=model_version,
+        data_start=windows.train_start,
+        data_end=windows.train_end,
+        reference_end=windows.validation_start,
+    )
+
+
+def _build_model_5_profiles_for_backtest(
+    session,
+    *,
+    definition: CandidateModelDefinition,
+    model_version: int,
+    windows: RebuildWindows,
+) -> None:
+    _build_model_3_profiles(
+        session,
+        model_version=model_version,
+        data_start=windows.train_start,
+        data_end=windows.train_end,
+        reference_end=windows.validation_start,
+        half_life_days=MODEL_V5_RECENCY_HALF_LIFE_DAYS,
+    )
+
+
 def _build_candidate_profiles_for_backtest_fold(
     session,
     *,
@@ -841,57 +981,12 @@ def _build_candidate_profiles_for_backtest_fold(
     model_version: int,
     windows: RebuildWindows,
 ) -> None:
-    if definition.model_version == MODEL_VERSION_BASELINE:
-        _build_v1_profiles(
+    plugin = _get_candidate_model_plugin(definition.model_version)
+    if plugin is not None:
+        plugin.build_profiles_for_backtest(
             session,
             model_version=model_version,
-            data_start=windows.train_start,
-            data_end=windows.train_end,
-        )
-        return
-
-    if definition.model_version == MODEL_VERSION_LEARNING:
-        _, selected_by_ident = _select_model_2_strategies_for_windows(
-            session,
-            windows,
-        )
-        _replace_model_2_profiles(
-            session,
-            model_version=model_version,
-            data_start=windows.train_start,
-            data_end=windows.train_end,
-            selected_by_ident=selected_by_ident,
-        )
-        return
-
-    if definition.model_version == MODEL_VERSION_HIERARCHICAL:
-        _build_model_3_profiles(
-            session,
-            model_version=model_version,
-            data_start=windows.train_start,
-            data_end=windows.train_end,
-            reference_end=windows.validation_start,
-        )
-        return
-
-    if definition.model_version == MODEL_VERSION_SEASONAL_YEARLY:
-        _build_model_4_profiles(
-            session,
-            model_version=model_version,
-            data_start=windows.train_start,
-            data_end=windows.train_end,
-            reference_end=windows.validation_start,
-        )
-        return
-
-    if definition.model_version == MODEL_VERSION_LONG_RECENCY:
-        _build_model_3_profiles(
-            session,
-            model_version=model_version,
-            data_start=windows.train_start,
-            data_end=windows.train_end,
-            reference_end=windows.validation_start,
-            half_life_days=MODEL_V5_RECENCY_HALF_LIFE_DAYS,
+            windows=windows,
         )
         return
 

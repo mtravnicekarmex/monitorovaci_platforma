@@ -633,7 +633,7 @@ def _render_smartfuelpass_section(access_token: str) -> None:
     status_col, rows_col, import_col, failures_col = st.columns(4)
     status_col.metric("Celkovy stav", _status_label(status))
     rows_col.metric("Relace v DB", str(table.get("total_session_count") or 0))
-    import_col.metric("Posledni import", _format_timestamp(table.get("last_imported_at")))
+    import_col.metric("Posledni sync", _format_timestamp(sync_job.get("last_run")))
     failures_col.metric(
         "Chyby jobu 24h",
         str((sync_job.get("failure_count_24h") or 0) + (weekly_report_job.get("failure_count_24h") or 0)),
@@ -643,7 +643,8 @@ def _render_smartfuelpass_section(access_token: str) -> None:
         f"Posledni kontrola API: {_format_timestamp(payload.get('checked_at'))} | "
         f"zdroj: {str(payload.get('source') or '-')} | "
         f"basis obdobi: {str(payload.get('period_basis') or '-')} | "
-        f"stari importu: {_format_seconds(table.get('last_import_age_seconds'))} | "
+        f"posledni novy import v DB: {_format_timestamp(table.get('last_imported_at'))} | "
+        f"stari posledniho noveho importu: {_format_seconds(table.get('last_import_age_seconds'))} | "
         f"missing UTC end: {int(table.get('missing_ended_at_utc_count') or 0)}"
     )
     _smartfuelpass_status_message(status)

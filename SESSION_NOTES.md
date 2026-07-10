@@ -215,18 +215,18 @@ Checklist:
   disabled.
 - [x] 13. Enable vodomery per-identifier model selection in production after a
   reviewed dry-run rebuild, keeping the global active model as fallback.
-- [ ] 14. Generalize forecast-period and rolling-backtest handling so the shared
+- [x] 14. Generalize forecast-period and rolling-backtest handling so the shared
   pipeline supports both weekly and monthly periods.
-- [ ] 15. Extract a reusable media pipeline runner so adding a new model or a
+- [x] 15. Extract a reusable media pipeline runner so adding a new model or a
   parameter variant requires plugin registration and adapter metadata rather
   than edits to scheduler/report core.
-- [ ] 16. Adapt the shared prediction pipeline to `plynomery`, preserving current
+- [x] 16. Adapt the shared prediction pipeline to `plynomery`, preserving current
   baseline/weather-aware behavior and gas-specific expected-zero/outlier
   semantics.
-- [ ] 17. Design and integrate `elektromery` candidates with monthly next-month
+- [x] 17. Design and integrate `elektromery` candidates with monthly next-month
   prediction, after reviewing electricity source cadence, calendar/tariff
   behavior, imports, and reporting semantics.
-- [ ] 18. Add cross-media dashboard/report views for candidate and
+- [x] 18. Add cross-media dashboard/report views for candidate and
   per-identifier selection performance only after the shared core has vodomery
   and at least one more medium integrated.
 
@@ -10637,3 +10637,1124 @@ Known risks or accepted gaps:
   observation until its next scheduled minute runs.
 - The scheduled task starts the process set but does not supervise later child
   process exits; recovery remains the supported full-workstation restart path.
+
+### 2026-07-10 08:14 +02:00 - Post-restart verification and manual weekly rebuild
+
+Scope:
+- Verified runtime state after the 2026-07-09 workstation restart.
+- Confirmed the SmartFuelPass `Health systemu` route is loaded in the running
+  API process.
+- Manually ran `weekly_job` from `.venv-production` with the scheduler manual
+  run wrapper so weekly rebuild profiles and email reports were sent.
+
+Changed:
+- Added this session note only.
+
+Verified:
+- `git status --short` was clean before operational checks.
+- Windows boot time was `2026-07-09 15:57:57 +02:00`.
+- Startup task `API_dashboard_caddy` last ran at
+  `2026-07-09 15:58:06 +02:00` with result `0`.
+- Expected listeners were present: Caddy on TCP `80`, `443`, and
+  `127.0.0.1:2019`; FastAPI on `127.0.0.1:8000`; Streamlit on
+  `127.0.0.1:8001`; Tailscale retained interface-specific TCP `443`
+  listeners. No listeners were present on temporary ports `8010` or `8011`.
+- FastAPI `/health/live` and `/health/ready`, Streamlit `/_stcore/health`,
+  and Caddy admin `/config/` returned HTTP `200`.
+- Unauthenticated `/health/system/runtime`, `/health/system/proxy`,
+  `/health/system/scheduler`, `/health/system/database`,
+  `/health/system/smartfuelpass`, and map-image access returned HTTP `401`.
+- Local Caddy Host/SNI route through `127.0.0.1` returned HTTPS dashboard
+  HTTP `200`, HTTP-to-HTTPS redirect HTTP `308`, `users-exist` HTTP `200`,
+  protected `/auth/me` HTTP `401`, map image without cookie HTTP `401`, and
+  `/docs`, `/redoc`, `/openapi.json` HTTP `404`.
+- Public response headers through the local Caddy Host/SNI route included
+  HSTS, `nosniff`, `Referrer-Policy`, `X-Frame-Options`,
+  `Permissions-Policy`, and CSP report-only; `Server` and `Via` were absent.
+- Root `Caddyfile` and runtime `C:\Program Files\Caddy\Caddyfile` SHA-256
+  hashes matched:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Runtime Caddy validation reported `Valid configuration`.
+- Scheduler metrics showed `scheduler_running=True`, heartbeat
+  `2026-07-10T07:43:17.338050`, and a post-boot `quarter_hour_job` success at
+  `2026-07-10T07:47:09.856475` with `failure_count_24h=0`.
+- Direct production-environment database collector reported PostgreSQL
+  `status=ok`, `connected=True`, `transaction_read_only=False`, latency about
+  `1.5 ms`, and expected schemas `dashboard`, `dbo`, `evidence`,
+  `monitoring`, `revize`, and `web_search` present.
+- SmartFuelPass collector route was registered and callable. Its scheduler
+  sync/report metrics were `ok`, daily sync last ran successfully at
+  `2026-07-10T00:17:20.377435`, weekly report last ran successfully at
+  `2026-07-07T06:55:09.631677`, table existed with `22` total sessions and
+  `0` missing UTC end values.
+- SmartFuelPass collector overall status was `degraded` because table
+  `last_imported_at` was still `2026-07-06T22:17:21.474904`.
+- Manual `weekly_job` started at `2026-07-10 06:50:07 +02:00` and completed
+  with `JOB MANUAL SUCCESS` at `2026-07-10 07:03:24 +02:00`, duration
+  `796.27` seconds.
+- Manual `weekly_job` log showed successful runtime/database preflight,
+  vodomery rebuild, plynomery rebuild, vodomery model rebuild email,
+  plynomery model rebuild email, weekly vodomery branch email, weekly
+  vodomery billing summary email, weekly elektromery branch email, and weekly
+  new elektromery email.
+- Database checks after the manual rebuild showed vodomery selection run `32`
+  with active Model 3, 37,800 profiles for each vodomery model version 1-5,
+  and active vodomery selected-model snapshots for 58 identifiers. Plynomery
+  selection run `13` selected Model 2 and had 3,360 profiles for Model 2.
+- Targeted tests passed:
+  `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_api_authorization_regression.py tests\test_smartfuelpass_service.py
+  tests\test_smartfuelpass_sync.py tests\test_dashboard_navigation_config.py
+  tests\test_dashboard_responsive.py -q --tb=short` reported `249 passed`.
+- `git diff --check` reported no whitespace errors.
+
+Not verified:
+- Authenticated browser rendering of `Health systemu` was not performed in this
+  shell session.
+- Direct public hostname routing from outside the workstation was not tested;
+  local Caddy Host/SNI verification through `127.0.0.1` was used.
+- Scheduler metrics JSON did not retain the manual `weekly_job` run from the
+  one-off shell process because the running scheduler process later rewrote the
+  file from its in-memory metrics. `scheduler.log` and database rows are the
+  retained evidence for this manual run.
+
+Follow-up:
+- Consider making scheduler metrics writes merge-safe across processes if
+  manual one-off runs must remain visible in `Health scheduleru` metrics after
+  the main scheduler heartbeat rewrites the metrics file.
+
+### 2026-07-10 - Shared prediction core step 14
+
+Scope:
+- Completed step 14 of the shared prediction core plan.
+
+Changed:
+- Added shared forecast-period helpers in `moduly/mereni/prediction/periods.py`
+  for weekly and monthly cadence, including next-month monthly forecast
+  periods.
+- Generalized rolling backtest fold generation and runner in
+  `moduly/mereni/prediction/backtest.py` so shared code supports weekly and
+  monthly validation periods.
+- Kept existing weekly backtest helpers as compatibility wrappers.
+- Wired vodomery weekly forecast-period construction through the shared helper
+  without changing its period length or label format.
+- Added tests for monthly forecast periods, calendar-month rolling folds, and
+  the generic monthly rolling backtest runner.
+- Marked checklist step 14 complete.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile moduly\mereni\prediction\contracts.py
+  moduly\mereni\prediction\periods.py moduly\mereni\prediction\backtest.py
+  moduly\mereni\prediction\__init__.py
+  moduly\mereni\vodomery\vodomery_prediction.py
+  tests\test_prediction_backtest.py tests\test_prediction_contracts.py
+  tests\test_vodomery_prediction.py` passed.
+- `.venv\Scripts\python.exe -m pytest tests\test_prediction_contracts.py
+  tests\test_prediction_backtest.py tests\test_prediction_storage.py
+  tests\test_vodomery_prediction.py tests\test_vodomery_prediction_adapter.py
+  -q --tb=short` reported `56 passed`.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  tests\test_vodomery_model_rebuild_report.py -q --tb=short` reported
+  `2 passed`.
+
+Not verified:
+- No live database rebuild or scheduler manual run was executed for this step;
+  the change is shared-period/backtest plumbing and keeps vodomery production
+  weekly behavior covered by unit tests.
+
+Follow-up:
+- Continue with step 15: extract a reusable media pipeline runner so candidate
+  registration and adapter metadata drive future models and parameter variants.
+
+### 2026-07-10 - Shared prediction core step 15
+
+Scope:
+- Completed step 15 of the shared prediction core plan.
+
+Changed:
+- Added `moduly/mereni/prediction/pipeline.py` with shared pipeline settings,
+  a validated candidate plugin registry, rebuild-window construction, forecast
+  period delegation, and candidate selection rules.
+- Exported the shared pipeline runner and helpers from
+  `moduly/mereni/prediction/__init__.py`.
+- Rewired vodomery candidate metadata, rebuild-window calculation, forecast
+  period construction, global candidate selection, and rolling-backtest profile
+  dispatch through the shared runner/registry.
+- Kept existing vodomery scheduler/report entry points and return payloads
+  compatible; model-specific profile construction remains in vodomery helper
+  functions registered as plugin callbacks.
+- Added `tests/test_prediction_pipeline.py` for registry validation, runner
+  metadata behavior, rebuild-window validation, and shared candidate selection.
+- Marked checklist step 15 complete.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile moduly\mereni\prediction\contracts.py
+  moduly\mereni\prediction\periods.py moduly\mereni\prediction\backtest.py
+  moduly\mereni\prediction\pipeline.py moduly\mereni\prediction\__init__.py
+  moduly\mereni\vodomery\vodomery_prediction.py
+  tests\test_prediction_pipeline.py tests\test_vodomery_prediction.py` passed.
+- `.venv\Scripts\python.exe -m pytest tests\test_prediction_pipeline.py
+  tests\test_prediction_contracts.py tests\test_prediction_backtest.py
+  tests\test_prediction_storage.py tests\test_vodomery_prediction.py
+  tests\test_vodomery_prediction_adapter.py -q --tb=short` reported
+  `61 passed`.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  tests\test_vodomery_model_rebuild_report.py -q --tb=short` reported
+  `2 passed`.
+- `git diff --check` reported no whitespace errors beyond existing LF/CRLF
+  normalization warnings.
+
+Not verified:
+- No live database rebuild or scheduler manual run was executed for this step;
+  the change is shared pipeline plumbing and preserves the existing vodomery
+  weekly rebuild/report surface in unit tests.
+
+Follow-up:
+- Continue with step 16: adapt the shared prediction pipeline to `plynomery`
+  while preserving current gas-specific behavior.
+
+### 2026-07-10 - Shared prediction core step 16
+
+Scope:
+- Completed step 16 of the shared prediction core plan.
+
+Changed:
+- Added shared pipeline metadata to `moduly/mereni/plynomery/plynomery_prediction.py`
+  for the gas medium, including stable candidate specs for the exact/fallback
+  baseline and weather-adjusted baseline models.
+- Rewired plynomery rebuild windows, global candidate selection, single-model
+  rebuild dispatch, and candidate model metadata through the shared prediction
+  runner/registry while preserving existing report payload shape.
+- Added `moduly/mereni/plynomery/prediction_adapter.py` with gas observation
+  loading metadata, selection metadata serialization, active model lookup, and
+  baseline profile row mapping using the existing plynomery quality filters.
+- Kept `plynomery_anomaly.py`, expected-zero tables, outlier event logic, and
+  outlier review rebuild/apply behavior unchanged.
+- Added tests for plynomery shared candidate specs and adapter behavior.
+- Marked checklist step 16 complete.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile moduly\mereni\prediction\pipeline.py
+  moduly\mereni\prediction\__init__.py
+  moduly\mereni\plynomery\plynomery_prediction.py
+  moduly\mereni\plynomery\prediction_adapter.py
+  tests\test_plynomery_prediction.py
+  tests\test_plynomery_prediction_adapter.py` passed.
+- `.venv\Scripts\python.exe -m pytest tests\test_plynomery_prediction.py
+  tests\test_plynomery_prediction_adapter.py tests\test_plynomery_db_import.py
+  tests\test_plynomery_outlier_review_apply.py
+  tests\test_plynomery_alert_rule_validation.py
+  tests\test_plynomery_outlier_notifications.py -q --tb=short` reported
+  `29 passed`.
+- `.venv\Scripts\python.exe -m pytest tests\test_prediction_pipeline.py
+  tests\test_prediction_contracts.py tests\test_prediction_backtest.py
+  tests\test_prediction_storage.py -q --tb=short` reported `35 passed`.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  tests\test_vodomery_model_rebuild_report.py -q --tb=short` reported
+  `2 passed`.
+- `git diff --check` reported no whitespace errors beyond existing LF/CRLF
+  normalization warnings.
+
+Not verified:
+- No live database rebuild, manual scheduler run, or workstation restart was
+  executed for this step. The user explicitly chose to defer restart and live
+  rebuild checks until after step 16; those checks still need a pre-restart
+  handoff before execution.
+
+Follow-up:
+- Prepare the agreed restart handoff and then perform post-restart/runtime
+  verification plus any approved manual rebuild/scheduler run before moving to
+  step 17.
+
+### 2026-07-10 11:13 +02:00 - Pre-restart handoff after prediction steps 14-16
+
+Reason for restart:
+- Load the shared prediction pipeline changes from steps 14-16 into the
+  production FastAPI, Streamlit, and scheduler processes through the supported
+  full-workstation restart path.
+- After restart, verify runtime health and run the agreed testrun before
+  continuing to checklist step 17.
+
+Current task/conversation state:
+- Completed: shared prediction checklist steps 14, 15, and 16.
+- Completed: vodomery forecast-period/backtest generalization, reusable
+  prediction pipeline runner/registry, and plynomery integration with shared
+  candidate metadata/adapter.
+- Pending: workstation restart, post-restart runtime checks, and testrun.
+- First action after restart: confirm startup task/process/listener health,
+  then run targeted prediction/plynomery tests and the agreed scheduler/rebuild
+  testrun if runtime checks pass.
+
+Working tree and deployment:
+- Branch: `master`
+- HEAD: `8a9b2e2e96b553b107864e9199172dbfd5363b80`
+- `git status --short --untracked-files=all` before restart:
+
+```text
+ M SESSION_NOTES.md
+ M moduly/mereni/plynomery/plynomery_prediction.py
+ M moduly/mereni/prediction/__init__.py
+ M moduly/mereni/prediction/backtest.py
+ M moduly/mereni/vodomery/vodomery_prediction.py
+ M tests/test_plynomery_prediction.py
+ M tests/test_prediction_backtest.py
+?? moduly/mereni/plynomery/prediction_adapter.py
+?? moduly/mereni/prediction/periods.py
+?? moduly/mereni/prediction/pipeline.py
+?? tests/test_plynomery_prediction_adapter.py
+?? tests/test_prediction_pipeline.py
+```
+
+- `main.py` is unchanged.
+- No Caddy configuration changes were made in steps 14-16.
+- Running production processes have not yet loaded these prediction changes.
+  Restart should load the current dirty working tree into the process set.
+- Current pre-restart runtime snapshot:
+  - Windows boot time: `2026-07-09 15:57:57 +02:00`.
+  - Startup task `API_dashboard_caddy`: state `Ready`, last run
+    `2026-07-09 15:58:06 +02:00`, last result `0`.
+  - Expected listeners present before restart: Caddy on TCP `80`, `443`, and
+    `127.0.0.1:2019`; FastAPI on `127.0.0.1:8000`; Streamlit on
+    `127.0.0.1:8001`; Tailscale retained interface-specific TCP `443`
+    listeners.
+  - Temporary ports `8010` and `8011` were not listening.
+
+Sensitive/runtime artifacts:
+- Do not print, read, modify, delete, or commit `.env` values, ProgramData
+  credential files, bearer tokens, cookie values, SmartFuelPass session JSON
+  payloads, raw portal rows, raw meter rows, raw device photo paths, or
+  production credentials.
+- Scheduler lock files under `core/scheduler/locks` are tracked runtime
+  artifacts; do not delete or rewrite them as part of restart verification.
+
+Expected processes after restart:
+- FastAPI/Uvicorn: one runtime on `127.0.0.1:8000`.
+- Streamlit: one runtime on `127.0.0.1:8001`.
+- Scheduler: one `main.py` runtime holding the scheduler process role.
+- Caddy: one runtime owning TCP `80`, TCP `443`, and admin
+  `127.0.0.1:2019`.
+- Temporary ports `8010` and `8011` should remain unused.
+- Tailscale may retain interface-specific TCP `443` listeners.
+
+Expected application state:
+- FastAPI `/health/live` and `/health/ready`: HTTP `200`.
+- Streamlit `/_stcore/health`: HTTP `200`.
+- Caddy admin `/config/`: HTTP `200`.
+- Public dashboard via local Caddy Host/SNI route: HTTPS dashboard HTTP `200`.
+- HTTP to HTTPS redirect: HTTP `308`.
+- `/api/v1/auth/users-exist`: HTTP `200`.
+- Protected API without bearer token: HTTP `401` JSON.
+- `/docs`, `/redoc`, and `/openapi.json`: HTTP `404` at Caddy layer.
+- Scheduler metrics should show `scheduler_running=True`, a post-boot
+  heartbeat, and a post-boot `quarter_hour_job` observation after the next
+  scheduled slot.
+
+Required post-restart checks:
+- Confirm Windows boot time is after this handoff and startup task
+  `API_dashboard_caddy` last result is `0`.
+- Confirm expected listeners and absence of temporary listeners.
+- Confirm FastAPI, Streamlit, and Caddy local health endpoints.
+- Confirm unauthenticated protected health/admin routes still return `401`.
+- Confirm local Caddy routing and public response headers; `Server` and `Via`
+  should remain absent.
+- Confirm root `Caddyfile` and runtime `C:\Program Files\Caddy\Caddyfile`
+  hashes still match, then validate the runtime Caddy configuration.
+- Confirm scheduler heartbeat and a fresh post-boot `quarter_hour_job`
+  observation.
+- Run targeted code verification:
+  `.venv\Scripts\python.exe -m py_compile moduly\mereni\prediction\contracts.py
+  moduly\mereni\prediction\periods.py moduly\mereni\prediction\backtest.py
+  moduly\mereni\prediction\pipeline.py moduly\mereni\prediction\__init__.py
+  moduly\mereni\vodomery\vodomery_prediction.py
+  moduly\mereni\plynomery\plynomery_prediction.py
+  moduly\mereni\plynomery\prediction_adapter.py
+  tests\test_prediction_pipeline.py tests\test_prediction_backtest.py
+  tests\test_plynomery_prediction.py tests\test_plynomery_prediction_adapter.py`
+- Run targeted tests:
+  `.venv\Scripts\python.exe -m pytest tests\test_prediction_pipeline.py
+  tests\test_prediction_contracts.py tests\test_prediction_backtest.py
+  tests\test_prediction_storage.py tests\test_vodomery_prediction.py
+  tests\test_vodomery_prediction_adapter.py
+  tests\test_plynomery_prediction.py tests\test_plynomery_prediction_adapter.py
+  tests\test_plynomery_db_import.py tests\test_plynomery_outlier_review_apply.py
+  tests\test_plynomery_alert_rule_validation.py
+  tests\test_plynomery_outlier_notifications.py -q --tb=short`
+- Run scheduler/report smoke:
+  `.venv\Scripts\python.exe -m pytest
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  tests\test_vodomery_model_rebuild_report.py -q --tb=short`
+- Run the agreed testrun only after runtime checks pass. If it is the manual
+  scheduler/rebuild testrun, run it from `.venv-production` through the
+  scheduler manual-run wrapper and expect configured report emails to be sent.
+- After testrun, verify database evidence for latest vodomery and plynomery
+  selection runs/profile counts without printing raw measurement data.
+- Finish with `git diff --check` and
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with results, deviations, and
+  accepted gaps.
+
+Known risks or accepted gaps:
+- The process set will load uncommitted working-tree changes. This is intended
+  for the agreed post-step-16 runtime testrun.
+- If a scheduled production job runs before manual verification, it may use the
+  new prediction code after restart.
+- `git diff --check` before restart reported only LF/CRLF normalization
+  warnings, not whitespace errors.
+- Immediately after boot, scheduler metrics may not yet contain a post-boot
+  `quarter_hour_job` observation until the next scheduled slot.
+- The startup task starts the process set but does not supervise later child
+  process exits; recovery remains full-workstation restart.
+
+### 2026-07-10 11:40 +02:00 - Post-restart runtime verification after prediction steps 14-16
+
+Scope:
+- Checked workstation and application runtime state after the restart requested
+  in the 2026-07-10 11:13 pre-restart handoff.
+- Ran the targeted code and test verification listed in the handoff.
+
+Changed:
+- Added this session note only.
+
+Verified:
+- Windows boot time was `2026-07-10 11:16:54 +02:00`.
+- Startup task `API_dashboard_caddy` last ran at
+  `2026-07-10 11:17:04 +02:00` with result `0`.
+- Expected listeners were present: Caddy on TCP `80`, `443`, and
+  `127.0.0.1:2019`; FastAPI on `127.0.0.1:8000`; Streamlit on
+  `127.0.0.1:8001`; Tailscale retained interface-specific TCP `443`
+  listeners. Temporary ports `8010` and `8011` were not listening.
+- FastAPI `/health/live` and `/health/ready`, Streamlit `/_stcore/health`,
+  and Caddy admin `/config/` returned HTTP `200`.
+- Unauthenticated system-health routes returned HTTP `401`.
+- Local Caddy Host/SNI route returned HTTPS dashboard HTTP `200`,
+  HTTP-to-HTTPS redirect HTTP `308`, `users-exist` HTTP `200`,
+  protected `/auth/me` HTTP `401`, map image without cookie HTTP `401`, and
+  `/docs`, `/redoc`, `/openapi.json` HTTP `404`.
+- Public response headers through the local Caddy Host/SNI route included
+  HSTS, `nosniff`, `Referrer-Policy`, `X-Frame-Options`,
+  `Permissions-Policy`, and CSP report-only; `Server` and `Via` were absent.
+- Root `Caddyfile` and runtime `C:\Program Files\Caddy\Caddyfile` SHA-256
+  hashes matched:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Runtime Caddy validation reported `Valid configuration`.
+- Scheduler metrics showed `scheduler_running=True`, heartbeat
+  `2026-07-10T11:32:10.706143`, and a post-boot `quarter_hour_job` success at
+  `2026-07-10T11:35:10.531349` with `failure_count_24h=0`.
+- Targeted `py_compile` for prediction/vodomery/plynomery modules and related
+  tests passed.
+- Targeted prediction and plynomery pytest suite reported `90 passed`.
+- Scheduler/report smoke tests reported `2 passed`.
+- `git diff --check` reported no whitespace errors beyond existing LF/CRLF
+  normalization warnings.
+
+Not verified:
+- Manual production scheduler/rebuild testrun was not run in this check.
+- Database evidence for a new manual rebuild was not checked because no manual
+  rebuild was started.
+- Direct public hostname routing from outside the workstation was not tested;
+  local Caddy Host/SNI verification through `127.0.0.1` was used.
+
+Follow-up:
+- Continue with the next agreed step only after deciding whether to run the
+  manual production scheduler/rebuild testrun that sends configured reports.
+
+### 2026-07-10 12:21 +02:00 - Manual weekly rebuild testrun after prediction steps 14-16
+
+Scope:
+- Ran the agreed manual production `weekly_job` rebuild/test run from
+  `.venv-production` before moving to prediction checklist step 17.
+- Verified scheduler log, runtime health, and aggregate database evidence
+  without printing raw measurements or per-device identifiers.
+
+Changed:
+- Added this session note only.
+- Production database state changed through the intended manual rebuild:
+  vodomery and plynomery model selection/profile tables were refreshed and
+  configured weekly/model report emails were sent.
+
+Verified:
+- Manual `weekly_job` started at `2026-07-10 11:53:37 +02:00` and completed
+  with `JOB MANUAL SUCCESS` at `2026-07-10 12:07:12 +02:00`, duration
+  `814.35` seconds.
+- Runtime/database preflight succeeded before the rebuild.
+- Vodomery rebuild completed with `selection_run_id=33` and global active
+  `Model 3 - recency weighted blend`.
+- Plynomery rebuild completed with `selection_run_id=14` and active
+  `Model 2 - weather adjusted baseline`.
+- Scheduler log showed successful completion of vodomery rebuild, plynomery
+  rebuild, vodomery model rebuild report, plynomery model rebuild report,
+  weekly vodomery branch report, weekly vodomery billing summary report,
+  weekly elektromery branch report, and weekly new elektromery report.
+- Vodomery database aggregate checks after the run:
+  - 37,800 anomaly-profile rows for each vodomery model version 1-5.
+  - 58 identifiers covered by each vodomery model version.
+  - Active selected-model snapshots: 58 total for the new weekly forecast
+    period, 55 without fallback and 3 with `no_identifier_metrics` fallback.
+  - Active selected-model distribution: 43 snapshots use Model 2 and
+    15 snapshots use Model 3.
+  - 43 active snapshots differ from the global active Model 3, confirming
+    per-identifier selection is active in the rebuild output.
+  - Measured-only candidates were evaluated but not selected for production
+    snapshots; per-identifier best counts included Model 4 for 6 identifiers
+    and Model 5 for 17 identifiers.
+- Vodomery rolling WAPE by candidate in this run:
+  - Model 1: `11.252027`
+  - Model 2: `11.127486`
+  - Model 3: `3.9993`
+  - Model 4 measured-only: `8.329386`
+  - Model 5 measured-only: `26.829175`
+- Plynomery database aggregate checks after the run:
+  - Model 1 baseline candidate had 3,360 profiles for 5 identifiers.
+  - Model 2 weather-adjusted candidate had 3,360 profiles for 5 identifiers
+    and was selected.
+  - Model 2 had lower MAE/RMSE/bias than Model 1 in the latest selection run.
+- Runtime health after the rebuild remained OK: FastAPI `/health/live` and
+  `/health/ready`, Streamlit `/_stcore/health`, and Caddy admin `/config/`
+  returned HTTP `200`.
+- Scheduler metrics still showed `scheduler_running=True`; `quarter_hour_job`
+  last succeeded at `2026-07-10T12:16:09.538693`.
+
+Not verified:
+- The wrapper shell command returned exit code `1` after the successful job
+  because the inline Python expression incorrectly attempted to `raise` the
+  return value of `_run_manual_job_worker`. The scheduler job itself was not
+  rerun, because the log already contained `JOB MANUAL SUCCESS` and rerunning
+  would resend reports.
+- Scheduler metrics JSON did not retain the manual `weekly_job` result from
+  the one-off shell process after the main scheduler rewrote metrics from its
+  in-memory state. `scheduler.log` and database rows are the retained evidence.
+- Authenticated browser rendering of report/status pages was not checked.
+- Direct public hostname routing from outside the workstation was not tested.
+
+Follow-up:
+- Continue with checklist step 17 for elektromery monthly next-month
+  prediction candidates after reviewing electricity source cadence, calendar
+  and tariff behavior, imports, and reporting semantics.
+
+### 2026-07-10 12:49 +02:00 - SmartFuelPass health freshness investigation
+
+Scope:
+- Investigated why `Health systemu / SmartFuelPass` showed the last import as
+  about three days old before starting prediction checklist step 17.
+- Checked code wiring, scheduler metrics/logs, aggregate PostgreSQL state, and
+  a read-only live SmartFuelPass portal fetch without printing raw relace
+  identifiers, cookies, credentials, or portal rows.
+
+Changed:
+- Updated `services/api/services/system_health.py` so stale
+  `MAX(imported_at)` does not degrade the SmartFuelPass health table when the
+  scheduler sync job ran successfully within the expected daily window.
+- Updated `moduly/apps/dashboard/pages/37_system_health.py` so the primary
+  metric says `Posledni sync` and uses `sync_job.last_run`; the table
+  `last_imported_at` remains visible as the latest newly inserted DB import.
+- Added a regression test for the case where no new SmartFuelPass sessions were
+  inserted recently but the daily sync completed successfully.
+
+Verified:
+- Scheduler metrics showed `daily_job` success at
+  `2026-07-10T00:17:21.125356` and `sync_charge_sessions_to_db` success at
+  `2026-07-10T00:17:20.377435`, with no failures in the last 24 hours.
+- Scheduler log showed `sync_charge_sessions_to_db` started at
+  `2026-07-10 00:15:16 +02:00` and completed at
+  `2026-07-10 00:17:20 +02:00`, duration `124.11` seconds.
+- PostgreSQL aggregate checks showed `monitoring.smartfuelpass_relace` had
+  22 rows, all with normalized UTC end timestamps, last completed relace at
+  `2026-07-06 17:02:00`, and `MAX(imported_at)` at
+  `2026-07-06 22:17:21.474904`.
+- Corrected recent-window aggregate checks showed 0 completed relace in the
+  last 1 and 3 days, 1 in the last 7 days, and 5 in the last 30 days.
+- Read-only live portal fetch returned 5 completed relace, with latest
+  completed end time `2026-07-06 17:02:00`, matching the DB aggregate.
+- Direct `.venv-production` collector call after the code change returned
+  SmartFuelPass `status=ok`, table `status=ok`, sync `status=ok`, and the
+  detail that no newly inserted sessions were recorded recently while the
+  scheduler sync ran successfully within the daily window.
+- `.venv\Scripts\python.exe -m py_compile services\api\services\system_health.py
+  moduly\apps\dashboard\pages\37_system_health.py tests\test_system_health.py`
+  passed.
+- `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_api_authorization_regression.py -q --tb=short` reported
+  `194 passed`.
+
+Not verified:
+- The running FastAPI/Streamlit production processes have not loaded this code
+  change yet. The dashboard will keep showing the old SmartFuelPass health
+  interpretation until the next supported process reload/restart.
+- Authenticated browser rendering of the updated `Health systemu` page was not
+  checked.
+
+Follow-up:
+- Load the SmartFuelPass health fix into production through the supported
+  restart/reload path before relying on the dashboard display.
+- Continue with prediction checklist step 17 after the health display fix is
+  accepted.
+
+### 2026-07-10 13:04 +02:00 - Shared prediction core step 17
+
+Scope:
+- Completed step 17 of the shared prediction core plan for `elektromery`.
+- Reviewed electricity source cadence and reporting semantics before adding
+  monthly next-month prediction candidates.
+
+Changed:
+- Added `moduly/mereni/elektromery/prediction_adapter.py` with valid
+  consumption observation loading from `monitoring.Mereni_elektromery_vse`,
+  source-aware monthly aggregation, and a no-op active-model/selection
+  adapter surface for the current non-production electricity prediction stage.
+- Added `moduly/mereni/elektromery/elektromery_prediction.py` with shared
+  monthly pipeline settings, next-month forecast-period construction, three
+  candidate plugins, previous-completed-calendar-month rebuild windows,
+  monthly rolling-backtest execution, and shared candidate selection helpers.
+- Electricity monthly aggregation prefers detailed non-`SOFTLINK` sources for
+  an identifier/month when present, otherwise falls back to `SOFTLINK`, so
+  parallel sources are not double-counted.
+- Candidate models added:
+  - Model 1: recent 3-month average.
+  - Model 2: trailing 12-month median.
+  - Model 3: same month last year.
+- Added targeted tests for adapter SQL filters, source-priority aggregation,
+  candidate metadata, next-month forecast periods, and synthetic monthly
+  backtests.
+- Marked checklist step 17 complete.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile moduly\mereni\elektromery\prediction_adapter.py
+  moduly\mereni\elektromery\elektromery_prediction.py
+  tests\test_elektromery_prediction_adapter.py tests\test_elektromery_prediction.py`
+  passed.
+- `.venv\Scripts\python.exe -m pytest tests\test_elektromery_prediction_adapter.py
+  tests\test_elektromery_prediction.py tests\test_prediction_pipeline.py
+  tests\test_prediction_backtest.py tests\test_elektromery_db_vse.py
+  tests\test_elektromery_reports.py tests\test_elektromery_branch_period_report.py
+  -q --tb=short` reported `66 passed`.
+- `.venv\Scripts\python.exe -m pytest tests\test_prediction_contracts.py
+  tests\test_prediction_backtest.py tests\test_prediction_pipeline.py
+  tests\test_prediction_storage.py tests\test_vodomery_prediction.py
+  tests\test_vodomery_prediction_adapter.py tests\test_plynomery_prediction.py
+  tests\test_plynomery_prediction_adapter.py tests\test_elektromery_prediction.py
+  tests\test_elektromery_prediction_adapter.py tests\test_elektromery_db_vse.py
+  tests\test_elektromery_reports.py tests\test_elektromery_branch_period_report.py
+  -q --tb=short` reported `125 passed`.
+
+Not verified:
+- No live electricity prediction/backtest was run against production
+  PostgreSQL data.
+- No scheduler, report email, dashboard, or production scoring integration was
+  enabled for electricity prediction in this step.
+- Running production processes have not loaded these uncommitted code changes;
+  restart/reload remains deferred by user request.
+
+Follow-up:
+- Step 18 remains open: add cross-media dashboard/report views for candidate
+  and per-identifier selection performance after deciding the display shape.
+
+### 2026-07-10 13:14 +02:00 - Pre-restart handoff after SmartFuelPass health fix and prediction step 17
+
+Reason for restart:
+- Load the uncommitted SmartFuelPass `Health systemu` freshness fix and shared
+  prediction pipeline changes through the supported full-workstation restart
+  path.
+- Confirm after boot that FastAPI, Streamlit, scheduler, and Caddy all start
+  cleanly from the current dirty working tree.
+- Continue after restart with post-restart verification before any new
+  implementation work.
+
+Current task/conversation state:
+- Completed: shared prediction checklist steps 14, 15, 16, and 17.
+- Completed: manual production `weekly_job` rebuild testrun after steps 14-16.
+- Completed: SmartFuelPass health investigation. The real sync last succeeded
+  on `2026-07-10 00:17:20 +02:00`; the dashboard issue was caused by using
+  `MAX(imported_at)` as the main freshness signal when no new relace were
+  inserted.
+- Completed: SmartFuelPass health fix now treats stale `MAX(imported_at)` as
+  OK when `sync_charge_sessions_to_db` ran successfully within the daily
+  window, and the dashboard primary metric now displays `Posledni sync`.
+- Completed: `elektromery` monthly next-month prediction candidate integration
+  without scheduler/report/scoring enablement.
+- Pending: workstation restart and post-restart verification.
+- Pending: prediction checklist step 18, cross-media dashboard/report views,
+  only after post-restart state is confirmed.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and
+  `SESSION_NOTES.md`, run `git status --short --untracked-files=all`, then
+  execute the post-restart checks below.
+
+Working tree and deployment:
+- Branch: `master`
+- HEAD: `8a9b2e2e96b553b107864e9199172dbfd5363b80`
+- `git status --short --untracked-files=all` before restart:
+
+```text
+ M SESSION_NOTES.md
+ M moduly/apps/dashboard/pages/37_system_health.py
+ M moduly/mereni/plynomery/plynomery_prediction.py
+ M moduly/mereni/prediction/__init__.py
+ M moduly/mereni/prediction/backtest.py
+ M moduly/mereni/vodomery/vodomery_prediction.py
+ M services/api/services/system_health.py
+ M tests/test_plynomery_prediction.py
+ M tests/test_prediction_backtest.py
+ M tests/test_system_health.py
+?? moduly/mereni/elektromery/elektromery_prediction.py
+?? moduly/mereni/elektromery/prediction_adapter.py
+?? moduly/mereni/plynomery/prediction_adapter.py
+?? moduly/mereni/prediction/periods.py
+?? moduly/mereni/prediction/pipeline.py
+?? tests/test_elektromery_prediction.py
+?? tests/test_elektromery_prediction_adapter.py
+?? tests/test_plynomery_prediction_adapter.py
+?? tests/test_prediction_pipeline.py
+```
+
+- `main.py` is unchanged.
+- No Caddy configuration changes were made. Root `Caddyfile` and runtime
+  `C:\Program Files\Caddy\Caddyfile` SHA-256 hashes matched before restart:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Runtime Caddy validation before restart reported `Valid configuration`.
+- Current running FastAPI/Streamlit/scheduler processes have not yet loaded
+  the latest SmartFuelPass health fix or the `elektromery` step 17 modules.
+  Restart should load the current dirty working tree into the process set.
+- Current pre-restart runtime snapshot:
+  - Windows boot time: `2026-07-10 11:16:54 +02:00`.
+  - Startup task `API_dashboard_caddy`: state `Ready`, last run
+    `2026-07-10 11:17:04 +02:00`, last result `0`.
+  - Expected listeners present before restart: Caddy on TCP `80`, `443`, and
+    `127.0.0.1:2019`; FastAPI on `127.0.0.1:8000`; Streamlit on
+    `127.0.0.1:8001`; Tailscale retained interface-specific TCP `443`
+    listeners.
+  - Temporary ports `8010` and `8011` were not listening.
+  - FastAPI `/health/live` and `/health/ready`, Streamlit `/_stcore/health`,
+    and Caddy admin `/config/` returned HTTP `200`.
+  - Local Caddy Host/SNI route returned HTTPS dashboard HTTP `200`,
+    HTTP-to-HTTPS redirect HTTP `308`, `users-exist` HTTP `200`,
+    protected `/auth/me` HTTP `401`, and `/docs` HTTP `404`.
+  - Scheduler metrics showed `scheduler_running=True`, heartbeat
+    `2026-07-10T13:07:11.205795`, and `quarter_hour_job` success at
+    `2026-07-10T13:05:09.995917`.
+
+Sensitive/runtime artifacts:
+- Do not print, read, modify, delete, or commit `.env` values, ProgramData
+  credential files, bearer tokens, cookie values, SmartFuelPass session JSON
+  payloads, raw portal rows, raw meter rows, raw device photo paths, or
+  production credentials.
+- Do not inspect local SOFTLINK auth files such as
+  `moduly/mereni/elektromery/SOFTLINK/lds_auth.json`.
+- Do not inspect or clean raw electric-meter data artifacts under
+  `moduly/mereni/elektromery/data/` unless explicitly requested.
+- Scheduler lock files under `core/scheduler/locks` are tracked runtime
+  artifacts; do not delete or rewrite them as part of restart verification.
+
+Expected processes after restart:
+- FastAPI/Uvicorn: one runtime on `127.0.0.1:8000`.
+- Streamlit: one runtime on `127.0.0.1:8001`.
+- Scheduler: one `main.py` runtime holding the scheduler process role.
+- Caddy: one runtime owning TCP `80`, TCP `443`, and admin
+  `127.0.0.1:2019`.
+- Temporary ports `8010` and `8011` should remain unused.
+- Tailscale may retain interface-specific TCP `443` listeners.
+
+Expected application state:
+- FastAPI `/health/live` and `/health/ready`: HTTP `200`.
+- Streamlit `/_stcore/health`: HTTP `200`.
+- Caddy admin `/config/`: HTTP `200`.
+- Public dashboard via local Caddy Host/SNI route: HTTPS dashboard HTTP `200`.
+- HTTP to HTTPS redirect: HTTP `308`.
+- `/api/v1/auth/users-exist`: HTTP `200`.
+- Protected API without bearer token: HTTP `401` JSON.
+- Map image without cookie: HTTP `401`.
+- `/docs`, `/redoc`, and `/openapi.json`: HTTP `404` at Caddy layer.
+- Public response headers should include HSTS, `nosniff`, `Referrer-Policy`,
+  `X-Frame-Options`, `Permissions-Policy`, and CSP report-only; `Server` and
+  `Via` should remain absent.
+- Scheduler metrics should show `scheduler_running=True`, a post-boot
+  heartbeat, and a post-boot `quarter_hour_job` observation after the next
+  scheduled slot.
+- Direct `.venv-production` SmartFuelPass collector call should return
+  `status=ok` for the current expected state where sync is fresh but
+  `MAX(imported_at)` may still be `2026-07-06 22:17:21.474904` until a new
+  completed relace appears.
+- `elektromery` prediction modules should import and tests should pass, but no
+  production scheduler/report/scoring path should start using them yet.
+
+Required post-restart checks:
+- Confirm Windows boot time is after this handoff and startup task
+  `API_dashboard_caddy` last result is `0`.
+- Confirm expected listeners and absence of temporary listeners.
+- Confirm FastAPI, Streamlit, and Caddy local health endpoints.
+- Confirm unauthenticated protected health/admin routes still return `401`,
+  including `/health/system/smartfuelpass`.
+- Confirm local Caddy routing and public response headers; `Server` and `Via`
+  should remain absent.
+- Confirm root `Caddyfile` and runtime `C:\Program Files\Caddy\Caddyfile`
+  hashes still match, then validate the runtime Caddy configuration.
+- Confirm scheduler heartbeat and a fresh post-boot `quarter_hour_job`
+  observation.
+- Run direct production-environment SmartFuelPass collector check:
+  `.venv-production\Scripts\python.exe -c "import json; from services.api.services.system_health import collect_system_smartfuelpass_health; r=collect_system_smartfuelpass_health(); print(json.dumps({'status': r.status, 'table_status': r.table.status, 'sync_status': r.sync_job.status, 'sync_last_status': r.sync_job.last_status, 'sync_last_run': r.sync_job.last_run, 'last_imported_at': r.table.last_imported_at}, default=str, ensure_ascii=False, indent=2))"`
+- Run targeted code verification:
+  `.venv\Scripts\python.exe -m py_compile services\api\services\system_health.py
+  moduly\apps\dashboard\pages\37_system_health.py
+  moduly\mereni\prediction\periods.py moduly\mereni\prediction\pipeline.py
+  moduly\mereni\prediction\backtest.py moduly\mereni\prediction\__init__.py
+  moduly\mereni\vodomery\vodomery_prediction.py
+  moduly\mereni\plynomery\plynomery_prediction.py
+  moduly\mereni\plynomery\prediction_adapter.py
+  moduly\mereni\elektromery\prediction_adapter.py
+  moduly\mereni\elektromery\elektromery_prediction.py`
+- Run targeted tests:
+  `.venv\Scripts\python.exe -m pytest tests\test_system_health.py
+  tests\test_api_authorization_regression.py tests\test_prediction_contracts.py
+  tests\test_prediction_backtest.py tests\test_prediction_pipeline.py
+  tests\test_prediction_storage.py tests\test_vodomery_prediction.py
+  tests\test_vodomery_prediction_adapter.py tests\test_plynomery_prediction.py
+  tests\test_plynomery_prediction_adapter.py tests\test_elektromery_prediction.py
+  tests\test_elektromery_prediction_adapter.py tests\test_elektromery_db_vse.py
+  tests\test_elektromery_reports.py tests\test_elektromery_branch_period_report.py
+  -q --tb=short`
+- Run scheduler/report smoke:
+  `.venv\Scripts\python.exe -m pytest
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  tests\test_vodomery_model_rebuild_report.py -q --tb=short`
+- Do not run another manual production `weekly_job` rebuild unless the user
+  explicitly asks, because it sends configured reports and was already run on
+  `2026-07-10 11:53-12:07 +02:00`.
+- Finish with `git diff --check` and
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with results, deviations, and
+  accepted gaps.
+
+Known risks or accepted gaps:
+- The process set will load uncommitted working-tree changes. This is intended
+  for the agreed restart.
+- Step 17 only integrates electricity prediction candidates and tests; it does
+  not enable live electricity prediction, scheduler rebuilds, report views, or
+  scoring.
+- Authenticated browser rendering of the updated `Health systemu` page may
+  still require manual browser verification after restart.
+- Direct public hostname routing from outside the workstation is not covered
+  by local Host/SNI checks.
+- Immediately after boot, scheduler metrics may not yet contain a post-boot
+  `quarter_hour_job` observation until the next scheduled slot.
+- The startup task starts the process set but does not supervise later child
+  process exits; recovery remains full-workstation restart.
+
+### 2026-07-10 14:14 +02:00 - Post-restart verification
+
+Scope:
+- Completed the required post-restart verification from the
+  `2026-07-10 13:14 +02:00` handoff.
+
+Changed:
+- Appended this verification note to `SESSION_NOTES.md`.
+
+Verified:
+- Windows boot time was `2026-07-10 13:17:55 +02:00`, after the handoff.
+- Startup task `API_dashboard_caddy` last ran at
+  `2026-07-10 13:18:04 +02:00` with result `0`.
+- Expected listeners were present: Caddy on TCP `80`, TCP `443`, and
+  `127.0.0.1:2019`; FastAPI on `127.0.0.1:8000`; Streamlit on
+  `127.0.0.1:8001`; Tailscale retained its interface-specific TCP `443`
+  listeners.
+- Temporary ports `8010` and `8011` were not listening.
+- Local health endpoints returned HTTP `200`: FastAPI `/health/live`,
+  FastAPI `/health/ready`, Streamlit `/_stcore/health`, and Caddy admin
+  `/config/`.
+- Unauthenticated protected system health routes returned HTTP `401`,
+  including `/health/system/smartfuelpass`.
+- Local Caddy Host/SNI routing returned: dashboard HTTP `200`,
+  `/api/v1/auth/users-exist` HTTP `200`, protected `/auth/me` HTTP `401`,
+  map image without cookie HTTP `401`, `/docs`, `/redoc`, and
+  `/openapi.json` HTTP `404`, and HTTP-to-HTTPS redirect HTTP `308`.
+- Public response headers included HSTS, `nosniff`, `Referrer-Policy`,
+  `X-Frame-Options`, `Permissions-Policy`, and CSP report-only; `Server` and
+  `Via` were absent.
+- Root `Caddyfile` and runtime `C:\Program Files\Caddy\Caddyfile` SHA-256
+  hashes matched:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Runtime Caddy validation reported `Valid configuration`.
+- Scheduler metrics showed `scheduler_running=True`, heartbeat
+  `2026-07-10T13:58:10.799420`, and post-boot `quarter_hour_job` success at
+  `2026-07-10T13:47:09.583349` with `0` failures in the last 24 hours.
+- Direct `.venv-production` SmartFuelPass collector returned overall
+  `status=ok`, table `status=ok`, sync `status=ok`, sync last status
+  `success`, sync last run `2026-07-10 00:17:20.377435`, and
+  `last_imported_at=2026-07-06 22:17:21.474904`.
+- Targeted `py_compile` for the SmartFuelPass health fix and prediction
+  modules passed.
+- Targeted pytest suite for system health, API authorization, prediction
+  contracts/pipeline/storage, vodomery, plynomery, and elektromery reported
+  `319 passed`.
+- Scheduler/report smoke tests reported `2 passed`.
+
+Not verified:
+- Authenticated browser rendering of the updated `Health systemu` page was
+  not checked.
+- Direct external public routing from outside the workstation was not checked.
+- Exact Python process command-line details were not available through the
+  read-only process query; API and Streamlit were verified by listeners and
+  health endpoints, and scheduler by metrics heartbeat plus post-boot
+  `quarter_hour_job`.
+- No manual production `weekly_job` rebuild was run after restart, as required
+  by the handoff because the earlier manual run already sent reports.
+
+Follow-up:
+- Continue with prediction checklist step 18 after deciding the
+  cross-media dashboard/report view shape.
+
+### 2026-07-10 14:47 +02:00 - Shared prediction core step 18
+
+Scope:
+- Completed step 18 of the shared prediction core plan.
+- Added cross-media admin views for prediction candidate performance and
+  per-identifier selected-model snapshots after vodomery, plynomery, and
+  elektromery shared-pipeline integration.
+
+Changed:
+- Added admin-only FastAPI route `GET /api/v1/prediction/performance`.
+- Added `services/api/services/prediction_performance.py` to aggregate latest
+  vodomery/plynomery selection runs, shared selected-model snapshots, worst
+  identifier selections, and registered candidate catalogs.
+- Added `services/api/schemas/prediction.py` response schemas.
+- Added Streamlit admin page
+  `moduly/apps/dashboard/pages/38_prediction_performance.py` and footer
+  navigation entry `prediction_performance`.
+- Added dashboard API client method `get_prediction_performance`.
+- Updated API authorization inventory and dashboard navigation tests.
+- Updated `AGENTS.md` project map for the new prediction API/service/page.
+- Marked prediction checklist step 18 complete.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile services\api\schemas\prediction.py
+  services\api\services\prediction_performance.py services\api\routes\prediction.py
+  services\api\main.py moduly\apps\dashboard\api_client.py
+  moduly\apps\dashboard\navigation_config.py
+  moduly\apps\dashboard\pages\38_prediction_performance.py
+  tests\test_prediction_performance.py tests\test_api_authorization_regression.py
+  tests\test_dashboard_navigation_config.py` passed.
+- `.venv\Scripts\python.exe -m pytest tests\test_prediction_performance.py
+  tests\test_api_authorization_regression.py tests\test_dashboard_navigation_config.py
+  -q --tb=short` reported `201 passed`.
+- `.venv\Scripts\python.exe -m pytest tests\test_prediction_performance.py
+  tests\test_api_authorization_regression.py tests\test_dashboard_navigation_config.py
+  tests\test_prediction_contracts.py tests\test_prediction_backtest.py
+  tests\test_prediction_pipeline.py tests\test_prediction_storage.py
+  tests\test_vodomery_prediction.py tests\test_vodomery_prediction_adapter.py
+  tests\test_plynomery_prediction.py tests\test_plynomery_prediction_adapter.py
+  tests\test_elektromery_prediction.py tests\test_elektromery_prediction_adapter.py
+  -q --tb=short` reported `281 passed`.
+- Direct `.venv-production` collector call returned aggregate-only status
+  `ok`: vodomery `5` candidate rows, `58` selected-model snapshots, `3`
+  fallback snapshots, and `25` worst-identifier rows; plynomery `2`
+  candidate rows; elektromery `3` catalog candidates and `not_run` status.
+
+Not verified:
+- Authenticated browser rendering of the new `Predikce modelu` dashboard page
+  was not checked.
+- The running production FastAPI process has not loaded the new route yet;
+  it will require the supported restart/reload path before the dashboard page
+  can use the endpoint in production.
+- No live elektromery production prediction run was enabled; elektromery remain
+  catalog-only in this view until a future scheduler/report/scoring step.
+
+Follow-up:
+- Before relying on the new dashboard page in production, load the changed
+  FastAPI/Streamlit code through the supported restart path.
+
+### 2026-07-10 14:54 +02:00 - Pre-restart handoff after prediction performance view
+
+Reason for restart:
+- Load the new admin-only prediction performance API route and Streamlit
+  dashboard page into the supported production runtime process set.
+- Confirm after boot that FastAPI, Streamlit, scheduler, and Caddy start from
+  the current dirty working tree and that the new prediction performance view
+  works through the public dashboard route.
+
+Current task/conversation state:
+- Completed: post-restart verification from the earlier
+  `2026-07-10 13:14 +02:00` handoff.
+- Completed: shared prediction checklist step 18.
+- Completed: admin-only FastAPI route `GET /api/v1/prediction/performance`.
+- Completed: Streamlit admin page `Predikce modelu` at
+  `moduly/apps/dashboard/pages/38_prediction_performance.py`.
+- Completed: dashboard navigation entry `prediction_performance`.
+- Completed: API client method `get_prediction_performance`.
+- Completed: targeted tests and direct aggregate collector check for the new
+  prediction performance view.
+- Pending: workstation restart and post-restart verification.
+- First action after restart: read `AGENTS.md`, `DECISIONS.md`, and
+  `SESSION_NOTES.md`, run `git status --short --untracked-files=all`, then
+  execute the post-restart checks below.
+
+Working tree and deployment:
+- Branch: `master`
+- HEAD: `8a9b2e2e96b553b107864e9199172dbfd5363b80`
+- `git status --short --untracked-files=all` before restart:
+
+```text
+ M AGENTS.md
+ M SESSION_NOTES.md
+ M moduly/apps/dashboard/api_client.py
+ M moduly/apps/dashboard/navigation_config.py
+ M moduly/apps/dashboard/pages/37_system_health.py
+ M moduly/mereni/plynomery/plynomery_prediction.py
+ M moduly/mereni/prediction/__init__.py
+ M moduly/mereni/prediction/backtest.py
+ M moduly/mereni/vodomery/vodomery_prediction.py
+ M services/api/main.py
+ M services/api/services/system_health.py
+ M tests/test_api_authorization_regression.py
+ M tests/test_dashboard_navigation_config.py
+ M tests/test_plynomery_prediction.py
+ M tests/test_prediction_backtest.py
+ M tests/test_system_health.py
+?? moduly/apps/dashboard/pages/38_prediction_performance.py
+?? moduly/mereni/elektromery/elektromery_prediction.py
+?? moduly/mereni/elektromery/prediction_adapter.py
+?? moduly/mereni/plynomery/prediction_adapter.py
+?? moduly/mereni/prediction/periods.py
+?? moduly/mereni/prediction/pipeline.py
+?? services/api/routes/prediction.py
+?? services/api/schemas/prediction.py
+?? services/api/services/prediction_performance.py
+?? tests/test_elektromery_prediction.py
+?? tests/test_elektromery_prediction_adapter.py
+?? tests/test_plynomery_prediction_adapter.py
+?? tests/test_prediction_performance.py
+?? tests/test_prediction_pipeline.py
+```
+
+- `main.py` is unchanged.
+- No Caddy configuration changes were made. Root `Caddyfile` and runtime
+  `C:\Program Files\Caddy\Caddyfile` SHA-256 hashes matched before restart:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Runtime Caddy validation before restart reported `Valid configuration`.
+- Current running FastAPI/Streamlit processes have not loaded the new
+  prediction route/page code. Pre-restart public
+  `/api/v1/prediction/performance` without bearer returned HTTP `404`; after
+  restart the expected unauthenticated result is HTTP `401`.
+- Current pre-restart runtime snapshot:
+  - Windows boot time: `2026-07-10 13:17:55 +02:00`.
+  - Startup task `API_dashboard_caddy`: state `Ready`, last run
+    `2026-07-10 13:18:04 +02:00`, last result `0`.
+  - Expected listeners present before restart: Caddy on TCP `80`, TCP `443`,
+    and `127.0.0.1:2019`; FastAPI on `127.0.0.1:8000`; Streamlit on
+    `127.0.0.1:8001`; Tailscale retained interface-specific TCP `443`
+    listeners.
+  - Temporary ports `8010` and `8011` were not listening.
+  - FastAPI `/health/live` and `/health/ready`, Streamlit `/_stcore/health`,
+    and Caddy admin `/config/` returned HTTP `200`.
+  - Local Caddy Host/SNI route returned HTTPS dashboard HTTP `200`,
+    HTTP-to-HTTPS redirect HTTP `308`, `users-exist` HTTP `200`, protected
+    `/auth/me` HTTP `401`, map image without cookie HTTP `401`, and `/docs`
+    HTTP `404`.
+  - Scheduler metrics showed `scheduler_running=True`, heartbeat
+    `2026-07-10T14:53:11.082173`, and `quarter_hour_job` success at
+    `2026-07-10T14:47:09.626052` with `0` failures in the last 24 hours.
+
+Sensitive/runtime artifacts:
+- Do not print, read, modify, delete, or commit `.env` values, ProgramData
+  credential files, bearer tokens, cookie values, SmartFuelPass session JSON
+  payloads, raw portal rows, raw meter rows, raw device photo paths, or
+  production credentials.
+- Do not inspect local SOFTLINK auth files such as
+  `moduly/mereni/elektromery/SOFTLINK/lds_auth.json`.
+- Do not inspect or clean raw electric-meter data artifacts under
+  `moduly/mereni/elektromery/data/` unless explicitly requested.
+- Scheduler lock files under `core/scheduler/locks` are tracked runtime
+  artifacts; do not delete or rewrite them as part of restart verification.
+
+Expected processes after restart:
+- FastAPI/Uvicorn: one runtime on `127.0.0.1:8000`.
+- Streamlit: one runtime on `127.0.0.1:8001`.
+- Scheduler: one `main.py` runtime holding the scheduler process role.
+- Caddy: one runtime owning TCP `80`, TCP `443`, and admin
+  `127.0.0.1:2019`.
+- Temporary ports `8010` and `8011` should remain unused.
+- Tailscale may retain interface-specific TCP `443` listeners.
+
+Expected application state:
+- FastAPI `/health/live` and `/health/ready`: HTTP `200`.
+- Streamlit `/_stcore/health`: HTTP `200`.
+- Caddy admin `/config/`: HTTP `200`.
+- Public dashboard via local Caddy Host/SNI route: HTTPS dashboard HTTP `200`.
+- HTTP-to-HTTPS redirect: HTTP `308`.
+- `/api/v1/auth/users-exist`: HTTP `200`.
+- Protected API without bearer token: HTTP `401` JSON.
+- New `/api/v1/prediction/performance` without bearer token: HTTP `401`
+  JSON, confirming the new route is loaded and protected.
+- Map image without cookie: HTTP `401`.
+- `/docs`, `/redoc`, and `/openapi.json`: HTTP `404` at Caddy layer.
+- Public response headers should include HSTS, `nosniff`, `Referrer-Policy`,
+  `X-Frame-Options`, `Permissions-Policy`, and CSP report-only; `Server` and
+  `Via` should remain absent.
+- Scheduler metrics should show `scheduler_running=True`, a post-boot
+  heartbeat, and a post-boot `quarter_hour_job` observation after the next
+  scheduled slot.
+- Direct `.venv-production` prediction performance collector should return
+  aggregate-only `status=ok` with vodomery candidate/snapshot rows, plynomery
+  candidate rows, and elektromery catalog-only `not_run` status until a future
+  production electricity prediction run is explicitly enabled.
+
+Required post-restart checks:
+- Confirm Windows boot time is after this handoff and startup task
+  `API_dashboard_caddy` last result is `0`.
+- Confirm expected listeners and absence of temporary listeners.
+- Confirm FastAPI, Streamlit, and Caddy local health endpoints.
+- Confirm unauthenticated protected routes still return `401`, including
+  `/api/v1/prediction/performance` and `/health/system/smartfuelpass`.
+- Confirm local Caddy routing and public response headers; `Server` and `Via`
+  should remain absent.
+- Confirm root `Caddyfile` and runtime `C:\Program Files\Caddy\Caddyfile`
+  hashes still match, then validate the runtime Caddy configuration.
+- Confirm scheduler heartbeat and a fresh post-boot `quarter_hour_job`
+  observation.
+- Run direct production-environment prediction performance collector check:
+  `.venv-production\Scripts\python.exe -c "import json; from services.api.services.prediction_performance import collect_prediction_performance_report; r=collect_prediction_performance_report(); print(json.dumps({'status': r.status, 'media': [{'medium': m.medium_key, 'status': m.status, 'candidates': len(m.candidate_performance), 'catalog': len(m.candidate_catalog), 'snapshots': None if m.snapshot_summary is None else m.snapshot_summary.snapshot_count, 'fallbacks': None if m.snapshot_summary is None else m.snapshot_summary.fallback_count, 'worst_rows': len(m.worst_identifier_selections)} for m in r.media]}, default=str, ensure_ascii=False, indent=2))"`
+- Run targeted code verification:
+  `.venv\Scripts\python.exe -m py_compile services\api\schemas\prediction.py
+  services\api\services\prediction_performance.py services\api\routes\prediction.py
+  services\api\main.py moduly\apps\dashboard\api_client.py
+  moduly\apps\dashboard\navigation_config.py
+  moduly\apps\dashboard\pages\38_prediction_performance.py
+  tests\test_prediction_performance.py tests\test_api_authorization_regression.py
+  tests\test_dashboard_navigation_config.py`
+- Run targeted tests:
+  `.venv\Scripts\python.exe -m pytest tests\test_prediction_performance.py
+  tests\test_api_authorization_regression.py tests\test_dashboard_navigation_config.py
+  -q --tb=short`
+- Run broader prediction regression set:
+  `.venv\Scripts\python.exe -m pytest tests\test_prediction_performance.py
+  tests\test_api_authorization_regression.py tests\test_dashboard_navigation_config.py
+  tests\test_prediction_contracts.py tests\test_prediction_backtest.py
+  tests\test_prediction_pipeline.py tests\test_prediction_storage.py
+  tests\test_vodomery_prediction.py tests\test_vodomery_prediction_adapter.py
+  tests\test_plynomery_prediction.py tests\test_plynomery_prediction_adapter.py
+  tests\test_elektromery_prediction.py tests\test_elektromery_prediction_adapter.py
+  -q --tb=short`
+- If admin browser access is available, open `Predikce modelu` in the
+  dashboard and confirm the page loads candidate tables without exposing raw
+  measurement rows or secrets.
+- Finish with `git diff --check` and
+  `git status --short --untracked-files=all`.
+- Append a dated post-restart verification entry with results, deviations, and
+  accepted gaps.
+
+Known risks or accepted gaps:
+- The process set will load uncommitted working-tree changes. This is intended
+  for the agreed restart.
+- The new prediction view is read-only and aggregate-oriented; it does not
+  enable live elektromery prediction, scheduler rebuilds, report emails, or
+  scoring.
+- Elektromery are expected to show catalog-only `not_run` status in the new
+  view until a future reviewed step enables persisted production prediction
+  runs.
+- Authenticated browser rendering of the new `Predikce modelu` page still
+  requires post-restart manual/admin browser verification.
+- Direct public hostname routing from outside the workstation is not covered
+  by local Host/SNI checks.
+- Immediately after boot, scheduler metrics may not yet contain a post-boot
+  `quarter_hour_job` observation until the next scheduled slot.
+- The startup task starts the process set but does not supervise later child
+  process exits; recovery remains full-workstation restart.

@@ -4,8 +4,10 @@ from moduly.mereni.prediction.backtest import (
     PredictionBacktestPoint,
     PredictionBacktestResult,
     RollingBacktestCandidate,
+    build_rolling_backtest_folds,
     build_rolling_weekly_folds,
     calculate_metric_summary,
+    run_rolling_backtest,
     run_rolling_weekly_backtest,
     subtract_months,
 )
@@ -27,6 +29,20 @@ from moduly.mereni.prediction.contracts import (
     PredictionSelectionFallbackReason,
     PredictionSelectionMetadata,
     PredictionTimeWindow,
+)
+from moduly.mereni.prediction.periods import (
+    add_months,
+    build_next_forecast_period,
+    month_start,
+    next_month_start,
+)
+from moduly.mereni.prediction.pipeline import (
+    PredictionCandidateRegistry,
+    PredictionPipelineCandidateRun,
+    PredictionPipelineRunner,
+    PredictionPipelineSettings,
+    build_prediction_rebuild_windows,
+    select_best_prediction_candidate,
 )
 from moduly.mereni.prediction.storage import (
     PredictionSelectedModelSnapshot,
@@ -50,6 +66,7 @@ __all__ = [
     "PredictionBacktestPoint",
     "PredictionBacktestResult",
     "PredictionCandidateResult",
+    "PredictionCandidateRegistry",
     "PredictionCandidateSpec",
     "PredictionForecastCadence",
     "PredictionForecastPeriod",
@@ -57,6 +74,9 @@ __all__ = [
     "PredictionMediaAdapter",
     "PredictionMetricSummary",
     "PredictionObservation",
+    "PredictionPipelineCandidateRun",
+    "PredictionPipelineRunner",
+    "PredictionPipelineSettings",
     "PredictionCandidatePlugin",
     "PredictionProfilePoint",
     "PredictionRebuildWindows",
@@ -68,7 +88,11 @@ __all__ = [
     "RollingBacktestCandidate",
     "SELECTION_MODE_ACTIVE",
     "SELECTION_MODE_DRY_RUN",
+    "add_months",
     "build_insert_selected_model_snapshots_statement",
+    "build_next_forecast_period",
+    "build_prediction_rebuild_windows",
+    "build_rolling_backtest_folds",
     "build_selected_model_snapshot_lookup_statement",
     "build_rolling_weekly_folds",
     "calculate_metric_summary",
@@ -77,7 +101,11 @@ __all__ = [
     "load_selected_model_decision",
     "normalize_selection_mode",
     "persist_selected_model_decisions",
+    "run_rolling_backtest",
     "run_rolling_weekly_backtest",
+    "select_best_prediction_candidate",
     "selected_model_snapshot_row_to_decision",
+    "month_start",
+    "next_month_start",
     "subtract_months",
 ]

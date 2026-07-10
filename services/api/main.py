@@ -18,6 +18,7 @@ from services.api.routes.health import router as health_router
 from services.api.routes.kalorimetry import router as kalorimetry_router
 from services.api.routes.map import router as map_router
 from services.api.routes.manometry import router as manometry_router
+from services.api.routes.prediction import router as prediction_router
 from services.api.routes.plynomery import router as plynomery_router
 from services.api.routes.scheduler_health import router as scheduler_health_router
 from services.api.routes.system_health import router as system_health_router
@@ -93,6 +94,7 @@ def create_api_app(api_settings: ApiSettings = settings) -> FastAPI:
     application.include_router(kalorimetry_router)
     application.include_router(map_router)
     application.include_router(manometry_router)
+    application.include_router(prediction_router)
     application.include_router(plynomery_router)
     application.include_router(vodomery_router)
     application.include_router(web_search_router)

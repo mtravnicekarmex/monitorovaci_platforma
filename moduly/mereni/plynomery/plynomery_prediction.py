@@ -1,15 +1,26 @@
 from __future__ import annotations
 
-import calendar
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Sequence
+from typing import Callable, Sequence
 
 from sqlalchemy import text
 
 from app.time_utils import prague_now_naive
 from core.db.connect import ENGINE_PG, get_session_pg
 from moduly.apps.meteo.meteo_sync import ensure_meteo_tables
+from moduly.mereni.prediction import (
+    PredictionCandidateRegistry,
+    PredictionCandidateResult,
+    PredictionCandidateSpec,
+    PredictionForecastCadence,
+    PredictionForecastPeriodDefinition,
+    PredictionMetricSummary,
+    PredictionPipelineRunner,
+    PredictionPipelineSettings,
+    PredictionRebuildWindows,
+    build_prediction_rebuild_windows,
+)
 from moduly.mereni.plynomery.database.models import (
     PlynomeryModelSelectionCandidate,
     PlynomeryModelSelectionRun,
@@ -29,12 +40,41 @@ MIN_SLOT_HISTORY = 32
 MIN_STD = 0.0001
 MIN_HDD_VARIANCE = 0.0001
 LOCAL_TIMEZONE_NAME = "Europe/Prague"
+PLYNOMERY_MEDIUM_KEY = "plynomery"
+PLYNOMERY_FORECAST_PERIOD_DEFINITION = PredictionForecastPeriodDefinition(
+    cadence=PredictionForecastCadence.WEEKLY,
+    period_count=1,
+)
+PLYNOMERY_PIPELINE_SETTINGS = PredictionPipelineSettings(
+    medium_key=PLYNOMERY_MEDIUM_KEY,
+    forecast_period_definition=PLYNOMERY_FORECAST_PERIOD_DEFINITION,
+    default_training_window_months=MODEL_REBUILD_TRAINING_MONTHS,
+    default_validation_window_months=MODEL_VALIDATION_MONTHS,
+    candidate_coverage_threshold=MODEL_SELECTION_COVERAGE_THRESHOLD,
+    rolling_backtest_fold_count=0,
+    rolling_validation_period=PLYNOMERY_FORECAST_PERIOD_DEFINITION,
+)
 
 
 @dataclass(frozen=True)
 class CandidateModelDefinition:
     model_version: int
     model_name: str
+    model_key: str = ""
+    training_window_months: int = MODEL_REBUILD_TRAINING_MONTHS
+    validation_window_months: int = MODEL_VALIDATION_MONTHS
+    selection_enabled: bool = True
+
+    def to_prediction_spec(self) -> PredictionCandidateSpec:
+        return PredictionCandidateSpec(
+            medium_key=PLYNOMERY_MEDIUM_KEY,
+            model_version=self.model_version,
+            model_key=self.model_key or f"model_{self.model_version}",
+            model_name=self.model_name,
+            training_window_months=self.training_window_months,
+            validation_window_months=self.validation_window_months,
+            selection_enabled=self.selection_enabled,
+        )
 
 
 @dataclass(frozen=True)
@@ -68,6 +108,38 @@ class ModelPerformanceSummary:
     rmse: float | None
     bias: float | None
     profile_count: int
+    model_key: str | None = None
+    training_window_months: int | None = None
+    validation_window_months: int | None = None
+    selection_enabled: bool = True
+
+    def to_prediction_candidate_result(self) -> PredictionCandidateResult:
+        return PredictionCandidateResult(
+            spec=PredictionCandidateSpec(
+                medium_key=PLYNOMERY_MEDIUM_KEY,
+                model_version=self.model_version,
+                model_key=self.model_key or f"model_{self.model_version}",
+                model_name=self.model_name,
+                training_window_months=(
+                    self.training_window_months
+                    or PLYNOMERY_PIPELINE_SETTINGS.default_training_window_months
+                ),
+                validation_window_months=(
+                    self.validation_window_months
+                    or PLYNOMERY_PIPELINE_SETTINGS.default_validation_window_months
+                ),
+                selection_enabled=self.selection_enabled,
+            ),
+            metrics=PredictionMetricSummary(
+                validation_total_count=self.validation_total_count,
+                matched_validation_count=self.matched_validation_count,
+                coverage=self.coverage,
+                mae=self.mae,
+                rmse=self.rmse,
+                bias=self.bias,
+            ),
+            profile_count=self.profile_count,
+        )
 
     def to_dict(self, *, selected: bool) -> dict[str, object]:
         return {
@@ -84,20 +156,54 @@ class ModelPerformanceSummary:
         }
 
 
-CANDIDATE_MODELS: tuple[CandidateModelDefinition, ...] = (
-    CandidateModelDefinition(
-        model_version=MODEL_VERSION_BASELINE,
-        model_name="Model 1 - exact/fallback baseline",
-    ),
-    CandidateModelDefinition(
-        model_version=MODEL_VERSION_WEATHER_ADJUSTED,
-        model_name="Model 2 - weather adjusted baseline",
-    ),
-)
-MODEL_NAME_BY_VERSION = {
-    definition.model_version: definition.model_name
-    for definition in CANDIDATE_MODELS
-}
+@dataclass(frozen=True)
+class PlynomeryCandidateModelPlugin:
+    definition: CandidateModelDefinition
+    rebuild_fn: Callable[..., ModelPerformanceSummary]
+
+    @property
+    def spec(self) -> PredictionCandidateSpec:
+        return self.definition.to_prediction_spec()
+
+    def rebuild_candidate(
+        self,
+        session,
+        *,
+        windows: RebuildWindows,
+    ) -> ModelPerformanceSummary:
+        return self.rebuild_fn(
+            session,
+            definition=self.definition,
+            windows=windows,
+        )
+
+
+def _build_plynomery_pipeline_runner() -> PredictionPipelineRunner[PlynomeryCandidateModelPlugin]:
+    registry = PredictionCandidateRegistry(
+        medium_key=PLYNOMERY_MEDIUM_KEY,
+        plugins=(
+            PlynomeryCandidateModelPlugin(
+                definition=CandidateModelDefinition(
+                    model_version=MODEL_VERSION_BASELINE,
+                    model_key="exact_fallback_baseline",
+                    model_name="Model 1 - exact/fallback baseline",
+                ),
+                rebuild_fn=_rebuild_baseline_candidate,
+            ),
+            PlynomeryCandidateModelPlugin(
+                definition=CandidateModelDefinition(
+                    model_version=MODEL_VERSION_WEATHER_ADJUSTED,
+                    model_key="weather_adjusted_baseline",
+                    model_name="Model 2 - weather adjusted baseline",
+                ),
+                rebuild_fn=_rebuild_weather_adjusted_candidate,
+            ),
+        ),
+    )
+    return PredictionPipelineRunner(
+        settings=PLYNOMERY_PIPELINE_SETTINGS,
+        registry=registry,
+    )
 
 
 def ensure_prediction_tables() -> None:
@@ -238,11 +344,18 @@ def _ensure_model_selection_tables(conn) -> None:
 
 
 def get_candidate_model_definitions() -> tuple[CandidateModelDefinition, ...]:
-    return CANDIDATE_MODELS
+    return tuple(
+        plugin.definition
+        for plugin in _build_plynomery_pipeline_runner().list_plugins()
+    )
 
 
 def get_candidate_model_versions() -> tuple[int, ...]:
-    return tuple(definition.model_version for definition in get_candidate_model_definitions())
+    return _build_plynomery_pipeline_runner().list_model_versions()
+
+
+def get_candidate_model_specs() -> tuple[PredictionCandidateSpec, ...]:
+    return _build_plynomery_pipeline_runner().list_specs()
 
 
 def get_runtime_model_version(*, session=None, default: int = DEFAULT_MODEL_VERSION) -> int:
@@ -277,28 +390,39 @@ def build_rebuild_windows(
     training_window_months: int = MODEL_REBUILD_TRAINING_MONTHS,
     validation_window_months: int = MODEL_VALIDATION_MONTHS,
 ) -> RebuildWindows:
-    deploy_end = reference_time or prague_now_naive()
-    validation_end = deploy_end
-    validation_start = _subtract_months(validation_end, validation_window_months)
-    train_end = validation_start
-    train_start = _subtract_months(train_end, training_window_months)
-    deploy_start = train_start
-    return RebuildWindows(
-        train_start=train_start,
-        train_end=train_end,
-        validation_start=validation_start,
-        validation_end=validation_end,
-        deploy_start=deploy_start,
-        deploy_end=deploy_end,
+    return _to_plynomery_rebuild_windows(
+        build_prediction_rebuild_windows(
+            reference_time=reference_time or prague_now_naive(),
+            training_window_months=training_window_months,
+            validation_window_months=validation_window_months,
+        )
     )
 
 
-def _subtract_months(value: datetime, months: int) -> datetime:
-    month_index = value.month - months - 1
-    year = value.year + month_index // 12
-    month = month_index % 12 + 1
-    day = min(value.day, calendar.monthrange(year, month)[1])
-    return value.replace(year=year, month=month, day=day)
+def _to_plynomery_rebuild_windows(
+    windows: PredictionRebuildWindows,
+) -> RebuildWindows:
+    return RebuildWindows(
+        train_start=windows.train.start,
+        train_end=windows.train.end,
+        validation_start=windows.validation.start,
+        validation_end=windows.validation.end,
+        deploy_start=windows.deploy.start,
+        deploy_end=windows.deploy.end,
+    )
+
+
+def _build_windows_for_definition(
+    definition: CandidateModelDefinition,
+    *,
+    reference_time: datetime,
+) -> RebuildWindows:
+    return _to_plynomery_rebuild_windows(
+        _build_plynomery_pipeline_runner().build_rebuild_windows(
+            reference_time=reference_time,
+            spec=definition.to_prediction_spec(),
+        )
+    )
 
 
 def select_best_model_summary(
@@ -306,48 +430,42 @@ def select_best_model_summary(
     *,
     coverage_threshold: float = MODEL_SELECTION_COVERAGE_THRESHOLD,
 ) -> ModelPerformanceSummary | None:
-    eligible_summaries = [
-        summary
-        for summary in summaries
-        if summary.validation_total_count > 0
-        and summary.matched_validation_count > 0
-        and summary.mae is not None
-        and summary.rmse is not None
-        and summary.bias is not None
-    ]
-    if not eligible_summaries:
-        return None
-
-    return min(
-        eligible_summaries,
-        key=lambda summary: (
-            0 if summary.coverage >= coverage_threshold else 1,
-            summary.mae,
-            summary.rmse,
-            abs(summary.bias),
-            -summary.matched_validation_count,
-            summary.model_version,
+    summary_by_version = {summary.model_version: summary for summary in summaries}
+    selected = _build_plynomery_pipeline_runner().select_best_candidate(
+        (
+            summary.to_prediction_candidate_result()
+            for summary in summary_by_version.values()
         ),
+        coverage_threshold=coverage_threshold,
     )
+    if selected is None:
+        return None
+    return summary_by_version[selected.spec.model_version]
 
 
 def rebuild_profiles(
     model_version: int | None = None,
     reference_time: datetime | None = None,
 ) -> dict[str, object]:
+    resolved_reference_time = reference_time or prague_now_naive()
     if model_version is not None and model_version not in get_candidate_model_versions():
         raise ValueError(f"Neznama verze modelu: {model_version}")
 
     ensure_prediction_tables()
-    windows = build_rebuild_windows(reference_time=reference_time)
 
     if model_version is not None:
-        definition = MODEL_NAME_BY_VERSION[model_version]
+        definition = _get_candidate_model_definition(model_version)
+        if definition is None:
+            raise ValueError(f"Neznama verze modelu: {model_version}")
+        windows = _build_windows_for_definition(
+            definition,
+            reference_time=resolved_reference_time,
+        )
         session = get_session_pg()
         try:
             summary = _rebuild_candidate_model(
                 session,
-                definition=CandidateModelDefinition(model_version, definition),
+                definition=definition,
                 windows=windows,
             )
             session.commit()
@@ -365,20 +483,26 @@ def rebuild_profiles(
         finally:
             session.close()
 
+    windows = build_rebuild_windows(reference_time=resolved_reference_time)
     session = get_session_pg()
     try:
         previous_active_model_version = get_runtime_model_version(
             session=session,
             default=DEFAULT_MODEL_VERSION,
         )
-        summaries = [
-            _rebuild_candidate_model(
-                session,
-                definition=definition,
-                windows=windows,
+        summaries = []
+        for definition in get_candidate_model_definitions():
+            candidate_windows = _build_windows_for_definition(
+                definition,
+                reference_time=resolved_reference_time,
             )
-            for definition in get_candidate_model_definitions()
-        ]
+            summaries.append(
+                _rebuild_candidate_model(
+                    session,
+                    definition=definition,
+                    windows=candidate_windows,
+                )
+            )
         selected_summary = select_best_model_summary(summaries)
         if selected_summary is None:
             selected_summary = next(
@@ -403,10 +527,7 @@ def rebuild_profiles(
             "active_model_version": selected_summary.model_version,
             "active_model_name": selected_summary.model_name,
             "previous_active_model_version": previous_active_model_version,
-            "previous_active_model_name": MODEL_NAME_BY_VERSION.get(
-                previous_active_model_version,
-                f"Model {previous_active_model_version}",
-            ),
+            "previous_active_model_name": _get_model_name(previous_active_model_version),
             "windows": {
                 "train_start": windows.train_start,
                 "train_end": windows.train_end,
@@ -435,27 +556,45 @@ def _rebuild_candidate_model(
     definition: CandidateModelDefinition,
     windows: RebuildWindows,
 ) -> ModelPerformanceSummary:
-    if definition.model_version == MODEL_VERSION_BASELINE:
-        return _rebuild_baseline_candidate(
-            session,
-            model_version=definition.model_version,
-            windows=windows,
-        )
-    if definition.model_version == MODEL_VERSION_WEATHER_ADJUSTED:
-        return _rebuild_weather_adjusted_candidate(
-            session,
-            model_version=definition.model_version,
-            windows=windows,
-        )
+    plugin = _get_candidate_model_plugin(definition.model_version)
+    if plugin is not None:
+        return plugin.rebuild_candidate(session, windows=windows)
     raise ValueError(f"Neznama verze modelu: {definition.model_version}")
+
+
+def _get_candidate_model_definition(
+    model_version: int,
+) -> CandidateModelDefinition | None:
+    return next(
+        (
+            definition
+            for definition in get_candidate_model_definitions()
+            if definition.model_version == model_version
+        ),
+        None,
+    )
+
+
+def _get_candidate_model_plugin(
+    model_version: int,
+) -> PlynomeryCandidateModelPlugin | None:
+    return _build_plynomery_pipeline_runner().get_plugin(model_version)
+
+
+def _get_model_name(model_version: int) -> str:
+    plugin = _get_candidate_model_plugin(model_version)
+    if plugin is None:
+        return f"Model {model_version}"
+    return plugin.spec.model_name
 
 
 def _rebuild_baseline_candidate(
     session,
     *,
-    model_version: int,
+    definition: CandidateModelDefinition,
     windows: RebuildWindows,
 ) -> ModelPerformanceSummary:
+    model_version = definition.model_version
     evaluation_version = _build_evaluation_model_version(model_version)
     _replace_profiles(
         session,
@@ -479,7 +618,11 @@ def _rebuild_baseline_candidate(
     profile_count = _count_profiles(session, model_version)
     return ModelPerformanceSummary(
         model_version=model_version,
-        model_name=MODEL_NAME_BY_VERSION[model_version],
+        model_name=definition.model_name,
+        model_key=definition.model_key,
+        training_window_months=definition.training_window_months,
+        validation_window_months=definition.validation_window_months,
+        selection_enabled=definition.selection_enabled,
         validation_total_count=validation.validation_total_count,
         matched_validation_count=validation.matched_validation_count,
         coverage=validation.coverage,
@@ -493,9 +636,10 @@ def _rebuild_baseline_candidate(
 def _rebuild_weather_adjusted_candidate(
     session,
     *,
-    model_version: int,
+    definition: CandidateModelDefinition,
     windows: RebuildWindows,
 ) -> ModelPerformanceSummary:
+    model_version = definition.model_version
     evaluation_version = _build_evaluation_model_version(model_version)
     _replace_weather_profiles(
         session,
@@ -519,7 +663,11 @@ def _rebuild_weather_adjusted_candidate(
     profile_count = _count_weather_profiles(session, model_version)
     return ModelPerformanceSummary(
         model_version=model_version,
-        model_name=MODEL_NAME_BY_VERSION[model_version],
+        model_name=definition.model_name,
+        model_key=definition.model_key,
+        training_window_months=definition.training_window_months,
+        validation_window_months=definition.validation_window_months,
+        selection_enabled=definition.selection_enabled,
         validation_total_count=validation.validation_total_count,
         matched_validation_count=validation.matched_validation_count,
         coverage=validation.coverage,

@@ -10,6 +10,7 @@ from moduly.mereni.plynomery.plynomery_prediction import (
     MODEL_VERSION_WEATHER_ADJUSTED,
     ModelPerformanceSummary,
     build_rebuild_windows,
+    get_candidate_model_specs,
     get_candidate_model_versions,
     select_best_model_summary,
 )
@@ -49,6 +50,42 @@ def test_plynomery_candidate_model_versions_includes_weather_adjusted_candidate(
         MODEL_VERSION_BASELINE,
         MODEL_VERSION_WEATHER_ADJUSTED,
     )
+
+
+def test_plynomery_candidate_model_specs_expose_shared_prediction_metadata():
+    specs = get_candidate_model_specs()
+
+    assert [
+        (
+            spec.medium_key,
+            spec.model_version,
+            spec.model_key,
+            spec.model_name,
+            spec.training_window_months,
+            spec.validation_window_months,
+            spec.selection_enabled,
+        )
+        for spec in specs
+    ] == [
+        (
+            "plynomery",
+            MODEL_VERSION_BASELINE,
+            "exact_fallback_baseline",
+            "Model 1 - exact/fallback baseline",
+            3,
+            1,
+            True,
+        ),
+        (
+            "plynomery",
+            MODEL_VERSION_WEATHER_ADJUSTED,
+            "weather_adjusted_baseline",
+            "Model 2 - weather adjusted baseline",
+            3,
+            1,
+            True,
+        ),
+    ]
 
 
 def test_plynomery_runtime_model_version_uses_latest_selection(monkeypatch):

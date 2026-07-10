@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import calendar
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from math import sqrt
@@ -8,10 +7,13 @@ from typing import Protocol, Sequence
 
 from moduly.mereni.prediction.contracts import (
     PredictionCandidateSpec,
+    PredictionForecastCadence,
+    PredictionForecastPeriodDefinition,
     PredictionMediaAdapter,
     PredictionMetricSummary,
     PredictionTimeWindow,
 )
+from moduly.mereni.prediction.periods import month_start, subtract_months
 
 
 @dataclass(frozen=True)
@@ -84,18 +86,118 @@ def build_rolling_weekly_folds(
     training_window_months: int,
     validation_days: int = 7,
 ) -> tuple[PredictionBacktestFold, ...]:
+    if validation_days <= 0:
+        raise ValueError("Rolling backtest validation days must be positive.")
+    return _build_fixed_delta_folds(
+        reference_end=reference_end,
+        fold_count=fold_count,
+        training_window_months=training_window_months,
+        validation_delta=timedelta(days=validation_days),
+    )
+
+
+def build_rolling_backtest_folds(
+    *,
+    reference_end: datetime,
+    fold_count: int,
+    training_window_months: int,
+    validation_period: PredictionForecastPeriodDefinition,
+) -> tuple[PredictionBacktestFold, ...]:
+    period_definition = PredictionForecastPeriodDefinition(
+        cadence=validation_period.cadence,
+        period_count=validation_period.period_count,
+        label=validation_period.label,
+    )
+    if period_definition.cadence is PredictionForecastCadence.WEEKLY:
+        return _build_fixed_delta_folds(
+            reference_end=reference_end,
+            fold_count=fold_count,
+            training_window_months=training_window_months,
+            validation_delta=timedelta(days=7 * period_definition.period_count),
+        )
+    if period_definition.cadence is PredictionForecastCadence.MONTHLY:
+        return _build_calendar_month_folds(
+            reference_end=reference_end,
+            fold_count=fold_count,
+            training_window_months=training_window_months,
+            validation_months=period_definition.period_count,
+        )
+    raise ValueError(
+        f"Unsupported rolling backtest cadence: {period_definition.cadence.value}"
+    )
+
+
+def _validate_rolling_backtest_windows(
+    *,
+    fold_count: int,
+    training_window_months: int,
+) -> None:
     if fold_count <= 0:
         raise ValueError("Rolling backtest fold count must be positive.")
     if training_window_months <= 0:
         raise ValueError("Rolling backtest training window must be positive.")
-    if validation_days <= 0:
-        raise ValueError("Rolling backtest validation days must be positive.")
 
-    validation_delta = timedelta(days=validation_days)
+
+def _build_fixed_delta_folds(
+    *,
+    reference_end: datetime,
+    fold_count: int,
+    training_window_months: int,
+    validation_delta: timedelta,
+) -> tuple[PredictionBacktestFold, ...]:
+    _validate_rolling_backtest_windows(
+        fold_count=fold_count,
+        training_window_months=training_window_months,
+    )
+    if validation_delta <= timedelta(0):
+        raise ValueError("Rolling backtest validation window must be positive.")
+
     folds: list[PredictionBacktestFold] = []
     for offset in reversed(range(fold_count)):
         validation_end = reference_end - validation_delta * offset
         validation_start = validation_end - validation_delta
+        train_start = subtract_months(validation_start, training_window_months)
+        fold_index = len(folds) + 1
+        folds.append(
+            PredictionBacktestFold(
+                fold_index=fold_index,
+                train=PredictionTimeWindow(
+                    start=train_start,
+                    end=validation_start,
+                    label=f"train_fold_{fold_index}",
+                ),
+                validation=PredictionTimeWindow(
+                    start=validation_start,
+                    end=validation_end,
+                    label=f"validation_fold_{fold_index}",
+                ),
+            )
+        )
+    return tuple(folds)
+
+
+def _build_calendar_month_folds(
+    *,
+    reference_end: datetime,
+    fold_count: int,
+    training_window_months: int,
+    validation_months: int,
+) -> tuple[PredictionBacktestFold, ...]:
+    _validate_rolling_backtest_windows(
+        fold_count=fold_count,
+        training_window_months=training_window_months,
+    )
+    if validation_months <= 0:
+        raise ValueError("Rolling backtest validation months must be positive.")
+
+    latest_validation_end = month_start(reference_end)
+    folds: list[PredictionBacktestFold] = []
+    for offset in reversed(range(fold_count)):
+        validation_end = subtract_months(
+            latest_validation_end,
+            validation_months * offset,
+        )
+        validation_start = subtract_months(validation_end, validation_months)
         train_start = subtract_months(validation_start, training_window_months)
         fold_index = len(folds) + 1
         folds.append(
@@ -176,7 +278,40 @@ def run_rolling_weekly_backtest(
         training_window_months=candidate.spec.training_window_months,
         validation_days=validation_days,
     )
+    return _run_rolling_backtest_for_folds(
+        adapter=adapter,
+        candidate=candidate,
+        folds=folds,
+    )
 
+
+def run_rolling_backtest(
+    *,
+    adapter: PredictionMediaAdapter,
+    candidate: RollingBacktestCandidate,
+    reference_end: datetime,
+    fold_count: int,
+    validation_period: PredictionForecastPeriodDefinition,
+) -> PredictionBacktestResult:
+    folds = build_rolling_backtest_folds(
+        reference_end=reference_end,
+        fold_count=fold_count,
+        training_window_months=candidate.spec.training_window_months,
+        validation_period=validation_period,
+    )
+    return _run_rolling_backtest_for_folds(
+        adapter=adapter,
+        candidate=candidate,
+        folds=folds,
+    )
+
+
+def _run_rolling_backtest_for_folds(
+    *,
+    adapter: PredictionMediaAdapter,
+    candidate: RollingBacktestCandidate,
+    folds: Sequence[PredictionBacktestFold],
+) -> PredictionBacktestResult:
     fold_results: list[PredictionBacktestFoldResult] = []
     all_points: list[PredictionBacktestPoint] = []
     for fold in folds:
@@ -201,13 +336,3 @@ def run_rolling_weekly_backtest(
         folds=tuple(fold_results),
         metrics=calculate_metric_summary(tuple(all_points)),
     )
-
-
-def subtract_months(value: datetime, months: int) -> datetime:
-    if months < 0:
-        raise ValueError("Month subtraction expects a non-negative value.")
-    month_index = value.month - months - 1
-    year = value.year + month_index // 12
-    month = month_index % 12 + 1
-    day = min(value.day, calendar.monthrange(year, month)[1])
-    return value.replace(year=year, month=month, day=day)

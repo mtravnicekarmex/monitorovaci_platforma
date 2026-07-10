@@ -6,10 +6,15 @@ from moduly.mereni.prediction import (
     CandidateProfileBuildResult,
     PredictionBacktestPoint,
     PredictionCandidateSpec,
+    PredictionForecastCadence,
+    PredictionForecastPeriodDefinition,
     PredictionProfilePoint,
     PredictionTimeWindow,
+    build_next_forecast_period,
+    build_rolling_backtest_folds,
     build_rolling_weekly_folds,
     calculate_metric_summary,
+    run_rolling_backtest,
     run_rolling_weekly_backtest,
     subtract_months,
 )
@@ -106,6 +111,52 @@ def test_build_rolling_weekly_folds_returns_oldest_to_newest_folds():
     assert folds[-1].train.start == datetime.datetime(2026, 3, 29)
 
 
+def test_build_next_forecast_period_supports_weekly_and_monthly_cadence():
+    reference_time = datetime.datetime(2026, 7, 15, 9, 30, 5)
+
+    weekly = build_next_forecast_period(
+        reference_time=reference_time,
+        definition=PredictionForecastPeriodDefinition(
+            cadence=PredictionForecastCadence.WEEKLY,
+            period_count=1,
+        ),
+    )
+    monthly = build_next_forecast_period(
+        reference_time=reference_time,
+        definition=PredictionForecastPeriodDefinition(
+            cadence=PredictionForecastCadence.MONTHLY,
+            period_count=1,
+        ),
+    )
+
+    assert weekly.start == reference_time
+    assert weekly.end == datetime.datetime(2026, 7, 22, 9, 30, 5)
+    assert weekly.label == "2026-07-15 09:30 - 2026-07-22 09:30"
+    assert monthly.start == datetime.datetime(2026, 8, 1)
+    assert monthly.end == datetime.datetime(2026, 9, 1)
+    assert monthly.label == "2026-08"
+
+
+def test_build_rolling_backtest_folds_supports_monthly_calendar_folds():
+    folds = build_rolling_backtest_folds(
+        reference_end=datetime.datetime(2026, 7, 15, 12, 0),
+        fold_count=3,
+        training_window_months=6,
+        validation_period=PredictionForecastPeriodDefinition(
+            cadence=PredictionForecastCadence.MONTHLY,
+            period_count=1,
+        ),
+    )
+
+    assert [(fold.validation.start, fold.validation.end) for fold in folds] == [
+        (datetime.datetime(2026, 4, 1), datetime.datetime(2026, 5, 1)),
+        (datetime.datetime(2026, 5, 1), datetime.datetime(2026, 6, 1)),
+        (datetime.datetime(2026, 6, 1), datetime.datetime(2026, 7, 1)),
+    ]
+    assert folds[0].train.start == datetime.datetime(2025, 10, 1)
+    assert folds[-1].train.start == datetime.datetime(2025, 12, 1)
+
+
 def test_build_rolling_weekly_folds_rejects_empty_fold_count():
     with pytest.raises(ValueError, match="fold count"):
         build_rolling_weekly_folds(
@@ -180,3 +231,25 @@ def test_run_rolling_weekly_backtest_aggregates_synthetic_fold_metrics():
         "wape": 0.066667,
     }
     assert result.folds[0].to_dict()["prediction_count"] == 2
+
+
+def test_run_rolling_backtest_supports_monthly_periods():
+    candidate = SyntheticWeeklyCandidate()
+    result = run_rolling_backtest(
+        adapter=SyntheticAdapter(),
+        candidate=candidate,
+        reference_end=datetime.datetime(2026, 7, 15),
+        fold_count=2,
+        validation_period=PredictionForecastPeriodDefinition(
+            cadence=PredictionForecastCadence.MONTHLY,
+            period_count=1,
+        ),
+    )
+
+    assert len(result.folds) == 2
+    assert len(candidate.calls) == 2
+    assert candidate.calls[0][0].start == datetime.datetime(2026, 2, 1)
+    assert candidate.calls[0][1].start == datetime.datetime(2026, 5, 1)
+    assert candidate.calls[1][1].end == datetime.datetime(2026, 7, 1)
+    assert result.metrics.validation_total_count == 4
+    assert result.metrics.coverage == 1.0

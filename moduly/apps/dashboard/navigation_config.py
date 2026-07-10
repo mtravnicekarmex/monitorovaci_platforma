@@ -310,6 +310,14 @@ PAGES: tuple[DashboardPage, ...] = (
         admin_only=True,
     ),
     DashboardPage(
+        key="prediction_performance",
+        path="pages/38_prediction_performance.py",
+        title="Predikce modelu",
+        icon="M",
+        sidebar_location="footer",
+        admin_only=True,
+    ),
+    DashboardPage(
         key="outlier_review",
         path="pages/17_outlier_review.py",
         title="Review outlieru",

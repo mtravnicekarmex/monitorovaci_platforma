@@ -61,10 +61,22 @@ def test_shared_outlier_review_footer_page_is_after_system_health():
     footer_page_keys = [page.key for page in get_dashboard_pages("footer")]
 
     assert "system_health" in footer_page_keys
+    assert "prediction_performance" in footer_page_keys
     assert "outlier_review" in footer_page_keys
     assert "vodomery_outlier_review" not in footer_page_keys
     assert "plynomery_outlier_review" not in footer_page_keys
-    assert footer_page_keys.index("system_health") < footer_page_keys.index("outlier_review")
+    assert footer_page_keys.index("system_health") < footer_page_keys.index("prediction_performance")
+    assert footer_page_keys.index("prediction_performance") < footer_page_keys.index("outlier_review")
+
+
+def test_prediction_performance_footer_page_is_admin_only():
+    page = get_page_definition("prediction_performance")
+    footer_page_keys = [page.key for page in get_dashboard_pages("footer")]
+
+    assert page is not None
+    assert page.admin_only is True
+    assert page.configurable is False
+    assert "prediction_performance" in footer_page_keys
 
 
 def test_manometry_section_and_page_are_configurable():

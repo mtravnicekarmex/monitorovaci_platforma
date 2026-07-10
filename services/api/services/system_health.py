@@ -944,6 +944,7 @@ def _build_smartfuelpass_table_status(
     row: dict[str, Any],
     *,
     now: datetime,
+    sync_job: SystemSmartFuelPassJobMetricStatus | None = None,
 ) -> SystemSmartFuelPassTableStatus:
     total_session_count = max(0, int(row.get("total_session_count") or 0))
     sessions_with_utc_count = max(0, int(row.get("sessions_with_utc_count") or 0))
@@ -963,8 +964,28 @@ def _build_smartfuelpass_table_status(
         last_import_age_seconds is not None
         and last_import_age_seconds > SMARTFUELPASS_TABLE_MAX_IMPORT_AGE_SECONDS
     ):
-        status = "degraded"
-        details.append("Last synced database import is older than the expected daily sync window.")
+        sync_age_seconds = (
+            _seconds_since(now, sync_job.last_run)
+            if sync_job is not None and sync_job.last_run is not None
+            else None
+        )
+        recent_successful_sync = (
+            sync_job is not None
+            and sync_job.status == "ok"
+            and str(sync_job.last_status or "").lower() == "success"
+            and sync_age_seconds is not None
+            and sync_age_seconds <= SMARTFUELPASS_TABLE_MAX_IMPORT_AGE_SECONDS
+        )
+        if recent_successful_sync:
+            details.append(
+                "No newly inserted SmartFuelPass sessions were recorded recently, "
+                "but the scheduler sync ran successfully within the expected daily window."
+            )
+        else:
+            status = "degraded"
+            details.append(
+                "Last newly inserted SmartFuelPass session is older than the expected daily sync window."
+            )
     if missing_ended_at_utc_count > 0:
         status = "degraded"
         details.append("Some synced sessions are missing normalized UTC end time.")
@@ -1140,7 +1161,11 @@ def collect_system_smartfuelpass_health() -> SystemSmartFuelPassHealthResponse:
                 .mappings()
                 .one()
             )
-            table = _build_smartfuelpass_table_status(dict(aggregate_row), now=checked_at)
+            table = _build_smartfuelpass_table_status(
+                dict(aggregate_row),
+                now=checked_at,
+                sync_job=sync_job,
+            )
             report_periods = _query_smartfuelpass_period_summaries(
                 session,
                 reference_datetime=reference_datetime,

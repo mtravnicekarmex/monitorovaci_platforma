@@ -444,6 +444,15 @@ def get_system_smartfuelpass_health(access_token: str) -> dict[str, object]:
     return dict(response.json())
 
 
+def get_prediction_performance(access_token: str) -> dict[str, object]:
+    response = _request(
+        "GET",
+        "/api/v1/prediction/performance",
+        access_token=access_token,
+    )
+    return dict(response.json())
+
+
 def get_scheduler_log(
     access_token: str,
     *,

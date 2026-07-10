@@ -478,6 +478,28 @@ def test_collect_system_smartfuelpass_health_reports_ok(monkeypatch):
     assert session.closed is True
 
 
+def test_collect_system_smartfuelpass_health_accepts_recent_sync_without_new_sessions(monkeypatch):
+    reference_time = datetime.now()
+    aggregate_row = _smartfuelpass_aggregate_row(reference_time)
+    aggregate_row["last_imported_at"] = reference_time - timedelta(days=3)
+    session = _FakeSmartFuelPassSession(
+        aggregate_row=aggregate_row,
+        period_rows=_smartfuelpass_period_rows(),
+    )
+    monkeypatch.setattr(system_health, "get_session_pg", lambda: session)
+    monkeypatch.setattr(
+        system_health,
+        "get_metrics_store",
+        lambda *args, **kwargs: _fake_smartfuelpass_metrics(reference_time),
+    )
+
+    response = system_health.collect_system_smartfuelpass_health()
+
+    assert response.status == "ok"
+    assert response.table.status == "ok"
+    assert "No newly inserted SmartFuelPass sessions" in response.table.detail
+
+
 def test_collect_system_smartfuelpass_health_reports_missing_table(monkeypatch):
     reference_time = datetime.now()
     session = _FakeSmartFuelPassSession(table_present=False)

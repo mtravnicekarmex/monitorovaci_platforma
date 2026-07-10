@@ -46,6 +46,11 @@ At the end of every substantive session:
 - `services/api/core/config.py`: FastAPI runtime settings, including token and CORS configuration.
 - `services/api/core/tokens.py`: custom HMAC bearer token implementation.
 - `services/api/core/dependencies.py`: API authentication, admin, section, and device access dependencies.
+- `services/api/routes/prediction.py`: admin-only prediction performance API
+  routes for cross-media candidate and per-identifier selection views.
+- `services/api/services/prediction_performance.py`: read-only cross-media
+  prediction performance aggregation for candidate runs, selected-model
+  snapshots, and candidate catalogs.
 - `services/api/routes/system_health.py`: admin-only system health API routes
   for safe post-restart/runtime checks.
 - `services/api/services/system_health.py`: sanitized Windows runtime probes
@@ -62,6 +67,9 @@ At the end of every substantive session:
 - `moduly/apps/dashboard/database/db_init.py`: dashboard and feature table bootstrap.
 - `moduly/apps/dashboard/pages/37_system_health.py`: Streamlit admin page for
   safe system health and post-restart verification checks.
+- `moduly/apps/dashboard/pages/38_prediction_performance.py`: Streamlit
+  admin page for cross-media prediction candidate performance and
+  per-identifier selected-model snapshots.
 - `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`: Streamlit admin page for map layer configuration.
 - `moduly/apps/dashboard/pages/36_mapove_podklady.py`: Streamlit `Mapove podklady / Mapa` page.
 - `moduly/apps/smartfuelpass/service.py`: SmartFuelPass portal access,

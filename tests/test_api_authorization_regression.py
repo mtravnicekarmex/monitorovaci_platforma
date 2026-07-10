@@ -57,6 +57,7 @@ EXPECTED_ADMIN_OPERATIONS = {
     ("PATCH", "/api/v1/admin/revize/{revize_id}"),
     ("POST", "/api/v1/admin/devices/{meter_key}"),
     ("PATCH", "/api/v1/admin/devices/{meter_key}"),
+    ("GET", "/api/v1/prediction/performance"),
     ("GET", "/api/v1/kalorimetry/devices"),
     ("GET", "/api/v1/kalorimetry/outlier-reviews"),
     ("PATCH", "/api/v1/kalorimetry/outlier-reviews/{review_id}"),

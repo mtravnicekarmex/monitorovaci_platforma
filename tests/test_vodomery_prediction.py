@@ -1,6 +1,7 @@
 import datetime
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -28,17 +29,17 @@ def test_build_rebuild_windows_uses_one_month_validation_after_three_month_train
     assert windows.deploy_start == windows.train_start
 
 
-def test_build_vodomery_weekly_forecast_period_uses_next_seven_days():
+def test_build_vodomery_weekly_forecast_period_uses_calendar_week():
     reference_time = datetime.datetime(2026, 7, 13, 4, 10, 5)
 
     period = vodomery_prediction.build_vodomery_weekly_forecast_period(
         reference_time=reference_time,
     )
 
-    assert period.start == reference_time
-    assert period.end == datetime.datetime(2026, 7, 20, 4, 10, 5)
+    assert period.start == datetime.datetime(2026, 7, 13)
+    assert period.end == datetime.datetime(2026, 7, 20)
     assert period.cadence.value == "weekly"
-    assert period.label == "2026-07-13 04:10 - 2026-07-20 04:10"
+    assert period.label == "2026-07-13 - 2026-07-20"
 
 
 def test_get_candidate_model_versions_default_excludes_measured_only_candidate():
@@ -238,11 +239,27 @@ def test_rebuild_profiles_persists_active_selected_model_snapshots(monkeypatch):
         captured["decisions"] = tuple(decisions)
         return len(decisions)
 
+    def fake_build_profile_snapshot_rows(session, decisions, **kwargs):
+        captured["profile_snapshot_decisions"] = tuple(decisions)
+        captured["profile_snapshot_kwargs"] = kwargs
+        return (
+            {"identifier": "L1_V1", "model_version": 2},
+        )
+
+    def fake_persist_profile_snapshots(session, rows):
+        captured["profile_snapshot_rows"] = tuple(rows)
+        return 42
+
     monkeypatch.setattr(vodomery_prediction, "ensure_vodomery_model_validation_tables", lambda: None)
     monkeypatch.setattr(
         vodomery_prediction,
         "ensure_prediction_selected_model_snapshot_table",
         lambda: captured.update({"ensured_snapshot_table": True}),
+    )
+    monkeypatch.setattr(
+        vodomery_prediction,
+        "ensure_prediction_profile_snapshot_table",
+        lambda: captured.update({"ensured_profile_snapshot_table": True}),
     )
     monkeypatch.setattr(vodomery_prediction, "drop_legacy_identifikace_fk", lambda table_name: None)
     monkeypatch.setattr(vodomery_prediction, "get_session_pg", lambda: FakeSession())
@@ -264,23 +281,41 @@ def test_rebuild_profiles_persists_active_selected_model_snapshots(monkeypatch):
         "persist_selected_model_decisions",
         fake_persist_snapshots,
     )
+    monkeypatch.setattr(
+        vodomery_prediction,
+        "_build_selected_prediction_profile_snapshot_rows",
+        fake_build_profile_snapshot_rows,
+    )
+    monkeypatch.setattr(
+        vodomery_prediction,
+        "persist_prediction_profile_snapshots",
+        fake_persist_profile_snapshots,
+    )
 
     result = vodomery_prediction.rebuild_profiles(reference_time=reference_time)
 
     assert captured["ensured_snapshot_table"] is True
+    assert captured["ensured_profile_snapshot_table"] is True
     assert captured["selection_mode"] == "active"
     assert len(captured["decisions"]) == 1
+    assert captured["profile_snapshot_decisions"] == captured["decisions"]
     decision = captured["decisions"][0]
     assert decision.selection_run_id == 91
     assert decision.identifier == "L1_V1"
     assert decision.selected_model_version == 2
     assert decision.global_model_version == 3
     assert decision.metadata["selection_mode"] == "active"
-    assert decision.forecast_period.start == reference_time
-    assert decision.forecast_period.end == datetime.datetime(2026, 7, 20, 4, 10, 5)
+    assert decision.forecast_period.start == datetime.datetime(2026, 7, 13)
+    assert decision.forecast_period.end == datetime.datetime(2026, 7, 20)
     assert result["active_model_version"] == 3
     assert result["selected_model_snapshot_mode"] == "active"
     assert result["selected_model_snapshot_count"] == 1
+    assert result["prediction_profile_snapshot_source"] == "weekly_rebuild"
+    assert result["prediction_profile_snapshot_count"] == 42
+    assert result["prediction_profile_snapshot_pair_count"] == 1
+    assert result["prediction_profile_snapshot_missing_pair_count"] == 0
+    assert captured["profile_snapshot_kwargs"]["require_all_pairs"] is False
+    assert captured["profile_snapshot_rows"] == ({"identifier": "L1_V1", "model_version": 2},)
     assert result["selected_model_snapshots"][0]["identifier"] == "L1_V1"
     assert result["selected_model_snapshots"][0]["selected_model_version"] == 2
     assert result["selected_model_snapshots"][0]["global_model_version"] == 3
@@ -828,6 +863,240 @@ def test_build_selected_model_decisions_fallbacks_below_coverage():
     assert decision.fallback_reason is vodomery_prediction.PredictionSelectionFallbackReason.BELOW_COVERAGE_THRESHOLD
     assert decision.metrics is not None
     assert decision.metrics.wape == 0.2
+
+
+def test_persist_selected_prediction_profile_snapshots_writes_selected_models(monkeypatch):
+    forecast_period = vodomery_prediction.build_vodomery_weekly_forecast_period(
+        reference_time=datetime.datetime(2026, 7, 13, 4, 10, 5),
+    )
+    decisions = (
+        vodomery_prediction.PredictionSelectedModelDecision(
+            medium_key="vodomery",
+            identifier="L1_V1",
+            forecast_period=forecast_period,
+            selection_run_id=91,
+            selected_model_version=2,
+            selected_model_key="adaptive_strategy",
+            selected_model_name="Model 2 - adaptive strategy",
+            global_model_version=3,
+            global_model_key="recency_weighted_blend",
+            global_model_name="Model 3 - recency weighted blend",
+        ),
+        vodomery_prediction.PredictionSelectedModelDecision(
+            medium_key="vodomery",
+            identifier="B_V4",
+            forecast_period=forecast_period,
+            selection_run_id=91,
+            selected_model_version=3,
+            selected_model_key="recency_weighted_blend",
+            selected_model_name="Model 3 - recency weighted blend",
+            global_model_version=3,
+            global_model_key="recency_weighted_blend",
+            global_model_name="Model 3 - recency weighted blend",
+            fallback_reason=(
+                vodomery_prediction.PredictionSelectionFallbackReason.NO_IDENTIFIER_METRICS
+            ),
+        ),
+    )
+    profiles = [
+        SimpleNamespace(
+            identifikace="L1_V1",
+            model_version=2,
+            interval_minutes=60,
+            day_of_week=0,
+            slot=8,
+            mean=0.25,
+            median=0.2,
+            p10=0.05,
+            p90=0.5,
+            std=0.1,
+            sample_size=12,
+            created_at=datetime.datetime(2026, 7, 13, 4, 12),
+        ),
+        SimpleNamespace(
+            identifikace="L1_V1",
+            model_version=3,
+            interval_minutes=60,
+            day_of_week=0,
+            slot=8,
+            mean=9.99,
+            median=9.99,
+            p10=9.99,
+            p90=9.99,
+            std=9.99,
+            sample_size=1,
+            created_at=datetime.datetime(2026, 7, 13, 4, 12),
+        ),
+        SimpleNamespace(
+            identifikace="B_V4",
+            model_version=3,
+            interval_minutes=60,
+            day_of_week=0,
+            slot=8,
+            mean=0.4,
+            median=0.35,
+            p10=0.1,
+            p90=0.8,
+            std=0.12,
+            sample_size=10,
+            created_at=datetime.datetime(2026, 7, 13, 4, 13),
+        ),
+    ]
+
+    class FakeScalars:
+        def all(self):
+            return profiles
+
+    class FakeResult:
+        def scalars(self):
+            return FakeScalars()
+
+    class FakeSession:
+        def execute(self, statement):
+            return FakeResult()
+
+    captured = {}
+
+    def fake_persist(session, rows):
+        captured["session"] = session
+        captured["rows"] = rows
+        return len(rows)
+
+    monkeypatch.setattr(
+        vodomery_prediction,
+        "persist_prediction_profile_snapshots",
+        fake_persist,
+    )
+
+    count = vodomery_prediction._persist_selected_prediction_profile_snapshots(
+        FakeSession(),
+        decisions,
+    )
+
+    assert count == 2
+    rows = captured["rows"]
+    assert {row["identifier"] for row in rows} == {"L1_V1", "B_V4"}
+    assert {row["model_version"] for row in rows} == {2, 3}
+    assert all(row["archive_source"] == "weekly_rebuild" for row in rows)
+    assert all(row["archive_version"] == 1 for row in rows)
+    assert rows[0]["forecast_period_start"] == forecast_period.start
+    l1_row = next(row for row in rows if row["identifier"] == "L1_V1")
+    assert l1_row["model_version"] == 2
+    assert l1_row["expected_mean"] == 0.25
+    fallback_row = next(row for row in rows if row["identifier"] == "B_V4")
+    assert fallback_row["uses_fallback"] is True
+    assert fallback_row["fallback_reason"] == "no_identifier_metrics"
+
+
+def test_persist_selected_prediction_profile_snapshots_fails_missing_profiles():
+    forecast_period = vodomery_prediction.build_vodomery_weekly_forecast_period(
+        reference_time=datetime.datetime(2026, 7, 13, 4, 10, 5),
+    )
+    decision = vodomery_prediction.PredictionSelectedModelDecision(
+        medium_key="vodomery",
+        identifier="L1_V1",
+        forecast_period=forecast_period,
+        selection_run_id=91,
+        selected_model_version=2,
+        selected_model_key="adaptive_strategy",
+        selected_model_name="Model 2 - adaptive strategy",
+        global_model_version=3,
+        global_model_key="recency_weighted_blend",
+        global_model_name="Model 3 - recency weighted blend",
+    )
+
+    class EmptyScalars:
+        def all(self):
+            return []
+
+    class EmptyResult:
+        def scalars(self):
+            return EmptyScalars()
+
+    class FakeSession:
+        def execute(self, statement):
+            return EmptyResult()
+
+    try:
+        vodomery_prediction._persist_selected_prediction_profile_snapshots(
+            FakeSession(),
+            (decision,),
+        )
+    except RuntimeError as exc:
+        assert "missing source profiles" in str(exc)
+    else:
+        raise AssertionError("missing selected profiles should fail the rebuild")
+
+
+def test_build_selected_prediction_profile_snapshot_rows_can_skip_missing_profiles():
+    forecast_period = vodomery_prediction.build_vodomery_weekly_forecast_period(
+        reference_time=datetime.datetime(2026, 7, 13, 4, 10, 5),
+    )
+    decisions = (
+        vodomery_prediction.PredictionSelectedModelDecision(
+            medium_key="vodomery",
+            identifier="L1_V1",
+            forecast_period=forecast_period,
+            selection_run_id=91,
+            selected_model_version=2,
+            selected_model_key="adaptive_strategy",
+            selected_model_name="Model 2 - adaptive strategy",
+            global_model_version=3,
+            global_model_key="recency_weighted_blend",
+            global_model_name="Model 3 - recency weighted blend",
+        ),
+        vodomery_prediction.PredictionSelectedModelDecision(
+            medium_key="vodomery",
+            identifier="B_V4",
+            forecast_period=forecast_period,
+            selection_run_id=91,
+            selected_model_version=3,
+            selected_model_key="recency_weighted_blend",
+            selected_model_name="Model 3 - recency weighted blend",
+            global_model_version=3,
+            global_model_key="recency_weighted_blend",
+            global_model_name="Model 3 - recency weighted blend",
+        ),
+    )
+    profiles = [
+        SimpleNamespace(
+            identifikace="L1_V1",
+            model_version=2,
+            interval_minutes=60,
+            day_of_week=0,
+            slot=8,
+            mean=0.25,
+            median=0.2,
+            p10=0.05,
+            p90=0.5,
+            std=0.1,
+            sample_size=12,
+            created_at=datetime.datetime(2026, 7, 13, 4, 12),
+        )
+    ]
+
+    class FakeScalars:
+        def all(self):
+            return profiles
+
+    class FakeResult:
+        def scalars(self):
+            return FakeScalars()
+
+    class FakeSession:
+        def execute(self, statement):
+            return FakeResult()
+
+    rows = vodomery_prediction._build_selected_prediction_profile_snapshot_rows(
+        FakeSession(),
+        decisions,
+        archive_source="historical_backfill",
+        require_all_pairs=False,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["identifier"] == "L1_V1"
+    assert rows[0]["archive_source"] == "historical_backfill"
 
 
 def test_summary_with_rolling_backtest_serializes_new_metrics():

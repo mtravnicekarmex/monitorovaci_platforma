@@ -313,7 +313,7 @@ PAGES: tuple[DashboardPage, ...] = (
         key="prediction_performance",
         path="pages/38_prediction_performance.py",
         title="Predikce modelu",
-        icon="M",
+        icon="📊",
         sidebar_location="footer",
         admin_only=True,
     ),

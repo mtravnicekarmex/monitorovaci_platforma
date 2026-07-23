@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -29,10 +30,18 @@ from moduly.mereni.prediction.contracts import (
 
 SELECTION_MODE_DRY_RUN = "dry_run"
 SELECTION_MODE_ACTIVE = "active"
+ARCHIVE_SOURCE_WEEKLY_REBUILD = "weekly_rebuild"
+ARCHIVE_SOURCE_HISTORICAL_BACKFILL = "historical_backfill"
 SUPPORTED_SELECTION_MODES = frozenset(
     {
         SELECTION_MODE_DRY_RUN,
         SELECTION_MODE_ACTIVE,
+    }
+)
+SUPPORTED_ARCHIVE_SOURCES = frozenset(
+    {
+        ARCHIVE_SOURCE_WEEKLY_REBUILD,
+        ARCHIVE_SOURCE_HISTORICAL_BACKFILL,
     }
 )
 
@@ -43,6 +52,30 @@ SNAPSHOT_IDENTITY_COLUMNS = (
     "forecast_period_end",
     "forecast_cadence",
     "selection_mode",
+)
+
+PROFILE_SNAPSHOT_IDENTITY_COLUMNS = (
+    "medium_key",
+    "identifier",
+    "forecast_period_start",
+    "forecast_period_end",
+    "forecast_cadence",
+    "archive_source",
+    "archive_version",
+    "selection_mode",
+    "interval_minutes",
+    "day_of_week",
+    "slot",
+)
+
+BACKFILL_CANDIDATE_METRIC_IDENTITY_COLUMNS = (
+    "medium_key",
+    "identifier",
+    "forecast_period_start",
+    "forecast_period_end",
+    "forecast_cadence",
+    "archive_version",
+    "model_version",
 )
 
 
@@ -109,6 +142,208 @@ class PredictionSelectedModelSnapshot(Base):
     rmse: Mapped[float | None] = mapped_column(Float, nullable=True)
     bias: Mapped[float | None] = mapped_column(Float, nullable=True)
     wape: Mapped[float | None] = mapped_column(Float, nullable=True)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        nullable=False,
+    )
+
+
+class PredictionProfileSnapshot(Base):
+    __tablename__ = "prediction_profile_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            *PROFILE_SNAPSHOT_IDENTITY_COLUMNS,
+            name="uq_prediction_profile_snapshots_identity",
+        ),
+        Index(
+            "ix_prediction_profile_snapshots_lookup",
+            "medium_key",
+            "identifier",
+            "forecast_period_start",
+            "forecast_period_end",
+            "selection_mode",
+        ),
+        Index(
+            "ix_prediction_profile_snapshots_period",
+            "medium_key",
+            "forecast_period_start",
+            "forecast_period_end",
+        ),
+        Index(
+            "ix_prediction_profile_snapshots_archive_run",
+            "archive_source",
+            "archive_version",
+            "archive_run_id",
+        ),
+        Index(
+            "ix_prediction_profile_snapshots_selection_run",
+            "medium_key",
+            "selection_run_id",
+        ),
+        Index(
+            "ix_prediction_profile_snapshots_created",
+            "created_at",
+        ),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    medium_key: Mapped[str] = mapped_column(String(40), nullable=False)
+    identifier: Mapped[str] = mapped_column(String(250), nullable=False)
+    forecast_period_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        nullable=False,
+    )
+    forecast_period_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        nullable=False,
+    )
+    forecast_cadence: Mapped[str] = mapped_column(String(20), nullable=False)
+    forecast_period_label: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    archive_source: Mapped[str] = mapped_column(String(40), nullable=False)
+    archive_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("1"),
+    )
+    selection_mode: Mapped[str] = mapped_column(String(20), nullable=False)
+    selection_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    archive_run_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    global_model_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    global_model_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    global_model_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    uses_fallback: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+    )
+    fallback_reason: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    day_of_week: Mapped[int] = mapped_column(Integer, nullable=False)
+    slot: Mapped[int] = mapped_column(Integer, nullable=False)
+    expected_mean: Mapped[float] = mapped_column(Float, nullable=False)
+    expected_median: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expected_p10: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expected_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expected_std: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sample_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_profile_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False),
+        nullable=True,
+    )
+    training_window_start: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False),
+        nullable=True,
+    )
+    training_window_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False),
+        nullable=True,
+    )
+    validation_window_start: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False),
+        nullable=True,
+    )
+    validation_window_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False),
+        nullable=True,
+    )
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        nullable=False,
+    )
+
+
+class PredictionBackfillCandidateMetric(Base):
+    __tablename__ = "prediction_backfill_candidate_metrics"
+    __table_args__ = (
+        UniqueConstraint(
+            *BACKFILL_CANDIDATE_METRIC_IDENTITY_COLUMNS,
+            name="uq_prediction_backfill_candidate_metrics_identity",
+        ),
+        Index(
+            "ix_prediction_backfill_candidate_metrics_lookup",
+            "medium_key",
+            "identifier",
+            "forecast_period_start",
+            "forecast_period_end",
+        ),
+        Index(
+            "ix_prediction_backfill_candidate_metrics_period",
+            "medium_key",
+            "forecast_period_start",
+            "forecast_period_end",
+        ),
+        Index(
+            "ix_prediction_backfill_candidate_metrics_run",
+            "archive_version",
+            "archive_run_id",
+        ),
+        Index(
+            "ix_prediction_backfill_candidate_metrics_selected",
+            "medium_key",
+            "model_version",
+            "selected",
+        ),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    medium_key: Mapped[str] = mapped_column(String(40), nullable=False)
+    identifier: Mapped[str] = mapped_column(String(250), nullable=False)
+    forecast_period_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        nullable=False,
+    )
+    forecast_period_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        nullable=False,
+    )
+    forecast_cadence: Mapped[str] = mapped_column(String(20), nullable=False)
+    forecast_period_label: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    archive_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("1"),
+    )
+    archive_run_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    model_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    selection_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    selected: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    eligible: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    rank_by_policy: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fallback_reason: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    validation_total_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    matched_validation_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    coverage: Mapped[float] = mapped_column(Float, nullable=False)
+    mae: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rmse: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bias: Mapped[float | None] = mapped_column(Float, nullable=True)
+    wape: Mapped[float | None] = mapped_column(Float, nullable=True)
+    training_window_start: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False),
+        nullable=True,
+    )
+    training_window_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False),
+        nullable=True,
+    )
+    validation_window_start: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False),
+        nullable=True,
+    )
+    validation_window_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False),
+        nullable=True,
+    )
     metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False),
@@ -186,10 +421,201 @@ def ensure_prediction_selected_model_snapshot_table(*, engine=None) -> None:
         )
 
 
+def ensure_prediction_profile_snapshot_table(*, engine=None) -> None:
+    if engine is None:
+        from core.db.connect import ENGINE_PG
+
+        engine = ENGINE_PG
+
+    with engine.begin() as conn:
+        conn.execute(text("CREATE SCHEMA IF NOT EXISTS monitoring"))
+        PredictionProfileSnapshot.__table__.create(bind=conn, checkfirst=True)
+        conn.execute(
+            text(
+                """
+                ALTER TABLE monitoring.prediction_profile_snapshots
+                    ADD COLUMN IF NOT EXISTS forecast_period_label varchar(80),
+                    ADD COLUMN IF NOT EXISTS archive_source varchar(40) NOT NULL DEFAULT 'weekly_rebuild',
+                    ADD COLUMN IF NOT EXISTS archive_version integer NOT NULL DEFAULT 1,
+                    ADD COLUMN IF NOT EXISTS selection_mode varchar(20) NOT NULL DEFAULT 'active',
+                    ADD COLUMN IF NOT EXISTS selection_run_id integer,
+                    ADD COLUMN IF NOT EXISTS archive_run_id varchar(80) NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS model_key varchar(80) NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS model_name varchar(150) NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS global_model_version integer,
+                    ADD COLUMN IF NOT EXISTS global_model_key varchar(80),
+                    ADD COLUMN IF NOT EXISTS global_model_name varchar(150),
+                    ADD COLUMN IF NOT EXISTS uses_fallback boolean NOT NULL DEFAULT false,
+                    ADD COLUMN IF NOT EXISTS fallback_reason varchar(80),
+                    ADD COLUMN IF NOT EXISTS expected_median double precision,
+                    ADD COLUMN IF NOT EXISTS expected_p10 double precision,
+                    ADD COLUMN IF NOT EXISTS expected_p90 double precision,
+                    ADD COLUMN IF NOT EXISTS expected_std double precision,
+                    ADD COLUMN IF NOT EXISTS sample_size integer,
+                    ADD COLUMN IF NOT EXISTS source_profile_created_at timestamp without time zone,
+                    ADD COLUMN IF NOT EXISTS training_window_start timestamp without time zone,
+                    ADD COLUMN IF NOT EXISTS training_window_end timestamp without time zone,
+                    ADD COLUMN IF NOT EXISTS validation_window_start timestamp without time zone,
+                    ADD COLUMN IF NOT EXISTS validation_window_end timestamp without time zone,
+                    ADD COLUMN IF NOT EXISTS metadata_json text
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_prediction_profile_snapshots_identity
+                ON monitoring.prediction_profile_snapshots
+                    (medium_key, identifier, forecast_period_start, forecast_period_end,
+                     forecast_cadence, archive_source, archive_version, selection_mode,
+                     interval_minutes, day_of_week, slot)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_prediction_profile_snapshots_lookup
+                ON monitoring.prediction_profile_snapshots
+                    (medium_key, identifier, forecast_period_start, forecast_period_end,
+                     selection_mode)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_prediction_profile_snapshots_period
+                ON monitoring.prediction_profile_snapshots
+                    (medium_key, forecast_period_start, forecast_period_end)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_prediction_profile_snapshots_archive_run
+                ON monitoring.prediction_profile_snapshots
+                    (archive_source, archive_version, archive_run_id)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_prediction_profile_snapshots_selection_run
+                ON monitoring.prediction_profile_snapshots
+                    (medium_key, selection_run_id)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_prediction_profile_snapshots_created
+                ON monitoring.prediction_profile_snapshots (created_at)
+                """
+            )
+        )
+
+
+def ensure_prediction_backfill_candidate_metric_table(*, engine=None) -> None:
+    if engine is None:
+        from core.db.connect import ENGINE_PG
+
+        engine = ENGINE_PG
+
+    with engine.begin() as conn:
+        conn.execute(text("CREATE SCHEMA IF NOT EXISTS monitoring"))
+        PredictionBackfillCandidateMetric.__table__.create(bind=conn, checkfirst=True)
+        conn.execute(
+            text(
+                """
+                ALTER TABLE monitoring.prediction_backfill_candidate_metrics
+                    ADD COLUMN IF NOT EXISTS forecast_period_label varchar(80),
+                    ADD COLUMN IF NOT EXISTS archive_version integer NOT NULL DEFAULT 1,
+                    ADD COLUMN IF NOT EXISTS archive_run_id varchar(80),
+                    ADD COLUMN IF NOT EXISTS model_key varchar(80),
+                    ADD COLUMN IF NOT EXISTS model_name varchar(150),
+                    ADD COLUMN IF NOT EXISTS selection_enabled boolean NOT NULL DEFAULT true,
+                    ADD COLUMN IF NOT EXISTS selected boolean NOT NULL DEFAULT false,
+                    ADD COLUMN IF NOT EXISTS eligible boolean NOT NULL DEFAULT true,
+                    ADD COLUMN IF NOT EXISTS rank_by_policy integer,
+                    ADD COLUMN IF NOT EXISTS fallback_reason varchar(80),
+                    ADD COLUMN IF NOT EXISTS validation_total_count integer NOT NULL DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS matched_validation_count integer NOT NULL DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS coverage double precision NOT NULL DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS mae double precision,
+                    ADD COLUMN IF NOT EXISTS rmse double precision,
+                    ADD COLUMN IF NOT EXISTS bias double precision,
+                    ADD COLUMN IF NOT EXISTS wape double precision,
+                    ADD COLUMN IF NOT EXISTS training_window_start timestamp without time zone,
+                    ADD COLUMN IF NOT EXISTS training_window_end timestamp without time zone,
+                    ADD COLUMN IF NOT EXISTS validation_window_start timestamp without time zone,
+                    ADD COLUMN IF NOT EXISTS validation_window_end timestamp without time zone,
+                    ADD COLUMN IF NOT EXISTS metadata_json text
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_prediction_backfill_candidate_metrics_identity
+                ON monitoring.prediction_backfill_candidate_metrics
+                    (medium_key, identifier, forecast_period_start, forecast_period_end,
+                     forecast_cadence, archive_version, model_version)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_prediction_backfill_candidate_metrics_lookup
+                ON monitoring.prediction_backfill_candidate_metrics
+                    (medium_key, identifier, forecast_period_start, forecast_period_end)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_prediction_backfill_candidate_metrics_period
+                ON monitoring.prediction_backfill_candidate_metrics
+                    (medium_key, forecast_period_start, forecast_period_end)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_prediction_backfill_candidate_metrics_run
+                ON monitoring.prediction_backfill_candidate_metrics
+                    (archive_version, archive_run_id)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_prediction_backfill_candidate_metrics_selected
+                ON monitoring.prediction_backfill_candidate_metrics
+                    (medium_key, model_version, selected)
+                """
+            )
+        )
+
+
 def normalize_selection_mode(selection_mode: str) -> str:
     normalized = str(selection_mode).strip().lower()
     if normalized not in SUPPORTED_SELECTION_MODES:
         raise ValueError(f"Unsupported prediction selection mode: {selection_mode!r}")
+    return normalized
+
+
+def normalize_archive_source(archive_source: str) -> str:
+    normalized = str(archive_source).strip().lower()
+    if normalized not in SUPPORTED_ARCHIVE_SOURCES:
+        raise ValueError(f"Unsupported prediction archive source: {archive_source!r}")
     return normalized
 
 
@@ -236,6 +662,54 @@ def build_insert_selected_model_snapshots_statement(
     return statement.on_conflict_do_nothing(
         index_elements=list(SNAPSHOT_IDENTITY_COLUMNS),
     )
+
+
+def build_insert_prediction_profile_snapshots_statement(
+    rows: Sequence[Mapping[str, object]],
+):
+    statement = postgresql_insert(PredictionProfileSnapshot).values(list(rows))
+    return statement.on_conflict_do_nothing(
+        index_elements=list(PROFILE_SNAPSHOT_IDENTITY_COLUMNS),
+    )
+
+
+def build_insert_prediction_backfill_candidate_metrics_statement(
+    rows: Sequence[Mapping[str, object]],
+):
+    statement = postgresql_insert(PredictionBackfillCandidateMetric).values(list(rows))
+    return statement.on_conflict_do_nothing(
+        index_elements=list(BACKFILL_CANDIDATE_METRIC_IDENTITY_COLUMNS),
+    )
+
+
+def persist_prediction_profile_snapshots(
+    session,
+    rows: Sequence[Mapping[str, object]],
+) -> int:
+    if not rows:
+        return 0
+
+    result = session.execute(build_insert_prediction_profile_snapshots_statement(rows))
+    rowcount = getattr(result, "rowcount", None)
+    if rowcount is None or rowcount < 0:
+        return 0
+    return int(rowcount)
+
+
+def persist_prediction_backfill_candidate_metrics(
+    session,
+    rows: Sequence[Mapping[str, object]],
+) -> int:
+    if not rows:
+        return 0
+
+    result = session.execute(
+        build_insert_prediction_backfill_candidate_metrics_statement(rows)
+    )
+    rowcount = getattr(result, "rowcount", None)
+    if rowcount is None or rowcount < 0:
+        return 0
+    return int(rowcount)
 
 
 def persist_selected_model_decisions(

@@ -3,15 +3,16 @@ from __future__ import annotations
 import calendar
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from time import perf_counter
 from typing import Callable, Sequence
 
-from sqlalchemy import bindparam, insert, text
+from sqlalchemy import bindparam, insert, select, text
 
 from app.time_utils import utc_now_naive
 from core.db.connect import get_session_pg
 from moduly.mereni.prediction import (
+    ARCHIVE_SOURCE_WEEKLY_REBUILD,
     PredictionCandidateRegistry,
     PredictionForecastCadence,
     PredictionForecastPeriod,
@@ -27,7 +28,10 @@ from moduly.mereni.prediction import (
     SELECTION_MODE_ACTIVE,
     build_prediction_rebuild_windows,
     build_rolling_weekly_folds,
+    ensure_prediction_profile_snapshot_table,
     ensure_prediction_selected_model_snapshot_table,
+    normalize_archive_source,
+    persist_prediction_profile_snapshots,
     persist_selected_model_decisions,
 )
 from moduly.mereni.vodomery.database.model_validation import (
@@ -471,9 +475,20 @@ def build_model_2_rebuild_windows(
 def build_vodomery_weekly_forecast_period(
     reference_time: datetime | None = None,
 ) -> PredictionForecastPeriod:
-    return _build_vodomery_pipeline_runner().build_forecast_period(
-        reference_time=reference_time or utc_now_naive(),
+    resolved_reference_time = reference_time or utc_now_naive()
+    start = _floor_calendar_week_start(resolved_reference_time)
+    end = start + timedelta(days=7)
+    return PredictionForecastPeriod(
+        start=start,
+        end=end,
+        cadence=PredictionForecastCadence.WEEKLY,
+        label=f"{start:%Y-%m-%d} - {end:%Y-%m-%d}",
     )
+
+
+def _floor_calendar_week_start(value: datetime) -> datetime:
+    midnight = value.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight - timedelta(days=midnight.weekday())
 
 
 def _subtract_months(value: datetime, months: int) -> datetime:
@@ -552,6 +567,7 @@ def rebuild_profiles(
 
     ensure_vodomery_model_validation_tables()
     ensure_prediction_selected_model_snapshot_table()
+    ensure_prediction_profile_snapshot_table()
     drop_legacy_identifikace_fk(VodomeryProfilesAnomaly.__tablename__)
     windows = build_rebuild_windows(reference_time=resolved_reference_time)
     forecast_period = build_vodomery_weekly_forecast_period(
@@ -620,6 +636,22 @@ def rebuild_profiles(
             selected_model_decisions,
             selection_mode=SELECTION_MODE_ACTIVE,
         )
+        prediction_profile_snapshot_rows = _build_selected_prediction_profile_snapshot_rows(
+            session,
+            selected_model_decisions,
+            require_all_pairs=False,
+        )
+        prediction_profile_snapshot_count = persist_prediction_profile_snapshots(
+            session,
+            prediction_profile_snapshot_rows,
+        )
+        prediction_profile_snapshot_pair_count = _count_profile_snapshot_pairs(
+            prediction_profile_snapshot_rows,
+        )
+        prediction_profile_snapshot_missing_pair_count = max(
+            0,
+            len(selected_model_decisions) - prediction_profile_snapshot_pair_count,
+        )
         session.commit()
         rebuild_duration_seconds = perf_counter() - rebuild_started_at
 
@@ -648,6 +680,12 @@ def rebuild_profiles(
             ],
             "selected_model_snapshot_mode": SELECTION_MODE_ACTIVE,
             "selected_model_snapshot_count": selected_model_snapshot_count,
+            "prediction_profile_snapshot_source": ARCHIVE_SOURCE_WEEKLY_REBUILD,
+            "prediction_profile_snapshot_count": prediction_profile_snapshot_count,
+            "prediction_profile_snapshot_pair_count": prediction_profile_snapshot_pair_count,
+            "prediction_profile_snapshot_missing_pair_count": (
+                prediction_profile_snapshot_missing_pair_count
+            ),
             "selected_model_snapshots": [
                 decision.to_dict()
                 for decision in selected_model_decisions
@@ -1219,6 +1257,124 @@ def _build_selected_model_decisions(
         )
 
     return tuple(decisions)
+
+
+def _persist_selected_prediction_profile_snapshots(
+    session,
+    decisions: Sequence[PredictionSelectedModelDecision],
+    *,
+    archive_source: str = ARCHIVE_SOURCE_WEEKLY_REBUILD,
+    archive_version: int = 1,
+    archive_run_id: str | None = None,
+) -> int:
+    rows = _build_selected_prediction_profile_snapshot_rows(
+        session,
+        decisions,
+        archive_source=archive_source,
+        archive_version=archive_version,
+        archive_run_id=archive_run_id,
+    )
+    return persist_prediction_profile_snapshots(session, rows)
+
+
+def _build_selected_prediction_profile_snapshot_rows(
+    session,
+    decisions: Sequence[PredictionSelectedModelDecision],
+    *,
+    archive_source: str = ARCHIVE_SOURCE_WEEKLY_REBUILD,
+    archive_version: int = 1,
+    archive_run_id: str | None = None,
+    require_all_pairs: bool = True,
+) -> tuple[dict[str, object], ...]:
+    if not decisions:
+        return ()
+    if archive_version <= 0:
+        raise ValueError("Prediction profile archive version must be positive.")
+
+    normalized_archive_source = normalize_archive_source(archive_source)
+    selected_pairs = {
+        (decision.identifier, int(decision.selected_model_version)): decision
+        for decision in decisions
+    }
+    identifiers = sorted({identifier for identifier, _ in selected_pairs})
+    model_versions = sorted({model_version for _, model_version in selected_pairs})
+
+    profiles = (
+        session.execute(
+            select(VodomeryProfilesAnomaly).where(
+                VodomeryProfilesAnomaly.identifikace.in_(identifiers),
+                VodomeryProfilesAnomaly.model_version.in_(model_versions),
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    rows: list[dict[str, object]] = []
+    archived_pairs: set[tuple[str, int]] = set()
+    for profile in profiles:
+        pair = (profile.identifikace, int(profile.model_version))
+        decision = selected_pairs.get(pair)
+        if decision is None:
+            continue
+
+        archived_pairs.add(pair)
+        forecast_period = decision.forecast_period
+        rows.append(
+            {
+                "medium_key": decision.medium_key,
+                "identifier": decision.identifier,
+                "forecast_period_start": forecast_period.start,
+                "forecast_period_end": forecast_period.end,
+                "forecast_cadence": forecast_period.cadence.value,
+                "forecast_period_label": forecast_period.label,
+                "archive_source": normalized_archive_source,
+                "archive_version": archive_version,
+                "selection_mode": SELECTION_MODE_ACTIVE,
+                "selection_run_id": decision.selection_run_id,
+                "archive_run_id": archive_run_id,
+                "model_version": decision.selected_model_version,
+                "model_key": decision.selected_model_key,
+                "model_name": decision.selected_model_name,
+                "global_model_version": decision.global_model_version,
+                "global_model_key": decision.global_model_key,
+                "global_model_name": decision.global_model_name,
+                "uses_fallback": decision.uses_fallback,
+                "fallback_reason": decision.fallback_reason.value,
+                "interval_minutes": int(profile.interval_minutes),
+                "day_of_week": int(profile.day_of_week),
+                "slot": int(profile.slot),
+                "expected_mean": float(profile.mean),
+                "expected_median": (
+                    None if profile.median is None else float(profile.median)
+                ),
+                "expected_p10": None if profile.p10 is None else float(profile.p10),
+                "expected_p90": None if profile.p90 is None else float(profile.p90),
+                "expected_std": None if profile.std is None else float(profile.std),
+                "sample_size": (
+                    None if profile.sample_size is None else int(profile.sample_size)
+                ),
+                "source_profile_created_at": profile.created_at,
+            }
+        )
+
+    missing_pair_count = len(set(selected_pairs) - archived_pairs)
+    if missing_pair_count and require_all_pairs:
+        raise RuntimeError(
+            "Selected prediction profile archive is missing source profiles "
+            f"for {missing_pair_count} identifier/model pairs."
+        )
+
+    return tuple(rows)
+
+
+def _count_profile_snapshot_pairs(rows: Sequence[dict[str, object]]) -> int:
+    return len(
+        {
+            (str(row["identifier"]), int(row["model_version"]))
+            for row in rows
+        }
+    )
 
 
 def _device_summary_has_selection_metrics(

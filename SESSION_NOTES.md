@@ -11758,3 +11758,1494 @@ Known risks or accepted gaps:
   `quarter_hour_job` observation until the next scheduled slot.
 - The startup task starts the process set but does not supervise later child
   process exits; recovery remains full-workstation restart.
+
+### 2026-07-13 06:49 +02:00 - Post-restart verification after prediction performance view
+
+Scope:
+- Completed the required post-restart verification from the
+  `2026-07-10 14:54 +02:00` handoff.
+
+Changed:
+- Appended this verification note to `SESSION_NOTES.md`.
+
+Verified:
+- Windows boot time was `2026-07-10 15:01:24 +02:00`, after the handoff.
+- Startup task `API_dashboard_caddy` last ran at
+  `2026-07-10 15:01:33 +02:00` with result `0`.
+- Expected listeners were present: Caddy on TCP `80`, TCP `443`, and
+  `127.0.0.1:2019`; FastAPI on `127.0.0.1:8000`; Streamlit on
+  `127.0.0.1:8001`; Tailscale retained interface-specific TCP `443`
+  listeners.
+- Temporary ports `8010` and `8011` were not listening.
+- Local health endpoints returned HTTP `200`: FastAPI `/health/live`,
+  FastAPI `/health/ready`, Streamlit `/_stcore/health`, and Caddy admin
+  `/config/`.
+- Unauthenticated protected routes returned HTTP `401`, including
+  `/api/v1/prediction/performance` and `/health/system/smartfuelpass`.
+- Local Caddy Host/SNI routing returned: dashboard HTTP `200`,
+  `/api/v1/auth/users-exist` HTTP `200`, protected `/auth/me` HTTP `401`,
+  prediction performance without bearer HTTP `401`, map image without cookie
+  HTTP `401`, `/docs`, `/redoc`, and `/openapi.json` HTTP `404`, and
+  HTTP-to-HTTPS redirect HTTP `308`.
+- Public response headers included HSTS, `nosniff`, `Referrer-Policy`,
+  `X-Frame-Options`, `Permissions-Policy`, and CSP report-only; `Server` and
+  `Via` were absent.
+- Root `Caddyfile` and runtime `C:\Program Files\Caddy\Caddyfile` SHA-256
+  hashes matched:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Runtime Caddy validation reported `Valid configuration`.
+- Scheduler metrics showed `scheduler_running=True`, heartbeat
+  `2026-07-13T06:47:03.840435`, and `quarter_hour_job` success at
+  `2026-07-13T06:47:09.942813` with `0` failures in the last 24 hours.
+- Scheduler metrics had no jobs with failures in the last 24 hours.
+- Direct `.venv-production` prediction performance collector returned
+  aggregate-only `status=ok`: vodomery `5` candidate rows, `5` catalog
+  candidates, `58` selected-model snapshots, `3` fallback snapshots, and
+  `25` worst-identifier rows; plynomery `2` candidate rows and `2` catalog
+  candidates; elektromery `3` catalog candidates with `not_run` status.
+- Targeted prediction performance `py_compile` passed.
+- Targeted pytest suite for prediction performance, API authorization, and
+  dashboard navigation reported `201 passed`.
+- Broader prediction regression suite reported `281 passed`.
+- `git diff --check` passed before this note was appended.
+- `git status --short --untracked-files=all` was clean before this note was
+  appended.
+
+Not verified:
+- Authenticated browser rendering of the `Predikce modelu` page was not
+  checked.
+- Direct external public routing from outside the workstation was not checked.
+- Exact Python process command-line details were not available through the
+  read-only process query; API and Streamlit were verified by listeners and
+  health endpoints, and scheduler by metrics heartbeat plus post-boot job
+  observations.
+
+Notes:
+- `monthly_job` still has historical `last_status=error` from
+  `2026-07-01T06:20:05.118163`, with `0` failures in the last 24 hours; this
+  was not treated as a post-restart failure.
+
+### 2026-07-13 06:57 +02:00 - Streamlit prediction page icon fix
+
+Scope:
+- Fixed Streamlit navigation startup failure caused by invalid
+  `icon="M"`/`page_icon="M"` on the `Predikce modelu` dashboard page.
+
+Changed:
+- Replaced the prediction performance navigation and page icon with the valid
+  single emoji `📊`.
+- Added a dashboard navigation test that validates all `st.Page` icons with
+  Streamlit's icon validator.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile moduly\apps\dashboard\navigation_config.py
+  moduly\apps\dashboard\pages\38_prediction_performance.py
+  tests\test_dashboard_navigation_config.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_dashboard_navigation_config.py
+  -q --tb=short` reported `24 passed`.
+- `.venv\Scripts\python.exe -m pytest tests\test_prediction_performance.py
+  tests\test_dashboard_navigation_config.py -q --tb=short` reported
+  `26 passed`.
+- `.venv-production\Scripts\python.exe` successfully constructed all `35`
+  configured `st.Page` objects.
+
+Not verified:
+- Authenticated browser rendering was not checked.
+
+### 2026-07-13 - Historical prediction archive Step 1c
+
+Scope:
+- Implemented weekly vodomery archive writing for selected prediction profile
+  snapshots.
+
+Changed:
+- Added generic `persist_prediction_profile_snapshots()` storage helper for
+  `monitoring.prediction_profile_snapshots`.
+- Full weekly `vodomery_prediction.rebuild_profiles()` now archives the
+  selected profile rows for each identifier/model decision in the same
+  transaction as selected-model snapshots.
+- Archive writes use source `weekly_rebuild`, version `1`, active selection
+  mode, and PostgreSQL `ON CONFLICT DO NOTHING`.
+- Missing selected source profiles raise an error so the weekly rebuild rolls
+  back instead of creating a silent archive gap.
+- `rebuild_profiles()` now reports `prediction_profile_snapshot_source` and
+  `prediction_profile_snapshot_count`.
+- Single-candidate rebuilds remain unchanged and do not archive forecast-period
+  profiles.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile moduly\mereni\prediction\storage.py
+  moduly\mereni\prediction\__init__.py
+  moduly\mereni\vodomery\vodomery_prediction.py
+  tests\test_prediction_storage.py tests\test_vodomery_prediction.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_prediction_storage.py
+  tests\test_vodomery_prediction.py -q --tb=short` reported `40 passed`.
+- `git diff --check` passed with only existing LF/CRLF warnings.
+
+Not verified:
+- Live PostgreSQL bootstrap and live weekly rebuild were not run.
+
+### 2026-07-13 - Backfill candidate metric storage
+
+Scope:
+- Added storage/bootstrap support for compact candidate metrics that will be
+  produced by the future historical prediction backfill.
+
+Changed:
+- Added generic `monitoring.prediction_backfill_candidate_metrics` ORM metadata,
+  bootstrap, conflict-safe insert helper, and persist helper.
+- The unique identity is medium, identifier, forecast period, archive version,
+  and model version; `archive_run_id` remains audit metadata and is not part of
+  uniqueness.
+- Exported the new storage symbols through `moduly.mereni.prediction`.
+- Added storage tests for identity, required/optional columns, and empty-batch
+  behavior.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile moduly\mereni\prediction\storage.py
+  moduly\mereni\prediction\__init__.py tests\test_prediction_storage.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_prediction_storage.py -q
+  --tb=short` reported `22 passed`.
+- `git diff --check` passed with only existing LF/CRLF warnings.
+
+Not verified:
+- Live PostgreSQL bootstrap and backfill writes were not run.
+
+### 2026-07-13 - Vodomery prediction backfill plan mode foundation
+
+Scope:
+- Added the first non-writing foundation for historical vodomery prediction
+  backfill planning.
+
+Changed:
+- Added `moduly/mereni/vodomery/vodomery_prediction_backfill.py` with calendar
+  Monday `00:00` week helpers, identifier-history structures, and aggregate
+  backfill plan construction.
+- Plan mode applies the agreed `2024-01-01` default start, one-month history
+  gate, candidate models 1-3, and `archive_version=1`.
+- Planner stops after the week of the identifier's last valid measurement and
+  can skip periods already covered by `weekly_rebuild` archive rows.
+- Added unit tests for week boundaries, one-month gate, last-measurement stop,
+  weekly-rebuild skips, and scope limits.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\mereni\vodomery\vodomery_prediction_backfill.py
+  tests\test_vodomery_prediction_backfill.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction_backfill.py
+  -q --tb=short` reported `6 passed`.
+
+Not verified:
+- Live database planning query was not run.
+- Dry-run model calculations and write mode are not implemented yet.
+
+### 2026-07-13 - Vodomery prediction backfill dry-run foundation
+
+Scope:
+- Added the first non-writing dry-run orchestration for historical vodomery
+  prediction backfill.
+
+Changed:
+- Added `dry_run_vodomery_prediction_backfill()` to group planned items by
+  forecast week, run model calculations for candidate models 1-3, build
+  selected-model decisions, and report aggregate candidate/selection counts.
+- Dry-run rolls back the SQLAlchemy session after each forecast week so
+  temporary profile changes made during calculations are not committed.
+- Added helper logic to derive candidate metric rows in memory without calling
+  persistence helpers.
+- Added unit test coverage with monkeypatched model calculations to verify
+  weekly orchestration and rollback behavior.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\mereni\vodomery\vodomery_prediction_backfill.py
+  tests\test_vodomery_prediction_backfill.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction_backfill.py
+  -q --tb=short` reported `7 passed`.
+
+Not verified:
+- Live database dry-run was not run.
+- Write mode is not implemented yet.
+
+### 2026-07-13 - Vodomery prediction backfill CLI entrypoint
+
+Scope:
+- Added a safe command-line entrypoint for aggregate-only backfill planning and
+  dry-run reporting.
+
+Changed:
+- Added `scripts/vodomery_prediction_backfill.py` with `plan` and `dry-run`
+  commands.
+- CLI output is JSON aggregate data only and intentionally does not print
+  identifier lists or raw measurement rows.
+- `dry-run` requires explicit `--archive-run-id`.
+- Scope arguments include `--start-date`, `--end-date`, repeated
+  `--identifikace`, `--archive-version`, `--max-identifiers`, and
+  `--max-weeks`.
+- Added CLI tests with monkeypatched planning so no live database access is
+  required.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile scripts\vodomery_prediction_backfill.py
+  moduly\mereni\vodomery\vodomery_prediction_backfill.py
+  tests\test_vodomery_prediction_backfill.py
+  tests\test_vodomery_prediction_backfill_cli.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction_backfill.py
+  tests\test_vodomery_prediction_backfill_cli.py -q --tb=short` reported
+  `10 passed`.
+
+Not verified:
+- CLI was not run against the live database.
+- Write mode is not implemented yet.
+
+### 2026-07-13 - Vodomery prediction backfill write-mode foundation
+
+Scope:
+- Added write-mode orchestration for historical vodomery prediction backfill,
+  without running it against the live database.
+
+Changed:
+- Added `write_vodomery_prediction_backfill()` to reuse the weekly dry-run
+  calculation path, persist candidate metric rows and historical selected
+  profile snapshots, and commit after each forecast week.
+- Write mode rolls back the week and propagates errors if any calculation or
+  persist step fails.
+- Historical selected profile snapshots now carry
+  `archive_source=historical_backfill`, `archive_version`, and `archive_run_id`.
+- Added CLI `write` command with aggregate JSON output only.
+- Added unit tests for successful write commit, rollback on error, aggregate
+  write reporting, and monkeypatched CLI write execution.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\mereni\vodomery\vodomery_prediction_backfill.py
+  scripts\vodomery_prediction_backfill.py
+  tests\test_vodomery_prediction_backfill.py
+  tests\test_vodomery_prediction_backfill_cli.py
+  moduly\mereni\vodomery\vodomery_prediction.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction_backfill.py
+  tests\test_vodomery_prediction_backfill_cli.py tests\test_prediction_storage.py
+  tests\test_vodomery_prediction.py::test_rebuild_profiles_persists_active_selected_model_snapshots
+  tests\test_vodomery_prediction.py::test_persist_selected_prediction_profile_snapshots_writes_selected_models
+  -q --tb=short` reported `38 passed`.
+- `git diff --check` passed with only existing LF/CRLF warnings.
+
+Not verified:
+- Live plan, dry-run, and write commands were not run.
+
+### 2026-07-13 - Vodomery prediction backfill verify mode
+
+Scope:
+- Added read-only aggregate verification for historical vodomery prediction
+  backfill state.
+
+Changed:
+- Added `verify_vodomery_prediction_backfill()` to aggregate existing
+  `prediction_profile_snapshots` by archive source/version and
+  `prediction_backfill_candidate_metrics` by archive version.
+- Added CLI `verify` command with aggregate JSON output only.
+- Verify supports date range, archive version, and optional identifier filters
+  without printing identifier lists or raw measurement rows.
+- Added unit tests for aggregate query parsing, verify report generation, and
+  monkeypatched CLI verify execution.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\mereni\vodomery\vodomery_prediction_backfill.py
+  scripts\vodomery_prediction_backfill.py
+  tests\test_vodomery_prediction_backfill.py
+  tests\test_vodomery_prediction_backfill_cli.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction_backfill.py
+  tests\test_vodomery_prediction_backfill_cli.py -q --tb=short` reported
+  `17 passed`.
+
+Not verified:
+- Live verify command was not run.
+
+### 2026-07-13 - Live read-only backfill verify
+
+Scope:
+- Ran the first live read-only verification for vodomery historical prediction
+  archive state.
+
+Changed:
+- Fixed `scripts/vodomery_prediction_backfill.py` so direct script execution
+  adds the project root to `sys.path`.
+- Updated verify mode to report missing archive tables as aggregate JSON
+  instead of raising an `UndefinedTable` stack trace.
+
+Verified:
+- `.venv\Scripts\python.exe -m py_compile scripts\vodomery_prediction_backfill.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction_backfill_cli.py
+  -q --tb=short` reported `7 passed`.
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\mereni\vodomery\vodomery_prediction_backfill.py
+  scripts\vodomery_prediction_backfill.py
+  tests\test_vodomery_prediction_backfill.py
+  tests\test_vodomery_prediction_backfill_cli.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction_backfill.py
+  tests\test_vodomery_prediction_backfill_cli.py -q --tb=short` reported
+  `18 passed`.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  verify --start-date 2024-01-01 --end-date 2026-07-14 --archive-version 1`
+  completed successfully.
+
+Result:
+- `missing_tables` reported:
+  `monitoring.prediction_profile_snapshots` and
+  `monitoring.prediction_backfill_candidate_metrics`.
+- Profile archive coverage is currently `0`.
+- Backfill candidate metric coverage is currently `0`.
+
+Not verified:
+- No live bootstrap, plan, dry-run, or write command was run.
+
+### 2026-07-13 - Live prediction archive table bootstrap
+
+Scope:
+- Created the agreed historical prediction archive tables in the live
+  PostgreSQL database.
+
+Ran:
+- `.venv-production\Scripts\python.exe -c "from moduly.mereni.prediction import ensure_prediction_profile_snapshot_table, ensure_prediction_backfill_candidate_metric_table; ensure_prediction_profile_snapshot_table(); ensure_prediction_backfill_candidate_metric_table(); print('prediction archive tables ensured')"`
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  verify --start-date 2024-01-01 --end-date 2026-07-14 --archive-version 1`
+
+Result:
+- Bootstrap completed successfully.
+- Verify reported `missing_tables: []`.
+- `prediction_profile_snapshots` coverage is currently `0` rows.
+- `prediction_backfill_candidate_metrics` coverage is currently `0` rows.
+
+Not run:
+- No live `plan`, `dry-run`, or `write` backfill command was run.
+
+### 2026-07-13 - Live read-only backfill plan
+
+Scope:
+- Ran the first live read-only `plan` checks for vodomery historical prediction
+  backfill. No model calculations and no writes were performed.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2024-03-01 --max-identifiers 1
+  --max-weeks 2`
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2024-06-01 --max-identifiers 1
+  --max-weeks 2`
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2024-06-01 --max-weeks 2`
+
+Result:
+- The first two one-identifier plans produced no planned weeks because the
+  selected first identifier was outside the requested date windows after the
+  one-month history gate.
+- The aggregate plan through `2024-06-01` produced:
+  - `identifier_count`: `5`
+  - `forecast_week_count`: `2`
+  - `identifier_week_count`: `10`
+  - `candidate_metric_row_estimate`: `30`
+  - first forecast period start: `2024-02-05T00:00:00`
+  - last forecast period end: `2024-02-19T00:00:00`
+  - `outside_date_range`: `53`
+
+Not run:
+- No live `dry-run` or `write` command was run.
+
+### 2026-07-13 - Live backfill dry-run for SCVK_DP
+
+Scope:
+- Ran the first live vodomery historical prediction backfill `dry-run` for one
+  identifier, without writes.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2026-07-14 --identifikace SCVK_DP
+  --max-weeks 2`
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  dry-run --start-date 2024-01-01 --end-date 2026-07-14 --identifikace SCVK_DP
+  --max-weeks 2 --archive-run-id dry-run-20260713-scvk-dp-001`
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  verify --start-date 2024-01-01 --end-date 2026-07-14 --identifikace SCVK_DP
+  --archive-version 1`
+
+Result:
+- Plan found `1` identifier, `2` forecast weeks, `2` identifier-week pairs, and
+  `6` candidate metric rows for models 1-3.
+- Dry-run completed successfully in about 27 seconds.
+- Dry-run calculated `2` weeks, `6` candidate metric rows, `2` selected
+  decisions, and `2` selected profile pairs.
+- Forecast weeks were `2024-02-05T00:00:00` through `2024-02-19T00:00:00`.
+- Post dry-run verify reported `0` profile rows and `0` candidate metric rows,
+  confirming no archive writes were committed.
+
+Not run:
+- No live `write` command was run.
+
+### 2026-07-13 - Live backfill smoke write for SCVK_DP
+
+Scope:
+- Ran the first limited live historical prediction backfill write for one
+  identifier and two forecast weeks.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2026-07-14 --identifikace SCVK_DP
+  --max-weeks 2 --archive-run-id backfill-v1-scvk-dp-smoke-001`
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  verify --start-date 2024-01-01 --end-date 2026-07-14 --identifikace SCVK_DP
+  --archive-version 1`
+- Repeated the same write with
+  `--archive-run-id backfill-v1-scvk-dp-smoke-repeat-001` to test
+  idempotence.
+- Ran the same verify again after the repeated write.
+
+Result:
+- Initial write committed `2` forecast weeks.
+- Inserted candidate metric rows: `6`.
+- Inserted selected profile snapshot rows: `1008`.
+- Per week inserted profile snapshot rows: `504`.
+- First verify reported `profile_row_count=1008`,
+  `profile_identifier_week_count=2`, candidate `metric_row_count=6`, and
+  `selected_metric_row_count=2`.
+- Repeated write inserted `0` candidate metric rows and `0` profile snapshot
+  rows, confirming `ON CONFLICT DO NOTHING` idempotence.
+- Final verify remained unchanged at `1008` profile rows and `6` metric rows.
+
+Not run:
+- Full historical backfill was not run.
+
+### 2026-07-13 - Backfill write transaction hardening
+
+Scope:
+- Fixed the historical vodomery backfill write path after a limited live smoke
+  run exposed that candidate profile rebuilds could be committed together with
+  archive rows.
+
+Changed:
+- Split selected profile snapshot construction from persistence in
+  `vodomery_prediction`.
+- Backfill write mode now builds candidate metric rows and selected profile
+  snapshot rows while temporary candidate profiles exist, rolls the session
+  back to discard those temporary profile changes, and only then persists the
+  archive rows in a clean transaction.
+- Unit tests now assert the expected rollback behavior for dry-run, successful
+  write, and write failure.
+
+Verified:
+- Restored live `monitoring.vodomery_anomaly_profiles` for models `1`, `2`,
+  and `3` by running production `rebuild_profiles()` for each model.
+- Read-only production aggregate check after restore reported models `1`-`5`
+  all at `37800` profile rows and `58` identifiers.
+- `.venv\Scripts\python.exe -m py_compile moduly\mereni\vodomery\vodomery_prediction_backfill.py
+  scripts\vodomery_prediction_backfill.py moduly\mereni\vodomery\vodomery_prediction.py
+  moduly\mereni\prediction\storage.py tests\test_vodomery_prediction_backfill.py
+  tests\test_vodomery_prediction_backfill_cli.py tests\test_prediction_storage.py
+  tests\test_vodomery_prediction.py`
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction_backfill.py
+  tests\test_vodomery_prediction_backfill_cli.py tests\test_prediction_storage.py
+  tests\test_vodomery_prediction.py::test_rebuild_profiles_persists_active_selected_model_snapshots
+  tests\test_vodomery_prediction.py::test_persist_selected_prediction_profile_snapshots_writes_selected_models
+  -q --tb=short` reported `42 passed`.
+- `git diff --check` passed with only existing LF/CRLF warnings.
+- Live verify for `SCVK_DP` still reported `1008` historical profile snapshot
+  rows and `6` candidate metric rows from the earlier smoke write.
+
+Not run:
+- No additional live `write` or broad live `dry-run` was run after the
+  transaction hardening.
+
+Follow-up:
+- Before any broader write, run a small post-fix live write on a new limited
+  scope or decide whether the existing `SCVK_DP` smoke rows should remain.
+
+### 2026-07-14 - Post-fix live backfill smoke write
+
+Scope:
+- Ran one limited live historical vodomery backfill write after transaction
+  hardening to verify that archive persistence no longer commits temporary
+  candidate profile changes.
+
+Ran:
+- Baseline read-only aggregate check of
+  `monitoring.vodomery_anomaly_profiles` for models `1`-`5`.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2024-06-01 --identifikace SCVK_B1
+  --max-weeks 1 --archive-run-id backfill-v1-postfix-smoke-20260714-001`
+- Repeated read-only aggregate check of `vodomery_anomaly_profiles`.
+- Live verify for the full archive range and for the one written identifier.
+
+Result:
+- Write committed `1` forecast week and inserted `3` candidate metric rows plus
+  `504` selected profile snapshot rows.
+- Production `vodomery_anomaly_profiles` counts were unchanged after the write:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Full archive verify for `2024-01-01` through `2026-07-14` now reports
+  `1512` historical profile snapshot rows, `3` identifier-week pairs, and `9`
+  candidate metric rows.
+- The one-identifier verify for `2024-01-01` through `2024-06-01` reports
+  `504` profile snapshot rows, `1` identifier-week pair, and `3` candidate
+  metric rows.
+
+Not run:
+- No broader live backfill was run.
+
+Follow-up:
+- Next safe step is a slightly larger pilot batch, for example the first
+  forecast week across the five identifiers currently planned through
+  `2024-06-01`, with the same before/after production profile count check.
+
+### 2026-07-14 - First-week live backfill pilot
+
+Scope:
+- Ran the next limited live historical vodomery backfill pilot for the first
+  planned forecast week across the five identifiers in the plan through
+  `2024-06-01`.
+
+Ran:
+- Baseline read-only aggregate check of
+  `monitoring.vodomery_anomaly_profiles` for models `1`-`5`.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2024-06-01 --max-weeks 1`
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2024-06-01 --max-weeks 1
+  --archive-run-id backfill-v1-week1-pilot-20260714-001`
+- Repeated read-only aggregate check of `vodomery_anomaly_profiles`.
+- Live verify for `2024-01-01` through `2024-06-01` and for the full archive
+  range through `2026-07-14`.
+
+Result:
+- Plan covered `5` identifiers, `1` forecast week, `5` identifier-week pairs,
+  and estimated `15` candidate metric rows for `2024-02-05` through
+  `2024-02-12`.
+- Write calculated all `5` planned identifier-week pairs and committed `1`
+  forecast week.
+- Because two identifier-week pairs were already present from earlier smoke
+  writes, the pilot inserted `9` new candidate metric rows and `1512` new
+  selected profile snapshot rows.
+- Production `vodomery_anomaly_profiles` counts were unchanged after the write:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Archive verify now reports `3024` historical profile snapshot rows, `6`
+  identifier-week pairs, `18` candidate metric rows, and `6` selected metric
+  rows.
+
+Not run:
+- No broader multi-week or full historical backfill was run.
+
+Follow-up:
+- Next safe step is either the second forecast week for the same early-period
+  scope, or a dry-run/write pilot with a larger `--max-weeks` value while
+  keeping the same production-profile before/after check.
+
+### 2026-07-14 - First monthly live backfill batch
+
+Scope:
+- Started the controlled full historical backfill as a supervised monthly
+  operation. The first batch covered the early February 2024 forecast periods
+  represented by `start-date 2024-01-01` and `end-date 2024-03-01`.
+
+Baseline:
+- Full read-only plan for `2024-01-01` through `2026-07-14` reported `58`
+  identifiers, `128` forecast weeks, `3045` identifier-week pairs, and `9135`
+  candidate metric rows.
+- Pre-batch archive verify reported `3024` historical profile snapshot rows,
+  `6` identifier-week pairs, and `18` candidate metric rows.
+- Pre-batch production profile check reported models `1`-`5` each at `37800`
+  rows and `58` identifiers.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2024-03-01`
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2024-03-01
+  --archive-run-id backfill-v1-batch-2024-02-20260714-001`
+- Post-batch production profile aggregate check.
+- Post-batch archive verify for `2024-01-01` through `2024-03-01` and for the
+  full archive range through `2026-07-14`.
+
+Result:
+- The batch plan covered `5` identifiers, `4` forecast weeks, `20`
+  identifier-week pairs, and `60` candidate metric rows.
+- Write committed all `4` forecast weeks. Existing pilot rows meant the first
+  week inserted `0` new rows and the second week inserted only the missing
+  `12` metric rows / `2016` profile snapshot rows.
+- Total new inserts were `42` candidate metric rows and `7056` selected profile
+  snapshot rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Archive verify now reports `10080` historical profile snapshot rows, `20`
+  identifier-week pairs, `60` candidate metric rows, and `20` selected metric
+  rows.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue with the next monthly batch, likely `2024-03-01` through
+  `2024-04-01`, with the same before/after production profile count check.
+
+### 2026-07-14 - Second monthly live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill with the next monthly
+  increment, extending archive coverage through forecast week ending
+  `2024-04-01`.
+
+Note:
+- A direct sliding window plan with `--start-date 2024-03-01 --end-date
+  2024-04-01` produced no planned items because the current CLI uses
+  `start-date` both as the backfill lower bound and as the measurement-history
+  load lower bound. Monthly batches therefore currently need to keep
+  `--start-date 2024-01-01` and advance `--end-date` cumulatively. Existing
+  archive rows remain protected by `ON CONFLICT DO NOTHING`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-03-01 --end-date 2024-04-01`
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2024-04-01`
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2024-04-01
+  --archive-run-id backfill-v1-batch-through-2024-03-20260714-001`
+- Post-batch production profile aggregate check.
+- Post-batch archive verify for `2024-01-01` through `2024-04-01` and for the
+  full archive range through `2026-07-14`.
+
+Result:
+- The cumulative plan covered `5` identifiers, `8` forecast weeks, `40`
+  identifier-week pairs, and `120` candidate metric rows.
+- The first `4` forecast weeks were already archived and inserted `0` rows.
+- The March forecast weeks inserted `60` new candidate metric rows and `10080`
+  new selected profile snapshot rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Archive verify now reports `20160` historical profile snapshot rows, `40`
+  identifier-week pairs, `120` candidate metric rows, and `40` selected metric
+  rows.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2024-05-01`, while
+  keeping `--start-date 2024-01-01` until the CLI supports separate data
+  history start and batch window start.
+
+### 2026-07-14 - Third monthly live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  coverage through forecast week ending `2024-05-06` by advancing the
+  cumulative batch end to `2024-05-01`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2024-05-01`
+- Pre-batch archive verify for `2024-01-01` through `2024-05-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2024-05-01
+  --archive-run-id backfill-v1-batch-through-2024-04-20260714-001`
+- Post-batch production profile aggregate check.
+- Post-batch archive verify for `2024-01-01` through `2024-05-01` and for the
+  full archive range through `2026-07-14`.
+
+Result:
+- The cumulative plan covered `5` identifiers, `13` forecast weeks, `65`
+  identifier-week pairs, and `195` candidate metric rows.
+- Existing archived weeks inserted `0` rows. The April forecast weeks inserted
+  `75` new candidate metric rows and `12600` new selected profile snapshot
+  rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Archive verify now reports `32760` historical profile snapshot rows, `65`
+  identifier-week pairs, `195` candidate metric rows, and `65` selected metric
+  rows.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2024-06-01`.
+
+### 2026-07-14 - Fourth monthly live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  coverage through forecast week ending `2024-06-03` by advancing the
+  cumulative batch end to `2024-06-01`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2024-06-01`
+- Pre-batch archive verify for `2024-01-01` through `2024-06-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2024-06-01
+  --archive-run-id backfill-v1-batch-through-2024-05-20260714-001`
+- Post-batch production profile aggregate check.
+- Post-batch archive verify for `2024-01-01` through `2024-06-01` and for the
+  full archive range through `2026-07-14`.
+
+Result:
+- The cumulative plan covered `5` identifiers, `17` forecast weeks, `85`
+  identifier-week pairs, and `255` candidate metric rows.
+- Existing archived weeks inserted `0` rows. The May forecast weeks inserted
+  `60` new candidate metric rows and `10080` new selected profile snapshot
+  rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Archive verify now reports `42840` historical profile snapshot rows, `85`
+  identifier-week pairs, `255` candidate metric rows, and `85` selected metric
+  rows.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2024-07-01`.
+
+### 2026-07-14 - Fifth monthly live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  coverage through forecast week ending `2024-07-01` by advancing the
+  cumulative batch end to `2024-07-01`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2024-07-01`
+- Pre-batch archive verify for `2024-01-01` through `2024-07-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2024-07-01
+  --archive-run-id backfill-v1-batch-through-2024-06-20260714-001`
+- Post-batch production profile aggregate check.
+- Post-batch archive verify for `2024-01-01` through `2024-07-01` and for the
+  full archive range through `2026-07-14`.
+
+Result:
+- The cumulative plan covered `5` identifiers, `21` forecast weeks, `105`
+  identifier-week pairs, and `315` candidate metric rows.
+- Existing archived weeks inserted `0` rows. The June forecast weeks inserted
+  `60` new candidate metric rows and `10080` new selected profile snapshot
+  rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Archive verify now reports `52920` historical profile snapshot rows, `105`
+  identifier-week pairs, `315` candidate metric rows, and `105` selected metric
+  rows.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2024-08-01`.
+
+### 2026-07-14 - Sixth monthly live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  coverage through forecast week ending `2024-08-05` by advancing the
+  cumulative batch end to `2024-08-01`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2024-08-01`
+- Pre-batch archive verify for `2024-01-01` through `2024-08-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2024-08-01
+  --archive-run-id backfill-v1-batch-through-2024-07-20260714-001`
+- Post-batch production profile aggregate check.
+- Post-batch archive verify for `2024-01-01` through `2024-08-01` and for the
+  full archive range through `2026-07-14`.
+
+Result:
+- The cumulative plan covered `5` identifiers, `26` forecast weeks, `130`
+  identifier-week pairs, and `390` candidate metric rows.
+- Existing archived weeks inserted `0` rows. The July forecast weeks inserted
+  `75` new candidate metric rows and `12600` new selected profile snapshot
+  rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Archive verify now reports `65520` historical profile snapshot rows, `130`
+  identifier-week pairs, `390` candidate metric rows, and `130` selected metric
+  rows.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2024-09-01`.
+
+### 2026-07-14 - Seventh monthly live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  coverage through forecast week ending `2024-09-02` by advancing the
+  cumulative batch end to `2024-09-01`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2024-09-01`
+- Pre-batch archive verify for `2024-01-01` through `2024-09-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2024-09-01
+  --archive-run-id backfill-v1-batch-through-2024-08-20260714-001`
+- Post-batch production profile aggregate check.
+- Post-batch archive verify for `2024-01-01` through `2024-09-01` and for the
+  full archive range through `2026-07-14`.
+
+Result:
+- The cumulative plan covered `5` identifiers, `30` forecast weeks, `150`
+  identifier-week pairs, and `450` candidate metric rows.
+- Existing archived weeks inserted `0` rows. The August forecast weeks inserted
+  `60` new candidate metric rows and `10080` new selected profile snapshot
+  rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Archive verify now reports `75600` historical profile snapshot rows, `150`
+  identifier-week pairs, `450` candidate metric rows, and `150` selected metric
+  rows.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2024-10-01`.
+
+### 2026-07-14 - Eighth monthly live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  coverage through forecast week ending `2024-10-07` by advancing the
+  cumulative batch end to `2024-10-01`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2024-10-01`
+- Pre-batch archive verify for `2024-01-01` through `2024-10-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2024-10-01
+  --archive-run-id backfill-v1-batch-through-2024-09-20260714-001`
+- Post-batch production profile aggregate check.
+- Post-batch archive verify for `2024-01-01` through `2024-10-01` and for the
+  full archive range through `2026-07-14`.
+
+Result:
+- The cumulative plan covered `5` identifiers, `35` forecast weeks, `175`
+  identifier-week pairs, and `525` candidate metric rows.
+- Existing archived weeks inserted `0` rows. The September forecast weeks
+  inserted `75` new candidate metric rows and `12600` new selected profile
+  snapshot rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Archive verify now reports `88200` historical profile snapshot rows, `175`
+  identifier-week pairs, `525` candidate metric rows, and `175` selected metric
+  rows.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2024-11-01`.
+
+### 2026-07-14 - Ninth monthly live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  coverage through forecast week ending `2024-11-04` by advancing the
+  cumulative batch end to `2024-11-01`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2024-11-01`
+- Pre-batch archive verify for `2024-01-01` through `2024-11-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2024-11-01
+  --archive-run-id backfill-v1-batch-through-2024-10-20260714-001`
+- Post-batch production profile aggregate check.
+- Post-batch archive verify for `2024-01-01` through `2024-11-01` and for the
+  full archive range through `2026-07-14`.
+
+Result:
+- The cumulative plan covered `5` identifiers, `39` forecast weeks, `195`
+  identifier-week pairs, and `585` candidate metric rows.
+- Existing archived weeks inserted `0` rows. The October forecast weeks
+  inserted `60` new candidate metric rows and `10080` new selected profile
+  snapshot rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Archive verify now reports `98280` historical profile snapshot rows, `195`
+  identifier-week pairs, `585` candidate metric rows, and `195` selected metric
+  rows.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2024-12-01`.
+
+### 2026-07-14 - Tenth monthly live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  coverage through forecast week ending `2024-12-02` by advancing the
+  cumulative batch end to `2024-12-01`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2024-12-01`
+- Pre-batch archive verify for `2024-01-01` through `2024-12-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2024-12-01
+  --archive-run-id backfill-v1-batch-through-2024-11-20260714-001`
+- Post-batch production profile aggregate check.
+- Post-batch archive verify for `2024-01-01` through `2024-12-01` and for the
+  full archive range through `2026-07-14`.
+
+Result:
+- The cumulative plan covered `5` identifiers, `43` forecast weeks, `215`
+  identifier-week pairs, and `645` candidate metric rows.
+- Existing archived weeks inserted `0` rows. The November forecast weeks
+  inserted `60` new candidate metric rows and `10080` new selected profile
+  snapshot rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Archive verify now reports `108360` historical profile snapshot rows, `215`
+  identifier-week pairs, `645` candidate metric rows, and `215` selected metric
+  rows.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2025-01-01`.
+
+### 2026-07-14 - Eleventh monthly live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  coverage through forecast week ending `2025-01-06` by advancing the
+  cumulative batch end to `2025-01-01`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2025-01-01`
+- Pre-batch archive verify for `2024-01-01` through `2025-01-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2025-01-01
+  --archive-run-id backfill-v1-batch-through-2024-12-20260714-001`
+- Post-batch production profile aggregate check.
+- Post-batch archive verify for `2024-01-01` through `2025-01-01` and for the
+  full archive range through `2026-07-14`.
+
+Result:
+- The cumulative plan covered `5` identifiers, `48` forecast weeks, `240`
+  identifier-week pairs, and `720` candidate metric rows.
+- Existing archived weeks inserted `0` rows. The December forecast weeks
+  inserted `75` new candidate metric rows and `12600` new selected profile
+  snapshot rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Archive verify now reports `120960` historical profile snapshot rows, `240`
+  identifier-week pairs, `720` candidate metric rows, and `240` selected metric
+  rows.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2025-02-01`.
+
+### 2026-07-14 - Twelfth monthly live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  coverage through forecast week ending `2025-02-03` by advancing the
+  cumulative batch end to `2025-02-01`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2025-02-01`
+- Pre-batch archive verify for `2024-01-01` through `2025-02-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2025-02-01
+  --archive-run-id backfill-v1-batch-through-2025-01-20260714-001`
+- Post-batch production profile aggregate check.
+- Post-batch archive verify for `2024-01-01` through `2025-02-01` and for the
+  full archive range through `2026-07-14`.
+
+Result:
+- The cumulative plan covered `5` identifiers, `52` forecast weeks, `260`
+  identifier-week pairs, and `780` candidate metric rows.
+- Existing archived weeks inserted `0` rows. The January 2025 forecast weeks
+  inserted `60` new candidate metric rows and `10080` new selected profile
+  snapshot rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Archive verify now reports `131040` historical profile snapshot rows, `260`
+  identifier-week pairs, `780` candidate metric rows, and `260` selected metric
+  rows.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2025-03-01`.
+
+### 2026-07-14 - Thirteenth monthly live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  coverage through forecast week ending `2025-03-03` by advancing the
+  cumulative batch end to `2025-03-01`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2025-03-01`
+- Pre-batch archive verify for `2024-01-01` through `2025-03-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2025-03-01
+  --archive-run-id backfill-v1-batch-through-2025-02-20260714-001`
+- Post-batch production profile aggregate check.
+- Post-batch archive verify for `2024-01-01` through `2025-03-01` and for the
+  full archive range through `2026-07-14`.
+
+Result:
+- The cumulative plan covered `5` identifiers, `56` forecast weeks, `280`
+  identifier-week pairs, and `840` candidate metric rows.
+- Existing archived weeks inserted `0` rows. The February 2025 forecast weeks
+  inserted `60` new candidate metric rows and `10080` new selected profile
+  snapshot rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Archive verify now reports `141120` historical profile snapshot rows, `280`
+  identifier-week pairs, `840` candidate metric rows, and `280` selected metric
+  rows.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2025-04-01`.
+
+### 2026-07-20 - Fourteenth live backfill continuation after restart
+
+Scope:
+- Continued the controlled historical vodomery backfill after post-restart
+  runtime checks.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2025-04-01`
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  verify --start-date 2024-01-01 --end-date 2025-04-01`
+- Monthly read-only completeness scan from `2025-04-01` through `2026-08-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2025-09-01
+  --archive-run-id backfill-v1-batch-through-2025-08-20260720-001`
+- Post-batch archive verify for `2024-01-01` through `2025-09-01` and for the
+  isolated `2025-08-01` through `2025-09-01` batch window.
+- Post-batch production profile aggregate and scheduler heartbeat checks.
+
+Result:
+- Initial read-only checks showed archive coverage through cumulative
+  `2025-08-01` was already complete before this batch.
+- The first incomplete cumulative range was `2025-09-01`.
+- The write command exceeded the tool timeout while the child process kept
+  running; read-only polling showed week-level commits continuing until the
+  process finished. No backfill process remained afterward.
+- The cumulative verify through `2025-09-01` now reports `429744` historical
+  profile snapshot rows, `742` identifier-week pairs, `2226` candidate metric
+  rows, and `742` selected metric rows.
+- The isolated August 2025 batch inserted archive coverage for `132`
+  identifier-week pairs, `396` candidate metric rows, and `85344` profile
+  snapshot rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Scheduler remained healthy; `quarter_hour_job` and database availability
+  checks were successful after the batch.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2025-10-01`.
+
+### 2026-07-20 - Fifteenth live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  coverage through forecast week ending `2025-10-06` by advancing the
+  cumulative batch end to `2025-10-01`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2025-10-01`
+- Pre-batch archive verify for `2024-01-01` through `2025-10-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2025-10-01
+  --archive-run-id backfill-v1-batch-through-2025-09-20260720-001`
+- Post-batch archive verify for `2024-01-01` through `2025-10-01` and for the
+  isolated `2025-09-01` through `2025-10-01` batch window.
+- Post-batch production profile aggregate and scheduler heartbeat checks.
+
+Result:
+- The cumulative plan covered `33` identifiers, `87` forecast weeks, `907`
+  identifier-week pairs, and `2721` candidate metric rows.
+- Existing archived weeks inserted `0` rows. The September 2025 forecast weeks
+  inserted `495` new candidate metric rows and `106680` new selected profile
+  snapshot rows.
+- Cumulative verify through `2025-10-01` now reports `536424` historical
+  profile snapshot rows, `907` identifier-week pairs, `2721` candidate metric
+  rows, and `907` selected metric rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Scheduler remained healthy; `quarter_hour_job` and database availability
+  checks were successful after the batch.
+- No backfill process remained after verification.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2025-11-01`.
+
+### 2026-07-20 - Sixteenth live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  coverage through forecast week ending `2025-11-03` by advancing the
+  cumulative batch end to `2025-11-01`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2025-11-01`
+- Pre-batch archive verify for `2024-01-01` through `2025-11-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2025-11-01
+  --archive-run-id backfill-v1-batch-through-2025-10-20260720-001`
+- Post-batch archive verify for `2024-01-01` through `2025-11-01` and for the
+  isolated `2025-10-01` through `2025-11-01` batch window.
+- Post-batch production profile aggregate and scheduler heartbeat checks.
+
+Result:
+- The cumulative plan covered `34` identifiers, `91` forecast weeks, `1040`
+  identifier-week pairs, and `3120` candidate metric rows.
+- Existing archived weeks inserted `0` rows. The October 2025 forecast weeks
+  inserted `399` new candidate metric rows and `86016` new selected profile
+  snapshot rows.
+- Cumulative verify through `2025-11-01` now reports `622440` historical
+  profile snapshot rows, `1040` identifier-week pairs, `3120` candidate metric
+  rows, and `1040` selected metric rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Scheduler remained healthy; `quarter_hour_job` and database availability
+  checks were successful after the batch.
+- No backfill process remained after verification.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2025-12-01`.
+
+### 2026-07-20 - Seventeenth live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  coverage through forecast week ending `2025-12-01` by advancing the
+  cumulative batch end to `2025-12-01`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2025-12-01`
+- Pre-batch archive verify for `2024-01-01` through `2025-12-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2025-12-01
+  --archive-run-id backfill-v1-batch-through-2025-11-20260720-001`
+- Post-batch archive verify for `2024-01-01` through `2025-12-01` and for the
+  isolated `2025-11-01` through `2025-12-01` batch window.
+- Post-batch production profile aggregate and scheduler heartbeat checks.
+
+Result:
+- The cumulative plan covered `39` identifiers, `95` forecast weeks, `1187`
+  identifier-week pairs, and `3561` candidate metric rows.
+- Existing archived weeks inserted `0` rows. The November 2025 forecast weeks
+  inserted `441` new candidate metric rows and `94080` new selected profile
+  snapshot rows.
+- Cumulative verify through `2025-12-01` now reports `716520` historical
+  profile snapshot rows, `1187` identifier-week pairs, `3561` candidate metric
+  rows, and `1187` selected metric rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Scheduler remained healthy; `quarter_hour_job` and database availability
+  checks were successful after the batch.
+- No backfill process remained after verification.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2026-01-01`.
+
+### 2026-07-21 - Eighteenth live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  coverage through forecast week ending `2026-01-05` by advancing the
+  cumulative batch end to `2026-01-01`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2026-01-01`
+- Pre-batch archive verify for `2024-01-01` through `2026-01-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2026-01-01
+  --archive-run-id backfill-v1-batch-through-2025-12-20260720-001`
+- Post-batch archive verify for `2024-01-01` through `2026-01-01` and for the
+  isolated `2025-12-01` through `2026-01-01` batch window.
+- Post-batch production profile aggregate and scheduler heartbeat checks.
+
+Result:
+- The cumulative plan covered `56` identifiers, `100` forecast weeks, `1428`
+  identifier-week pairs, and `4284` candidate metric rows.
+- Existing archived weeks inserted `0` rows. The December 2025 forecast weeks
+  inserted `723` new candidate metric rows and `156072` new selected profile
+  snapshot rows.
+- Cumulative verify through `2026-01-01` now reports `872592` historical
+  profile snapshot rows, `1428` identifier-week pairs, `4284` candidate metric
+  rows, and `1428` selected metric rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Scheduler remained healthy; `quarter_hour_job` and database availability
+  checks were successful after the batch.
+- No backfill process remained after verification.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2026-02-01`.
+
+### 2026-07-21 - Nineteenth live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  coverage through forecast week ending `2026-02-02` by advancing the
+  cumulative batch end to `2026-02-01`.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2026-02-01`
+- Pre-batch archive verify for `2024-01-01` through `2026-02-01`.
+- Pre-batch production profile aggregate check.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2024-01-01 --end-date 2026-02-01
+  --archive-run-id backfill-v1-batch-through-2026-01-20260721-001`
+- Post-batch archive verify for `2024-01-01` through `2026-02-01` and for the
+  isolated `2026-01-01` through `2026-02-01` batch window.
+- Post-batch production profile aggregate and scheduler heartbeat checks.
+
+Result:
+- The cumulative plan covered `57` identifiers, `104` forecast weeks, `1656`
+  identifier-week pairs, and `4968` candidate metric rows.
+- Existing archived weeks inserted `0` rows. The January 2026 forecast weeks
+  inserted `684` new candidate metric rows and `148512` new selected profile
+  snapshot rows.
+- Cumulative verify through `2026-02-01` now reports `1021104` historical
+  profile snapshot rows, `1656` identifier-week pairs, `4968` candidate metric
+  rows, and `1656` selected metric rows.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Scheduler remained healthy; `quarter_hour_job` and database availability
+  checks were successful after the batch.
+- No backfill process remained after verification.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by advancing the cumulative `--end-date` to `2026-03-01`.
+
+### 2026-07-22 - Twentieth live backfill batch
+
+Scope:
+- Continued the controlled historical vodomery backfill, extending archive
+  candidate metrics through forecast week ending `2026-03-02` by processing
+  the February 2026 forecast weeks.
+
+Ran:
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  plan --start-date 2024-01-01 --end-date 2026-03-01`
+- Pre-batch archive verify for `2024-01-01` through `2026-03-01` and for the
+  isolated `2026-02-01` through `2026-03-01` batch window.
+- Pre-batch production profile aggregate check.
+- Started cumulative write through `2026-03-01` with archive run id
+  `backfill-v1-batch-through-2026-02-20260722-001`; stopped it after it ran
+  for about one hour without archive progress because it was reprocessing
+  already archived weeks.
+- `.venv-production\Scripts\python.exe scripts\vodomery_prediction_backfill.py
+  write --start-date 2026-02-01 --history-start-date 2024-01-01
+  --end-date 2026-03-01 --archive-run-id
+  backfill-v1-batch-through-2026-02-20260722-002`
+- Post-batch archive verify for `2024-01-01` through `2026-03-01` and for the
+  isolated `2026-02-01` through `2026-03-01` batch window.
+- Post-batch production profile aggregate, listener, and scheduler heartbeat
+  checks.
+
+Result:
+- The cumulative plan covered `58` identifiers, `108` forecast weeks, `1885`
+  identifier-week pairs, and `5655` candidate metric rows.
+- The isolated February 2026 write committed `4` forecast weeks. The first two
+  weeks were already archived and inserted `0` rows. The last two weeks
+  inserted `345` new candidate metric rows and `73584` new selected profile
+  snapshot rows.
+- Cumulative verify through `2026-03-01` now reports `1168944` historical
+  profile snapshot rows, `1883` profile identifier-week pairs, `5655`
+  candidate metric rows, and `1885` selected metric rows.
+- The isolated February 2026 verify reports `147840` historical profile
+  snapshot rows, `227` profile identifier-week pairs, `687` candidate metric
+  rows, and `229` selected metric rows.
+- Two selected February 2026 `Model 2 - adaptive_strategy` identifier-week
+  decisions have no available profile snapshot rows: one for forecast week
+  starting `2026-02-16` and one for forecast week starting `2026-02-23`.
+  The backfill writer tolerated this through `require_all_pairs=False`.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Expected listeners were present on Caddy `80/443/2019`, FastAPI
+  `127.0.0.1:8000`, and Streamlit `127.0.0.1:8001`.
+- Scheduler metrics reported `scheduler_running=True`, heartbeat
+  `2026-07-22T15:22:05.322831`, and no recorded job failure timestamps.
+- No backfill process remained after verification.
+
+Not run:
+- Later monthly batches and dashboard integration were not run yet.
+
+Follow-up:
+- Continue by processing the isolated monthly range `2026-03-01` through
+  `2026-04-01` with `--history-start-date 2024-01-01`, then verify the
+  cumulative archive through `2026-04-01`.
+- Investigate whether the two February 2026 selected `adaptive_strategy`
+  decisions without profile snapshots are expected data sparsity or need a
+  fallback profile rule.
+
+### 2026-07-23 - Historical backfill continuation through closed July weeks
+
+Scope:
+- Continued controlled historical vodomery backfill with isolated ranges and
+  `--history-start-date 2024-01-01` to avoid reprocessing the full archive.
+- Processed March, April, May, June, and the two closed July 2026 forecast
+  weeks ending `2026-07-20`.
+
+Ran:
+- Pre-batch `plan` and `verify` for each isolated range:
+  `2026-03-01` through `2026-04-01`, `2026-04-01` through `2026-05-01`,
+  `2026-05-01` through `2026-06-01`, `2026-06-01` through `2026-07-01`,
+  and `2026-07-01` through `2026-07-20`.
+- Write runs with archive run ids:
+  `backfill-v1-batch-through-2026-03-20260722-001`,
+  `backfill-v1-batch-through-2026-04-20260722-001`,
+  `backfill-v1-batch-through-2026-05-20260722-001`,
+  `backfill-v1-batch-through-2026-06-20260722-001`, and
+  `backfill-v1-batch-through-2026-07-20-20260722-001`.
+- Post-batch isolated and cumulative archive verifies.
+- Post-batch production profile aggregate, listener, backfill-process, and
+  scheduler heartbeat checks.
+
+Result:
+- March 2026 inserted `861` candidate metric rows and `186312` selected
+  profile snapshot rows. Three March weeks each skipped one planned identifier
+  with no candidate metrics.
+- April 2026 inserted `696` candidate metric rows and `151200` selected
+  profile snapshot rows.
+- May 2026 inserted `696` candidate metric rows and `151200` selected profile
+  snapshot rows.
+- June 2026 inserted `870` candidate metric rows and `189000` selected profile
+  snapshot rows.
+- Closed July weeks `2026-07-06` through `2026-07-20` inserted `348`
+  candidate metric rows and `75600` selected profile snapshot rows.
+- Cumulative verify for `2024-01-01` through `2026-07-20` now reports
+  `1922256` historical profile snapshot rows, `3039` profile
+  identifier-week pairs, `9126` candidate metric rows, and `3042` selected
+  metric rows.
+- The three cumulative profile-pair gaps are the previously observed selected
+  `Model 2 - adaptive_strategy` decisions without available profile snapshots:
+  two in February 2026 and one in March 2026.
+- The full July plan through `2026-08-01` was read-only only; it would include
+  a forecast week ending `2026-07-27`, so it was not written while that week
+  was not treated as closed.
+- Post-batch production `vodomery_anomaly_profiles` counts remained unchanged:
+  models `1`-`5` each reported `37800` rows and `58` identifiers.
+- Expected listeners were present on Caddy `80/443/2019`, FastAPI
+  `127.0.0.1:8000`, and Streamlit `127.0.0.1:8001`.
+- Scheduler metrics reported `scheduler_running=True`, heartbeat
+  `2026-07-23T10:07:12.421197`, and no recorded job failure timestamps.
+- No backfill process remained after verification.
+
+Not run:
+- The still-open July forecast week ending `2026-07-27` was not written.
+- Dashboard integration follow-up was not run.
+
+Follow-up:
+- After the week ending `2026-07-27` is safely closed, process the next
+  isolated range starting `2026-07-20` or a reviewed monthly range that avoids
+  incomplete forecast weeks.
+- Investigate the three selected `adaptive_strategy` decisions without profile
+  snapshots and decide whether they are expected data sparsity or need a
+  fallback profile rule.
+
+### 2026-07-23 - Weekly rebuild profile settings after backfill
+
+Scope:
+- Updated vodomery weekly prediction rebuild behavior after completing the
+  historical archive through closed forecast weeks.
+- Checked and updated the model rebuild email report for the new weekly
+  profile snapshot behavior.
+
+Changed:
+- `build_vodomery_weekly_forecast_period` now returns a calendar-week period
+  from Monday `00:00` through the following Monday `00:00`, matching the
+  historical backfill archive keys.
+- Weekly `rebuild_profiles` now persists selected profile snapshots with
+  `require_all_pairs=False`, so a small number of selected identifier/model
+  pairs without a source profile no longer fails the whole weekly rebuild.
+- Weekly rebuild results now include profile snapshot source, row count,
+  distinct pair count, and missing selected profile-pair count.
+- The vodomery model rebuild email now displays those profile snapshot
+  archive counts, including missing profile snapshot pairs.
+
+Verified:
+- `.venv\Scripts\python.exe -m pytest tests\test_vodomery_prediction.py
+  tests\test_vodomery_model_rebuild_report.py -q --tb=short` reported
+  `25 passed`.
+- `.venv\Scripts\python.exe -m pytest
+  tests\test_scheduler.py::test_weekly_job_rebuilds_profiles_and_sends_report
+  tests\test_prediction_storage.py -q --tb=short` reported `23 passed`.
+- `.venv\Scripts\python.exe -m py_compile
+  moduly\mereni\vodomery\vodomery_prediction.py
+  moduly\mereni\vodomery\reporting\model_rebuild_report.py
+  tests\test_vodomery_prediction.py
+  tests\test_vodomery_model_rebuild_report.py`
+
+Not verified:
+- No live weekly rebuild was run.
+- Dashboard integration was intentionally left for the next step.
+
+Follow-up:
+- Integrate historical candidate metrics and selected profile snapshots into
+  the dashboard prediction performance views.

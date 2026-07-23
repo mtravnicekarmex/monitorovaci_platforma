@@ -29,6 +29,12 @@ def send_vodomery_model_rebuild_report(selection_result: dict[str, object]) -> d
             "selected_model_snapshot_count": int(
                 selection_result.get("selected_model_snapshot_count") or 0
             ),
+            "prediction_profile_snapshot_count": int(
+                selection_result.get("prediction_profile_snapshot_count") or 0
+            ),
+            "prediction_profile_snapshot_missing_pair_count": int(
+                selection_result.get("prediction_profile_snapshot_missing_pair_count") or 0
+            ),
             "skipped": True,
             "skip_reason": "no_sendable_recipients",
         }
@@ -60,6 +66,12 @@ def send_vodomery_model_rebuild_report(selection_result: dict[str, object]) -> d
         "selected_model_snapshot_count": int(
             selection_result.get("selected_model_snapshot_count") or 0
         ),
+        "prediction_profile_snapshot_count": int(
+            selection_result.get("prediction_profile_snapshot_count") or 0
+        ),
+        "prediction_profile_snapshot_missing_pair_count": int(
+            selection_result.get("prediction_profile_snapshot_missing_pair_count") or 0
+        ),
     }
 
 
@@ -84,6 +96,12 @@ def _build_email_body(selection_result: dict[str, object]) -> str:
     forecast_period = selection_result.get("forecast_period")
     snapshot_mode = selection_result.get("selected_model_snapshot_mode")
     snapshot_count = selection_result.get("selected_model_snapshot_count")
+    profile_snapshot_source = selection_result.get("prediction_profile_snapshot_source")
+    profile_snapshot_count = selection_result.get("prediction_profile_snapshot_count")
+    profile_snapshot_pair_count = selection_result.get("prediction_profile_snapshot_pair_count")
+    profile_snapshot_missing_pair_count = selection_result.get(
+        "prediction_profile_snapshot_missing_pair_count",
+    )
     rebuild_duration = selection_result.get("rebuild_duration_seconds")
 
     header_html = (
@@ -117,6 +135,13 @@ def _build_email_body(selection_result: dict[str, object]) -> str:
             ("Validation end", windows["validation_end"]),
             ("Deploy start", windows["deploy_start"]),
             ("Deploy end", windows["deploy_end"]),
+            ("Profile snapshot source", _format_optional_text(profile_snapshot_source)),
+            ("Profile snapshot rows", _format_optional_int(profile_snapshot_count)),
+            ("Profile snapshot pairs", _format_optional_int(profile_snapshot_pair_count)),
+            (
+                "Missing profile snapshot pairs",
+                _format_optional_int(profile_snapshot_missing_pair_count),
+            ),
         )
     )
 
@@ -222,6 +247,13 @@ def _format_optional_int(value: object) -> str:
     if value is None:
         return "-"
     return str(int(value))
+
+
+def _format_optional_text(value: object) -> str:
+    if value is None:
+        return "-"
+    normalized = str(value).strip()
+    return normalized or "-"
 
 
 def _format_duration(value: object) -> str:

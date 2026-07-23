@@ -21,7 +21,7 @@ from moduly.apps.dashboard.auth import get_auth_token, require_page_access  # no
 
 st.set_page_config(
     page_title="Predikce modelu",
-    page_icon="M",
+    page_icon="📊",
     layout="wide",
 )
 

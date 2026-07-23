@@ -117,6 +117,10 @@ def test_model_rebuild_report_body_shows_eligibility_and_rolling_metrics():
             ],
             "selected_model_snapshot_mode": "active",
             "selected_model_snapshot_count": 3,
+            "prediction_profile_snapshot_source": "weekly_rebuild",
+            "prediction_profile_snapshot_count": 1296,
+            "prediction_profile_snapshot_pair_count": 2,
+            "prediction_profile_snapshot_missing_pair_count": 1,
             "selected_model_snapshots": [
                 {
                     "medium_key": "vodomery",
@@ -212,6 +216,11 @@ def test_model_rebuild_report_body_shows_eligibility_and_rolling_metrics():
     assert "Eligibility" in body
     assert "Rebuild duration" in body
     assert "2 min 5.4 s" in body
+    assert "Profile snapshot source" in body
+    assert "weekly_rebuild" in body
+    assert "Profile snapshot rows" in body
+    assert "1296" in body
+    assert "Missing profile snapshot pairs" in body
     assert "Rolling WAPE" in body
     assert "Popis sloupcu tabulky Model" in body
     assert "Per-odberne misto rolling backtest" in body

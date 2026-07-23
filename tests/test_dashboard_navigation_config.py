@@ -11,6 +11,7 @@ from moduly.apps.dashboard.navigation_config import (
     get_page_definition,
     normalize_page_keys,
 )
+from streamlit.string_util import validate_icon_or_emoji
 
 
 def test_sidebar_section_order_matches_requested_dashboard_order():
@@ -77,6 +78,11 @@ def test_prediction_performance_footer_page_is_admin_only():
     assert page.admin_only is True
     assert page.configurable is False
     assert "prediction_performance" in footer_page_keys
+
+
+def test_all_navigation_page_icons_are_valid_for_streamlit_pages():
+    for page in get_dashboard_pages():
+        validate_icon_or_emoji(page.icon)
 
 
 def test_manometry_section_and_page_are_configurable():

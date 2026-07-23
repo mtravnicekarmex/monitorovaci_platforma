@@ -13249,3 +13249,153 @@ Not verified:
 Follow-up:
 - Integrate historical candidate metrics and selected profile snapshots into
   the dashboard prediction performance views.
+
+### 2026-07-23 - Prediction dashboard historical archive integration
+
+Scope:
+- Integrated vodomery historical prediction backfill aggregates into the
+  admin `Predikce modelu` dashboard page.
+
+Changed:
+- Extended `/api/v1/prediction/performance` response with historical candidate
+  performance aggregates by medium/model/archive version.
+- Added historical selected-profile snapshot coverage aggregates by forecast
+  period, including selected metric pairs, archived profile pairs, profile row
+  counts, and missing profile pair counts.
+- Added dashboard `Historie` tab showing historical candidate metrics and
+  profile snapshot coverage.
+- Kept historical views aggregate-only; no raw measurements are exposed.
+
+Verified:
+- `.venv\Scripts\python.exe -m pytest tests\test_prediction_performance.py
+  tests\test_dashboard_navigation_config.py -q --tb=short` reported
+  `26 passed`.
+- `.venv\Scripts\python.exe -m pytest tests\test_prediction_storage.py
+  tests\test_vodomery_prediction.py tests\test_vodomery_model_rebuild_report.py
+  -q --tb=short` reported `47 passed`.
+- `.venv\Scripts\python.exe -m py_compile
+  services\api\schemas\prediction.py
+  services\api\services\prediction_performance.py
+  moduly\apps\dashboard\pages\38_prediction_performance.py`
+- Production read-only aggregate check through
+  `collect_prediction_performance_report()` returned status `ok`; vodomery
+  returned `3` historical candidate rows, `128` historical snapshot periods,
+  and `3` missing historical profile pairs.
+
+Not verified:
+- The Streamlit page was not opened in a browser.
+
+Follow-up:
+- Review the dashboard `Historie` tab visually in the running Streamlit app.
+- Decide whether to add drill-down for the three missing historical profile
+  pairs after confirming the safe level of detail for dashboard users.
+
+### 2026-07-23 11:08 - Pre-restart handoff
+
+Reason for restart:
+- User will restart the Windows workstation after completing vodomery
+  prediction historical backfill, weekly rebuild profile-setting changes, and
+  dashboard integration.
+- Restart should load the changed FastAPI and Streamlit code through the
+  existing startup task model.
+
+Current task/conversation state:
+- Completed: historical vodomery prediction archive through the closed
+  forecast weeks ending `2026-07-20`.
+- Completed: weekly vodomery rebuild now uses calendar-week forecast periods
+  and tolerates selected identifier/model pairs without source profile
+  snapshots while reporting the missing pair count.
+- Completed: model rebuild email includes profile snapshot source, row count,
+  pair count, and missing pair count.
+- Completed: dashboard `Predikce modelu` page now has a `Historie` tab backed
+  by aggregate API data from historical candidate metrics and profile snapshot
+  coverage.
+- Pending: visually review the dashboard `Historie` tab after restart.
+- Pending: decide whether to add a safe drill-down for the three missing
+  historical profile pairs.
+- First action after restart: run the post-restart health/routing checks, then
+  open the Streamlit dashboard page `Predikce modelu` and verify the
+  `Historie` tab.
+
+Working tree and deployment:
+- `git status --short` before restart:
+  ```text
+   M SESSION_NOTES.md
+   M moduly/apps/dashboard/pages/38_prediction_performance.py
+   M services/api/schemas/prediction.py
+   M services/api/services/prediction_performance.py
+   M tests/test_prediction_performance.py
+  ```
+- Relevant changed files:
+  - `services/api/schemas/prediction.py`: added historical prediction
+    dashboard response models.
+  - `services/api/services/prediction_performance.py`: added aggregate
+    historical candidate performance and profile snapshot coverage queries.
+  - `moduly/apps/dashboard/pages/38_prediction_performance.py`: added
+    dashboard `Historie` tab.
+  - `tests/test_prediction_performance.py`: added API coverage for historical
+    dashboard fields.
+  - `SESSION_NOTES.md`: session log and this restart handoff.
+- Runtime-deployed files and hash/config state:
+  - No Caddyfile, launcher, scheduled-task, dependency, or environment file
+    changes were made in this session.
+  - Code changes are in the repository and should be picked up by the normal
+    post-restart application startup.
+
+Sensitive/runtime artifacts:
+- Do not print/change/delete/commit credentials, tokens, cookies, `.env`,
+  ProgramData credential files, raw meter data, raw source imports, or device
+  photo paths.
+- Do not inspect retired SmartFuelPass JSON session artifacts.
+- Do not create a code-integrity baseline while the working tree remains dirty.
+
+Expected processes after restart:
+- FastAPI/Uvicorn: one runtime on `127.0.0.1:8000`.
+- Streamlit: one runtime on `127.0.0.1:8001`.
+- Scheduler: one `main.py` runtime holding the `scheduler_process` lock.
+- Caddy: one runtime owning TCP `80`, `443`, and `127.0.0.1:2019`.
+- Pre-restart listener observation also showed a separate process on
+  Tailscale-local `443` addresses; verify after restart if it appears again,
+  but do not treat it as the dashboard Caddy listener without checking owner.
+
+Expected application state:
+- FastAPI live: `GET http://127.0.0.1:8000/health/live` returns HTTP `200`.
+- FastAPI ready: `GET http://127.0.0.1:8000/health/ready` returns HTTP `200`
+  after dashboard DB bootstrap succeeds; temporary `503` is acceptable only
+  during startup retry.
+- Streamlit health: `GET http://127.0.0.1:8001/_stcore/health` returns HTTP
+  `200`.
+- Scheduler metrics: `scheduler_running=True`, fresh heartbeat within the
+  configured TTL, and no new unexpected job failure timestamps.
+- Public HTTPS dashboard: `https://monitoring.armexholding.cz/` returns the
+  Streamlit login/dashboard surface.
+- Protected API without bearer token:
+  `https://monitoring.armexholding.cz/api/v1/auth/me` returns HTTP `401` JSON.
+- Public docs aliases remain blocked by Caddy:
+  `/docs`, `/redoc`, and `/openapi.json` return HTTP `404`.
+- Prediction performance API after login/admin token returns status `ok`; the
+  vodomery aggregate should include `3` historical candidate rows, `128`
+  historical snapshot periods, and `3` missing historical profile pairs unless
+  a new weekly rebuild changes the latest active snapshot state.
+- Dashboard `Predikce modelu / Historie` tab should show historical candidate
+  metrics and profile snapshot coverage without raw measurements or secrets.
+
+Required post-restart checks:
+- Confirm startup task state and last result for `API_dashboard_caddy`.
+- Confirm expected listeners on `80`, `443`, `2019`, `8000`, and `8001`.
+- Confirm FastAPI live/ready, Streamlit health, public HTTPS dashboard,
+  protected API `401`, docs aliases `404`, and HTTP-to-HTTPS redirect.
+- Confirm scheduler heartbeat and `quarter_hour_job`/database availability
+  status after the first expected post-restart run.
+- Run a read-only aggregate prediction check through
+  `collect_prediction_performance_report()` and verify vodomery historical
+  counts are still present.
+- Open `Predikce modelu` in the dashboard as an admin and visually check the
+  `Historie` tab layout and values.
+
+Known risks or accepted gaps:
+- The working tree is dirty and not committed.
+- The Streamlit page was not visually reviewed before restart.
+- Three historical selected `Model 2 - adaptive_strategy` profile pairs are
+  missing source profile snapshots; this is already surfaced in API/dashboard
+  aggregate counts and remains a follow-up investigation.

@@ -108,6 +108,45 @@ class PredictionIdentifierSelectionRecord(BaseModel):
     created_at: datetime | None = None
 
 
+class PredictionHistoricalCandidatePerformanceRecord(BaseModel):
+    medium_key: str
+    medium_label: str
+    archive_version: int
+    model_version: int
+    model_key: str
+    model_name: str
+    selection_enabled: bool
+    metric_row_count: int = Field(ge=0)
+    forecast_period_count: int = Field(ge=0)
+    identifier_week_count: int = Field(ge=0)
+    selected_metric_count: int = Field(ge=0)
+    eligible_metric_count: int = Field(ge=0)
+    avg_coverage: float | None = Field(default=None, ge=0)
+    avg_mae: float | None = None
+    avg_rmse: float | None = None
+    avg_bias: float | None = None
+    avg_wape: float | None = None
+    worst_wape: float | None = None
+    first_forecast_period_start: datetime | None = None
+    last_forecast_period_end: datetime | None = None
+    latest_created_at: datetime | None = None
+
+
+class PredictionHistoricalSnapshotCoverageRecord(BaseModel):
+    medium_key: str
+    medium_label: str
+    archive_version: int
+    forecast_period_start: datetime
+    forecast_period_end: datetime
+    forecast_period_label: str | None = None
+    forecast_cadence: str
+    selected_metric_pair_count: int = Field(ge=0)
+    profile_pair_count: int = Field(ge=0)
+    missing_profile_pair_count: int = Field(ge=0)
+    profile_row_count: int = Field(ge=0)
+    latest_created_at: datetime | None = None
+
+
 class PredictionMediumPerformance(BaseModel):
     medium_key: str
     medium_label: str
@@ -119,6 +158,8 @@ class PredictionMediumPerformance(BaseModel):
     candidate_performance: list[PredictionCandidatePerformanceRecord] = Field(default_factory=list)
     snapshot_summary: PredictionSnapshotSummary | None = None
     worst_identifier_selections: list[PredictionIdentifierSelectionRecord] = Field(default_factory=list)
+    historical_candidate_performance: list[PredictionHistoricalCandidatePerformanceRecord] = Field(default_factory=list)
+    historical_snapshot_coverage: list[PredictionHistoricalSnapshotCoverageRecord] = Field(default_factory=list)
 
 
 class PredictionPerformanceResponse(BaseModel):

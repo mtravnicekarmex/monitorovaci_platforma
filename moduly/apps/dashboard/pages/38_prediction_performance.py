@@ -215,6 +215,64 @@ def _build_catalog_dataframe(media: list[dict[str, object]]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _build_historical_candidate_dataframe(media: list[dict[str, object]]) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for item in media:
+        medium_label = str(item.get("medium_label") or item.get("medium_key") or "-")
+        for candidate in item.get("historical_candidate_performance") or []:
+            if not isinstance(candidate, dict):
+                continue
+            rows.append(
+                {
+                    "medium": medium_label,
+                    "archive": candidate.get("archive_version"),
+                    "model": candidate.get("model_name"),
+                    "key": candidate.get("model_key"),
+                    "eligible": "ANO" if candidate.get("selection_enabled") else "NE",
+                    "periods": candidate.get("forecast_period_count") or 0,
+                    "identifier_weeks": candidate.get("identifier_week_count") or 0,
+                    "metric_rows": candidate.get("metric_row_count") or 0,
+                    "selected": candidate.get("selected_metric_count") or 0,
+                    "avg_coverage": _format_percent(candidate.get("avg_coverage")),
+                    "avg_wape": _format_percent(candidate.get("avg_wape")),
+                    "avg_mae": _format_number(candidate.get("avg_mae")),
+                    "avg_rmse": _format_number(candidate.get("avg_rmse")),
+                    "avg_bias": _format_number(candidate.get("avg_bias")),
+                    "worst_wape": _format_percent(candidate.get("worst_wape")),
+                    "first_period": _format_date(candidate.get("first_forecast_period_start")),
+                    "last_period_end": _format_date(candidate.get("last_forecast_period_end")),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _build_historical_snapshot_dataframe(media: list[dict[str, object]]) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for item in media:
+        medium_label = str(item.get("medium_label") or item.get("medium_key") or "-")
+        for snapshot in item.get("historical_snapshot_coverage") or []:
+            if not isinstance(snapshot, dict):
+                continue
+            selected_pairs = int(snapshot.get("selected_metric_pair_count") or 0)
+            profile_pairs = int(snapshot.get("profile_pair_count") or 0)
+            rows.append(
+                {
+                    "medium": medium_label,
+                    "archive": snapshot.get("archive_version"),
+                    "period": _format_period(snapshot),
+                    "selected_pairs": selected_pairs,
+                    "profile_pairs": profile_pairs,
+                    "missing_pairs": snapshot.get("missing_profile_pair_count") or 0,
+                    "coverage": _format_percent(
+                        (profile_pairs / selected_pairs) if selected_pairs else None
+                    ),
+                    "profile_rows": snapshot.get("profile_row_count") or 0,
+                    "created": _format_timestamp(snapshot.get("latest_created_at")),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def _render_distribution_tables(media: list[dict[str, object]]) -> None:
     rows: list[dict[str, object]] = []
     fallback_rows: list[dict[str, object]] = []
@@ -281,8 +339,11 @@ def _render_page() -> None:
     col3.metric("Kandidati", sum(len(item.get("candidate_catalog") or []) for item in media))
     col4.metric("Snapshoty", snapshot_count)
 
-    tab_summary, tab_candidates, tab_identifiers, tab_catalog = st.tabs(
-        ["Souhrn", "Kandidati", "Vybery zarizeni", "Katalog"]
+    historical_candidate_df = _build_historical_candidate_dataframe(media)
+    historical_snapshot_df = _build_historical_snapshot_dataframe(media)
+
+    tab_summary, tab_candidates, tab_identifiers, tab_history, tab_catalog = st.tabs(
+        ["Souhrn", "Kandidati", "Vybery zarizeni", "Historie", "Katalog"]
     )
 
     with tab_summary:
@@ -304,6 +365,34 @@ def _render_page() -> None:
             st.info("Zadne per-identifier snapshoty.")
         else:
             st.dataframe(identifier_df, hide_index=True, use_container_width=True)
+
+    with tab_history:
+        st.subheader("Historicky backfill kandidatu")
+        if historical_candidate_df.empty:
+            st.info("Zadne historicke candidate metriky.")
+        else:
+            st.dataframe(
+                historical_candidate_df,
+                hide_index=True,
+                use_container_width=True,
+            )
+
+        st.subheader("Pokryti historickych profile snapshotu")
+        if historical_snapshot_df.empty:
+            st.info("Zadne historicke profile snapshoty.")
+        else:
+            missing_total = int(historical_snapshot_df["missing_pairs"].sum())
+            period_total = len(historical_snapshot_df)
+            complete_total = int((historical_snapshot_df["missing_pairs"] == 0).sum())
+            cols = st.columns(3)
+            cols[0].metric("Historicka obdobi", period_total)
+            cols[1].metric("Kompletni obdobi", complete_total)
+            cols[2].metric("Chybejici pary", missing_total)
+            st.dataframe(
+                historical_snapshot_df,
+                hide_index=True,
+                use_container_width=True,
+            )
 
     with tab_catalog:
         catalog_df = _build_catalog_dataframe(media)

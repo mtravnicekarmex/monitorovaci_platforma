@@ -44,6 +44,8 @@ class _FakePredictionSession:
             "monitoring.plynomery_model_selection_runs",
             "monitoring.plynomery_model_selection_candidates",
             "monitoring.prediction_selected_model_snapshots",
+            "monitoring.prediction_profile_snapshots",
+            "monitoring.prediction_backfill_candidate_metrics",
         }
 
     def execute(self, statement, params=None):
@@ -236,6 +238,70 @@ class _FakePredictionSession:
                 ]
             )
 
+        if "prediction_performance:historical_candidates" in statement_text:
+            if params["medium_key"] != "vodomery":
+                return _FakeResult(all_rows=[])
+            return _FakeResult(
+                all_rows=[
+                    {
+                        "medium_key": "vodomery",
+                        "archive_version": 1,
+                        "model_version": 2,
+                        "model_key": "adaptive_strategy",
+                        "model_name": "Model 2 - adaptive strategy",
+                        "selection_enabled": True,
+                        "metric_row_count": 3042,
+                        "forecast_period_count": 128,
+                        "identifier_week_count": 3042,
+                        "selected_metric_count": 1800,
+                        "eligible_metric_count": 3042,
+                        "avg_coverage": 0.96,
+                        "avg_mae": 0.4,
+                        "avg_rmse": 0.8,
+                        "avg_bias": -0.02,
+                        "avg_wape": 0.18,
+                        "worst_wape": 0.72,
+                        "first_forecast_period_start": datetime(2024, 2, 5),
+                        "last_forecast_period_end": datetime(2026, 7, 20),
+                        "latest_created_at": datetime(2026, 7, 23, 10, 0),
+                    }
+                ]
+            )
+
+        if "prediction_performance:historical_snapshot_coverage" in statement_text:
+            if params["medium_key"] != "vodomery":
+                return _FakeResult(all_rows=[])
+            return _FakeResult(
+                all_rows=[
+                    {
+                        "medium_key": "vodomery",
+                        "archive_version": 1,
+                        "forecast_period_start": datetime(2026, 7, 13),
+                        "forecast_period_end": datetime(2026, 7, 20),
+                        "forecast_period_label": "2026-07-13 - 2026-07-20",
+                        "forecast_cadence": "weekly",
+                        "selected_metric_pair_count": 58,
+                        "profile_pair_count": 58,
+                        "missing_profile_pair_count": 0,
+                        "profile_row_count": 37800,
+                        "latest_created_at": datetime(2026, 7, 23, 10, 0),
+                    },
+                    {
+                        "medium_key": "vodomery",
+                        "archive_version": 1,
+                        "forecast_period_start": datetime(2026, 3, 2),
+                        "forecast_period_end": datetime(2026, 3, 9),
+                        "forecast_period_label": "2026-03-02 - 2026-03-09",
+                        "forecast_cadence": "weekly",
+                        "selected_metric_pair_count": 58,
+                        "profile_pair_count": 57,
+                        "missing_profile_pair_count": 1,
+                        "profile_row_count": 37128,
+                        "latest_created_at": datetime(2026, 7, 23, 10, 0),
+                    },
+                ]
+            )
+
         raise AssertionError(f"Unexpected SQL: {statement_text}")
 
     def close(self):
@@ -266,12 +332,17 @@ def test_collect_prediction_performance_report_merges_media_runs_snapshots_and_c
     assert vodomery.snapshot_summary.model_distribution[0].count == 43
     assert vodomery.candidate_performance[0].rolling_wape == 3.9993
     assert vodomery.worst_identifier_selections[0].identifier == "V-001"
+    assert vodomery.historical_candidate_performance[0].model_key == "adaptive_strategy"
+    assert vodomery.historical_candidate_performance[0].identifier_week_count == 3042
+    assert vodomery.historical_snapshot_coverage[0].profile_pair_count == 58
+    assert vodomery.historical_snapshot_coverage[1].missing_profile_pair_count == 1
 
     plynomery = by_medium["plynomery"]
     assert plynomery.status == "ok"
     assert plynomery.latest_selection_run.selection_run_id == 14
     assert plynomery.candidate_performance[0].model_key == "weather_adjusted_baseline"
     assert plynomery.candidate_performance[0].training_window_months == 3
+    assert plynomery.historical_candidate_performance == []
 
     elektromery = by_medium["elektromery"]
     assert elektromery.status == "not_run"

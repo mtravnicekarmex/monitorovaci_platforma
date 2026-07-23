@@ -25,6 +25,8 @@ from services.api.schemas.prediction import (
     PredictionCandidateCatalogRecord,
     PredictionCandidatePerformanceRecord,
     PredictionDistributionRecord,
+    PredictionHistoricalCandidatePerformanceRecord,
+    PredictionHistoricalSnapshotCoverageRecord,
     PredictionIdentifierSelectionRecord,
     PredictionMediumPerformance,
     PredictionPerformanceResponse,
@@ -34,7 +36,10 @@ from services.api.schemas.prediction import (
 
 
 SNAPSHOT_TABLE = "monitoring.prediction_selected_model_snapshots"
+PROFILE_SNAPSHOT_TABLE = "monitoring.prediction_profile_snapshots"
+BACKFILL_CANDIDATE_TABLE = "monitoring.prediction_backfill_candidate_metrics"
 WORST_IDENTIFIER_LIMIT = 25
+HISTORICAL_SNAPSHOT_PERIOD_LIMIT = 160
 
 
 @dataclass(frozen=True)
@@ -107,6 +112,15 @@ def _collect_medium_performance(
     catalog_by_version = {row.model_version: row for row in catalog}
 
     try:
+        historical_candidate_performance = _load_historical_candidate_performance(
+            session,
+            config,
+            catalog_by_version,
+        )
+        historical_snapshot_coverage = _load_historical_snapshot_coverage(
+            session,
+            config,
+        )
         if config.selection_run_table is None or config.candidate_table is None:
             return PredictionMediumPerformance(
                 medium_key=config.medium_key,
@@ -117,6 +131,8 @@ def _collect_medium_performance(
                 candidate_catalog=catalog,
                 snapshot_summary=_load_latest_snapshot_summary(session, config),
                 worst_identifier_selections=_load_worst_identifier_selections(session, config),
+                historical_candidate_performance=historical_candidate_performance,
+                historical_snapshot_coverage=historical_snapshot_coverage,
             )
 
         if not _table_exists(session, config.selection_run_table):
@@ -129,6 +145,8 @@ def _collect_medium_performance(
                 candidate_catalog=catalog,
                 snapshot_summary=_load_latest_snapshot_summary(session, config),
                 worst_identifier_selections=_load_worst_identifier_selections(session, config),
+                historical_candidate_performance=historical_candidate_performance,
+                historical_snapshot_coverage=historical_snapshot_coverage,
             )
 
         run = _load_latest_selection_run(session, config)
@@ -142,6 +160,8 @@ def _collect_medium_performance(
                 candidate_catalog=catalog,
                 snapshot_summary=_load_latest_snapshot_summary(session, config),
                 worst_identifier_selections=_load_worst_identifier_selections(session, config),
+                historical_candidate_performance=historical_candidate_performance,
+                historical_snapshot_coverage=historical_snapshot_coverage,
             )
 
         candidates = (
@@ -160,6 +180,8 @@ def _collect_medium_performance(
             candidate_performance=candidates,
             snapshot_summary=_load_latest_snapshot_summary(session, config),
             worst_identifier_selections=_load_worst_identifier_selections(session, config),
+            historical_candidate_performance=historical_candidate_performance,
+            historical_snapshot_coverage=historical_snapshot_coverage,
         )
     except SQLAlchemyError as exc:
         return PredictionMediumPerformance(
@@ -651,6 +673,236 @@ def _load_worst_identifier_selections(
             bias=_float_or_none(row.get("bias")),
             wape=_float_or_none(row.get("wape")),
             created_at=row.get("created_at"),
+        )
+        for row in rows
+    ]
+
+
+def _load_historical_candidate_performance(
+    session,
+    config: PredictionMediumConfig,
+    catalog_by_version: Mapping[int, PredictionCandidateCatalogRecord],
+) -> list[PredictionHistoricalCandidatePerformanceRecord]:
+    if not _table_exists(session, BACKFILL_CANDIDATE_TABLE):
+        return []
+
+    rows = (
+        session.execute(
+            text(
+                """
+                /* prediction_performance:historical_candidates */
+                SELECT
+                    medium_key,
+                    archive_version,
+                    model_version,
+                    model_key,
+                    model_name,
+                    BOOL_OR(selection_enabled)::boolean AS selection_enabled,
+                    COUNT(*)::integer AS metric_row_count,
+                    COUNT(DISTINCT forecast_period_start)::integer AS forecast_period_count,
+                    COUNT(DISTINCT (identifier, forecast_period_start))::integer
+                        AS identifier_week_count,
+                    COUNT(*) FILTER (WHERE selected)::integer AS selected_metric_count,
+                    COUNT(*) FILTER (WHERE eligible)::integer AS eligible_metric_count,
+                    AVG(coverage)::double precision AS avg_coverage,
+                    AVG(mae)::double precision AS avg_mae,
+                    AVG(rmse)::double precision AS avg_rmse,
+                    AVG(bias)::double precision AS avg_bias,
+                    AVG(wape)::double precision AS avg_wape,
+                    MAX(wape)::double precision AS worst_wape,
+                    MIN(forecast_period_start) AS first_forecast_period_start,
+                    MAX(forecast_period_end) AS last_forecast_period_end,
+                    MAX(created_at) AS latest_created_at
+                FROM monitoring.prediction_backfill_candidate_metrics
+                WHERE medium_key = :medium_key
+                GROUP BY
+                    medium_key,
+                    archive_version,
+                    model_version,
+                    model_key,
+                    model_name
+                ORDER BY archive_version DESC, model_version
+                """
+            ),
+            {"medium_key": config.medium_key},
+        )
+        .mappings()
+        .all()
+    )
+    return [
+        _historical_candidate_row_to_record(
+            row,
+            config=config,
+            catalog_by_version=catalog_by_version,
+        )
+        for row in rows
+    ]
+
+
+def _historical_candidate_row_to_record(
+    row: Mapping[str, object],
+    *,
+    config: PredictionMediumConfig,
+    catalog_by_version: Mapping[int, PredictionCandidateCatalogRecord],
+) -> PredictionHistoricalCandidatePerformanceRecord:
+    model_version = int(row["model_version"])
+    catalog = catalog_by_version.get(model_version)
+    return PredictionHistoricalCandidatePerformanceRecord(
+        medium_key=config.medium_key,
+        medium_label=config.medium_label,
+        archive_version=int(row["archive_version"]),
+        model_version=model_version,
+        model_key=str(row.get("model_key") or (catalog.model_key if catalog else f"model_{model_version}")),
+        model_name=str(row.get("model_name") or (catalog.model_name if catalog else f"Model {model_version}")),
+        selection_enabled=bool(
+            row.get("selection_enabled")
+            if row.get("selection_enabled") is not None
+            else (catalog.selection_enabled if catalog else True)
+        ),
+        metric_row_count=int(row.get("metric_row_count") or 0),
+        forecast_period_count=int(row.get("forecast_period_count") or 0),
+        identifier_week_count=int(row.get("identifier_week_count") or 0),
+        selected_metric_count=int(row.get("selected_metric_count") or 0),
+        eligible_metric_count=int(row.get("eligible_metric_count") or 0),
+        avg_coverage=_float_or_none(row.get("avg_coverage")),
+        avg_mae=_float_or_none(row.get("avg_mae")),
+        avg_rmse=_float_or_none(row.get("avg_rmse")),
+        avg_bias=_float_or_none(row.get("avg_bias")),
+        avg_wape=_float_or_none(row.get("avg_wape")),
+        worst_wape=_float_or_none(row.get("worst_wape")),
+        first_forecast_period_start=row.get("first_forecast_period_start"),
+        last_forecast_period_end=row.get("last_forecast_period_end"),
+        latest_created_at=row.get("latest_created_at"),
+    )
+
+
+def _load_historical_snapshot_coverage(
+    session,
+    config: PredictionMediumConfig,
+) -> list[PredictionHistoricalSnapshotCoverageRecord]:
+    if not _table_exists(session, BACKFILL_CANDIDATE_TABLE) or not _table_exists(
+        session,
+        PROFILE_SNAPSHOT_TABLE,
+    ):
+        return []
+
+    rows = (
+        session.execute(
+            text(
+                """
+                /* prediction_performance:historical_snapshot_coverage */
+                WITH selected_pairs AS (
+                    SELECT DISTINCT
+                        medium_key,
+                        identifier,
+                        archive_version,
+                        forecast_period_start,
+                        forecast_period_end,
+                        forecast_period_label,
+                        forecast_cadence,
+                        created_at
+                    FROM monitoring.prediction_backfill_candidate_metrics
+                    WHERE medium_key = :medium_key
+                      AND selected = TRUE
+                ),
+                profile_pairs AS (
+                    SELECT DISTINCT
+                        medium_key,
+                        identifier,
+                        archive_version,
+                        forecast_period_start,
+                        forecast_period_end,
+                        forecast_cadence
+                    FROM monitoring.prediction_profile_snapshots
+                    WHERE medium_key = :medium_key
+                      AND archive_source = 'historical_backfill'
+                ),
+                profile_periods AS (
+                    SELECT
+                        medium_key,
+                        archive_version,
+                        forecast_period_start,
+                        forecast_period_end,
+                        forecast_cadence,
+                        COUNT(*)::integer AS profile_row_count,
+                        COUNT(DISTINCT (identifier, forecast_period_start))::integer
+                            AS profile_pair_count,
+                        MAX(created_at) AS latest_created_at
+                    FROM monitoring.prediction_profile_snapshots
+                    WHERE medium_key = :medium_key
+                      AND archive_source = 'historical_backfill'
+                    GROUP BY
+                        medium_key,
+                        archive_version,
+                        forecast_period_start,
+                        forecast_period_end,
+                        forecast_cadence
+                )
+                SELECT
+                    selected_pairs.medium_key,
+                    selected_pairs.archive_version,
+                    selected_pairs.forecast_period_start,
+                    selected_pairs.forecast_period_end,
+                    selected_pairs.forecast_period_label,
+                    selected_pairs.forecast_cadence,
+                    COUNT(*)::integer AS selected_metric_pair_count,
+                    COALESCE(MAX(profile_periods.profile_pair_count), 0)::integer
+                        AS profile_pair_count,
+                    COUNT(*) FILTER (WHERE profile_pairs.identifier IS NULL)::integer
+                        AS missing_profile_pair_count,
+                    COALESCE(MAX(profile_periods.profile_row_count), 0)::integer
+                        AS profile_row_count,
+                    GREATEST(
+                        MAX(selected_pairs.created_at),
+                        MAX(profile_periods.latest_created_at)
+                    ) AS latest_created_at
+                FROM selected_pairs
+                LEFT JOIN profile_pairs
+                  ON profile_pairs.medium_key = selected_pairs.medium_key
+                 AND profile_pairs.identifier = selected_pairs.identifier
+                 AND profile_pairs.archive_version = selected_pairs.archive_version
+                 AND profile_pairs.forecast_period_start = selected_pairs.forecast_period_start
+                 AND profile_pairs.forecast_period_end = selected_pairs.forecast_period_end
+                 AND profile_pairs.forecast_cadence = selected_pairs.forecast_cadence
+                LEFT JOIN profile_periods
+                  ON profile_periods.medium_key = selected_pairs.medium_key
+                 AND profile_periods.archive_version = selected_pairs.archive_version
+                 AND profile_periods.forecast_period_start = selected_pairs.forecast_period_start
+                 AND profile_periods.forecast_period_end = selected_pairs.forecast_period_end
+                 AND profile_periods.forecast_cadence = selected_pairs.forecast_cadence
+                GROUP BY
+                    selected_pairs.medium_key,
+                    selected_pairs.archive_version,
+                    selected_pairs.forecast_period_start,
+                    selected_pairs.forecast_period_end,
+                    selected_pairs.forecast_period_label,
+                    selected_pairs.forecast_cadence
+                ORDER BY selected_pairs.forecast_period_start DESC
+                LIMIT :limit
+                """
+            ),
+            {
+                "medium_key": config.medium_key,
+                "limit": HISTORICAL_SNAPSHOT_PERIOD_LIMIT,
+            },
+        )
+        .mappings()
+        .all()
+    )
+    return [
+        PredictionHistoricalSnapshotCoverageRecord(
+            medium_key=config.medium_key,
+            medium_label=config.medium_label,
+            archive_version=int(row["archive_version"]),
+            forecast_period_start=row["forecast_period_start"],
+            forecast_period_end=row["forecast_period_end"],
+            forecast_period_label=row.get("forecast_period_label"),
+            forecast_cadence=str(row["forecast_cadence"]),
+            selected_metric_pair_count=int(row.get("selected_metric_pair_count") or 0),
+            profile_pair_count=int(row.get("profile_pair_count") or 0),
+            missing_profile_pair_count=int(row.get("missing_profile_pair_count") or 0),
+            profile_row_count=int(row.get("profile_row_count") or 0),
+            latest_created_at=row.get("latest_created_at"),
         )
         for row in rows
     ]

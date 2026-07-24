@@ -213,9 +213,13 @@ class PredictionSelectedModelDecision:
         fallback_reason = PredictionSelectionFallbackReason(self.fallback_reason)
         object.__setattr__(self, "fallback_reason", fallback_reason)
 
-        if self.uses_fallback and (
-            self.selected_model_version != self.global_model_version
-            or self.selected_model_key != self.global_model_key
+        if (
+            self.uses_fallback
+            and self.fallback_reason is not PredictionSelectionFallbackReason.MISSING_PROFILE
+            and (
+                self.selected_model_version != self.global_model_version
+                or self.selected_model_key != self.global_model_key
+            )
         ):
             raise ValueError(
                 "Prediction fallback decisions must select the global model."

@@ -269,6 +269,25 @@ def test_dry_run_backfill_calculates_week_and_rolls_back(monkeypatch):
         "_run_candidate_rolling_weekly_backtest_with_devices",
         fake_rolling,
     )
+    monkeypatch.setattr(
+        vodomery_prediction,
+        "_load_deployable_profile_pairs",
+        lambda session, device_summaries: {
+            ("A_V1", summary.model_version)
+            for summary in device_summaries
+        },
+    )
+    monkeypatch.setattr(
+        vodomery_prediction,
+        "_build_selected_prediction_profile_snapshot_rows",
+        lambda session, decisions, **kwargs: tuple(
+            {
+                "identifier": decision.identifier,
+                "model_version": decision.selected_model_version,
+            }
+            for decision in decisions
+        ),
+    )
 
     result = dry_run_vodomery_prediction_backfill(
         plan,

@@ -523,6 +523,7 @@ def dry_run_vodomery_prediction_backfill(
                         archive_run_id=archive_run_id,
                         archive_version=plan.archive_version,
                         model_versions=plan.model_versions,
+                        include_profile_snapshot_rows=True,
                     ).summary
                 )
             finally:
@@ -687,6 +688,10 @@ def _calculate_vodomery_backfill_week(
         forecast_period=forecast_period,
         selection_run_id=None,
         selection_mode="historical_backfill_dry_run",
+        deployable_profile_pairs=vodomery_prediction._load_deployable_profile_pairs(
+            session,
+            device_summaries,
+        ),
     )
     candidate_metric_rows = _build_backfill_candidate_metric_rows(
         device_summaries,
@@ -707,6 +712,13 @@ def _calculate_vodomery_backfill_week(
                 require_all_pairs=False,
             )
         )
+    selected_profile_pair_count = (
+        vodomery_prediction._count_profile_snapshot_pairs(
+            selected_profile_snapshot_rows,
+        )
+        if include_profile_snapshot_rows
+        else len(selected_decisions)
+    )
     calculated_identifiers = {summary.identifikace for summary in device_summaries}
     skipped = Counter()
     skipped["no_candidate_metrics"] = len(planned_identifiers - calculated_identifiers)
@@ -718,7 +730,7 @@ def _calculate_vodomery_backfill_week(
             calculated_identifier_count=len(calculated_identifiers),
             candidate_metric_row_count=len(candidate_metric_rows),
             selected_decision_count=len(selected_decisions),
-            selected_profile_pair_count=len(selected_decisions),
+            selected_profile_pair_count=selected_profile_pair_count,
             skipped_counts={key: value for key, value in skipped.items() if value},
         ),
         selected_decisions=tuple(selected_decisions),

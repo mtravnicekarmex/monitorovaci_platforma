@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from moduly.mereni.vodomery import vodomery_prediction
@@ -275,6 +277,11 @@ def test_rebuild_profiles_persists_active_selected_model_snapshots(monkeypatch):
         vodomery_prediction,
         "_persist_selection_run",
         lambda *args, **kwargs: FakeSelectionRun(),
+    )
+    monkeypatch.setattr(
+        vodomery_prediction,
+        "_load_deployable_profile_pairs",
+        lambda session, device_summaries: {("L1_V1", 2), ("L1_V1", 3)},
     )
     monkeypatch.setattr(
         vodomery_prediction,
@@ -801,6 +808,117 @@ def test_build_selected_model_decisions_use_best_eligible_model():
     assert decision.metadata["best_overall_selection_enabled"] is False
     assert decision.metadata["selection_mode"] == "active"
     assert decision.metadata["selected_from_device_metrics"] is True
+
+
+def test_build_selected_model_decisions_skips_metric_winner_without_profile():
+    forecast_period = vodomery_prediction.build_vodomery_weekly_forecast_period(
+        reference_time=datetime.datetime(2026, 7, 13, 4, 10, 5),
+    )
+    global_summary = ModelPerformanceSummary(
+        model_version=3,
+        model_name="Model 3 - recency weighted blend",
+        model_key="recency_weighted_blend",
+        validation_total_count=100,
+        matched_validation_count=100,
+        coverage=1.0,
+        mae=0.1,
+        rmse=0.2,
+        bias=0.0,
+        profile_count=1000,
+    )
+    metric_winner = vodomery_prediction.DeviceModelPerformanceSummary(
+        identifikace="L1_V1",
+        model_version=2,
+        model_key="adaptive_strategy",
+        model_name="Model 2 - adaptive strategy",
+        selection_enabled=True,
+        rolling_backtest_fold_count=8,
+        rolling_validation_total_count=80,
+        rolling_matched_validation_count=80,
+        rolling_coverage=1.0,
+        rolling_mae=0.1,
+        rolling_rmse=0.2,
+        rolling_bias=0.0,
+        rolling_wape=0.1,
+    )
+    deployable_runner_up = vodomery_prediction.DeviceModelPerformanceSummary(
+        identifikace="L1_V1",
+        model_version=1,
+        model_key="baseline_mad",
+        model_name="Model 1 - baseline MAD",
+        selection_enabled=True,
+        rolling_backtest_fold_count=8,
+        rolling_validation_total_count=80,
+        rolling_matched_validation_count=80,
+        rolling_coverage=1.0,
+        rolling_mae=0.2,
+        rolling_rmse=0.3,
+        rolling_bias=0.0,
+        rolling_wape=0.2,
+    )
+
+    decisions = vodomery_prediction._build_selected_model_decisions(
+        device_summaries=(metric_winner, deployable_runner_up),
+        selected_summary=global_summary,
+        forecast_period=forecast_period,
+        selection_run_id=91,
+        deployable_profile_pairs={("L1_V1", 1)},
+    )
+
+    decision = decisions[0]
+    assert decision.selected_model_version == 1
+    assert decision.selected_model_key == "baseline_mad"
+    assert decision.uses_fallback is True
+    assert (
+        decision.fallback_reason
+        is vodomery_prediction.PredictionSelectionFallbackReason.MISSING_PROFILE
+    )
+    assert decision.metrics is not None
+    assert decision.metrics.wape == 0.2
+    assert decision.metadata["deployable_profile_required"] is True
+    assert decision.metadata["metric_winner_missing_profile"] is True
+
+
+def test_build_selected_model_decisions_fails_without_any_deployable_profile():
+    forecast_period = vodomery_prediction.build_vodomery_weekly_forecast_period(
+        reference_time=datetime.datetime(2026, 7, 13, 4, 10, 5),
+    )
+    global_summary = ModelPerformanceSummary(
+        model_version=3,
+        model_name="Model 3 - recency weighted blend",
+        model_key="recency_weighted_blend",
+        validation_total_count=100,
+        matched_validation_count=100,
+        coverage=1.0,
+        mae=0.1,
+        rmse=0.2,
+        bias=0.0,
+        profile_count=0,
+    )
+    candidate = vodomery_prediction.DeviceModelPerformanceSummary(
+        identifikace="L1_V1",
+        model_version=3,
+        model_key="recency_weighted_blend",
+        model_name="Model 3 - recency weighted blend",
+        selection_enabled=True,
+        rolling_backtest_fold_count=8,
+        rolling_validation_total_count=80,
+        rolling_matched_validation_count=80,
+        rolling_coverage=1.0,
+        rolling_mae=0.1,
+        rolling_rmse=0.2,
+        rolling_bias=0.0,
+        rolling_wape=0.1,
+    )
+
+    with pytest.raises(RuntimeError, match="No deployable prediction profile"):
+        vodomery_prediction._build_selected_model_decisions(
+            device_summaries=(candidate,),
+            selected_summary=global_summary,
+            forecast_period=forecast_period,
+            selection_run_id=91,
+            deployable_profile_pairs=set(),
+        )
 
 
 def test_build_selected_model_decisions_fallbacks_below_coverage():

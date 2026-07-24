@@ -1232,3 +1232,34 @@ Clarification (2026-07-09):
   slot.
 - Non-active vodomery candidate scoring remains pure per-candidate scoring so
   comparison and diagnostics stay available.
+
+## DEC-051: Prediction Selection Requires A Deployable Profile
+
+Date: 2026-07-24
+
+Decision: A vodomery candidate may be selected for an identifier and forecast
+period only when that rebuild produced a deployable profile for the same
+identifier and model. If the metric winner has no profile, selection uses the
+next best eligible candidate with sufficient coverage and records
+`missing_profile`. If no eligible candidate has a profile, the rebuild fails
+before selections or profile snapshots are committed.
+
+Rationale: Historical verification found three consecutive selected Model 2
+pairs for one identifier without profile snapshots. Recalculation showed that
+none of the candidate models produced a deployable profile for that identifier
+in those weeks. A selection without a profile cannot be executed, while
+copying a later or stale profile would misrepresent the historical model
+state.
+
+Implications:
+
+- Weekly rebuild and historical backfill selection must query the profile pairs
+  actually produced in the current transaction.
+- `missing_profile` may select a non-global deployable runner-up; other fallback
+  reasons continue to select the global model.
+- Absence of every candidate profile is a fail-closed condition.
+- Historical gaps remain visible when no contemporaneous profile existed.
+  Later or stale profiles must not be copied merely to make archive coverage
+  complete.
+- A future carry-forward policy requires a separate decision with an explicit
+  staleness limit and auditable source-period metadata.

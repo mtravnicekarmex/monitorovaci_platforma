@@ -13399,3 +13399,167 @@ Known risks or accepted gaps:
 - Three historical selected `Model 2 - adaptive_strategy` profile pairs are
   missing source profile snapshots; this is already surfaced in API/dashboard
   aggregate counts and remains a follow-up investigation.
+
+### 2026-07-24 - Deployable-profile selection guard
+
+Scope:
+- Investigated the three historical selected-model pairs without profile
+  snapshots and added a future selection guard.
+
+Finding:
+- All three gaps belong to one identifier and forecast weeks starting
+  `2026-02-16`, `2026-02-23`, and `2026-03-02`.
+- Model 2 was the eligible metric winner with full rolling coverage, but the
+  rebuild produced no deployable profile for any candidate model for that
+  identifier in those weeks.
+- The latest earlier archived profile was Model 2 for the week ending
+  `2026-02-16`. It was not copied forward because doing so would conceal the
+  actual historical state.
+
+Changed:
+- Vodomery weekly rebuild and historical backfill now restrict selection to
+  identifier/model pairs with profiles produced in the current transaction.
+- A missing metric-winner profile selects the next best deployable eligible
+  candidate and records `missing_profile`.
+- Selection fails before persistence when no candidate has a deployable
+  profile.
+- Historical backfill dry-run now builds profile snapshot rows inside its
+  rollback transaction, so `selected_profile_pair_count` reports actual
+  snapshot coverage.
+
+Verified:
+- Targeted prediction contracts, storage, vodomery prediction, backfill, and
+  rebuild-report tests reported `72 passed`.
+- Broader prediction performance and scheduler regression coverage reported
+  `128 passed`.
+- Read-only archive inspection confirmed `3` missing pairs across `1`
+  identifier.
+- No historical repair write was run; the three gaps remain visible by
+  decision.
+
+Follow-up:
+- Do not introduce profile carry-forward without a separate reviewed policy
+  defining maximum staleness and auditable source-period metadata.
+
+### 2026-07-24 07:49 - Pre-restart handoff
+
+Reason for restart:
+- Restart the Windows workstation so the production scheduler loads the new
+  vodomery deployable-profile selection guard before the next weekly rebuild
+  on `2026-07-27 06:10:05+02:00`.
+
+Current task/conversation state:
+- Completed: vodomery selection now considers only identifier/model pairs with
+  a profile produced in the current rebuild transaction.
+- Completed: when the metric winner has no profile, selection uses the next
+  best deployable eligible candidate with sufficient coverage and records
+  `missing_profile`.
+- Completed: when no candidate has a deployable profile, selection fails
+  before selections or profile snapshots are committed.
+- Completed: historical backfill dry-run now builds snapshot rows inside the
+  rollback transaction and reports actual profile-pair coverage.
+- Decision: the three existing historical missing-profile pairs remain visible
+  and will not be repaired with a later or stale profile.
+- No historical archive write or live weekly rebuild was run.
+
+Working tree and deployment:
+- Current HEAD is `b78ea09` on `master`.
+- The working tree is dirty and the deployable-profile changes are not
+  committed.
+- `git status --short` before restart:
+  ```text
+   M AGENTS.md
+   M DECISIONS.md
+   M SESSION_NOTES.md
+   M moduly/mereni/prediction/contracts.py
+   M moduly/mereni/vodomery/vodomery_prediction.py
+   M moduly/mereni/vodomery/vodomery_prediction_backfill.py
+   M tests/test_prediction_contracts.py
+   M tests/test_vodomery_prediction.py
+   M tests/test_vodomery_prediction_backfill.py
+  ```
+- Relevant changes:
+  - `moduly/mereni/prediction/contracts.py`: permits `missing_profile` fallback
+    to a deployable non-global runner-up while preserving the global-model
+    invariant for other fallback reasons.
+  - `moduly/mereni/vodomery/vodomery_prediction.py`: loads deployable profile
+    pairs, filters selection, records missing-profile fallback, and fails
+    closed when no profile exists.
+  - `moduly/mereni/vodomery/vodomery_prediction_backfill.py`: applies the same
+    guard and verifies real snapshot coverage during dry-run.
+  - Prediction tests cover the runner-up fallback, fail-closed case, contract,
+    weekly rebuild, and backfill behavior.
+  - `AGENTS.md`, `DECISIONS.md`, and `SESSION_NOTES.md` record the durable
+    operating rule and investigation result.
+- No Caddyfile, launcher, scheduled-task, dependency, environment, or secret
+  file changed.
+- The repository code will be loaded by the normal startup task after restart.
+
+Verification completed before restart:
+- Prediction contracts, storage, vodomery prediction, backfill, rebuild report,
+  prediction performance, and scheduler regression tests reported
+  `128 passed`.
+- Python compilation and `git diff --check` succeeded.
+- Read-only archive inspection confirmed `3` missing historical pairs across
+  `1` identifier.
+- The attempted archive-version-2 dry-run correctly failed closed when it
+  found that no candidate profile existed for the affected identifier.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, or commit credentials, tokens, cookies, `.env`,
+  ProgramData credential files, raw measurements, raw imports, or device photo
+  paths.
+- Do not inspect retired SmartFuelPass JSON session artifacts.
+- Do not create a code-integrity baseline while the working tree is dirty.
+
+Pre-restart runtime state:
+- Startup task `API_dashboard_caddy` was `Ready`; last run
+  `2026-07-23 11:17:55` returned `0`.
+- Expected listeners were present on Caddy `80/443/2019`, FastAPI
+  `127.0.0.1:8000`, and Streamlit `127.0.0.1:8001`.
+- A separate process owned Tailscale-local `443` listeners; do not identify it
+  as dashboard Caddy without checking the owning process.
+- Scheduler reported `scheduler_running=True` with heartbeat
+  `2026-07-24T07:48:16.678751`.
+- `quarter_hour_job` last completed successfully at
+  `2026-07-24T07:47:09.929882`; database availability last completed
+  successfully at `2026-07-24T07:47:05.140543`.
+
+Expected processes after restart:
+- FastAPI/Uvicorn: one production runtime on `127.0.0.1:8000`.
+- Streamlit: one production runtime on `127.0.0.1:8001`.
+- Scheduler: one production `main.py` runtime holding the scheduler lock.
+- Caddy: one runtime owning TCP `80`, `443`, and `127.0.0.1:2019`.
+
+Required post-restart checks:
+- Confirm a new Windows boot time.
+- Confirm startup task `API_dashboard_caddy` is `Ready` and its new
+  `LastTaskResult` is `0`.
+- Confirm listeners on `80`, `443`, `2019`, `8000`, and `8001` and verify
+  their owning processes.
+- Confirm `GET http://127.0.0.1:8000/health/live`,
+  `GET http://127.0.0.1:8000/health/ready`, and
+  `GET http://127.0.0.1:8001/_stcore/health` return HTTP `200`.
+- Confirm the public HTTPS dashboard, unauthenticated protected API HTTP `401`,
+  blocked `/docs`, `/redoc`, and `/openapi.json` HTTP `404`, and HTTP-to-HTTPS
+  redirect when the public domain is reachable from the workstation.
+- Confirm a fresh scheduler heartbeat after boot and a successful first
+  `quarter_hour_job` plus database availability check.
+- Run the targeted prediction/scheduler regression suite if the working tree
+  and runtime remain unchanged; expected result is `128 passed`.
+- Run the read-only prediction performance aggregate check; vodomery history
+  should still report `3` historical candidate rows, `128` snapshot periods,
+  and `3` missing historical profile pairs.
+- Confirm no backfill process is running and no archive-version-2 repair rows
+  were written.
+- Do not run a live weekly rebuild merely as a restart smoke test. The next
+  scheduled weekly job should exercise the new guard on
+  `2026-07-27 06:10:05+02:00`.
+
+Known risks and accepted gaps:
+- The working tree is dirty and uncommitted.
+- The three historical missing profile pairs remain intentionally visible.
+- The new guard has automated regression coverage but has not yet run in a
+  live weekly rebuild.
+- A later profile carry-forward policy requires a separate reviewed decision
+  with an explicit staleness limit and source-period audit metadata.

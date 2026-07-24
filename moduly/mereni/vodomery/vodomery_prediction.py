@@ -630,6 +630,10 @@ def rebuild_profiles(
             forecast_period=forecast_period,
             selection_run_id=int(selection_run.id),
             selection_mode=SELECTION_MODE_ACTIVE,
+            deployable_profile_pairs=_load_deployable_profile_pairs(
+                session,
+                device_summaries,
+            ),
         )
         selected_model_snapshot_count = persist_selected_model_decisions(
             session,
@@ -1169,6 +1173,7 @@ def _build_selected_model_decisions(
     selection_run_id: int,
     selection_mode: str = SELECTION_MODE_ACTIVE,
     coverage_threshold: float = MODEL_SELECTION_COVERAGE_THRESHOLD,
+    deployable_profile_pairs: set[tuple[str, int]] | None = None,
 ) -> tuple[PredictionSelectedModelDecision, ...]:
     all_identifiers = sorted({summary.identifikace for summary in device_summaries})
     valid_by_identifier: dict[str, list[DeviceModelPerformanceSummary]] = defaultdict(list)
@@ -1193,35 +1198,88 @@ def _build_selected_model_decisions(
             for summary in eligible_summaries
             if summary.rolling_coverage >= coverage_threshold
         ]
+        deployable_threshold_summaries = [
+            summary
+            for summary in threshold_summaries
+            if deployable_profile_pairs is None
+            or (summary.identifikace, summary.model_version)
+            in deployable_profile_pairs
+        ]
 
-        if threshold_summaries:
+        if deployable_threshold_summaries:
             selected_device_summary = min(
+                deployable_threshold_summaries,
+                key=_device_summary_selection_key,
+            )
+            best_metric_summary = min(
                 threshold_summaries,
                 key=_device_summary_selection_key,
             )
-            fallback_reason = PredictionSelectionFallbackReason.NONE
+            fallback_reason = (
+                PredictionSelectionFallbackReason.MISSING_PROFILE
+                if selected_device_summary is not best_metric_summary
+                else PredictionSelectionFallbackReason.NONE
+            )
             selected_metrics = _device_summary_to_metric_summary(selected_device_summary)
             selected_model_version = selected_device_summary.model_version
             selected_model_key = _device_model_key(selected_device_summary)
             selected_model_name = selected_device_summary.model_name
         else:
-            selected_device_summary = None
-            fallback_reason = _resolve_device_selection_fallback_reason(
-                valid_summaries=valid_summaries,
-                eligible_summaries=eligible_summaries,
-            )
             global_device_summary = _find_device_summary_for_model(
                 valid_summaries,
                 model_version=selected_summary.model_version,
             )
+            global_profile_is_deployable = (
+                global_device_summary is not None
+                and (
+                    deployable_profile_pairs is None
+                    or (
+                        global_device_summary.identifikace,
+                        global_device_summary.model_version,
+                    )
+                    in deployable_profile_pairs
+                )
+            )
+            if global_profile_is_deployable:
+                selected_device_summary = None
+                fallback_reason = _resolve_device_selection_fallback_reason(
+                    valid_summaries=valid_summaries,
+                    eligible_summaries=eligible_summaries,
+                )
+            else:
+                deployable_summaries = [
+                    summary
+                    for summary in eligible_summaries
+                    if deployable_profile_pairs is None
+                    or (summary.identifikace, summary.model_version)
+                    in deployable_profile_pairs
+                ]
+                if not deployable_summaries:
+                    raise RuntimeError(
+                        "No deployable prediction profile is available for "
+                        "one or more identifiers."
+                    )
+                selected_device_summary = min(
+                    deployable_summaries,
+                    key=_device_summary_selection_key,
+                )
+                fallback_reason = PredictionSelectionFallbackReason.MISSING_PROFILE
+
             selected_metrics = (
                 None
-                if global_device_summary is None
-                else _device_summary_to_metric_summary(global_device_summary)
+                if selected_device_summary is None and global_device_summary is None
+                else _device_summary_to_metric_summary(
+                    selected_device_summary or global_device_summary
+                )
             )
-            selected_model_version = selected_summary.model_version
-            selected_model_key = _model_summary_key(selected_summary)
-            selected_model_name = selected_summary.model_name
+            if selected_device_summary is None:
+                selected_model_version = selected_summary.model_version
+                selected_model_key = _model_summary_key(selected_summary)
+                selected_model_name = selected_summary.model_name
+            else:
+                selected_model_version = selected_device_summary.model_version
+                selected_model_key = _device_model_key(selected_device_summary)
+                selected_model_name = selected_device_summary.model_name
 
         best_overall = best_overall_by_identifier.get(identifikace)
         decisions.append(
@@ -1252,11 +1310,43 @@ def _build_selected_model_decisions(
                         None if best_overall is None else best_overall.selection_enabled
                     ),
                     "selected_from_device_metrics": selected_device_summary is not None,
+                    "deployable_profile_required": (
+                        deployable_profile_pairs is not None
+                    ),
+                    "metric_winner_missing_profile": (
+                        fallback_reason
+                        is PredictionSelectionFallbackReason.MISSING_PROFILE
+                    ),
                 },
             )
         )
 
     return tuple(decisions)
+
+
+def _load_deployable_profile_pairs(
+    session,
+    device_summaries: Sequence[DeviceModelPerformanceSummary],
+) -> set[tuple[str, int]]:
+    identifiers = sorted({summary.identifikace for summary in device_summaries})
+    model_versions = sorted({summary.model_version for summary in device_summaries})
+    if not identifiers or not model_versions:
+        return set()
+
+    return {
+        (str(identifier), int(model_version))
+        for identifier, model_version in session.execute(
+            select(
+                VodomeryProfilesAnomaly.identifikace,
+                VodomeryProfilesAnomaly.model_version,
+            )
+            .where(
+                VodomeryProfilesAnomaly.identifikace.in_(identifiers),
+                VodomeryProfilesAnomaly.model_version.in_(model_versions),
+            )
+            .distinct()
+        ).all()
+    }
 
 
 def _persist_selected_prediction_profile_snapshots(

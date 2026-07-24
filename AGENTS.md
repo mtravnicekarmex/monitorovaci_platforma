@@ -186,6 +186,12 @@ Known hygiene topics to handle only after explicit approval:
   alert flows remain compatible. Missing or unusable per-identifier selections
   fall back to the global active model profile. Non-active candidate scoring
   remains pure per-candidate scoring for comparison.
+- Vodomery per-identifier selection may choose only a candidate that produced
+  a deployable profile for that identifier. If the metric winner has no
+  profile, select the next best eligible candidate with sufficient coverage
+  and record `missing_profile`; if no candidate profile exists, fail the
+  rebuild before persisting selections. Do not hide historical missing-profile
+  gaps by copying a later or stale profile into the archive.
 - SmartFuelPass automation logs in with configured credentials for each portal
   run. Do not restore JSON cookie/session persistence or
   `SMARTFUELPASS_SESSION_COOKIES_PATH`.

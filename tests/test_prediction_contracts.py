@@ -249,6 +249,29 @@ def test_prediction_selected_model_decision_supports_global_fallback():
     assert decision.to_dict()["fallback_reason"] == "no_eligible_candidate"
 
 
+def test_missing_profile_fallback_can_select_deployable_non_global_model():
+    decision = PredictionSelectedModelDecision(
+        medium_key="vodomery",
+        identifier="L1_V1",
+        forecast_period=PredictionForecastPeriod(
+            start=datetime.datetime(2026, 2, 16),
+            end=datetime.datetime(2026, 2, 23),
+            cadence=PredictionForecastCadence.WEEKLY,
+        ),
+        selection_run_id=91,
+        selected_model_version=1,
+        selected_model_key="baseline_mad",
+        selected_model_name="Model 1 - baseline MAD",
+        global_model_version=3,
+        global_model_key="recency_weighted_blend",
+        global_model_name="Model 3 - recency weighted blend",
+        fallback_reason=PredictionSelectionFallbackReason.MISSING_PROFILE,
+    )
+
+    assert decision.uses_fallback is True
+    assert decision.selected_model_version == 1
+
+
 def test_prediction_selected_model_decision_rejects_non_global_fallback():
     with pytest.raises(ValueError, match="fallback decisions must select"):
         PredictionSelectedModelDecision(

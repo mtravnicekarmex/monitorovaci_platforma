@@ -6,8 +6,8 @@ Purpose: plan the change that makes historical dashboard charts compare
 measured consumption with the prediction that was valid for the same historical
 period, not with the current prediction profile projected backward.
 
-Status: planning only. Do not implement any step before it is reviewed and
-explicitly approved.
+Status: implemented through Step 3 on 2026-07-24. Historical vodomery overview
+charts now read the archived selected profile valid for each forecast period.
 
 ## Agreed Step 1 Direction
 
@@ -583,6 +583,27 @@ Acceptance criteria for Step 3:
 - missing archive periods are visible as missing prediction data, not filled by
   today's profile,
 - API and dashboard tests cover multi-week historical joins.
+
+Implemented on 2026-07-24:
+
+- `/api/v1/vodomery/prediction-profiles` accepts optional paired
+  `start_date` and `end_date` parameters.
+- Calls without a date range preserve the current-profile response for
+  existing consumers.
+- Date-range calls return only selected profile snapshots whose forecast
+  periods overlap the requested range, including `valid_from`, `valid_to`,
+  model, archive-source, and selection-run metadata.
+- When multiple archive versions contain the same profile slot, the highest
+  archive version and newest row wins deterministically.
+- The vodomery overview passes its selected date range and joins each
+  measurement only to a profile whose `[valid_from, valid_to)` contains the
+  measurement timestamp.
+- Archive gaps remain null prediction values; the current active profile is
+  not projected backward to fill them.
+- Unit coverage verifies multi-week profile changes, missing-week behavior,
+  legacy current-profile compatibility, and authorization regression.
+- A production read-only query for January 2025 returned five bounded weekly
+  periods for one sampled identifier without printing its identifier.
 
 ## Suggested Review Order
 

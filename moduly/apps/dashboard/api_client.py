@@ -702,12 +702,19 @@ def get_vodomery_prediction_profiles(
     access_token: str,
     *,
     identifikace: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> list[dict[str, object]]:
+    query_params: dict[str, object] = {"identifikace": identifikace}
+    if start_date is not None:
+        query_params["start_date"] = start_date
+    if end_date is not None:
+        query_params["end_date"] = end_date
     response = _request(
         "GET",
         "/api/v1/vodomery/prediction-profiles",
         access_token=access_token,
-        query_params={"identifikace": identifikace},
+        query_params=query_params,
     )
     payload = response.json()
     return [dict(item) for item in payload.get("rows", [])]

@@ -189,12 +189,16 @@ def get_vodomery_measurement_series(
 )
 def get_vodomery_prediction_profiles(
     identifikace: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
     current_user: DashboardUserContext = Depends(get_current_vodomery_user),
 ) -> VodomeryPredictionProfilesResponse:
     try:
         rows = load_prediction_profiles(
             current_user,
             identifikace=identifikace,
+            start_date=start_date,
+            end_date=end_date,
         )
     except AuthorizationError as exc:
         raise HTTPException(
@@ -209,6 +213,8 @@ def get_vodomery_prediction_profiles(
 
     return VodomeryPredictionProfilesResponse(
         identifikace=identifikace,
+        start_date=start_date,
+        end_date=end_date,
         total=len(rows),
         rows=rows,
     )

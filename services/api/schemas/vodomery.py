@@ -75,16 +75,23 @@ class VodomeryPredictionProfileRow(BaseModel):
     day_of_week: int
     slot: int
     expected_mean: float
-    expected_median: float
-    expected_p10: float
-    expected_p90: float
-    expected_std: float
-    sample_size: int
+    expected_median: float | None = None
+    expected_p10: float | None = None
+    expected_p90: float | None = None
+    expected_std: float | None = None
+    sample_size: int | None = None
     model_version: int
+    model_key: str | None = None
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+    archive_source: str | None = None
+    selection_run_id: int | None = None
 
 
 class VodomeryPredictionProfilesResponse(BaseModel):
     identifikace: str
+    start_date: date | None = None
+    end_date: date | None = None
     total: int
     rows: list[VodomeryPredictionProfileRow]
 

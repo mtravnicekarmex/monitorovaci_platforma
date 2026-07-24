@@ -13563,3 +13563,169 @@ Known risks and accepted gaps:
   live weekly rebuild.
 - A later profile carry-forward policy requires a separate reviewed decision
   with an explicit staleness limit and source-period audit metadata.
+
+### 2026-07-24 - Historical vodomery chart profile integration
+
+Scope:
+- Completed Step 3 of the historical prediction archive plan for the active
+  vodomery overview dashboard.
+
+Changed:
+- Added optional paired `start_date` and `end_date` parameters to
+  `/api/v1/vodomery/prediction-profiles`.
+- Date-range requests now return overlapping archived selected profiles with
+  forecast validity, model, archive-source, and selection-run metadata.
+- Calls without a date range retain the existing current-profile behavior.
+- The vodomery overview now requests profiles for its selected date range and
+  joins measurements only to the profile valid at that timestamp.
+- Missing archive periods remain missing instead of using today's profile.
+- Recorded the completed implementation in
+  `PREDICTION_HISTORICAL_ARCHIVE_PLAN.md` and durable behavior in
+  `DECISIONS.md`.
+
+Verified:
+- Targeted service, dashboard-helper, and API authorization tests reported
+  `184 passed`.
+- Python compilation and `git diff --check` succeeded.
+- A production read-only January 2025 archive query returned `2520` profile
+  rows across `5` bounded forecast periods for one sampled identifier; the
+  identifier was not printed.
+
+Not verified:
+- The changed Streamlit overview was not visually opened in an authenticated
+  browser.
+- The running FastAPI and Streamlit processes still contain the pre-change
+  code until the next supported workstation restart.
+
+Follow-up:
+- After a reviewed restart handoff and workstation restart, verify a
+  multi-week historical range in the vodomery overview and confirm a known
+  archive gap renders without a prediction line.
+
+### 2026-07-24 10:25 - Pre-restart handoff
+
+Reason for restart:
+- Restart the Windows workstation so production FastAPI and Streamlit load the
+  completed historical vodomery prediction-profile integration.
+
+Current task/conversation state:
+- Completed: `/api/v1/vodomery/prediction-profiles` supports paired
+  `start_date` and `end_date` archive lookup while preserving the current
+  profile response when the range is omitted.
+- Completed: date-range responses include bounded selected-profile snapshots
+  and deterministic duplicate archive-version resolution.
+- Completed: the vodomery overview requests the selected date range and joins
+  each measurement only to the profile valid for that timestamp.
+- Completed: archive gaps remain missing and are not filled with the current,
+  later, or stale profile.
+- Completed: Step 3 is marked implemented in
+  `PREDICTION_HISTORICAL_ARCHIVE_PLAN.md`; durable behavior is recorded as
+  `DEC-052`.
+- Pending after restart: visually verify a multi-week historical range and a
+  known archive gap in the authenticated vodomery overview.
+
+Working tree and deployment:
+- Current HEAD is `12625b7` on `master`.
+- The working tree is dirty and the historical chart integration is not
+  committed.
+- `git status --short` before restart:
+  ```text
+   M DECISIONS.md
+   M PREDICTION_HISTORICAL_ARCHIVE_PLAN.md
+   M SESSION_NOTES.md
+   M moduly/apps/dashboard/api_client.py
+   M moduly/apps/dashboard/pages/2_vodomery.py
+   M moduly/apps/dashboard/vodomery_shared.py
+   M services/api/routes/vodomery.py
+   M services/api/schemas/vodomery.py
+   M services/api/services/vodomery.py
+   M tests/test_dashboard_vodomery_shared.py
+   M tests/test_vodomery_service.py
+  ```
+- No Caddyfile, launcher, scheduled-task, dependency, environment, report, or
+  secret file changed.
+- The changed repository code will be loaded by the normal startup task after
+  restart.
+
+Verification completed before restart:
+- Targeted prediction, scheduler, dashboard-helper, navigation, service, and
+  authorization regression coverage reported `336 passed`.
+- API public-exposure/OpenAPI coverage reported `3 passed`.
+- Python compilation and `git diff --check` succeeded.
+- Production read-only January 2025 archive lookup returned `2520` profile
+  rows across `5` bounded forecast periods for one sampled identifier without
+  printing that identifier.
+- The complete `tests` run reported `903 passed, 2 failed`. Both failures
+  reproduce in isolated `tests/test_vodomery_reports.py` and concern existing
+  report aggregation/HTML expectations:
+  `test_build_consumption_curve_day_aggregates_water_measurements` and
+  `test_build_vodomery_report_html_contains_expected_sections`.
+- Neither `moduly/apps/dashboard/vodomery_reports.py` nor
+  `tests/test_vodomery_reports.py` is changed by this task. The two report
+  failures are recorded as an existing unrelated test-baseline issue and do
+  not affect the targeted historical prediction verification.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, or commit credentials, tokens, cookies, `.env`,
+  ProgramData credential files, raw measurements, raw imports, device
+  identifiers, or device photo paths.
+- Do not inspect retired SmartFuelPass JSON session artifacts.
+- Do not create a code-integrity baseline while the working tree remains dirty
+  unless the current code state is explicitly approved for that purpose.
+
+Pre-restart runtime state:
+- Windows boot time was `2026-07-24 07:52:05`.
+- Startup task `API_dashboard_caddy` was `Ready`; last run
+  `2026-07-24 07:52:15` returned `0`.
+- Caddy owned listeners `80`, `443`, and `127.0.0.1:2019`.
+- FastAPI owned `127.0.0.1:8000`; Streamlit owned `127.0.0.1:8001`.
+- A separate Tailscale process owned Tailscale-local `443` listeners.
+- FastAPI `/health/live`, FastAPI `/health/ready`, and Streamlit
+  `/_stcore/health` returned HTTP `200`.
+- Scheduler reported `scheduler_running=True` with heartbeat
+  `2026-07-24T10:22:24.056302`.
+- `quarter_hour_job` last completed successfully at
+  `2026-07-24T10:16:09.619621`; database availability last completed
+  successfully at `2026-07-24T10:16:05.079220`.
+- Scheduler metrics contained no job failure names.
+
+Expected processes after restart:
+- FastAPI/Uvicorn: one production runtime on `127.0.0.1:8000`.
+- Streamlit: one production runtime on `127.0.0.1:8001`.
+- Scheduler: one production `main.py` runtime holding the scheduler lock.
+- Caddy: one runtime owning TCP `80`, `443`, and `127.0.0.1:2019`.
+
+Required post-restart checks:
+- Confirm a new Windows boot time.
+- Confirm startup task `API_dashboard_caddy` is `Ready` and its new
+  `LastTaskResult` is `0`.
+- Confirm listener ownership on `80`, `443`, `2019`, `8000`, and `8001`.
+- Confirm FastAPI `/health/live`, FastAPI `/health/ready`, and Streamlit
+  `/_stcore/health` return HTTP `200`.
+- Confirm a fresh scheduler heartbeat and a successful first
+  `quarter_hour_job` plus database availability check.
+- Confirm no unexpected scheduler job failure timestamp appeared.
+- Run a read-only archived-profile service check for a bounded historical
+  interval and confirm returned rows contain `valid_from`, `valid_to`, and
+  archive metadata without printing the device identifier.
+- Through an authenticated dashboard session, open the vodomery overview with
+  a range spanning multiple archived weeks and confirm the expected curve can
+  change model/profile at weekly boundaries.
+- Through the same dashboard, inspect a known missing archive period and
+  confirm it renders as a prediction gap rather than using the current
+  profile.
+- Verify an authenticated prediction-profile request without date parameters
+  still returns the current-profile compatibility response.
+- When the public domain is reachable from the workstation, confirm the
+  public HTTPS dashboard, unauthenticated protected API HTTP `401`, blocked
+  `/docs`, `/redoc`, and `/openapi.json` HTTP `404`, and HTTP-to-HTTPS
+  redirect. The public domain timed out from this workstation during the
+  earlier 2026-07-24 post-restart check.
+
+Known risks and accepted gaps:
+- The working tree is dirty and uncommitted.
+- The changed dashboard has automated coverage but has not yet been visually
+  reviewed in the running production Streamlit process.
+- The full suite has two reproducible unrelated vodomery report test failures;
+  targeted prediction and authorization coverage is green.
+- Historical archive gaps remain intentionally visible by policy.

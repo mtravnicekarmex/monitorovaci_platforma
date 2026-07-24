@@ -282,14 +282,18 @@ def load_prediction_profiles(
     identifikace: str,
     allowed_devices: tuple[str, ...],
     user_is_admin: bool,
+    start_date: datetime.date | None = None,
+    end_date: datetime.date | None = None,
 ) -> pd.DataFrame:
     del allowed_devices, user_is_admin
     access_token = require_dashboard_api_token()
     rows = api_get_vodomery_prediction_profiles(
         access_token,
         identifikace=identifikace,
+        start_date=start_date.isoformat() if start_date is not None else None,
+        end_date=end_date.isoformat() if end_date is not None else None,
     )
-    return pd.DataFrame(
+    frame = pd.DataFrame(
         rows,
         columns=[
             "interval_minutes",
@@ -302,8 +306,96 @@ def load_prediction_profiles(
             "expected_std",
             "sample_size",
             "model_version",
+            "model_key",
+            "valid_from",
+            "valid_to",
+            "archive_source",
+            "selection_run_id",
         ],
     )
+    for column in ("valid_from", "valid_to"):
+        frame[column] = pd.to_datetime(frame[column], errors="coerce")
+    return frame
+
+
+def apply_prediction_profiles(
+    measurements_df: pd.DataFrame,
+    profiles_df: pd.DataFrame,
+) -> pd.DataFrame:
+    prepared = measurements_df.copy()
+    prepared["ocekavana_spotreba"] = pd.NA
+    prepared["ocekavana_kumulovana_spotreba"] = pd.NA
+    prepared["model_version"] = pd.NA
+
+    if prepared.empty or profiles_df.empty:
+        return prepared
+
+    join_columns = ["interval_minutes", "day_of_week", "slot"]
+    profile_value_columns = ["expected_mean", "model_version"]
+    has_validity = (
+        {"valid_from", "valid_to"}.issubset(profiles_df.columns)
+        and profiles_df["valid_from"].notna().any()
+        and profiles_df["valid_to"].notna().any()
+    )
+    if not has_validity:
+        merged = prepared.drop(columns=["model_version"], errors="ignore").merge(
+            profiles_df[join_columns + profile_value_columns],
+            on=join_columns,
+            how="left",
+        )
+        merged["ocekavana_spotreba"] = pd.to_numeric(
+            merged["expected_mean"],
+            errors="coerce",
+        ).round(3)
+        merged["ocekavana_kumulovana_spotreba"] = (
+            merged["ocekavana_spotreba"].cumsum().round(3)
+        )
+        return merged
+
+    base = prepared.drop(columns=["model_version"], errors="ignore").copy()
+    base["_prediction_row_id"] = range(len(base))
+    candidates = base[
+        ["_prediction_row_id", "date", *join_columns]
+    ].merge(
+        profiles_df[
+            join_columns
+            + profile_value_columns
+            + ["valid_from", "valid_to"]
+        ],
+        on=join_columns,
+        how="inner",
+    )
+    candidates["date"] = pd.to_datetime(candidates["date"], errors="coerce")
+    candidates["valid_from"] = pd.to_datetime(
+        candidates["valid_from"],
+        errors="coerce",
+    )
+    candidates["valid_to"] = pd.to_datetime(
+        candidates["valid_to"],
+        errors="coerce",
+    )
+    candidates = candidates[
+        (candidates["date"] >= candidates["valid_from"])
+        & (candidates["date"] < candidates["valid_to"])
+    ]
+    candidates = candidates.sort_values(
+        ["_prediction_row_id", "valid_from", "valid_to"],
+        ascending=[True, False, False],
+    ).drop_duplicates("_prediction_row_id", keep="first")
+
+    selected = candidates[
+        ["_prediction_row_id", "expected_mean", "model_version"]
+    ]
+    merged = base.merge(selected, on="_prediction_row_id", how="left")
+    merged = merged.drop(columns=["_prediction_row_id"])
+    merged["ocekavana_spotreba"] = pd.to_numeric(
+        merged["expected_mean"],
+        errors="coerce",
+    ).round(3)
+    merged["ocekavana_kumulovana_spotreba"] = (
+        merged["ocekavana_spotreba"].cumsum().round(3)
+    )
+    return merged
 
 
 @st.cache_data(ttl=60)

@@ -11,9 +11,98 @@ from services.api.services.vodomery import (
     BranchDashboardConfig,
     _aggregate_hourly_branch_values,
     _build_branch_billing_payload,
+    _load_archived_prediction_profiles,
     _prepare_branch_measurements,
     _serialize_dataframe_rows,
 )
+
+
+class _FakeMappingResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _FakeArchiveSession:
+    def __init__(self, rows):
+        self.rows = rows
+        self.statement = None
+        self.params = None
+
+    def execute(self, statement, params):
+        self.statement = statement
+        self.params = params
+        return _FakeMappingResult(self.rows)
+
+
+def test_load_archived_prediction_profiles_returns_overlapping_validity_metadata():
+    period_start = datetime.datetime(2026, 1, 5)
+    period_end = datetime.datetime(2026, 1, 12)
+    base_row = {
+        "forecast_period_start": period_start,
+        "forecast_period_end": period_end,
+        "archive_source": "historical_backfill",
+        "archive_version": 1,
+        "selection_run_id": 42,
+        "model_version": 2,
+        "model_key": "adaptive_strategy",
+        "interval_minutes": 15,
+        "day_of_week": 0,
+        "slot": 8,
+        "expected_mean": 1.25,
+        "expected_median": 1.0,
+        "expected_p10": None,
+        "expected_p90": 2.0,
+        "expected_std": 0.5,
+        "sample_size": 10,
+        "created_at": datetime.datetime(2026, 7, 1),
+        "id": 2,
+    }
+    older_duplicate = {
+        **base_row,
+        "archive_version": 0,
+        "expected_mean": 99.0,
+        "created_at": datetime.datetime(2026, 6, 1),
+        "id": 1,
+    }
+    session = _FakeArchiveSession([base_row, older_duplicate])
+
+    rows = _load_archived_prediction_profiles(
+        session,
+        identifikace="L1_V1",
+        start_date=datetime.date(2026, 1, 6),
+        end_date=datetime.date(2026, 1, 7),
+    )
+
+    assert session.params == {
+        "identifikace": "L1_V1",
+        "range_start": datetime.datetime(2026, 1, 6),
+        "range_end": datetime.datetime(2026, 1, 8),
+    }
+    assert "forecast_period_start <" in str(session.statement)
+    assert len(rows) == 1
+    assert rows[0] == {
+        "interval_minutes": 15,
+        "day_of_week": 0,
+        "slot": 8,
+        "expected_mean": 1.25,
+        "expected_median": 1.0,
+        "expected_p10": None,
+        "expected_p90": 2.0,
+        "expected_std": 0.5,
+        "sample_size": 10,
+        "model_version": 2,
+        "model_key": "adaptive_strategy",
+        "valid_from": period_start,
+        "valid_to": period_end,
+        "archive_source": "historical_backfill",
+        "selection_run_id": 42,
+    }
 
 
 def test_serialize_dataframe_rows_converts_datetime_columns_without_future_warning():

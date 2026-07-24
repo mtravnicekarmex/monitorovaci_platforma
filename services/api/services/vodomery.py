@@ -749,12 +749,26 @@ def load_prediction_profiles(
     user_context: DashboardUserContext,
     *,
     identifikace: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> list[dict[str, object]]:
     require_section_access(user_context, "vodomery")
     require_device_access(user_context, identifikace)
+    if (start_date is None) != (end_date is None):
+        raise ValueError("start_date a end_date musĂ­ bĂ˝t zadĂˇny spoleÄŤnÄ›.")
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise ValueError("start_date nesmĂ­ bĂ˝t pozdÄ›ji neĹľ end_date.")
 
     session = get_session_pg()
     try:
+        if start_date is not None and end_date is not None:
+            return _load_archived_prediction_profiles(
+                session,
+                identifikace=identifikace,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
         active_model_version = _get_active_model_version(session)
 
         rows = (
@@ -797,6 +811,105 @@ def load_prediction_profiles(
         ]
     finally:
         session.close()
+
+
+def _load_archived_prediction_profiles(
+    session,
+    *,
+    identifikace: str,
+    start_date: date,
+    end_date: date,
+) -> list[dict[str, object]]:
+    range_start = datetime.combine(start_date, time.min)
+    range_end = datetime.combine(end_date + timedelta(days=1), time.min)
+    rows = session.execute(
+        text(
+            """
+            /* vodomery:archived_prediction_profiles */
+            SELECT
+                forecast_period_start,
+                forecast_period_end,
+                archive_source,
+                archive_version,
+                selection_run_id,
+                model_version,
+                model_key,
+                interval_minutes,
+                day_of_week,
+                slot,
+                expected_mean,
+                expected_median,
+                expected_p10,
+                expected_p90,
+                expected_std,
+                sample_size,
+                created_at,
+                id
+            FROM monitoring.prediction_profile_snapshots
+            WHERE medium_key = 'vodomery'
+              AND identifier = :identifikace
+              AND forecast_period_start < :range_end
+              AND forecast_period_end > :range_start
+            ORDER BY
+                forecast_period_start ASC,
+                forecast_period_end ASC,
+                archive_version DESC,
+                created_at DESC,
+                id DESC
+            """
+        ),
+        {
+            "identifikace": identifikace,
+            "range_start": range_start,
+            "range_end": range_end,
+        },
+    ).mappings().all()
+
+    result: list[dict[str, object]] = []
+    seen: set[tuple[object, ...]] = set()
+    for row in rows:
+        identity = (
+            row["forecast_period_start"],
+            row["forecast_period_end"],
+            int(row["interval_minutes"]),
+            int(row["day_of_week"]),
+            int(row["slot"]),
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        result.append(
+            {
+                "interval_minutes": int(row["interval_minutes"]),
+                "day_of_week": int(row["day_of_week"]),
+                "slot": int(row["slot"]),
+                "expected_mean": float(row["expected_mean"]),
+                "expected_median": _optional_float(row["expected_median"]),
+                "expected_p10": _optional_float(row["expected_p10"]),
+                "expected_p90": _optional_float(row["expected_p90"]),
+                "expected_std": _optional_float(row["expected_std"]),
+                "sample_size": (
+                    int(row["sample_size"]) if row["sample_size"] is not None else None
+                ),
+                "model_version": int(row["model_version"]),
+                "model_key": (
+                    str(row["model_key"]) if row["model_key"] is not None else None
+                ),
+                "valid_from": row["forecast_period_start"],
+                "valid_to": row["forecast_period_end"],
+                "archive_source": str(row["archive_source"]),
+                "selection_run_id": (
+                    int(row["selection_run_id"])
+                    if row["selection_run_id"] is not None
+                    else None
+                ),
+            }
+        )
+    return result
+
+
+def _optional_float(value: object) -> float | None:
+    return float(value) if value is not None else None
 
 
 def load_recent_anomalies(

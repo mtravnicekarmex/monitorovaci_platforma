@@ -1263,3 +1263,30 @@ Implications:
   complete.
 - A future carry-forward policy requires a separate decision with an explicit
   staleness limit and auditable source-period metadata.
+
+## DEC-052: Historical Charts Use Period-Bounded Archived Profiles
+
+Date: 2026-07-24
+
+Decision: When a vodomery dashboard request includes a historical date range,
+prediction values come only from selected profile snapshots whose forecast
+period contains each measurement timestamp. The current active profile must
+not be projected backward into historical periods, and missing archive
+coverage remains missing.
+
+Rationale: Reusing the current profile for old measurements creates a
+historically false expected-consumption curve. The profile snapshot archive
+now preserves the concrete selected profile values and weekly validity bounds
+needed to reproduce the prediction that was available for that period.
+
+Implications:
+
+- The prediction-profile API remains backward compatible without date
+  parameters and returns the current active profile for those callers.
+- A paired `start_date` and `end_date` switches the API to read-only archive
+  lookup with `[valid_from, valid_to)` validity metadata.
+- Dashboard joins include interval, weekday, slot, and timestamp validity.
+- Missing archived weeks are visible as gaps and are not filled from current,
+  later, or stale profiles.
+- Duplicate archived slot identities are resolved deterministically in favor
+  of the highest archive version and newest stored row.

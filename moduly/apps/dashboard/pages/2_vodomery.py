@@ -21,6 +21,7 @@ from moduly.apps.dashboard.api_client import DashboardApiError
 from moduly.apps.dashboard.auth import require_page_access
 from moduly.apps.dashboard.time_semantics import add_chart_time, time_axis_column
 from moduly.apps.dashboard.vodomery_shared import (
+    apply_prediction_profiles,
     format_consumption_dataframe,
     format_consumption_with_unit,
     format_value,
@@ -124,23 +125,7 @@ def prepare_measurements(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def apply_prediction_layer(df: pd.DataFrame, profiles_df: pd.DataFrame) -> pd.DataFrame:
-    prepared = df.copy()
-    prepared["ocekavana_spotreba"] = pd.NA
-    prepared["ocekavana_kumulovana_spotreba"] = pd.NA
-    prepared["model_version"] = pd.NA
-
-    if prepared.empty or profiles_df.empty:
-        return prepared
-
-    prepared = prepared.drop(columns=["model_version"], errors="ignore")
-    merged = prepared.merge(
-        profiles_df[["interval_minutes", "day_of_week", "slot", "expected_mean", "model_version"]],
-        on=["interval_minutes", "day_of_week", "slot"],
-        how="left",
-    )
-    merged["ocekavana_spotreba"] = pd.to_numeric(merged["expected_mean"], errors="coerce").round(3)
-    merged["ocekavana_kumulovana_spotreba"] = merged["ocekavana_spotreba"].fillna(0).cumsum().round(3)
-    return merged
+    return apply_prediction_profiles(df, profiles_df)
 
 
 def has_prediction_data(df: pd.DataFrame) -> bool:
@@ -576,7 +561,13 @@ def render_dashboard() -> None:
         user_is_admin,
     )
     measurements_df = prepare_measurements(measurements_df)
-    profiles_df = load_prediction_profiles(selected_ident, allowed_devices, user_is_admin)
+    profiles_df = load_prediction_profiles(
+        selected_ident,
+        allowed_devices,
+        user_is_admin,
+        start_date,
+        end_date,
+    )
     measurements_df = apply_prediction_layer(measurements_df, profiles_df)
 
     if measurements_df.empty:

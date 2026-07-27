@@ -22,6 +22,7 @@ from moduly.apps.dashboard.auth import require_page_access
 from moduly.apps.dashboard.time_semantics import add_chart_time, time_axis_column
 from moduly.apps.dashboard.vodomery_shared import (
     apply_prediction_profiles,
+    build_period_prediction,
     format_consumption_dataframe,
     format_consumption_with_unit,
     format_value,
@@ -133,40 +134,12 @@ def has_prediction_data(df: pd.DataFrame) -> bool:
 
 
 def build_full_day_hourly_prediction(profiles_df: pd.DataFrame, target_date: datetime.date) -> pd.DataFrame:
-    if profiles_df.empty:
-        return pd.DataFrame()
-
-    weekday_profiles = profiles_df[profiles_df["day_of_week"] == target_date.weekday()].copy()
-    if weekday_profiles.empty:
-        return pd.DataFrame()
-
-    weekday_profiles["interval_minutes"] = pd.to_numeric(weekday_profiles["interval_minutes"], errors="coerce")
-    weekday_profiles["slot"] = pd.to_numeric(weekday_profiles["slot"], errors="coerce")
-    weekday_profiles["expected_mean"] = pd.to_numeric(weekday_profiles["expected_mean"], errors="coerce")
-    weekday_profiles = weekday_profiles.dropna(subset=["interval_minutes", "slot", "expected_mean"])
-    if weekday_profiles.empty:
-        return pd.DataFrame()
-
-    day_start = pd.Timestamp(target_date)
-    weekday_profiles["date"] = day_start + pd.to_timedelta(
-        weekday_profiles["slot"] * weekday_profiles["interval_minutes"],
-        unit="m",
+    return build_period_prediction(
+        profiles_df,
+        start_date=target_date,
+        end_date=target_date,
+        frequency="h",
     )
-
-    hourly_prediction = (
-        weekday_profiles[["date", "expected_mean"]]
-        .set_index("date")
-        .resample("h")
-        .sum()
-        .rename(columns={"expected_mean": "ocekavana_spotreba"})
-    )
-    full_index = pd.date_range(start=day_start, periods=24, freq="h")
-    hourly_prediction = hourly_prediction.reindex(full_index, fill_value=0.0)
-    hourly_prediction.index.name = "date"
-    hourly_prediction = hourly_prediction.reset_index()
-    hourly_prediction["ocekavana_kumulovana_spotreba"] = hourly_prediction["ocekavana_spotreba"].cumsum().round(3)
-    hourly_prediction["ocekavana_spotreba"] = hourly_prediction["ocekavana_spotreba"].round(3)
-    return hourly_prediction
 
 
 def render_graph_legend(show_prediction: bool) -> None:
@@ -387,14 +360,18 @@ def render_graphs(
 
     use_line_chart = detail_level == "Hodinově"
     prediction_available = has_prediction_data(detail_df)
-    today = prague_today()
-    use_full_day_today_prediction = (
-        detail_level == "Hodinově"
-        and start_date == end_date == today
-        and not profiles_df.empty
+    prediction_frequency = {
+        "Měsíčně": "ME",
+        "Denně": "D",
+        "Hodinově": "h",
+    }[detail_level]
+    period_prediction_df = build_period_prediction(
+        profiles_df,
+        start_date=start_date,
+        end_date=end_date,
+        frequency=prediction_frequency,
     )
-    full_day_prediction_df = build_full_day_hourly_prediction(profiles_df, start_date) if use_full_day_today_prediction else pd.DataFrame()
-    if not full_day_prediction_df.empty:
+    if not period_prediction_df.empty:
         prediction_available = True
     rounded_detail_df = round_consumption_columns(
         detail_df,
@@ -405,28 +382,40 @@ def render_graphs(
         st.subheader(f"Spotřeba - {detail_level.lower()}")
         chart_df = rounded_detail_df[["date", "spotreba"]].rename(columns={"spotreba": "Spotřeba"}).copy()
         if prediction_available:
-            if not full_day_prediction_df.empty:
+            if not period_prediction_df.empty:
                 chart_df = chart_df.merge(
-                    round_consumption_columns(full_day_prediction_df, columns=("ocekavana_spotreba",))[["date", "ocekavana_spotreba"]],
+                    round_consumption_columns(
+                        period_prediction_df,
+                        columns=("ocekavana_spotreba",),
+                    )[["date", "ocekavana_spotreba"]],
                     on="date",
                     how="outer",
                 ).sort_values("date")
             else:
                 chart_df["ocekavana_spotreba"] = rounded_detail_df["ocekavana_spotreba"].values
             chart_df = chart_df.rename(columns={"ocekavana_spotreba": "Očekávaná spotřeba"})
-        if use_line_chart:
-            if prediction_available:
-                actual_chart = alt.Chart(chart_df).mark_line(color="#1f77b4").encode(
-                    x=alt.X("date:T", title=None),
-                    y=alt.Y("Spotřeba:Q", title=None),
-                )
-                expected_chart = alt.Chart(chart_df.dropna(subset=["Očekávaná spotřeba"])).mark_line(color="#dedcd9").encode(
-                    x=alt.X("date:T", title=None),
-                    y=alt.Y("Očekávaná spotřeba:Q", title=None),
-                )
-                st.altair_chart((expected_chart + actual_chart).interactive(), width="stretch")
-            else:
-                st.line_chart(chart_df.set_index("date")[["Spotřeba"]], height=320)
+        if prediction_available:
+            actual_chart = alt.Chart(chart_df).mark_line(
+                color="#1f77b4"
+            ).encode(
+                x=alt.X("date:T", title=None),
+                y=alt.Y("Spotřeba:Q", title=None),
+            )
+            expected_chart = alt.Chart(
+                chart_df.dropna(subset=["Očekávaná spotřeba"])
+            ).mark_line(color="#dedcd9").encode(
+                x=alt.X("date:T", title=None),
+                y=alt.Y("Očekávaná spotřeba:Q", title=None),
+            )
+            st.altair_chart(
+                (expected_chart + actual_chart).interactive(),
+                width="stretch",
+            )
+        elif use_line_chart:
+            st.line_chart(
+                chart_df.set_index("date")[["Spotřeba"]],
+                height=320,
+            )
         else:
             st.bar_chart(chart_df.set_index("date")[["Spotřeba"]], height=320)
     with chart_cols[1]:
@@ -435,10 +424,10 @@ def render_graphs(
             columns={"kumulovana_spotreba": "Kumulovaná spotřeba"}
         ).copy()
         if prediction_available:
-            if not full_day_prediction_df.empty:
+            if not period_prediction_df.empty:
                 cumulative_df = cumulative_df.merge(
                     round_consumption_columns(
-                        full_day_prediction_df,
+                        period_prediction_df,
                         columns=("ocekavana_kumulovana_spotreba",),
                     )[["date", "ocekavana_kumulovana_spotreba"]],
                     on="date",

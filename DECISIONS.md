@@ -1400,3 +1400,26 @@ Implications:
   cannot appear in dashboard predictions.
 - The current no-date fallback remains available for operational continuity
   when a valid active snapshot is absent.
+
+## DEC-057: Vodomery Overview Graphs Preserve The Full Forecast Horizon
+
+Date: 2026-07-27
+
+Decision: Vodomery overview prediction curves are generated independently for
+the complete selected date range at the selected hourly, daily, or monthly
+granularity. Actual and cumulative-actual curves end at the last available
+measurement and are not extended with future zero values.
+
+Rationale: When a currently running week was selected, predictions were joined
+only to existing measurement timestamps, except for a special single-day
+hourly case. The prediction curve therefore ended with the latest import even
+though profile snapshots covered the rest of the selected week.
+
+Implications:
+
+- Future forecast buckets remain visible through the end of the selected
+  period.
+- Missing future measurements remain missing rather than appearing as zero
+  consumption.
+- Period prediction construction respects profile validity and resolves
+  overlapping snapshots in favor of the latest period start.

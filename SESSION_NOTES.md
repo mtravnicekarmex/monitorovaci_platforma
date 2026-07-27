@@ -14076,3 +14076,31 @@ Verified:
   were printed.
 - No profile rebuild, scheduler job, database write, PDF delivery, or email
   delivery was triggered.
+
+### 2026-07-27 - Full-period vodomery overview prediction curves
+
+Cause:
+- `Vodomery / Prehled` built chart predictions primarily by joining profiles
+  to available measurements.
+- Only the current single-day hourly view had a special full-horizon
+  prediction path, so a running weekly range stopped its prediction curve at
+  the latest measurement.
+
+Changed:
+- Added shared full-period prediction construction for hourly, daily, and
+  monthly chart granularities.
+- Predictions are generated for every covered bucket in the selected range,
+  independently of measurement availability.
+- Actual and cumulative-actual chart values remain absent after the last real
+  measurement.
+- Overlapping profile periods resolve per timestamp to the latest valid period
+  start.
+
+Verified:
+- Targeted shared dashboard tests reported `5 passed`.
+- Vodomery, branch-report, prediction, responsive-dashboard, and API
+  authorization coverage reported `377 passed`.
+- The complete project test suite reported `920 passed`.
+- Python compilation succeeded.
+- No scheduler job, database write, report delivery, or email delivery was
+  triggered.

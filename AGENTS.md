@@ -419,6 +419,10 @@ Known job families:
 - For dashboard page changes, prefer small helpers and tested filtering/formatting behavior.
 - For visual or UX changes, preserve existing project patterns unless the user explicitly asks for redesign.
 - Branch overview hourly graphs plot the current incomplete hour at the latest real measurement timestamp so the chart does not appear stale.
+- Vodomery overview graphs build the prediction series independently across
+  the complete selected date range. Actual and cumulative-actual series stop
+  at the last available measurement and must not be extended into future
+  buckets with zero consumption.
 - Vodomery photo paths stored under `P:\` require a server-side fallback to `\\SERVER1A\Company\`, because service processes may not inherit interactive mapped drives.
 - Map GeoJSON should expose only photo availability such as `has_photo`; raw and resolved filesystem paths must remain server-side.
 - The `B1_V1` monthly report runs on the last Czech business day at 13:03 and uses the interval from 13:15 on the previous month's last Czech business day through 13:00 on the current month's last Czech business day.

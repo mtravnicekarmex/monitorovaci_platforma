@@ -398,6 +398,89 @@ def apply_prediction_profiles(
     return merged
 
 
+def build_period_prediction(
+    profiles_df: pd.DataFrame,
+    *,
+    start_date: datetime.date,
+    end_date: datetime.date,
+    frequency: str,
+) -> pd.DataFrame:
+    if profiles_df.empty or start_date > end_date:
+        return pd.DataFrame()
+
+    profiles = profiles_df.copy()
+    for column in ("interval_minutes", "day_of_week", "slot", "expected_mean"):
+        profiles[column] = pd.to_numeric(profiles[column], errors="coerce")
+    profiles = profiles.dropna(
+        subset=["interval_minutes", "day_of_week", "slot", "expected_mean"]
+    )
+    if profiles.empty:
+        return pd.DataFrame()
+
+    has_validity = (
+        {"valid_from", "valid_to"}.issubset(profiles.columns)
+        and profiles["valid_from"].notna().any()
+        and profiles["valid_to"].notna().any()
+    )
+    if has_validity:
+        profiles["valid_from"] = pd.to_datetime(
+            profiles["valid_from"],
+            errors="coerce",
+        )
+        profiles["valid_to"] = pd.to_datetime(
+            profiles["valid_to"],
+            errors="coerce",
+        )
+
+    daily_frames: list[pd.DataFrame] = []
+    for target_day in pd.date_range(start=start_date, end=end_date, freq="D"):
+        day_profiles = profiles.loc[
+            profiles["day_of_week"] == target_day.weekday()
+        ].copy()
+        if day_profiles.empty:
+            continue
+        day_profiles["date"] = target_day + pd.to_timedelta(
+            day_profiles["slot"] * day_profiles["interval_minutes"],
+            unit="m",
+        )
+        if has_validity:
+            day_profiles = day_profiles.loc[
+                (day_profiles["date"] >= day_profiles["valid_from"])
+                & (day_profiles["date"] < day_profiles["valid_to"])
+            ].copy()
+            day_profiles = day_profiles.sort_values(
+                ["date", "valid_from", "valid_to"],
+                ascending=[True, False, False],
+            ).drop_duplicates("date", keep="first")
+        daily_frames.append(day_profiles[["date", "expected_mean"]])
+
+    if not daily_frames:
+        return pd.DataFrame()
+
+    interval_prediction = pd.concat(daily_frames, ignore_index=True)
+    interval_prediction = interval_prediction.dropna(
+        subset=["date", "expected_mean"]
+    ).sort_values("date")
+    if interval_prediction.empty:
+        return pd.DataFrame()
+
+    prediction = (
+        interval_prediction.set_index("date")[["expected_mean"]]
+        .resample(frequency)
+        .sum(min_count=1)
+        .rename(columns={"expected_mean": "ocekavana_spotreba"})
+        .dropna(subset=["ocekavana_spotreba"])
+        .reset_index()
+    )
+    prediction["ocekavana_spotreba"] = prediction[
+        "ocekavana_spotreba"
+    ].round(3)
+    prediction["ocekavana_kumulovana_spotreba"] = prediction[
+        "ocekavana_spotreba"
+    ].cumsum().round(3)
+    return prediction
+
+
 @st.cache_data(ttl=60)
 def load_billing_options() -> list[dict[str, object]]:
     access_token = require_dashboard_api_token()

@@ -13,9 +13,11 @@ from services.api.services.vodomery import (
     _build_branch_billing_payload,
     _load_archived_prediction_profiles,
     _load_branch_archived_prediction_rows,
+    _load_current_prediction_profiles,
     _prepare_branch_measurements,
     _serialize_dataframe_rows,
 )
+from services.api.services import vodomery as vodomery_service
 
 
 class _FakeMappingResult:
@@ -106,6 +108,7 @@ def test_load_archived_prediction_profiles_returns_overlapping_validity_metadata
         "range_end": datetime.datetime(2026, 1, 8),
     }
     assert "forecast_period_start <" in str(session.statement)
+    assert "selection_mode = 'active'" in str(session.statement)
     assert len(rows) == 1
     assert rows[0] == {
         "interval_minutes": 15,
@@ -124,6 +127,98 @@ def test_load_archived_prediction_profiles_returns_overlapping_validity_metadata
         "archive_source": "historical_backfill",
         "selection_run_id": 42,
     }
+
+
+def test_load_current_prediction_profiles_prefers_period_active_snapshot(monkeypatch):
+    older_rows = [
+        {
+            "model_version": 3,
+            "expected_mean": 9.0,
+            "valid_from": datetime.datetime(2026, 7, 20, 4, 10),
+            "valid_to": datetime.datetime(2026, 7, 27, 4, 10),
+        }
+    ]
+    expected_rows = [
+        {
+            "model_version": 5,
+            "expected_mean": 1.25,
+            "valid_from": datetime.datetime(2026, 7, 27),
+            "valid_to": datetime.datetime(2026, 8, 3),
+        }
+    ]
+    calls = {}
+
+    def fake_archive(session, *, identifikace, start_date, end_date):
+        calls["archive"] = (session, identifikace, start_date, end_date)
+        return older_rows + expected_rows
+
+    def fail_global(*args, **kwargs):
+        raise AssertionError("Global fallback must not be used when a snapshot exists.")
+
+    monkeypatch.setattr(
+        vodomery_service,
+        "prague_now_naive",
+        lambda: datetime.datetime(2026, 7, 27, 8, 0),
+    )
+    monkeypatch.setattr(
+        vodomery_service,
+        "_load_archived_prediction_profiles",
+        fake_archive,
+    )
+    monkeypatch.setattr(
+        vodomery_service,
+        "_load_global_prediction_profiles",
+        fail_global,
+    )
+    session = object()
+
+    rows = _load_current_prediction_profiles(
+        session,
+        identifikace="I_V1",
+    )
+
+    assert rows == expected_rows
+    assert calls["archive"] == (
+        session,
+        "I_V1",
+        datetime.date(2026, 7, 27),
+        datetime.date(2026, 7, 27),
+    )
+
+
+def test_load_current_prediction_profiles_falls_back_to_global(monkeypatch):
+    fallback_rows = [{"model_version": 3, "expected_mean": 2.5}]
+    calls = {}
+
+    monkeypatch.setattr(
+        vodomery_service,
+        "prague_now_naive",
+        lambda: datetime.datetime(2026, 7, 27, 8, 0),
+    )
+    monkeypatch.setattr(
+        vodomery_service,
+        "_load_archived_prediction_profiles",
+        lambda *args, **kwargs: [],
+    )
+
+    def fake_global(session, *, identifikace):
+        calls["global"] = (session, identifikace)
+        return fallback_rows
+
+    monkeypatch.setattr(
+        vodomery_service,
+        "_load_global_prediction_profiles",
+        fake_global,
+    )
+    session = object()
+
+    rows = _load_current_prediction_profiles(
+        session,
+        identifikace="B_V4",
+    )
+
+    assert rows == fallback_rows
+    assert calls["global"] == (session, "B_V4")
 
 
 def test_load_branch_archived_prediction_rows_uses_active_per_identifier_period_snapshots():

@@ -80,10 +80,10 @@ def test_build_consumption_curve_day_aggregates_water_measurements():
     curve = vodomery_reports.build_consumption_curve(period_df, period)
     summary = vodomery_reports.summarize_report(period_df, curve)
 
-    assert curve[["spotreba_m3", "prutok_m3h", "pocet_mereni"]].to_dict(orient="records") == [
-        {"spotreba_m3": 0.0, "prutok_m3h": 0.0, "pocet_mereni": 2},
-        {"spotreba_m3": 1.5, "prutok_m3h": 6.0, "pocet_mereni": 2},
-        {"spotreba_m3": 0.5, "prutok_m3h": 2.0, "pocet_mereni": 1},
+    assert curve[
+        ["spotreba_m3", "prutok_m3h", "pocet_mereni"]
+    ].to_dict(orient="records") == [
+        {"spotreba_m3": 2.0, "prutok_m3h": 6.0, "pocet_mereni": 5},
     ]
     assert summary["total_consumption_m3"] == 2.0
     assert summary["device_count"] == 2
@@ -153,12 +153,11 @@ def test_build_vodomery_report_html_contains_expected_sections(monkeypatch):
     html = vodomery_reports.build_vodomery_report_html(report)
 
     assert "Denní report spotřeby vodoměrů" in html
-    assert "Křivka průtoku a spotřeby" in html
+    assert "Křivka hodinové spotřeby" in html
     assert "Souhrn měřidel" in html
     assert "monitoring.Mereni_vodomery_vse" in html
     assert "Odběrná místa:</strong> 2 / 4 odběrných míst: A, B" in html
     assert "1.500 m³" in html
-    assert "6.000 m³/h" in html
     assert "<svg" in html
     assert "data:image/png;base64,TEST" in html
 

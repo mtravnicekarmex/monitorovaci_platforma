@@ -13973,3 +13973,106 @@ Verified:
 - No duplicate measurement-key groups, synthetic rows, missing `time_utc`
   values, or new outlier-review records were created.
 - No repository code was changed by the backfill.
+
+### 2026-07-27 - Weekly vodomery rebuild undefined-WAPE repair
+
+Incident:
+- Scheduled `weekly_job` started at 06:10:05 and failed during
+  `rebuild_profiles` at 06:23:21 with a misleading
+  `No deployable prediction profile` error.
+- The transaction rolled back. The previous active selection run and profiles
+  remained intact, and later weekly steps did not run.
+
+Cause:
+- Three zero-consumption identifiers had complete rolling validation and
+  deployable profiles for all candidate models, but WAPE was undefined.
+- Selection correctly excluded them from WAPE ranking but incorrectly searched
+  only WAPE-rankable summaries for the deployable global-model fallback.
+
+Changed:
+- Kept WAPE mandatory for per-identifier candidate ranking.
+- Allowed the deployable global-model fallback when rolling MAE, RMSE, and
+  bias exist but WAPE is undefined.
+- Preserved fail-closed behavior when the global profile is genuinely absent.
+- Added regression coverage for the undefined-WAPE fallback.
+
+Verified:
+- Targeted vodomery prediction coverage reported `27 passed`.
+- Prediction contracts, storage, backfill, scheduler, and vodomery prediction
+  regression coverage reported `126 passed`.
+- Python compilation and `git diff --check` succeeded.
+- A production-only vodomery rebuild completed in 806.758 seconds as selection
+  run 38 with active model 3, 58 selected-model snapshots, 58 profile pairs,
+  37,800 profile rows, and zero missing profile pairs.
+- The three affected identifiers selected deployable global model 3 with
+  `no_identifier_metrics` and undefined WAPE.
+- No email report or non-vodomery weekly step was triggered by the verification
+  rebuild.
+
+Manual weekly completion:
+- After the repaired vodomery-only verification, the complete `weekly_job` was
+  run manually from the current production environment.
+- Vodomery rebuild completed as selection run 39 with active model 3.
+- Because selection run 38 had already written the same 2026-07-27 through
+  2026-08-03 forecast period, conflict-safe snapshot persistence retained its
+  existing 58 selected-model rows and 37,800 profile rows under run 38 instead
+  of duplicating them under run 39.
+- Plynomery rebuild completed as selection run 17 with active model 2.
+- Vodomery and plynomery model rebuild reports, the weekly vodomery branch
+  report, the weekly vodomery billing summary, the weekly elektromery branch
+  report, and the new-elektromery report all completed without an exception.
+- The manual complete run started at 07:31:23 and finished at 07:45:44.
+
+### 2026-07-27 - Conditional production rollout for vodomery models 4 and 5
+
+Decision:
+- Models 4 and 5 are now selectable production candidates at both global and
+  per-identifier level.
+- Each challenger must improve rolling WAPE by at least 5 percent against the
+  best eligible model 1-3 and must also have strictly lower rolling MAE.
+- Existing coverage and deployable-profile checks remain mandatory.
+
+Verified:
+- Targeted vodomery prediction coverage reported `35 passed`.
+- Prediction contracts, pipeline, backtest, storage, backfill, rebuild report,
+  scheduler, and vodomery prediction coverage reported `149 passed`.
+- A read-only replay of selection run 39 retained global model 3.
+- The conditional policy selected model 4 for three identifiers and model 5
+  for two identifiers, matching the reviewed 5-percent rollout scope.
+- No weekly job, profile rebuild, database write, or report delivery was
+  triggered during verification. The new policy first takes effect during the
+  next weekly rebuild.
+
+### 2026-07-27 - Vodomery downstream per-model pipeline closure
+
+Audit:
+- Confirmed production scoring uses active per-identifier selection with the
+  global model version retained for event and alert compatibility.
+- Confirmed date-ranged dashboard graphs and daily, weekly, and monthly branch
+  PDFs read period-bounded active profile snapshots.
+- Confirmed periodic billing-summary PDFs inherit the branch-report prediction
+  source; actual-consumption-only reports do not render predictions.
+- Found one remaining global-profile path in the no-date API used by the
+  vodomery detail dashboard.
+
+Changed:
+- The no-date profile API now returns the active per-identifier snapshot valid
+  at the exact current Prague time.
+- Overlapping current periods resolve to the period with the latest start.
+- The global current profile remains a fallback only when no active snapshot
+  covers the current instant.
+- Historical profile SQL now explicitly excludes non-active selection modes.
+- Updated two stale vodomery report tests to the established hourly report
+  baseline and current report content.
+
+Verified:
+- Dashboard/API/reporting targeted coverage reported `30 passed`.
+- The previously red `test_vodomery_reports.py` baseline now reports `6 passed`.
+- Combined vodomery, branch-report, prediction, and API authorization coverage
+  reported `371 passed`.
+- The complete project test suite reported `918 passed`.
+- A read-only production aggregate confirmed current active vodomery profile
+  snapshots exist for all 58 identifiers. No measurement values or identifiers
+  were printed.
+- No profile rebuild, scheduler job, database write, PDF delivery, or email
+  delivery was triggered.

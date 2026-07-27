@@ -44,8 +44,8 @@ def test_build_vodomery_weekly_forecast_period_uses_calendar_week():
     assert period.label == "2026-07-13 - 2026-07-20"
 
 
-def test_get_candidate_model_versions_default_excludes_measured_only_candidate():
-    assert get_candidate_model_versions() == (1, 2, 3)
+def test_get_candidate_model_versions_exposes_conditionally_deployable_candidates():
+    assert get_candidate_model_versions() == (1, 2, 3, 4, 5)
     assert get_candidate_model_versions(include_measured_only=True) == (1, 2, 3, 4, 5)
 
 
@@ -65,15 +65,81 @@ def test_candidate_model_specs_expose_shared_prediction_metadata():
         (1, "baseline_mad", "Model 1 - baseline MAD", 3, True),
         (2, "adaptive_strategy", "Model 2 - adaptive strategy", 3, True),
         (3, "recency_weighted_blend", "Model 3 - recency weighted blend", 3, True),
-        (4, "seasonal_yearly_blend", "Model 4 - seasonal yearly blend", 12, False),
-        (5, "recency_weighted_long_blend", "Model 5 - long recency weighted blend", 12, False),
+        (4, "seasonal_yearly_blend", "Model 4 - seasonal yearly blend", 12, True),
+        (5, "recency_weighted_long_blend", "Model 5 - long recency weighted blend", 12, True),
     ]
     assert {spec.medium_key for spec in specs} == {"vodomery"}
-    assert [spec.model_version for spec in get_candidate_model_specs(include_measured_only=False)] == [
-        1,
-        2,
-        3,
-    ]
+    assert [
+        spec.model_version
+        for spec in get_candidate_model_specs(include_measured_only=False)
+    ] == [1, 2, 3, 4, 5]
+
+
+@pytest.mark.parametrize(
+    (
+        "challenger_wape",
+        "challenger_mae",
+        "challenger_coverage",
+        "expected_version",
+    ),
+    [
+        (0.19, 0.19, 1.0, 4),
+        (0.1901, 0.19, 1.0, 2),
+        (0.19, 0.2, 1.0, 2),
+        (0.19, 0.19, 0.84, 2),
+    ],
+)
+def test_select_best_model_summary_gates_conditional_models(
+    challenger_wape,
+    challenger_mae,
+    challenger_coverage,
+    expected_version,
+):
+    incumbent = ModelPerformanceSummary(
+        model_version=2,
+        model_key="adaptive_strategy",
+        model_name="Model 2 - adaptive strategy",
+        selection_enabled=True,
+        validation_total_count=100,
+        matched_validation_count=100,
+        coverage=1.0,
+        mae=0.2,
+        rmse=0.3,
+        bias=0.0,
+        profile_count=1000,
+        rolling_validation_total_count=80,
+        rolling_matched_validation_count=80,
+        rolling_coverage=1.0,
+        rolling_mae=0.2,
+        rolling_rmse=0.3,
+        rolling_bias=0.0,
+        rolling_wape=0.2,
+    )
+    challenger = ModelPerformanceSummary(
+        model_version=4,
+        model_key="seasonal_yearly_blend",
+        model_name="Model 4 - seasonal yearly blend",
+        selection_enabled=True,
+        validation_total_count=100,
+        matched_validation_count=100,
+        coverage=1.0,
+        mae=0.1,
+        rmse=0.2,
+        bias=0.0,
+        profile_count=1000,
+        rolling_validation_total_count=80,
+        rolling_matched_validation_count=80,
+        rolling_coverage=challenger_coverage,
+        rolling_mae=challenger_mae,
+        rolling_rmse=0.2,
+        rolling_bias=0.0,
+        rolling_wape=challenger_wape,
+    )
+
+    selected = select_best_model_summary((incumbent, challenger))
+
+    assert selected is not None
+    assert selected.model_version == expected_version
 
 
 def test_rebuild_candidate_model_dispatches_through_candidate_plugin(monkeypatch):
@@ -155,7 +221,7 @@ def test_rebuild_single_measured_only_candidate_uses_candidate_training_window(m
 
     assert result["model_version"] == 4
     assert result["profile_count"] == 99
-    assert captured["definition"].selection_enabled is False
+    assert captured["definition"].selection_enabled is True
     assert captured["windows"].validation_start == datetime.datetime(2026, 6, 8, 6, 10, 5)
     assert captured["windows"].train_start == datetime.datetime(2025, 6, 8, 6, 10, 5)
     assert captured["committed"] is True
@@ -810,6 +876,85 @@ def test_build_selected_model_decisions_use_best_eligible_model():
     assert decision.metadata["selected_from_device_metrics"] is True
 
 
+@pytest.mark.parametrize(
+    ("model_version", "challenger_wape", "challenger_mae", "expected_version"),
+    [
+        (4, 0.19, 0.19, 4),
+        (5, 0.19, 0.19, 5),
+        (4, 0.1901, 0.19, 2),
+        (5, 0.19, 0.2, 2),
+    ],
+)
+def test_build_selected_model_decisions_gates_conditional_models(
+    model_version,
+    challenger_wape,
+    challenger_mae,
+    expected_version,
+):
+    forecast_period = vodomery_prediction.build_vodomery_weekly_forecast_period(
+        reference_time=datetime.datetime(2026, 7, 27, 4, 10, 5),
+    )
+    global_summary = ModelPerformanceSummary(
+        model_version=3,
+        model_name="Model 3 - recency weighted blend",
+        model_key="recency_weighted_blend",
+        validation_total_count=100,
+        matched_validation_count=100,
+        coverage=1.0,
+        mae=0.1,
+        rmse=0.2,
+        bias=0.0,
+        profile_count=1000,
+    )
+    incumbent = vodomery_prediction.DeviceModelPerformanceSummary(
+        identifikace="L1_V1",
+        model_version=2,
+        model_key="adaptive_strategy",
+        model_name="Model 2 - adaptive strategy",
+        selection_enabled=True,
+        rolling_backtest_fold_count=8,
+        rolling_validation_total_count=80,
+        rolling_matched_validation_count=80,
+        rolling_coverage=1.0,
+        rolling_mae=0.2,
+        rolling_rmse=0.3,
+        rolling_bias=0.0,
+        rolling_wape=0.2,
+    )
+    challenger = vodomery_prediction.DeviceModelPerformanceSummary(
+        identifikace="L1_V1",
+        model_version=model_version,
+        model_key=f"model_{model_version}",
+        model_name=f"Model {model_version}",
+        selection_enabled=True,
+        rolling_backtest_fold_count=8,
+        rolling_validation_total_count=80,
+        rolling_matched_validation_count=80,
+        rolling_coverage=1.0,
+        rolling_mae=challenger_mae,
+        rolling_rmse=0.2,
+        rolling_bias=0.0,
+        rolling_wape=challenger_wape,
+    )
+
+    decisions = vodomery_prediction._build_selected_model_decisions(
+        device_summaries=(incumbent, challenger),
+        selected_summary=global_summary,
+        forecast_period=forecast_period,
+        selection_run_id=93,
+        deployable_profile_pairs={
+            ("L1_V1", 2),
+            ("L1_V1", model_version),
+        },
+    )
+
+    decision = decisions[0]
+    assert decision.selected_model_version == expected_version
+    assert decision.metadata["conditional_model_versions"] == [4, 5]
+    assert decision.metadata["conditional_min_wape_improvement"] == 0.05
+    assert decision.metadata["conditional_requires_lower_mae"] is True
+
+
 def test_build_selected_model_decisions_skips_metric_winner_without_profile():
     forecast_period = vodomery_prediction.build_vodomery_weekly_forecast_period(
         reference_time=datetime.datetime(2026, 7, 13, 4, 10, 5),
@@ -919,6 +1064,59 @@ def test_build_selected_model_decisions_fails_without_any_deployable_profile():
             selection_run_id=91,
             deployable_profile_pairs=set(),
         )
+
+
+def test_build_selected_model_decisions_uses_deployable_global_model_when_wape_is_undefined():
+    forecast_period = vodomery_prediction.build_vodomery_weekly_forecast_period(
+        reference_time=datetime.datetime(2026, 7, 27, 4, 10, 5),
+    )
+    global_summary = ModelPerformanceSummary(
+        model_version=3,
+        model_name="Model 3 - recency weighted blend",
+        model_key="recency_weighted_blend",
+        validation_total_count=100,
+        matched_validation_count=100,
+        coverage=1.0,
+        mae=0.0,
+        rmse=0.0,
+        bias=0.0,
+        profile_count=1000,
+    )
+    zero_consumption_candidate = vodomery_prediction.DeviceModelPerformanceSummary(
+        identifikace="B_V4",
+        model_version=3,
+        model_key="recency_weighted_blend",
+        model_name="Model 3 - recency weighted blend",
+        selection_enabled=True,
+        rolling_backtest_fold_count=8,
+        rolling_validation_total_count=5371,
+        rolling_matched_validation_count=5371,
+        rolling_coverage=1.0,
+        rolling_mae=0.0,
+        rolling_rmse=0.0,
+        rolling_bias=0.0,
+        rolling_wape=None,
+    )
+
+    decisions = vodomery_prediction._build_selected_model_decisions(
+        device_summaries=(zero_consumption_candidate,),
+        selected_summary=global_summary,
+        forecast_period=forecast_period,
+        selection_run_id=92,
+        deployable_profile_pairs={("B_V4", 3)},
+    )
+
+    assert len(decisions) == 1
+    decision = decisions[0]
+    assert decision.selected_model_version == 3
+    assert decision.uses_fallback is True
+    assert (
+        decision.fallback_reason
+        is vodomery_prediction.PredictionSelectionFallbackReason.NO_IDENTIFIER_METRICS
+    )
+    assert decision.metrics is not None
+    assert decision.metrics.wape is None
+    assert decision.metadata["selected_from_device_metrics"] is False
 
 
 def test_build_selected_model_decisions_fallbacks_below_coverage():

@@ -8,7 +8,7 @@ import pandas as pd
 from sqlalchemy import bindparam, func, text
 
 from app.metrics_utils import calculate_percentage_deviation
-from app.time_utils import utc_now_naive
+from app.time_utils import prague_now_naive, utc_now_naive
 from core.db.connect import ENGINE_PG, get_session_ms, get_session_pg
 from moduly.apps.dashboard.time_semantics import local_date_range_to_utc, local_datetime_range_to_utc
 from moduly.mereni.vodomery.SCVK.SCVK_data_z_dotazu import paths as SCVK_PATHS
@@ -769,48 +769,95 @@ def load_prediction_profiles(
                 end_date=end_date,
             )
 
-        active_model_version = _get_active_model_version(session)
-
-        rows = (
-            session.query(
-                VodomeryProfilesAnomaly.interval_minutes,
-                VodomeryProfilesAnomaly.day_of_week,
-                VodomeryProfilesAnomaly.slot,
-                VodomeryProfilesAnomaly.mean,
-                VodomeryProfilesAnomaly.median,
-                VodomeryProfilesAnomaly.p10,
-                VodomeryProfilesAnomaly.p90,
-                VodomeryProfilesAnomaly.std,
-                VodomeryProfilesAnomaly.sample_size,
-                VodomeryProfilesAnomaly.model_version,
-            )
-            .filter(VodomeryProfilesAnomaly.identifikace == identifikace)
-            .filter(VodomeryProfilesAnomaly.model_version == active_model_version)
-            .order_by(
-                VodomeryProfilesAnomaly.day_of_week.asc(),
-                VodomeryProfilesAnomaly.slot.asc(),
-            )
-            .all()
+        return _load_current_prediction_profiles(
+            session,
+            identifikace=identifikace,
         )
-        if not rows:
-            return []
-        return [
-            {
-                "interval_minutes": int(row.interval_minutes),
-                "day_of_week": int(row.day_of_week),
-                "slot": int(row.slot),
-                "expected_mean": float(row.mean),
-                "expected_median": float(row.median),
-                "expected_p10": float(row.p10),
-                "expected_p90": float(row.p90),
-                "expected_std": float(row.std),
-                "sample_size": int(row.sample_size),
-                "model_version": int(row.model_version),
-            }
-            for row in rows
-        ]
     finally:
         session.close()
+
+
+def _load_current_prediction_profiles(
+    session,
+    *,
+    identifikace: str,
+) -> list[dict[str, object]]:
+    current_time = prague_now_naive()
+    current_date = current_time.date()
+    archived_rows = _load_archived_prediction_profiles(
+        session,
+        identifikace=identifikace,
+        start_date=current_date,
+        end_date=current_date,
+    )
+    valid_rows = [
+        row
+        for row in archived_rows
+        if row.get("valid_from") is not None
+        and row.get("valid_to") is not None
+        and row["valid_from"] <= current_time < row["valid_to"]
+    ]
+    if valid_rows:
+        latest_valid_from = max(row["valid_from"] for row in valid_rows)
+        latest_valid_to = max(
+            row["valid_to"]
+            for row in valid_rows
+            if row["valid_from"] == latest_valid_from
+        )
+        return [
+            row
+            for row in valid_rows
+            if row["valid_from"] == latest_valid_from
+            and row["valid_to"] == latest_valid_to
+        ]
+    return _load_global_prediction_profiles(
+        session,
+        identifikace=identifikace,
+    )
+
+
+def _load_global_prediction_profiles(
+    session,
+    *,
+    identifikace: str,
+) -> list[dict[str, object]]:
+    active_model_version = _get_active_model_version(session)
+    rows = (
+        session.query(
+            VodomeryProfilesAnomaly.interval_minutes,
+            VodomeryProfilesAnomaly.day_of_week,
+            VodomeryProfilesAnomaly.slot,
+            VodomeryProfilesAnomaly.mean,
+            VodomeryProfilesAnomaly.median,
+            VodomeryProfilesAnomaly.p10,
+            VodomeryProfilesAnomaly.p90,
+            VodomeryProfilesAnomaly.std,
+            VodomeryProfilesAnomaly.sample_size,
+            VodomeryProfilesAnomaly.model_version,
+        )
+        .filter(VodomeryProfilesAnomaly.identifikace == identifikace)
+        .filter(VodomeryProfilesAnomaly.model_version == active_model_version)
+        .order_by(
+            VodomeryProfilesAnomaly.day_of_week.asc(),
+            VodomeryProfilesAnomaly.slot.asc(),
+        )
+        .all()
+    )
+    return [
+        {
+            "interval_minutes": int(row.interval_minutes),
+            "day_of_week": int(row.day_of_week),
+            "slot": int(row.slot),
+            "expected_mean": float(row.mean),
+            "expected_median": float(row.median),
+            "expected_p10": float(row.p10),
+            "expected_p90": float(row.p90),
+            "expected_std": float(row.std),
+            "sample_size": int(row.sample_size),
+            "model_version": int(row.model_version),
+        }
+        for row in rows
+    ]
 
 
 def _load_archived_prediction_profiles(
@@ -847,6 +894,7 @@ def _load_archived_prediction_profiles(
                 id
             FROM monitoring.prediction_profile_snapshots
             WHERE medium_key = 'vodomery'
+              AND selection_mode = 'active'
               AND identifier = :identifikace
               AND forecast_period_start < :range_end
               AND forecast_period_end > :range_start

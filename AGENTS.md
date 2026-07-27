@@ -191,6 +191,10 @@ Known hygiene topics to handle only after explicit approval:
   use the current global profile; duplicate snapshot slots resolve by highest
   archive version and newest row. Billing-summary PDFs inherit the same branch
   report source, while actual-consumption-only reports remain unchanged.
+- Vodomery dashboard profile requests without a date range use the `active`
+  per-identifier profile snapshot valid at the current Prague time. Overlapping
+  periods resolve to the latest period start; the global current profile is
+  only a fallback when no active snapshot covers the current instant.
 - Vodomery per-identifier selection may choose only a candidate that produced
   a deployable profile for that identifier. If the metric winner has no
   profile, select the next best eligible candidate with sufficient coverage

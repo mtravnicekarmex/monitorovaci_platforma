@@ -1321,3 +1321,82 @@ Implications:
 - Vodomery billing-summary PDFs inherit the corrected branch report inputs.
   Reports that contain only actual consumption or billing values and do not
   render prediction values are unchanged.
+
+## DEC-054: Undefined Per-Identifier WAPE Falls Back To The Deployable Global Model
+
+Date: 2026-07-27
+
+Decision: When a vodomery identifier has matched rolling-validation data and
+defined MAE, RMSE, and bias but WAPE is undefined because actual consumption
+is zero, it is not eligible for per-identifier WAPE ranking. Selection falls
+back to the globally selected model only when that identifier/model profile
+was produced in the current rebuild transaction.
+
+Rationale: The first live weekly rebuild with deployable-profile enforcement
+failed for three zero-consumption identifiers. All candidate profiles existed,
+but undefined WAPE caused the identifiers to be treated as if no deployable
+profile were available. Undefined ranking data and missing deployable profile
+are distinct states.
+
+Implications:
+
+- WAPE remains required for per-identifier candidate ranking.
+- MAE, RMSE, and bias may establish that validation metrics exist even when
+  WAPE is mathematically undefined.
+- Zero-consumption identifiers use the deployable global model and record
+  `no_identifier_metrics`.
+- A genuinely missing global profile still fails closed; this decision does
+  not weaken deployable-profile enforcement.
+
+## DEC-055: Vodomery Models 4 And 5 Require A Five-Percent Challenger Margin
+
+Date: 2026-07-27
+
+Decision: Vodomery models 4 and 5 are production candidates, but may be
+selected only when their rolling WAPE is at least 5 percent lower than the
+best eligible model 1-3 and their rolling MAE is also strictly lower. The
+condition applies independently to the global selection and every
+per-identifier selection.
+
+Rationale: Shadow results showed material and repeatable improvements for a
+small set of identifiers, while many other model-5 wins were below a few
+percent. Enabling both candidates under the previous minimum-WAPE policy
+would create low-value model switches without a meaningful error margin.
+
+Implications:
+
+- Models 4 and 5 remain rebuilt and measured on every weekly run.
+- Coverage and deployable-profile requirements continue to apply before the
+  challenger margin.
+- Exactly 5 percent lower WAPE qualifies; equal or higher MAE does not.
+- If no valid model 1-3 benchmark exists, models 4 and 5 cannot enter
+  production through the conditional policy.
+- Selection metadata records the conditional versions, WAPE margin, and MAE
+  requirement for auditability.
+
+## DEC-056: Current Vodomery Dashboard Profiles Use The Active Per-Identifier Snapshot
+
+Date: 2026-07-27
+
+Decision: Vodomery profile API requests without an explicit date range use
+the `active` per-identifier profile snapshot valid at the current Prague time.
+When overlapping snapshots exist, the snapshot period with the latest start
+is selected deterministically. The current global profile is used only when
+no active snapshot covers the current instant.
+
+Rationale: Date-ranged dashboard graphs and periodic branch PDFs already used
+period-bounded per-identifier profile snapshots, but the vodomery detail page
+called the backward-compatible no-date API branch, which still loaded the
+global model profile. Selecting by the whole current date could also return
+two periods when legacy and calendar-aligned forecast intervals overlap.
+
+Implications:
+
+- Main and detail vodomery dashboard views now follow the same per-identifier
+  production selection as scoring and PDF reports.
+- Historical date-ranged requests remain snapshot-only and never fall back to
+  a current or global profile.
+- Snapshot reads explicitly require `selection_mode = 'active'`; dry-run rows
+  cannot appear in dashboard predictions.
+- The current no-date fallback remains available for operational continuity
+  when a valid active snapshot is absent.

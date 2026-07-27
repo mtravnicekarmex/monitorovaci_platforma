@@ -74,6 +74,13 @@ MODEL_V4_WORKDAY_WEIGHT_TARGET = 18.0
 MODEL_V4_SLOT_WEIGHT_TARGET = 28.0
 MODEL_V5_TRAINING_WINDOW_MONTHS = 12
 MODEL_V5_RECENCY_HALF_LIFE_DAYS = 90.0
+CONDITIONAL_PRODUCTION_MODEL_VERSIONS = frozenset(
+    {
+        MODEL_VERSION_SEASONAL_YEARLY,
+        MODEL_VERSION_LONG_RECENCY,
+    }
+)
+CONDITIONAL_MODEL_MIN_WAPE_IMPROVEMENT = 0.05
 VODOMERY_MEDIUM_KEY = "vodomery"
 VODOMERY_FORECAST_PERIOD_DEFINITION = PredictionForecastPeriodDefinition(
     cadence=PredictionForecastCadence.WEEKLY,
@@ -369,7 +376,7 @@ def _build_vodomery_pipeline_runner() -> PredictionPipelineRunner[VodomeryCandid
                     model_key="seasonal_yearly_blend",
                     model_name="Model 4 - seasonal yearly blend",
                     training_window_months=MODEL_V4_TRAINING_WINDOW_MONTHS,
-                    selection_enabled=False,
+                    selection_enabled=True,
                 ),
                 rebuild_fn=_rebuild_model_4_candidate,
                 build_backtest_profiles_fn=_build_model_4_profiles_for_backtest,
@@ -380,7 +387,7 @@ def _build_vodomery_pipeline_runner() -> PredictionPipelineRunner[VodomeryCandid
                     model_key="recency_weighted_long_blend",
                     model_name="Model 5 - long recency weighted blend",
                     training_window_months=MODEL_V5_TRAINING_WINDOW_MONTHS,
-                    selection_enabled=False,
+                    selection_enabled=True,
                 ),
                 rebuild_fn=_rebuild_model_5_candidate,
                 build_backtest_profiles_fn=_build_model_5_profiles_for_backtest,
@@ -530,7 +537,14 @@ def select_best_model_summary(
     *,
     coverage_threshold: float = MODEL_SELECTION_COVERAGE_THRESHOLD,
 ) -> ModelPerformanceSummary | None:
-    summary_by_version = {summary.model_version: summary for summary in summaries}
+    conditionally_eligible = _filter_conditionally_eligible_model_summaries(
+        summaries,
+        coverage_threshold=coverage_threshold,
+    )
+    summary_by_version = {
+        summary.model_version: summary
+        for summary in conditionally_eligible
+    }
     selected = _build_vodomery_pipeline_runner().select_best_candidate(
         (
             summary.to_prediction_candidate_result()
@@ -541,6 +555,77 @@ def select_best_model_summary(
     if selected is None:
         return None
     return summary_by_version[selected.spec.model_version]
+
+
+def _filter_conditionally_eligible_model_summaries(
+    summaries: Sequence[ModelPerformanceSummary],
+    *,
+    coverage_threshold: float,
+) -> tuple[ModelPerformanceSummary, ...]:
+    incumbent = _best_incumbent_model_summary(
+        summaries,
+        coverage_threshold=coverage_threshold,
+    )
+    return tuple(
+        summary
+        for summary in summaries
+        if summary.selection_enabled
+        and (
+            summary.model_version not in CONDITIONAL_PRODUCTION_MODEL_VERSIONS
+            or (
+                summary.rolling_coverage is not None
+                and summary.rolling_coverage >= coverage_threshold
+                and _challenger_beats_incumbent(summary, incumbent)
+            )
+        )
+    )
+
+
+def _best_incumbent_model_summary(
+    summaries: Sequence[ModelPerformanceSummary],
+    *,
+    coverage_threshold: float,
+) -> ModelPerformanceSummary | None:
+    incumbents = [
+        summary
+        for summary in summaries
+        if summary.selection_enabled
+        and summary.model_version not in CONDITIONAL_PRODUCTION_MODEL_VERSIONS
+        and summary.rolling_coverage is not None
+        and summary.rolling_coverage >= coverage_threshold
+        and summary.rolling_wape is not None
+        and summary.rolling_mae is not None
+    ]
+    if not incumbents:
+        return None
+    return min(
+        incumbents,
+        key=lambda summary: (
+            float(summary.rolling_wape),
+            float(summary.rolling_mae),
+            summary.model_version,
+        ),
+    )
+
+
+def _challenger_beats_incumbent(
+    challenger: ModelPerformanceSummary | DeviceModelPerformanceSummary,
+    incumbent: ModelPerformanceSummary | DeviceModelPerformanceSummary | None,
+) -> bool:
+    if (
+        incumbent is None
+        or challenger.rolling_wape is None
+        or challenger.rolling_mae is None
+        or incumbent.rolling_wape is None
+        or incumbent.rolling_mae is None
+    ):
+        return False
+    return (
+        challenger.rolling_wape
+        <= incumbent.rolling_wape
+        * (1.0 - CONDITIONAL_MODEL_MIN_WAPE_IMPROVEMENT)
+        and challenger.rolling_mae < incumbent.rolling_mae
+    )
 
 
 def rebuild_profiles(
@@ -1177,17 +1262,21 @@ def _build_selected_model_decisions(
 ) -> tuple[PredictionSelectedModelDecision, ...]:
     all_identifiers = sorted({summary.identifikace for summary in device_summaries})
     valid_by_identifier: dict[str, list[DeviceModelPerformanceSummary]] = defaultdict(list)
+    fallback_by_identifier: dict[str, list[DeviceModelPerformanceSummary]] = defaultdict(list)
     best_overall_by_identifier: dict[str, DeviceModelPerformanceSummary] = {}
 
     for summary in device_summaries:
         if summary.best_for_identifier:
             best_overall_by_identifier[summary.identifikace] = summary
+        if _device_summary_has_fallback_metrics(summary):
+            fallback_by_identifier[summary.identifikace].append(summary)
         if _device_summary_has_selection_metrics(summary):
             valid_by_identifier[summary.identifikace].append(summary)
 
     decisions: list[PredictionSelectedModelDecision] = []
     for identifikace in all_identifiers:
         valid_summaries = valid_by_identifier.get(identifikace, [])
+        fallback_summaries = fallback_by_identifier.get(identifikace, [])
         eligible_summaries = [
             summary
             for summary in valid_summaries
@@ -1198,9 +1287,25 @@ def _build_selected_model_decisions(
             for summary in eligible_summaries
             if summary.rolling_coverage >= coverage_threshold
         ]
-        deployable_threshold_summaries = [
+        incumbent_summary = _best_incumbent_device_summary(threshold_summaries)
+        conditional_threshold_summaries = [
             summary
             for summary in threshold_summaries
+            if summary.model_version not in CONDITIONAL_PRODUCTION_MODEL_VERSIONS
+            or _challenger_beats_incumbent(summary, incumbent_summary)
+        ]
+        fallback_incumbent_summary = _best_incumbent_device_summary(
+            eligible_summaries
+        )
+        conditional_eligible_summaries = [
+            summary
+            for summary in eligible_summaries
+            if summary.model_version not in CONDITIONAL_PRODUCTION_MODEL_VERSIONS
+            or _challenger_beats_incumbent(summary, fallback_incumbent_summary)
+        ]
+        deployable_threshold_summaries = [
+            summary
+            for summary in conditional_threshold_summaries
             if deployable_profile_pairs is None
             or (summary.identifikace, summary.model_version)
             in deployable_profile_pairs
@@ -1212,7 +1317,7 @@ def _build_selected_model_decisions(
                 key=_device_summary_selection_key,
             )
             best_metric_summary = min(
-                threshold_summaries,
+                conditional_threshold_summaries,
                 key=_device_summary_selection_key,
             )
             fallback_reason = (
@@ -1226,7 +1331,7 @@ def _build_selected_model_decisions(
             selected_model_name = selected_device_summary.model_name
         else:
             global_device_summary = _find_device_summary_for_model(
-                valid_summaries,
+                fallback_summaries,
                 model_version=selected_summary.model_version,
             )
             global_profile_is_deployable = (
@@ -1249,7 +1354,7 @@ def _build_selected_model_decisions(
             else:
                 deployable_summaries = [
                     summary
-                    for summary in eligible_summaries
+                    for summary in conditional_eligible_summaries
                     if deployable_profile_pairs is None
                     or (summary.identifikace, summary.model_version)
                     in deployable_profile_pairs
@@ -1297,9 +1402,18 @@ def _build_selected_model_decisions(
                 fallback_reason=fallback_reason,
                 metrics=selected_metrics,
                 metadata={
-                    "selection_policy": "eligible_rolling_wape_min_coverage",
+                    "selection_policy": (
+                        "eligible_rolling_wape_min_coverage_conditional_challenger"
+                    ),
                     "selection_mode": selection_mode,
                     "coverage_threshold": coverage_threshold,
+                    "conditional_model_versions": sorted(
+                        CONDITIONAL_PRODUCTION_MODEL_VERSIONS
+                    ),
+                    "conditional_min_wape_improvement": (
+                        CONDITIONAL_MODEL_MIN_WAPE_IMPROVEMENT
+                    ),
+                    "conditional_requires_lower_mae": True,
                     "best_overall_model_version": (
                         None if best_overall is None else best_overall.model_version
                     ),
@@ -1322,6 +1436,19 @@ def _build_selected_model_decisions(
         )
 
     return tuple(decisions)
+
+
+def _best_incumbent_device_summary(
+    summaries: Sequence[DeviceModelPerformanceSummary],
+) -> DeviceModelPerformanceSummary | None:
+    incumbents = [
+        summary
+        for summary in summaries
+        if summary.model_version not in CONDITIONAL_PRODUCTION_MODEL_VERSIONS
+    ]
+    if not incumbents:
+        return None
+    return min(incumbents, key=_device_summary_selection_key)
 
 
 def _load_deployable_profile_pairs(
@@ -1471,12 +1598,20 @@ def _device_summary_has_selection_metrics(
     summary: DeviceModelPerformanceSummary,
 ) -> bool:
     return (
+        _device_summary_has_fallback_metrics(summary)
+        and summary.rolling_wape is not None
+    )
+
+
+def _device_summary_has_fallback_metrics(
+    summary: DeviceModelPerformanceSummary,
+) -> bool:
+    return (
         summary.rolling_validation_total_count > 0
         and summary.rolling_matched_validation_count > 0
         and summary.rolling_mae is not None
         and summary.rolling_rmse is not None
         and summary.rolling_bias is not None
-        and summary.rolling_wape is not None
     )
 
 

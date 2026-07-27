@@ -1290,3 +1290,34 @@ Implications:
   later, or stale profiles.
 - Duplicate archived slot identities are resolved deterministically in favor
   of the highest archive version and newest stored row.
+
+## DEC-053: Periodic Vodomery PDF Predictions Use Archived Per-Identifier Profiles
+
+Date: 2026-07-24
+
+Decision: Expected-consumption values in daily, weekly, and monthly vodomery
+branch PDFs come from `active` selected profile snapshots for each identifier
+whose forecast period overlaps the report day. Reports must not project the
+current global profile backward into historical periods.
+
+Rationale: The dashboard already reproduces historical expectations from
+period-bounded selected profiles, but periodic branch reports still loaded one
+current global `model_version` for every identifier and every historical day.
+That made PDF predictions inconsistent with the model actually selected for a
+specific vodomery identifier and forecast week.
+
+Implications:
+
+- `load_branch_day_overview()` is the shared prediction boundary for daily,
+  weekly, and monthly branch reports.
+- Each report day can use different selected model versions for different
+  identifiers.
+- Weekly and monthly reports retain their existing daily aggregation, but each
+  constituent day reads the archived profile valid on that day.
+- Duplicate archived slot identities resolve in favor of the highest archive
+  version and newest stored row.
+- Missing archive coverage is not filled with the current, later, or stale
+  global profile.
+- Vodomery billing-summary PDFs inherit the corrected branch report inputs.
+  Reports that contain only actual consumption or billing values and do not
+  render prediction values are unchanged.

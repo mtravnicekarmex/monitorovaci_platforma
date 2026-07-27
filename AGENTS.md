@@ -186,6 +186,11 @@ Known hygiene topics to handle only after explicit approval:
   alert flows remain compatible. Missing or unusable per-identifier selections
   fall back to the global active model profile. Non-active candidate scoring
   remains pure per-candidate scoring for comparison.
+- Vodomery daily, weekly, and monthly branch PDF predictions use period-bounded
+  `active` profile snapshots per identifier. Historical report days must not
+  use the current global profile; duplicate snapshot slots resolve by highest
+  archive version and newest row. Billing-summary PDFs inherit the same branch
+  report source, while actual-consumption-only reports remain unchanged.
 - Vodomery per-identifier selection may choose only a candidate that produced
   a deployable profile for that identifier. If the metric winner has no
   profile, select the next best eligible candidate with sufficient coverage

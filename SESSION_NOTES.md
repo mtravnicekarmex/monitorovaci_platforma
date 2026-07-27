@@ -13729,3 +13729,247 @@ Known risks and accepted gaps:
 - The full suite has two reproducible unrelated vodomery report test failures;
   targeted prediction and authorization coverage is green.
 - Historical archive gaps remain intentionally visible by policy.
+
+### 2026-07-24 - Post-restart prediction dashboard review
+
+Scope:
+- Reviewed the deployed historical prediction dashboard after the supported
+  workstation restart.
+- Recorded the operator's disposition of the remaining Markdown follow-ups.
+
+Verified:
+- The post-restart runtime, listeners, local health endpoints, scheduler
+  heartbeat, first `quarter_hour_job`, and database availability check were
+  healthy.
+- The deployed `Predikce modelu / Historie` tab rendered successfully in an
+  authenticated browser.
+- The page reported status `OK`, three historical vodomery candidate rows,
+  128 historical periods, 125 complete periods, and three missing profile
+  pairs. Tables and summary metrics were readable.
+- A bounded production read-only archived-profile lookup returned overlapping
+  rows with `valid_from`, `valid_to`, archive-source, and selection-run
+  metadata.
+
+Decisions:
+- The three historical missing profile pairs are considered resolved as an
+  intentionally visible accepted historical state. No drill-down, repair, or
+  profile carry-forward work is currently planned.
+- The open security checklist work, including code-integrity activation and
+  external security verification, is explicitly deferred.
+
+Not verified:
+- The authenticated vodomery overview was not visually captured with a
+  multi-week range. A browser window was offered twice; the second attempt
+  expired without login.
+- Visual confirmation of a known archive gap in the vodomery chart therefore
+  remains the only open item from the historical dashboard review. Automated
+  service and dashboard-helper tests already cover weekly profile switching,
+  missing-period gaps, and current-profile compatibility.
+
+Follow-up:
+- In one authenticated browser session, open `Vodomery / Prehled`, select a
+  multi-week historical range with graphs enabled, and confirm that archived
+  weekly profile changes render and a known missing period remains a gap.
+
+Correction:
+- The operator subsequently opened `Vodomery / Prehled` and repeatedly
+  submitted the requested multi-week graph settings. The temporary capture
+  script failed to recognize the submissions because it incorrectly waited
+  for a network response that Streamlit may satisfy from cache. This was a
+  verification-tool defect, not an operator or dashboard-input failure.
+- The temporary browser process and script were removed.
+- Targeted dashboard-helper, vodomery service, and API authorization coverage
+  was rerun after the failed capture and reported `184 passed`.
+- The operator then confirmed that the multi-week vodomery graph rendered
+  correctly, including the prediction curve. The historical dashboard visual
+  review is complete; no follow-up remains for this item.
+
+### 2026-07-24 - Per-identifier historical profiles in periodic vodomery PDFs
+
+Scope:
+- Integrated period-bounded selected profile snapshots into automatic daily,
+  weekly, and monthly vodomery branch PDF inputs.
+
+Changed:
+- `load_branch_day_overview()` now reads `active` vodomery rows from
+  `monitoring.prediction_profile_snapshots` whose forecast period overlaps the
+  report day.
+- One report day may use a different selected model version for each
+  identifier.
+- Duplicate profile slots prefer the highest archive version and newest row.
+- The current global anomaly profile is no longer projected backward into
+  historical branch reports.
+- Daily, weekly, and monthly billing-summary PDFs inherit the same corrected
+  branch sections. Actual-consumption-only reports are unchanged.
+- Added service tests for per-identifier model rows, validity filtering,
+  deterministic archive precedence, and an empty device set.
+- Recorded the durable behavior in `AGENTS.md` and `DEC-053`.
+
+Verified:
+- Python compilation passed for the changed service and test module.
+- Service, daily/weekly/monthly branch report, billing-summary, API
+  authorization, and scheduler integration coverage reported `199 passed`.
+- A production read-only smoke check for `2026-07-23` returned four branch
+  payloads; all four had a positive archived prediction total.
+- The same period contained two selected model versions across archived active
+  profiles: model v2 for 43 identifiers and model v3 for 15 identifiers. No
+  identifiers or measurements were printed.
+- A broader report run reported `24 passed, 2 failed`. Both failures are the
+  previously documented unrelated baseline failures in
+  `tests/test_vodomery_reports.py` concerning legacy consumption-curve
+  aggregation and an expected HTML heading.
+
+Not verified:
+- No PDF email was sent and no scheduled production job was run manually.
+- Running FastAPI and scheduler processes still contain the pre-change code
+  until the next supported workstation restart.
+
+Follow-up:
+- Before deploying, write the mandatory restart handoff and perform the
+  supported workstation restart. After boot, verify runtime health and run a
+  read-only branch report smoke check before the next automatic report slot.
+
+### 2026-07-24 13:01 - Pre-restart handoff
+
+Reason for restart:
+- Load the per-identifier, period-bounded archived prediction profile source
+  into production FastAPI and scheduler processes used by automatic daily,
+  weekly, and monthly vodomery PDF reports.
+
+Current task/conversation state:
+- Completed: automatic vodomery branch PDF inputs now use the selected model
+  profile for each identifier and report day.
+- Completed: weekly and monthly reports aggregate the corrected daily
+  historical inputs; billing-summary PDFs inherit the corrected branch
+  sections.
+- Completed: current global profiles are no longer projected backward into
+  historical PDF report periods.
+- Pending after restart: runtime health verification and a read-only
+  production branch-report smoke check through the restarted process state.
+- Do not send a real report email or manually run a scheduled report job merely
+  as a restart smoke test.
+
+Working tree and deployment:
+- Branch: `master`.
+- HEAD: `5913841`.
+- The working tree is dirty and the PDF profile integration is not committed.
+- `git status --short`:
+  ```text
+   M AGENTS.md
+   M DECISIONS.md
+   M SESSION_NOTES.md
+   M services/api/services/vodomery.py
+   M tests/test_vodomery_service.py
+  ```
+- `services/api/services/vodomery.py` changes the common branch prediction
+  source to period-bounded `active` profile snapshots.
+- `tests/test_vodomery_service.py` covers the archive query contract and
+  per-identifier model rows.
+- `AGENTS.md`, `DECISIONS.md`, and `SESSION_NOTES.md` record the durable
+  behavior and verification.
+- No Caddy, launcher, dependency, environment, credential, report recipient,
+  or scheduler schedule file changed.
+
+Verification completed before restart:
+- Python compilation passed.
+- Targeted service, daily/weekly/monthly branch report, billing-summary, API
+  authorization, and scheduler integration coverage reported `199 passed`.
+- The broader report set reproduced only the two known unrelated
+  `tests/test_vodomery_reports.py` baseline failures.
+- Production read-only smoke for `2026-07-23` returned four branches, all with
+  positive archived predictions.
+- Aggregate snapshot verification for the same date found model v2 selected
+  for 43 identifiers and model v3 for 15 identifiers.
+- `git diff --check` passed.
+
+Sensitive/runtime artifacts:
+- Do not print, change, delete, or commit credentials, tokens, cookies, `.env`,
+  ProgramData credential files, raw measurements, raw imports, identifiers, or
+  device photo paths.
+- Do not inspect retired SmartFuelPass JSON session artifacts.
+- Do not create a code-integrity baseline while this working tree is dirty.
+
+Pre-restart runtime state:
+- Scheduler heartbeat: `2026-07-24T12:56:14.749210`.
+- `quarter_hour_job` last completed successfully at
+  `2026-07-24T12:47:09.714153`.
+- Database availability last completed successfully at
+  `2026-07-24T12:47:05.086311`.
+- The running process set still contains the pre-change PDF profile logic.
+
+Expected processes after restart:
+- FastAPI/Uvicorn: one production runtime on `127.0.0.1:8000`.
+- Streamlit: one production runtime on `127.0.0.1:8001`.
+- Scheduler: one production `main.py` runtime holding the scheduler lock.
+- Caddy: one runtime owning TCP `80`, `443`, and `127.0.0.1:2019`.
+
+Required post-restart checks:
+- Confirm a new Windows boot time and successful `API_dashboard_caddy` task
+  result `0`.
+- Confirm listener ownership on `80`, `443`, `2019`, `8000`, and `8001`.
+- Confirm FastAPI `/health/live`, FastAPI `/health/ready`, and Streamlit
+  `/_stcore/health` return HTTP `200`.
+- Confirm a fresh scheduler heartbeat and successful first
+  `quarter_hour_job` plus database availability check.
+- Run a read-only `load_branch_day_overview()` smoke check for the previous
+  completed day and report only branch/prediction aggregate counts.
+- Recheck aggregate active snapshot model distribution without printing
+  identifiers or measurements.
+- Run the targeted 199-test regression set if the working tree remains
+  unchanged.
+- Do not manually send PDFs or execute live scheduled report jobs solely for
+  verification.
+
+Known risks and accepted gaps:
+- The working tree is dirty and uncommitted.
+- Three historical missing profile pairs remain an intentionally accepted
+  historical state and are not filled from current or stale profiles.
+- The two unrelated legacy vodomery report baseline tests remain red.
+
+### 2026-07-24 - Plynomery K_P5/K_P7 targeted history repair
+
+Cause:
+- `K_P7` measurements were present in MSSQL but the identifier had been
+  missing from `dbo.Zarizeni_plynomery`, so the PostgreSQL import validation
+  rejected it.
+- The AREAL import also uses one global PostgreSQL `source_recid` watermark;
+  existing `K_P7` rows below that watermark required a targeted backfill after
+  the device record was corrected.
+
+Changed:
+- Deleted 2,406 existing PostgreSQL measurement rows for `K_P5`.
+- Backfilled only `K_P5` and `K_P7` from MSSQL into
+  `monitoring.Mereni_plynomery_vse`.
+- No scheduler job or notification delivery was triggered.
+
+Verified:
+- Both identifiers exist in the corrected MSSQL device table.
+- PostgreSQL contains 2,903 AREAL source rows for each identifier.
+- PostgreSQL `source_recid` coverage matches MSSQL exactly for both
+  identifiers, with no missing or unexpected source rows.
+- No duplicate measurement-key groups, synthetic rows, missing `time_utc`
+  values, or new outlier-review records were created.
+- No repository code was changed by the repair.
+
+### 2026-07-27 - Plynomery L2-L3_P7 targeted backfill
+
+Cause:
+- `L2-L3_P7` measurements existed in MSSQL but the identifier had previously
+  been missing from `dbo.Zarizeni_plynomery`, so normal PostgreSQL import
+  validation rejected it.
+- The device record was corrected before this backfill.
+
+Changed:
+- Backfilled only `L2-L3_P7` from MSSQL into
+  `monitoring.Mereni_plynomery_vse`.
+- No scheduler job or notification delivery was triggered.
+
+Verified:
+- `L2-L3_P7` exists in `dbo.Zarizeni_plynomery`.
+- PostgreSQL contains all 3,156 available AREAL source rows for the identifier,
+  covering 2026-06-24 09:15 through 2026-07-27 06:30.
+- PostgreSQL `source_recid` coverage matches MSSQL exactly, with no missing or
+  unexpected source rows.
+- No duplicate measurement-key groups, synthetic rows, missing `time_utc`
+  values, or new outlier-review records were created.
+- No repository code was changed by the backfill.

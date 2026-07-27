@@ -1193,17 +1193,7 @@ def load_branch_day_overview(
         ORDER BY identifikace ASC, time_utc ASC
         """
     ).bindparams(bindparam("identifiers", expanding=True))
-    prediction_statement = text(
-        """
-        SELECT identifikace, interval_minutes, day_of_week, slot, mean, model_version
-        FROM monitoring."vodomery_anomaly_profiles"
-        WHERE identifikace IN :identifiers
-          AND model_version = :model_version
-        """
-    ).bindparams(bindparam("identifiers", expanding=True))
-
     with ENGINE_PG.connect() as conn:
-        active_model_version = _get_active_model_version(conn)
         branch_payloads: list[dict[str, object]] = []
 
         for config_item in BRANCH_DASHBOARD_CONFIGS:
@@ -1309,16 +1299,11 @@ def load_branch_day_overview(
                     for row in actual_hourly.itertuples(index=False)
                 }
 
-            prediction_rows = (
-                conn.execute(
-                    prediction_statement,
-                    {
-                        "identifiers": list(active_devices),
-                        "model_version": active_model_version,
-                    },
-                ).all()
-                if active_devices
-                else []
+            prediction_rows = _load_branch_archived_prediction_rows(
+                conn,
+                identifiers=active_devices,
+                day_start=day_start,
+                day_end=day_end,
             )
 
             prediction_df = pd.DataFrame(
@@ -1503,4 +1488,57 @@ def load_branch_day_overview(
                 }
             )
 
-        return branch_payloads
+    return branch_payloads
+
+
+def _load_branch_archived_prediction_rows(
+    connection,
+    *,
+    identifiers: tuple[str, ...],
+    day_start: datetime,
+    day_end: datetime,
+) -> list[object]:
+    if not identifiers:
+        return []
+
+    statement = text(
+        """
+        /* vodomery:branch_archived_prediction_profiles */
+        SELECT DISTINCT ON (
+            identifier,
+            interval_minutes,
+            day_of_week,
+            slot
+        )
+            identifier AS identifikace,
+            interval_minutes,
+            day_of_week,
+            slot,
+            expected_mean,
+            model_version
+        FROM monitoring.prediction_profile_snapshots
+        WHERE medium_key = 'vodomery'
+          AND selection_mode = 'active'
+          AND identifier IN :identifiers
+          AND forecast_period_start < :day_end
+          AND forecast_period_end > :day_start
+        ORDER BY
+            identifier,
+            interval_minutes,
+            day_of_week,
+            slot,
+            archive_version DESC,
+            created_at DESC,
+            id DESC
+        """
+    ).bindparams(bindparam("identifiers", expanding=True))
+    return list(
+        connection.execute(
+            statement,
+            {
+                "identifiers": list(identifiers),
+                "day_start": day_start,
+                "day_end": day_end,
+            },
+        ).all()
+    )

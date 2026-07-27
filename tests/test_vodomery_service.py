@@ -12,6 +12,7 @@ from services.api.services.vodomery import (
     _aggregate_hourly_branch_values,
     _build_branch_billing_payload,
     _load_archived_prediction_profiles,
+    _load_branch_archived_prediction_rows,
     _prepare_branch_measurements,
     _serialize_dataframe_rows,
 )
@@ -38,6 +39,26 @@ class _FakeArchiveSession:
         self.statement = statement
         self.params = params
         return _FakeMappingResult(self.rows)
+
+
+class _FakeRowResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _FakeConnection:
+    def __init__(self, rows):
+        self.rows = rows
+        self.statement = None
+        self.params = None
+
+    def execute(self, statement, params):
+        self.statement = statement
+        self.params = params
+        return _FakeRowResult(self.rows)
 
 
 def test_load_archived_prediction_profiles_returns_overlapping_validity_metadata():
@@ -103,6 +124,52 @@ def test_load_archived_prediction_profiles_returns_overlapping_validity_metadata
         "archive_source": "historical_backfill",
         "selection_run_id": 42,
     }
+
+
+def test_load_branch_archived_prediction_rows_uses_active_per_identifier_period_snapshots():
+    rows = [
+        ("A", 15, 0, 8, 1.25, 2),
+        ("B", 15, 0, 8, 2.5, 3),
+    ]
+    connection = _FakeConnection(rows)
+    day_start = datetime.datetime(2026, 1, 6)
+    day_end = datetime.datetime(2026, 1, 7)
+
+    result = _load_branch_archived_prediction_rows(
+        connection,
+        identifiers=("A", "B"),
+        day_start=day_start,
+        day_end=day_end,
+    )
+
+    assert result == rows
+    assert connection.params == {
+        "identifiers": ["A", "B"],
+        "day_start": day_start,
+        "day_end": day_end,
+    }
+    sql = str(connection.statement)
+    assert "monitoring.prediction_profile_snapshots" in sql
+    assert "selection_mode = 'active'" in sql
+    assert "forecast_period_start <" in sql
+    assert "forecast_period_end >" in sql
+    assert "DISTINCT ON" in sql
+    assert "archive_version DESC" in sql
+    assert "vodomery_anomaly_profiles" not in sql
+
+
+def test_load_branch_archived_prediction_rows_skips_database_for_no_devices():
+    connection = _FakeConnection([])
+
+    result = _load_branch_archived_prediction_rows(
+        connection,
+        identifiers=(),
+        day_start=datetime.datetime(2026, 1, 6),
+        day_end=datetime.datetime(2026, 1, 7),
+    )
+
+    assert result == []
+    assert connection.statement is None
 
 
 def test_serialize_dataframe_rows_converts_datetime_columns_without_future_warning():

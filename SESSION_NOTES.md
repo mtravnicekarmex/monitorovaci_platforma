@@ -14104,3 +14104,77 @@ Verified:
 - Python compilation succeeded.
 - No scheduler job, database write, report delivery, or email delivery was
   triggered.
+
+### 2026-07-27 09:50 CEST - Restart handoff before plynomery continuation
+
+Restart reason:
+- Restart the production workstation after completing and committing the
+  vodomery per-identifier prediction pipeline and its full-period dashboard
+  graph behavior.
+- After post-restart verification, continue prediction-pipeline work for
+  `plynomery`.
+
+Completed before restart:
+- Vodomery production scoring, current and historical dashboard views, branch
+  dashboards, and prediction-bearing daily/weekly/monthly PDFs use
+  period-valid per-identifier model/profile snapshots.
+- Models 4 and 5 are conditional production candidates requiring at least
+  5 percent lower rolling WAPE than the best eligible model 1-3 and strictly
+  lower rolling MAE.
+- `Vodomery / Prehled` renders predictions across the complete selected
+  period while actual and cumulative-actual curves stop at the final
+  measurement.
+- The complete project test suite reported `920 passed`.
+- The changes are committed and pushed on `master` as commit `2893926`
+  (`oprava zobrazování predikce v grafech pro budoucí období`).
+- `git status --short` was clean immediately before this handoff.
+
+Runtime state before restart:
+- Windows boot time was 2026-07-24 13:03:30.
+- Scheduled task `API_dashboard_caddy` was `Ready`; its last result was `0`.
+- Expected listeners were present: Caddy on `80`, `443`, and loopback `2019`;
+  FastAPI on loopback `8000`; Streamlit on loopback `8001`.
+- Scheduler metrics were fresh at 2026-07-27 09:49:10.
+- Runtime process command lines and credentials were not printed.
+
+Expected post-restart runtime:
+- Windows scheduled task `API_dashboard_caddy` runs successfully at system
+  startup.
+- One scheduler process from `main.py`, one FastAPI process, one Streamlit
+  process, and Caddy are active.
+- Listeners exist on `80`, `443`, `127.0.0.1:2019`,
+  `127.0.0.1:8000`, and `127.0.0.1:8001`; no unexpected temporary public
+  application listener remains.
+
+Required post-restart verification:
+- Confirm Windows boot time is newer than 2026-07-27 09:50 CEST.
+- Confirm `API_dashboard_caddy` last result is `0`.
+- Confirm expected process families and listener ownership on `80`, `443`,
+  `2019`, `8000`, and `8001`.
+- Confirm FastAPI `/health/live`, FastAPI `/health/ready`, and Streamlit
+  `/_stcore/health` return HTTP `200`.
+- Confirm scheduler metrics receive a fresh heartbeat and the first
+  `quarter_hour_job` plus PostgreSQL/MSSQL preflight completes.
+- Confirm public HTTPS routing at `https://monitoring.armexholding.cz`,
+  the public login page, authenticated dashboard access, and protected API
+  behavior; `/docs`, `/redoc`, and `/openapi.json` must remain blocked.
+- Confirm Caddy still strips public `Server`/`Via` headers and preserves the
+  reviewed security headers and HTTP-to-HTTPS redirect.
+- Perform a read-only dashboard smoke check for `Vodomery / Prehled` over the
+  current week: prediction must extend through the selected period and actual
+  consumption must end at the latest measurement.
+- Run targeted vodomery dashboard tests and the broader suite only if the
+  working tree remains at commit `2893926` and clean.
+
+Next task after verification:
+- Return to `plynomery` prediction-pipeline work. First audit current gas
+  candidate selection, per-identifier snapshot/profile consumption, scoring,
+  dashboard, and report paths before changing production behavior.
+
+Sensitive and operational constraints:
+- Do not print database credentials, tokens, cookies, raw meter measurements,
+  runtime environment values, or process command lines.
+- Do not modify SmartFuelPass session artifacts, ProgramData credentials, or
+  Caddy certificate state.
+- The supported recovery path is a full workstation restart; do not attempt
+  to recreate individual production processes from the interactive session.

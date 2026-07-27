@@ -89,6 +89,9 @@ At the end of every substantive session:
 - `PREDICTION_PIPELINE_PLAN.md`: target architecture and rollout plan for the
   shared prediction pipeline, candidate plugins, forecast horizons, and
   per-identifier model selection.
+- `PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`: active step-by-step implementation
+  and verification plan for per-identifier plynomery prediction, scoring,
+  dashboard, and report integration.
 - `SECURITY_SECRET_INVENTORY.md`: non-secret inventory of production secret,
   credential, session, and sensitive runtime artifact locations.
 - `requirements-production.in`: reviewed direct production dependency pins.

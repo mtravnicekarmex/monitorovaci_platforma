@@ -14178,3 +14178,37 @@ Sensitive and operational constraints:
   Caddy certificate state.
 - The supported recovery path is a full workstation restart; do not attempt
   to recreate individual production processes from the interactive session.
+
+### 2026-07-27 - Plynomery per-identifier pipeline implementation plan
+
+Scope:
+- Audited the current plynomery prediction path against the completed
+  vodomery per-identifier production pipeline.
+- Created a systematic implementation checklist in
+  `PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`.
+
+Baseline:
+- Plynomery have shared runner/adapter integration, global baseline v1 and
+  weather-adjusted v2 candidates, global selection, scoring, and weekly model
+  rebuild reporting.
+- The production gap is per-identifier rolling selection, deployable selected
+  profile snapshots, mixed-model scoring, period-valid dashboard prediction,
+  and downstream report closure.
+
+Plan:
+- Work one checklist item at a time through baseline tests, gas forecast-period
+  semantics, per-identifier metrics and snapshots, scoring activation,
+  API/dashboard integration, report audit, and controlled rollout.
+- Preserve global score model-version compatibility, gas weather and
+  expected-zero semantics, historical snapshot immutability, and fail-closed
+  behavior for missing selected profiles.
+
+Changed:
+- Added `PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`.
+- Added the plan to the `AGENTS.md` project map.
+- Appended this factual session entry; no application code or runtime state
+  changed.
+
+Follow-up:
+- Start checklist step 1: freeze the current plynomery baseline with focused
+  tests and safe production aggregate evidence.

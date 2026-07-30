@@ -6,7 +6,7 @@ forecast period, and reuse the same architecture across water, gas, heat, and
 electricity.
 
 Status: active plan, opened on 2026-07-09. The executable checklist lives in
-`SESSION_NOTES.md`; this file describes the target architecture and rollout
+`agents/history/SESSION_NOTES.md`; this file describes the target architecture and rollout
 rules.
 
 ## Goals
@@ -162,5 +162,6 @@ credential data.
 - Step 10: integrate `kalorimetry` with the shared Prague weekly contract.
 - Step 11: integrate `elektromery` with monthly next-month prediction.
 
-Each step should update tests and only be marked complete in `SESSION_NOTES.md`
+Each step should update tests and only be marked complete in
+`agents/history/SESSION_NOTES.md`
 after targeted verification.

@@ -69,7 +69,8 @@ Completed on 2026-06-12:
   while an unauthenticated protected Bearer API request continued to return
   FastAPI HTTP 401 JSON.
 - Rollback and emergency access are documented in
-  `PUBLIC_HTTPS_DEPLOYMENT.md`; Tailscale remains the backup access path.
+  `agents/runbooks/PUBLIC_HTTPS_DEPLOYMENT.md`; Tailscale remains the backup
+  access path.
 
 Superseded later on 2026-06-12:
 
@@ -520,7 +521,8 @@ Current operational constraint documented on 2026-06-12:
 - Do not start duplicate production processes manually. A migration to
   independently controllable Windows services or scheduled tasks remains a
   future hardening decision.
-- Before every restart, append a dated handoff to `SESSION_NOTES.md` with the
+- Before every restart, append a dated handoff to
+  `agents/history/SESSION_NOTES.md` with the
   active task state, dirty working tree, runtime deployment state, expected
   processes/listeners, and exact post-restart checks.
 - Do not initiate or request the restart until the handoff is complete. After
@@ -718,7 +720,8 @@ Partial completion on 2026-06-18:
 - Added regression coverage proving current and historical secret matches are
   redacted and known session paths are reported without reading their cookie
   payloads.
-- Added `SECURITY_SECRET_INVENTORY.md` documenting non-secret production
+- Added `agents/inventories/SECURITY_SECRET_INVENTORY.md` documenting
+  non-secret production
   secret, credential, session, and sensitive runtime artifact locations and
   access expectations.
 - Confirmed `.env`, `.env.*`, SmartFuelPass session JSON files, SOFTLINK auth

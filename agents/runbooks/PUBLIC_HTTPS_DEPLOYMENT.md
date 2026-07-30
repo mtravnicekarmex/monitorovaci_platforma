@@ -72,7 +72,8 @@ Provozni pravidla:
    procesu stale bezi.
 2. Pri zmene launcheru nebo jeho startovacich argumentu pocitat s restartem
    stanice, aby Planovac uloh spustil novou konfiguraci.
-3. Pred kazdym restartem zapsat do `SESSION_NOTES.md` predrestartovy handoff
+3. Pred kazdym restartem zapsat do `agents/history/SESSION_NOTES.md`
+   predrestartovy handoff
    podle sablony nize.
 4. Po restartu vzdy overit FastAPI, Streamlit, scheduler, Caddy, listenery a
    verejne HTTPS podle restart checklistu.
@@ -128,7 +129,8 @@ Pred restartem se musi zapsat:
 10. Kontroly specificke pro zmenu, kvuli ktere se restart provadi.
 
 Restart se nema zahajit ani doporucit, dokud tento handoff neni zapsany.
-Po restartu se do `SESSION_NOTES.md` doplni skutecny stav a vsechny odchylky.
+Po restartu se do `agents/history/SESSION_NOTES.md` doplni skutecny stav a
+vsechny odchylky.
 
 ## Bezpecnostni pravidla
 

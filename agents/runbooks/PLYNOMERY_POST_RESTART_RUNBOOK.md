@@ -95,7 +95,8 @@ than a later model rebuild.
 
 ## Mandatory restart procedure
 
-1. Confirm this runbook and the dated handoff in `SESSION_NOTES.md` are still
+1. Confirm this runbook and the dated handoff in
+   `agents/history/SESSION_NOTES.md` are still
    present.
 2. Confirm `git status --short` contains the expected dirty pipeline files and
    no unexplained new change.
@@ -248,4 +249,3 @@ Using authenticated, authorized access:
 8. Mark step 23 complete.
 9. Mark restart rollout step 24 complete.
 10. Continue steps 25-26 and the recorded vodomery follow-ups.
-

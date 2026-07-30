@@ -10,11 +10,15 @@ and mark it complete only after targeted verification.
 
 Related context:
 
-- `PREDICTION_PIPELINE_PLAN.md`: shared cross-media architecture.
-- `PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`: completed weekly, weather-aware
+- `agents/plans/prediction/PREDICTION_PIPELINE_PLAN.md`: shared cross-media
+  architecture.
+- `agents/plans/plynomery/PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`: completed
+  weekly, weather-aware
   reference implementation.
-- `DECISIONS.md`: durable production and forecast-period decisions.
-- `SESSION_NOTES.md`: implementation history and operational handoffs.
+- `agents/decisions/DECISIONS.md`: durable production and forecast-period
+  decisions.
+- `agents/history/SESSION_NOTES.md`: implementation history and operational
+  handoffs.
 
 ## Current Baseline
 
@@ -568,7 +572,7 @@ Kalorimetry do not yet have:
     rebuild, or device/inventory output.
   - Convert only explicitly approved prediction-bearing consumers.
   - Completed on 2026-07-30 in
-    `KALORIMETRY_CONSUMER_INVENTORY.md`.
+    `agents/inventories/KALORIMETRY_CONSUMER_INVENTORY.md`.
   - The overview and detail pages are the only current user-facing
     prediction-bearing kalorimetry outputs. Their shared authenticated API
     paths remain the approved source.
@@ -590,7 +594,8 @@ Kalorimetry do not yet have:
   - Preserve manual-run compatibility, locks, metrics, preflight behavior,
     and recipient safety.
   - Monday continuation is governed by
-    `KALORIMETRY_ACTIVATION_RUNBOOK.md`. Before scheduler integration, verify
+    `agents/runbooks/KALORIMETRY_ACTIVATION_RUNBOOK.md`. Before scheduler
+    integration, verify
     the Sunday 2026-08-02 pre-week forecast, repeat the aggregate current
     dry-run, obtain explicit current-snapshot approval, verify the atomic
     snapshot write, and obtain separate scoring/event activation approval.

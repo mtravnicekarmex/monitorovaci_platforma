@@ -12,7 +12,8 @@ Rationale: The user explicitly requested a read-only review of the current proje
 
 Implications:
 
-- Future sessions should read `AGENTS.md`, `DECISIONS.md`, and `SESSION_NOTES.md` first.
+- Future sessions should read `AGENTS.md`, `agents/decisions/DECISIONS.md`, and
+  `agents/history/SESSION_NOTES.md` first.
 - Dirty working tree entries must be treated as real user/runtime state until clarified.
 - Runtime artifacts and sensitive files should not be cleaned up without explicit approval.
 
@@ -160,15 +161,18 @@ Implications:
 
 Date: 2026-06-05
 
-Decision: `AGENTS.md`, `DECISIONS.md`, and `SESSION_NOTES.md` are adopted as persistent context files for future work.
+Decision: `AGENTS.md`, `agents/decisions/DECISIONS.md`, and
+`agents/history/SESSION_NOTES.md` are adopted as persistent context files for
+future work.
 
 Rationale: The user requested a workflow that allows each session to continue with project context and to automatically preserve relevant changes and decisions.
 
 Implications:
 
 - Agents should propose context-file updates after substantive work.
-- Durable decisions belong in `DECISIONS.md`.
-- Session-specific facts and handoff notes belong in `SESSION_NOTES.md`.
+- Durable decisions belong in `agents/decisions/DECISIONS.md`.
+- Session-specific facts and handoff notes belong in
+  `agents/history/SESSION_NOTES.md`.
 - Operating instructions belong in `AGENTS.md`.
 
 ## DEC-013: Runtime/Data Artifact Cleanup Needs Separate Approval
@@ -428,7 +432,8 @@ Implications:
 Date: 2026-06-12
 
 Decision: Before every Windows workstation restart, the active session must
-write a dated restart handoff to `SESSION_NOTES.md`. The handoff must record the
+write a dated restart handoff to `agents/history/SESSION_NOTES.md`. The handoff
+must record the
 current work/conversation state and the expected runtime state after restart.
 
 Rationale: A workstation restart is the supported way to renew the production
@@ -451,7 +456,8 @@ Implications:
   the restart.
 - A restart must not be initiated or requested before the handoff is written
   and reviewed for completeness.
-- After restart, the verification result is appended to `SESSION_NOTES.md`,
+- After restart, the verification result is appended to
+  `agents/history/SESSION_NOTES.md`,
   including deviations from the expected state.
 
 ## DEC-027: Authentication Security Events Use A Protected Audit Log
@@ -968,7 +974,8 @@ Implications:
 
 - `scripts/secret_hygiene_scan.py` reports `value=REDACTED` and intentionally
   skips raw content review for known sensitive session/auth files.
-- `SECURITY_SECRET_INVENTORY.md` documents approved secret locations and
+- `agents/inventories/SECURITY_SECRET_INVENTORY.md` documents approved secret
+  locations and
   access expectations without storing values.
 - Current tracked SmartFuelPass session artifacts are treated as critical
   until their sessions are invalidated and the files are removed from Git by a
@@ -1155,7 +1162,7 @@ Implications:
   automatic activation until enough weekly backtest evidence is reviewed.
 - Rolling weekly backtests should evaluate all candidates with coverage, MAE,
   RMSE, bias, and a normalized error metric such as WAPE.
-- The active implementation checklist lives in `SESSION_NOTES.md`; do not
+- The active implementation checklist lives in `agents/history/SESSION_NOTES.md`; do not
   skip ahead or mark a step done until implementation and targeted
   verification for that step are complete.
 
@@ -1215,8 +1222,9 @@ Implications:
 - Scoring must retain a safe fallback to the global active model when
   per-identifier selection is missing, below coverage thresholds, or otherwise
   not eligible.
-- The detailed rollout plan lives in `PREDICTION_PIPELINE_PLAN.md`; the
-  executable step checklist remains in `SESSION_NOTES.md`.
+- The detailed rollout plan lives in
+  `agents/plans/prediction/PREDICTION_PIPELINE_PLAN.md`; the executable step
+  checklist remains in `agents/history/SESSION_NOTES.md`.
 
 Clarification (2026-07-09):
 
@@ -1743,7 +1751,8 @@ Consequences:
 
 - Future gas consumption reports must use the shared period-valid series and
   explicit unavailable-state contract.
-- `PLYNOMERY_REPORT_CONSUMER_INVENTORY.md` is the review baseline for steps
+- `agents/inventories/PLYNOMERY_REPORT_CONSUMER_INVENTORY.md` is the review
+  baseline for steps
   19-20.
 ## DEC-069: Future plynomery PDFs must adopt the prediction contract at creation
 
@@ -1763,7 +1772,8 @@ Decision:
   `Nedostupné` and must not substitute zero, the current profile, or a
   stale/global profile.
 - A future report addition must update
-  `PLYNOMERY_REPORT_CONSUMER_INVENTORY.md`, report/scheduler registration, and
+  `agents/inventories/PLYNOMERY_REPORT_CONSUMER_INVENTORY.md`,
+  report/scheduler registration, and
   regression coverage before recipients or delivery are enabled.
 
 Consequences:
@@ -1864,7 +1874,8 @@ Consequences:
 - Future plynomery prediction-bearing consumers must adopt the shared
   period-valid prediction-series contract.
 - Adding a new direct candidate-profile consumer requires classification in
-  `PLYNOMERY_REPORT_CONSUMER_INVENTORY.md` and regression coverage.
+  `agents/inventories/PLYNOMERY_REPORT_CONSUMER_INVENTORY.md` and regression
+  coverage.
 - The two water-specific follow-up items remain outside the completed
   plynomery plan.
 
@@ -2761,3 +2772,33 @@ Consequences:
 - The daily 00:15 synchronization creates an eligible Sunday run before the
   next weekly Monday rebuild.
 - Existing gas weather consumers remain deterministic with archived runs.
+
+## DEC-100: Agent documentation uses stable thematic paths
+
+Date: 2026-07-30
+
+Status: Accepted
+
+Decision:
+
+- Keep `AGENTS.md` in the repository root so agent tooling can discover the
+  project operating instructions.
+- Store other agent-facing project documentation under `agents/`, grouped by
+  stable purpose: decisions, history, plans, runbooks, inventories, security,
+  work indexes, and future agent registrations.
+- Track lifecycle state in `agents/work/` instead of moving implementation
+  plans whenever their status changes.
+- Keep `agents/history/SESSION_NOTES.md` intact during the structural move.
+  Splitting its older content into bounded archives is a separately verified
+  backlog task.
+- Registering a future monitoring agent does not itself authorize production
+  writes, restarts, alert delivery, or external messages.
+
+Consequences:
+
+- The repository root contains only the required agent entry point rather than
+  the complete Markdown documentation set.
+- Documentation links, tests, and integrity tooling must use the stable
+  `agents/` paths.
+- Active, blocked, queued, and completed work have concise dedicated indexes
+  without duplicating detailed plans or session history.

@@ -6,7 +6,8 @@ Purpose: persistent operating context for future agent-assisted sessions. Read t
 
 ## Start of Every Session
 
-1. Read `AGENTS.md`, `DECISIONS.md`, and `SESSION_NOTES.md`.
+1. Read `AGENTS.md`, `agents/decisions/DECISIONS.md`, and
+   `agents/history/SESSION_NOTES.md`.
 2. Run `git status --short` and treat the result as part of the session context.
 3. Do not assume a clean working tree. This project can contain user changes and runtime artifacts.
 4. Never revert, overwrite, or delete changes you did not make unless the user explicitly approves it.
@@ -19,8 +20,10 @@ Purpose: persistent operating context for future agent-assisted sessions. Read t
 These files are part of the daily workflow:
 
 - `AGENTS.md`: operating rules, project map, and practices for future agents.
-- `DECISIONS.md`: durable architectural, product, and workflow decisions.
-- `SESSION_NOTES.md`: current baseline, session history, open questions, and handoff notes.
+- `agents/decisions/DECISIONS.md`: durable architectural, product, and workflow decisions.
+- `agents/history/SESSION_NOTES.md`: current baseline, session history, open
+  questions, and handoff notes.
+- `agents/work/`: concise active, backlog, blocked, and completed work indexes.
 
 At the end of every substantive session:
 
@@ -120,30 +123,30 @@ At the end of every substantive session:
 - `frontend_next/`: experimental Next.js MVP. It is not the active production dashboard and is not currently used in daily operation. Treat it as a future migration/prototype area, not as the source of truth for current dashboard behavior.
 - `.streamlit/config.toml`: Streamlit server and navigation settings.
 - `Caddyfile`: tracked mirror of the deployed public proxy configuration at `C:\Program Files\Caddy\Caddyfile`.
-- `DASHBOARD_SECURITY_CHECKLIST.md`: tracked public dashboard security
+- `agents/security/DASHBOARD_SECURITY_CHECKLIST.md`: tracked public dashboard security
   remediation plan and status.
-- `PREDICTION_PIPELINE_PLAN.md`: target architecture and rollout plan for the
+- `agents/plans/prediction/PREDICTION_PIPELINE_PLAN.md`: target architecture and rollout plan for the
   shared prediction pipeline, candidate plugins, forecast horizons, and
   per-identifier model selection.
-- `PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`: active step-by-step implementation
+- `agents/plans/plynomery/PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`: active step-by-step implementation
   and verification plan for per-identifier plynomery prediction, scoring,
   dashboard, and report integration.
-- `PLYNOMERY_REPORT_CONSUMER_INVENTORY.md`: reviewed classification of every
+- `agents/inventories/PLYNOMERY_REPORT_CONSUMER_INVENTORY.md`: reviewed classification of every
   gas report/output and direct prediction-profile consumer, including
   intentionally actual-only outputs and the step 20 direct-read review queue.
-- `PLYNOMERY_POST_RESTART_RUNBOOK.md`: mandatory gas-pipeline restart,
+- `agents/runbooks/PLYNOMERY_POST_RESTART_RUNBOOK.md`: mandatory gas-pipeline restart,
   post-boot verification, score/event reconciliation safety contract, and
   aggregate completion checks.
-- `KALORIMETRY_PREDICTION_PIPELINE_PLAN.md`: active step-by-step plan for the
+- `agents/plans/kalorimetry/KALORIMETRY_PREDICTION_PIPELINE_PLAN.md`: active step-by-step plan for the
   complete kalorimetry import, profile, selection, historical backfill,
   scoring, API, dashboard, and downstream-consumer lifecycle.
-- `KALORIMETRY_CONSUMER_INVENTORY.md`: reviewed classification of every
+- `agents/inventories/KALORIMETRY_CONSUMER_INVENTORY.md`: reviewed classification of every
   kalorimetry prediction-bearing, actual-only, anomaly/event, model-rebuild,
   device/inventory, report, and scheduler consumer.
-- `KALORIMETRY_ACTIVATION_RUNBOOK.md`: mandatory Monday 2026-08-03 forecast
+- `agents/runbooks/KALORIMETRY_ACTIVATION_RUNBOOK.md`: mandatory Monday 2026-08-03 forecast
   preflight, approval, current-snapshot activation, scoring/event pilot,
   scheduler, regression, restart, and post-rollout checklist.
-- `SECURITY_SECRET_INVENTORY.md`: non-secret inventory of production secret,
+- `agents/inventories/SECURITY_SECRET_INVENTORY.md`: non-secret inventory of production secret,
   credential, session, and sensitive runtime artifact locations.
 - `requirements-production.in`: reviewed direct production dependency pins.
 - `requirements-production.lock.txt`: exact production direct and transitive
@@ -228,8 +231,10 @@ Known hygiene topics to handle only after explicit approval:
 - Streamlit remains the active dashboard unless a task explicitly targets the experimental Next.js area.
 - Shared behavior should live in modules/services, not in duplicated page logic.
 - Prediction model work should proceed toward the shared core described in
-  `DECISIONS.md`, `PREDICTION_PIPELINE_PLAN.md`, and the active checklist in
-  `SESSION_NOTES.md`: shared contracts, media-specific adapters, candidate
+  `agents/decisions/DECISIONS.md`,
+  `agents/plans/prediction/PREDICTION_PIPELINE_PLAN.md`, and the active
+  checklist in `agents/history/SESSION_NOTES.md`: shared contracts,
+  media-specific adapters, candidate
   model plugins, configurable forecast periods, rolling backtests, and
   per-identifier model selection. Implement one checklist step at a time and
   mark it complete only after targeted verification.
@@ -239,7 +244,8 @@ Known hygiene topics to handle only after explicit approval:
   builder; kalorimetry and elektromery must reuse the same builder when their
   prediction pipelines are added.
 - Kalorimetry prediction work follows
-  `KALORIMETRY_PREDICTION_PIPELINE_PLAN.md` one verified checklist item at a
+  `agents/plans/kalorimetry/KALORIMETRY_PREDICTION_PIPELINE_PLAN.md` one
+  verified checklist item at a
   time. Predict normalized non-negative energy `delta`, not cumulative
   `spotreba_energie` or `objem`; retain explicit reset, gap, synthetic,
   validity, outlier, time, and device-access semantics. Do not copy gas
@@ -320,7 +326,8 @@ Known hygiene topics to handle only after explicit approval:
   Do not use a run issued after Monday to reconstruct that week. Operational
   gas consumers must resolve the latest issuance per target hour now that
   multiple runs are retained.
-- Return to `KALORIMETRY_ACTIVATION_RUNBOOK.md` on Monday 2026-08-03 morning.
+- Return to `agents/runbooks/KALORIMETRY_ACTIVATION_RUNBOOK.md` on Monday
+  2026-08-03 morning.
   Do not begin step 25 scheduler writes before the Sunday pre-week forecast,
   current dry-run, snapshot approval, snapshot verification, and separate
   scoring/event approval gates are satisfied.
@@ -411,7 +418,8 @@ Known hygiene topics to handle only after explicit approval:
   prediction-bearing user outputs. The JORDAN monthly report's kalorimetry row
   remains intentionally actual-only and derives consumption from two valid
   cumulative states. Do not add prediction or change delivery without
-  separate approval; use `KALORIMETRY_CONSUMER_INVENTORY.md` as the reviewed
+  separate approval; use
+  `agents/inventories/KALORIMETRY_CONSUMER_INVENTORY.md` as the reviewed
   consumer baseline.
 - Vodomery production scoring now reads `active` per-identifier selected-model
   snapshots for the globally active model. The selected snapshot controls the
@@ -621,7 +629,8 @@ Known hygiene topics to handle only after explicit approval:
   the scheduled task runs again, normally after a workstation restart. Do not
   redesign this startup/recovery model without explicit user approval.
 - Before every workstation restart, append a dated restart handoff to
-  `SESSION_NOTES.md`. The handoff must preserve the current conversation/task
+  `agents/history/SESSION_NOTES.md`. The handoff must preserve the current
+  conversation/task
   state, completed and pending work, changed/uncommitted files, deployment
   state, reason for restart, and any sensitive artifacts that must not be
   printed or modified.
@@ -812,4 +821,5 @@ Before final response on substantive work:
 2. Summarize changed files and why they changed.
 3. State what verification was run.
 4. State what was not run and why.
-5. Propose updates to `DECISIONS.md` or `SESSION_NOTES.md` if needed.
+5. Propose updates to `agents/decisions/DECISIONS.md` or
+   `agents/history/SESSION_NOTES.md` if needed.

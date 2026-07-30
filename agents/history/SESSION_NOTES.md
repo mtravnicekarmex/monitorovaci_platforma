@@ -17314,3 +17314,22 @@ Exact post-restart verification:
    device-count, or cross-medium regression.
 9. Do not perform kalorimetry snapshot/scoring activation, alert delivery, or
    unrelated production writes as part of this restart verification.
+
+### 2026-07-30 - Agent workspace organization
+
+- Created the `agents/` control center with registry, work, plan, runbook,
+  inventory, security, decision, and history sections.
+- Kept `AGENTS.md` in the repository root for tool discovery and moved the
+  other 14 root Markdown documents to stable thematic paths under `agents/`.
+- Added concise active, backlog, blocked, and completed work indexes. Future
+  monitoring agents have a registry contract but no implied production-write,
+  restart, alert, or external-message authority.
+- Updated all live documentation references, the kalorimetry inventory test,
+  and code-integrity untracked-name handling for the new paths. Historical
+  session text was not rewritten.
+- Targeted documentation/integrity tests passed with `9 passed`; the complete
+  test suite passed with `1239 passed`; `git diff --check` passed.
+- Added DEC-100. The separate next documentation task is DOC-002: split the
+  large session history into bounded archives while preserving a short current
+  baseline. No production process, data, scheduler, alert, or email action
+  occurred.

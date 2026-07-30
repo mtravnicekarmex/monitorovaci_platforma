@@ -40,8 +40,9 @@ gates.
 
 ## Gate 1 - Start-of-session safety
 
-- Read `AGENTS.md`, `DECISIONS.md`, `SESSION_NOTES.md`, this runbook, and
-  `KALORIMETRY_PREDICTION_PIPELINE_PLAN.md`.
+- Read `AGENTS.md`, `agents/decisions/DECISIONS.md`,
+  `agents/history/SESSION_NOTES.md`, this runbook, and
+  `agents/plans/kalorimetry/KALORIMETRY_PREDICTION_PIPELINE_PLAN.md`.
 - Run `git status --short`; preserve all existing user and pipeline changes.
 - Check Windows boot time, startup task result, Caddy/API/Streamlit listeners,
   FastAPI readiness, Streamlit response, scheduler heartbeat, and recent
@@ -186,7 +187,8 @@ Complete pipeline steps 26 and 27:
 - run read-only production audits for active snapshots, exact 672-point
   profiles, score/event/checkpoint consistency, API availability, and
   scheduler state;
-- record exact pass counts and aggregate invariants in `SESSION_NOTES.md`;
+- record exact pass counts and aggregate invariants in
+  `agents/history/SESSION_NOTES.md`;
 - stop on any unexpected worktree change or production mismatch.
 
 ## Gate 9 - Rollout and restart
@@ -201,7 +203,8 @@ Complete pipeline step 28 only after all prior gates:
   jobs, current active snapshots, dashboard prediction availability, scoring
   checkpoints, event consistency, and delivery-disabled alert plans;
 - repeat aggregate reconciliation after restart;
-- update `AGENTS.md`, `DECISIONS.md`, `SESSION_NOTES.md`, and the active plan
+- update `AGENTS.md`, `agents/decisions/DECISIONS.md`,
+  `agents/history/SESSION_NOTES.md`, and the active plan
   with concrete results.
 
 ## Hard stop conditions

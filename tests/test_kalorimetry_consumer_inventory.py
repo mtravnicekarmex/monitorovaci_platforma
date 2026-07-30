@@ -2,7 +2,12 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-INVENTORY = PROJECT_ROOT / "KALORIMETRY_CONSUMER_INVENTORY.md"
+INVENTORY = (
+    PROJECT_ROOT
+    / "agents"
+    / "inventories"
+    / "KALORIMETRY_CONSUMER_INVENTORY.md"
+)
 
 
 def test_inventory_classifies_every_required_consumer_category():

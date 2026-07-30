@@ -6,13 +6,16 @@ preserving gas-specific weather adjustment, expected-zero behavior, outlier
 handling, event compatibility, and operational rollback safety.
 
 Status: completed on 2026-07-28. All 25 checklist items passed their targeted
-verification and are recorded in `SESSION_NOTES.md`.
+verification and are recorded in `agents/history/SESSION_NOTES.md`.
 
 Related context:
 
-- `PREDICTION_PIPELINE_PLAN.md`: shared cross-media architecture.
-- `DECISIONS.md`: durable prediction and production behavior decisions.
-- `SESSION_NOTES.md`: executable status, verification, and handoff history.
+- `agents/plans/prediction/PREDICTION_PIPELINE_PLAN.md`: shared cross-media
+  architecture.
+- `agents/decisions/DECISIONS.md`: durable prediction and production behavior
+  decisions.
+- `agents/history/SESSION_NOTES.md`: executable status, verification, and
+  handoff history.
 
 ## Current Baseline
 
@@ -64,7 +67,7 @@ period-valid per-identifier gas predictions.
 ## Resolved Design Questions
 
 Resolve these during the relevant checklist item and record durable outcomes
-in `DECISIONS.md`:
+in `agents/decisions/DECISIONS.md`:
 
 - Confirm the production gas forecast-period definition. The current rebuild
   uses shared period metadata, but the period must be explicitly verified
@@ -93,7 +96,8 @@ in `DECISIONS.md`:
 - [x] 2. Confirm and test the gas forecast-period contract.
   - Align selection, rolling folds, deploy windows, snapshot validity, and
     scheduler cadence.
-  - Record the resulting durable period rule in `DECISIONS.md`.
+  - Record the resulting durable period rule in
+    `agents/decisions/DECISIONS.md`.
 
 - [x] 3. Produce per-identifier rolling metrics for every eligible candidate.
   - Reuse shared metric contracts and storage.
@@ -212,7 +216,7 @@ in `DECISIONS.md`:
     model-rebuild reporting.
   - Document intentionally actual-only outputs.
   - The reviewed inventory is maintained in
-    `PLYNOMERY_REPORT_CONSUMER_INVENTORY.md`.
+    `agents/inventories/PLYNOMERY_REPORT_CONSUMER_INVENTORY.md`.
   - No plynomery consumption PDF or scheduled daily/weekly/monthly consumption
     report exists. The only gas report email is model-rebuild reporting.
   - The overview Excel export, device inventory, measurement/detail tables,
@@ -282,7 +286,8 @@ in `DECISIONS.md`:
   - After boot, verify processes, listeners, health endpoints, scheduler,
     database preflight, routing, authentication, and gas-specific behavior.
   - The detailed handoff and reconciliation sequence are prepared in
-    `PLYNOMERY_POST_RESTART_RUNBOOK.md` and the dated `SESSION_NOTES.md`
+    `agents/runbooks/PLYNOMERY_POST_RESTART_RUNBOOK.md` and the dated
+    `agents/history/SESSION_NOTES.md`
     handoff.
   - Do not mark this step complete until score/event reconciliation is
     explicitly approved, applied, and followed by zero-mismatch step 23
@@ -350,7 +355,7 @@ Every implementation item must pass:
 3. `git diff --check`,
 4. a review that no secrets, identifiers, raw measurements, or recipient
    addresses were added to output,
-5. a short dated entry in `SESSION_NOTES.md`.
+5. a short dated entry in `agents/history/SESSION_NOTES.md`.
 
 Database-writing rebuilds, scheduler jobs, report delivery, alert delivery,
 and workstation restarts require their existing explicit operational

@@ -55,12 +55,9 @@ UNTRACKED_SOURCE_NAMES = {
     ".env.example",
     "AGENTS.md",
     "Caddyfile",
-    "DECISIONS.md",
-    "DASHBOARD_SECURITY_CHECKLIST.md",
     "requirements-api.txt",
     "requirements-production.in",
     "requirements-production.lock.txt",
-    "SESSION_NOTES.md",
     "start_api_dashboard.bat",
 }
 

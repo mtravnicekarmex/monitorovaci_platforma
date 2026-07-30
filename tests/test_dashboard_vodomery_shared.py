@@ -10,6 +10,18 @@ from moduly.apps.dashboard.vodomery_shared import (
     align_latest_hour_timestamp,
     apply_prediction_profiles,
     build_period_prediction,
+    select_prediction_profiles_for_range,
+)
+from moduly.apps.dashboard import vodomery_shared
+
+
+VODOMERY_OVERVIEW_PAGE = (
+    Path(__file__).resolve().parents[1]
+    / "moduly"
+    / "apps"
+    / "dashboard"
+    / "pages"
+    / "2_vodomery.py"
 )
 
 
@@ -38,6 +50,39 @@ def test_align_latest_hour_timestamp_moves_only_current_hour_rows():
         pd.Timestamp("2026-06-09 07:00:00"),
     ]
     assert frame["date"].iloc[1] == pd.Timestamp("2026-06-09 06:00:00")
+
+
+def test_load_prediction_profiles_preserves_unavailable_metadata(monkeypatch):
+    monkeypatch.setattr(
+        vodomery_shared,
+        "require_dashboard_api_token",
+        lambda: "token",
+    )
+    monkeypatch.setattr(
+        vodomery_shared,
+        "api_get_vodomery_prediction_profiles",
+        lambda *args, **kwargs: {
+            "prediction_available": False,
+            "availability_status": "unavailable",
+            "availability_reason": "insufficient_history",
+            "rows": [],
+        },
+    )
+
+    frame = vodomery_shared.load_prediction_profiles.__wrapped__(
+        "NEW_V1",
+        ("NEW_V1",),
+        False,
+        datetime.date(2026, 7, 27),
+        datetime.date(2026, 8, 2),
+    )
+
+    assert frame.empty
+    assert frame.attrs == {
+        "prediction_available": False,
+        "availability_status": "unavailable",
+        "availability_reason": "insufficient_history",
+    }
 
 
 def test_apply_prediction_profiles_uses_profile_valid_for_each_week():
@@ -187,3 +232,95 @@ def test_build_period_prediction_resolves_overlapping_period_to_latest_start():
             "ocekavana_spotreba": 1.5,
         }
     ]
+
+
+def test_complete_current_snapshot_excludes_older_partial_overlap():
+    profiles = pd.DataFrame(
+        [
+            {
+                "interval_minutes": 60,
+                "day_of_week": 0,
+                "slot": 0,
+                "expected_mean": 99.0,
+                "valid_from": datetime.datetime(2026, 7, 20, 4, 10),
+                "valid_to": datetime.datetime(2026, 7, 27, 4, 10),
+            },
+            {
+                "interval_minutes": 60,
+                "day_of_week": 0,
+                "slot": 0,
+                "expected_mean": 1.5,
+                "valid_from": datetime.datetime(2026, 7, 27),
+                "valid_to": datetime.datetime(2026, 8, 3),
+            },
+        ]
+    )
+
+    selected = select_prediction_profiles_for_range(
+        profiles,
+        start_date=datetime.date(2026, 7, 27),
+        end_date=datetime.date(2026, 8, 2),
+    )
+
+    assert len(selected) == 1
+    assert selected.iloc[0]["expected_mean"] == 1.5
+    assert selected.iloc[0]["valid_from"] == pd.Timestamp("2026-07-27 00:00:00")
+
+
+def test_complete_snapshot_selection_accepts_mixed_api_datetime_precision():
+    profiles = pd.DataFrame(
+        [
+            {
+                "interval_minutes": 60,
+                "day_of_week": 0,
+                "slot": 0,
+                "expected_mean": 99.0,
+                "valid_from": "2026-07-20T04:10:05.081179",
+                "valid_to": "2026-07-27T04:10:05.081179",
+            },
+            {
+                "interval_minutes": 60,
+                "day_of_week": 0,
+                "slot": 0,
+                "expected_mean": 1.5,
+                "valid_from": "2026-07-27T00:00:00",
+                "valid_to": "2026-08-03T00:00:00",
+            },
+        ]
+    )
+
+    selected = select_prediction_profiles_for_range(
+        profiles,
+        start_date=datetime.date(2026, 7, 27),
+        end_date=datetime.date(2026, 8, 2),
+    )
+
+    assert len(selected) == 1
+    assert selected.iloc[0]["expected_mean"] == 1.5
+    assert selected.iloc[0]["valid_from"] == pd.Timestamp("2026-07-27 00:00:00")
+
+
+def test_overview_uses_complete_period_prediction_as_separate_series():
+    source = VODOMERY_OVERVIEW_PAGE.read_text(encoding="utf-8")
+
+    assert "prediction_df = build_period_prediction(" in source
+    assert "measurements_df = apply_prediction_layer(" not in source
+    assert "render_graph_legend(not prediction_df.empty)" in source
+
+
+def test_overview_detail_table_matches_plynomery_user_columns():
+    source = VODOMERY_OVERVIEW_PAGE.read_text(encoding="utf-8")
+
+    for label in (
+        '"Vodoměr"',
+        '"Sériové číslo"',
+        '"Objem"',
+        '"Spotřeba"',
+        '"Kumulovaná spotřeba"',
+        '"Platná data"',
+        '"Počet resetů"',
+    ):
+        assert label in source
+    assert '"Ocekavana spotreba"' not in source
+    assert '"Synteticka data"' not in source
+    assert 'st.subheader("Data")' in source

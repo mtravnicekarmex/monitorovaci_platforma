@@ -2,15 +2,20 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.time_utils import utc_now_naive
 from core.db.connect import ENGINE_PG
 from moduly.mereni.kalorimetry.database.models import (
+    KalorimetryAnomalyScore,
     KalorimetryOutlierReview,
     Mereni_kalorimetry,
+)
+from moduly.mereni.kalorimetry.kalorimetry_anomaly import (
+    ACTIVE_SELECTION_SCORE_MODEL_VERSION,
+    rebuild_active_scores_for_measurements,
 )
 from moduly.mereni.kalorimetry.database.outlier_reviews import (
     ensure_kalorimetry_outlier_review_table,
@@ -62,6 +67,13 @@ def apply_outlier_review_update(
 
         if previous_status != resolved_status:
             rebuild_summary = _rebuild_measurements_for_review(session, review_row)
+            rebuild_summary["active_scores_rebuilt"] = (
+                _rebuild_active_scores_if_enabled(
+                    session,
+                    identifikace=str(review_row.identifikace),
+                    start_date=review_row.date,
+                )
+            )
             logger.info(
                 "Applied kalorimetry outlier review rebuild | review_id=%s | identifikace=%s | zdroj=%s | status=%s | summary=%s",
                 review_row.id,
@@ -234,3 +246,41 @@ def _rebuild_measurements_for_review(session: Session, review_row: KalorimetryOu
         "inserted_synthetic_rows": inserted_synthetic_rows,
         "recreated_reviews": recreated_reviews,
     }
+
+
+def _rebuild_active_scores_if_enabled(
+    session: Session,
+    *,
+    identifikace: str,
+    start_date,
+) -> int:
+    score_table = session.execute(
+        text(
+            "SELECT to_regclass("
+            "'monitoring.kalorimetry_anomaly_scores'"
+            ")"
+        )
+    ).scalar_one()
+    if score_table is None:
+        return 0
+
+    session.execute(
+        delete(KalorimetryAnomalyScore).where(
+            KalorimetryAnomalyScore.identifikace == identifikace,
+            KalorimetryAnomalyScore.date >= start_date,
+            KalorimetryAnomalyScore.model_version
+            == ACTIVE_SELECTION_SCORE_MODEL_VERSION,
+        )
+    )
+    measurements = session.execute(
+        select(Mereni_kalorimetry)
+        .where(
+            Mereni_kalorimetry.identifikace == identifikace,
+            Mereni_kalorimetry.date >= start_date,
+        )
+        .order_by(Mereni_kalorimetry.id)
+    ).scalars().all()
+    return rebuild_active_scores_for_measurements(
+        session,
+        measurements=list(measurements),
+    )

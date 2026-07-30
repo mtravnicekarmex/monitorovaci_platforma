@@ -1203,17 +1203,25 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
     def fake_get_plynomery_runtime_model_version():
         return 1
 
-    def fake_score_new_plynomery_measurements(*, model_version, bootstrap_to_latest_if_missing=False):
-        assert model_version == 1
+    def fake_score_new_plynomery_measurements(
+        *,
+        model_version,
+        bootstrap_to_latest_if_missing=False,
+        use_per_identifier_selection=False,
+        selection_mode=None,
+    ):
+        assert model_version in (1, 2)
         assert bootstrap_to_latest_if_missing is True
+        assert use_per_identifier_selection is (model_version == 1)
+        assert selection_mode == scheduler.SELECTION_MODE_ACTIVE
         return 3
 
     def fake_detect_plynomery_events_from_scores(*, model_version, bootstrap_to_latest_if_missing=False):
-        assert model_version == 1
+        assert model_version in (1, 2)
         assert bootstrap_to_latest_if_missing is True
         return {
-            "active_event_ids": [101],
-            "resolved_event_ids": [202],
+            "active_event_ids": [model_version * 101],
+            "resolved_event_ids": [model_version * 202],
         }
 
     def fake_process_plynomery_alerts(*, active_event_ids, resolved_event_ids):
@@ -1221,6 +1229,9 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
         return None
 
     def fake_manometry_import():
+        return None
+
+    def fake_kalorimetry_import():
         return None
 
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
@@ -1238,10 +1249,11 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
     monkeypatch.setattr(scheduler, "process_vodomery_alerts", fake_process_vodomery_alerts)
     monkeypatch.setattr(scheduler, "plynomery_db_import", fake_plynomery_import)
     monkeypatch.setattr(scheduler, "get_plynomery_runtime_model_version", fake_get_plynomery_runtime_model_version)
-    monkeypatch.setattr(scheduler, "get_plynomery_candidate_model_versions", lambda: (1,))
+    monkeypatch.setattr(scheduler, "get_plynomery_candidate_model_versions", lambda: (1, 2))
     monkeypatch.setattr(scheduler, "score_new_plynomery_measurements", fake_score_new_plynomery_measurements)
     monkeypatch.setattr(scheduler, "detect_plynomery_events_from_scores", fake_detect_plynomery_events_from_scores)
     monkeypatch.setattr(scheduler, "process_plynomery_alerts", fake_process_plynomery_alerts)
+    monkeypatch.setattr(scheduler, "kalorimetry_db_import", fake_kalorimetry_import)
     monkeypatch.setattr(scheduler, "manometry_db_import", fake_manometry_import)
 
     scheduler.quarter_hour_job.__scheduler_unlocked_fn__()
@@ -1259,7 +1271,10 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
         "fake_get_plynomery_runtime_model_version",
         "fake_score_new_plynomery_measurements",
         "fake_detect_plynomery_events_from_scores",
+        "fake_score_new_plynomery_measurements",
+        "fake_detect_plynomery_events_from_scores",
         "fake_process_plynomery_alerts",
+        "fake_kalorimetry_import",
         "fake_manometry_import",
     ]
     assert alert_payloads == [([2], [20])]
@@ -1306,6 +1321,61 @@ def test_vodomery_manual_scoring_step_uses_per_identifier_selection_for_active_m
         },
         {
             "model_version": 3,
+            "bootstrap": True,
+            "use_per_identifier_selection": True,
+            "selection_mode": scheduler.SELECTION_MODE_ACTIVE,
+        },
+    ]
+
+
+def test_plynomery_manual_scoring_step_uses_per_identifier_selection_for_active_model(
+    monkeypatch,
+):
+    calls = []
+
+    def fake_score_new_plynomery_measurements(
+        *,
+        model_version,
+        bootstrap_to_latest_if_missing=False,
+        use_per_identifier_selection=False,
+        selection_mode=None,
+    ):
+        calls.append(
+            {
+                "model_version": model_version,
+                "bootstrap": bootstrap_to_latest_if_missing,
+                "use_per_identifier_selection": use_per_identifier_selection,
+                "selection_mode": selection_mode,
+            }
+        )
+
+    monkeypatch.setattr(
+        scheduler,
+        "get_plynomery_runtime_model_version",
+        lambda: 2,
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "get_plynomery_candidate_model_versions",
+        lambda: (1, 2),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "score_new_plynomery_measurements",
+        fake_score_new_plynomery_measurements,
+    )
+
+    scheduler._run_plynomery_scoring_step()
+
+    assert calls == [
+        {
+            "model_version": 1,
+            "bootstrap": True,
+            "use_per_identifier_selection": False,
+            "selection_mode": scheduler.SELECTION_MODE_ACTIVE,
+        },
+        {
+            "model_version": 2,
             "bootstrap": True,
             "use_per_identifier_selection": True,
             "selection_mode": scheduler.SELECTION_MODE_ACTIVE,
@@ -1360,6 +1430,61 @@ def test_vodomery_manual_alerting_step_uses_per_identifier_selection(monkeypatch
     }
 
 
+def test_plynomery_manual_alerting_step_uses_per_identifier_selection(monkeypatch):
+    captured = {}
+
+    def fake_score_new_plynomery_measurements(
+        *,
+        model_version,
+        bootstrap_to_latest_if_missing=False,
+        use_per_identifier_selection=False,
+        selection_mode=None,
+    ):
+        captured["score"] = {
+            "model_version": model_version,
+            "bootstrap": bootstrap_to_latest_if_missing,
+            "use_per_identifier_selection": use_per_identifier_selection,
+            "selection_mode": selection_mode,
+        }
+
+    monkeypatch.setattr(
+        scheduler,
+        "get_plynomery_runtime_model_version",
+        lambda: 2,
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "score_new_plynomery_measurements",
+        fake_score_new_plynomery_measurements,
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "detect_plynomery_events_from_scores",
+        lambda *, model_version, bootstrap_to_latest_if_missing: {
+            "active_event_ids": [31],
+            "resolved_event_ids": [32],
+        },
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "process_plynomery_alerts",
+        lambda **kwargs: captured.update({"alerts": kwargs}),
+    )
+
+    scheduler._run_plynomery_alerting_step()
+
+    assert captured["score"] == {
+        "model_version": 2,
+        "bootstrap": True,
+        "use_per_identifier_selection": True,
+        "selection_mode": scheduler.SELECTION_MODE_ACTIVE,
+    }
+    assert captured["alerts"] == {
+        "active_event_ids": [31],
+        "resolved_event_ids": [32],
+    }
+
+
 def test_daily_job_runs_meteo_sync_as_last_step(monkeypatch):
     calls = []
 
@@ -1376,22 +1501,17 @@ def test_daily_job_runs_meteo_sync_as_last_step(monkeypatch):
     def fake_meteo_sync():
         return None
 
-    def fake_sync_charge_sessions_to_db():
-        return {"upserted_count": 2}
-
     monkeypatch.setattr(scheduler, "_run_database_preflight_or_skip", lambda job_id: None)
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "SOFTLINK_save_to_database_all", fake_softlink_import)
     monkeypatch.setattr(scheduler, "elektromery_softlink_monitoring_import", fake_softlink_monitoring_import)
     monkeypatch.setattr(scheduler, "meteo_sync", fake_meteo_sync)
-    monkeypatch.setattr(scheduler, "sync_charge_sessions_to_db", fake_sync_charge_sessions_to_db)
 
     scheduler.daily_job.__scheduler_unlocked_fn__()
 
     assert calls == [
         "fake_softlink_import",
         "fake_softlink_monitoring_import",
-        "fake_sync_charge_sessions_to_db",
         "fake_meteo_sync",
     ]
 
@@ -1500,21 +1620,16 @@ def test_scheduler_job_registry_matches_schedule_specs():
     }
 
 
-def test_daily_job_schedule_description_mentions_smartfuelpass_sync():
+def test_daily_job_schedule_description_excludes_smartfuelpass_sync():
     daily_job_spec = next(job_spec for job_spec in get_scheduler_job_specs() if job_spec.id == "daily_job")
 
-    assert "SmartFuelPass" in daily_job_spec.description
+    assert "SmartFuelPass" not in daily_job_spec.description
 
 
-def test_daily_job_manual_specs_include_smartfuelpass_database_sync():
+def test_manual_specs_exclude_smartfuelpass_database_sync():
     manual_specs = scheduler.get_manual_run_specs()
 
-    sync_spec = manual_specs["sync_charge_sessions_to_db"]
-
-    assert sync_spec.run_fn is scheduler.sync_charge_sessions_to_db
-    assert sync_spec.lock_names == ("daily_job",)
-    assert sync_spec.is_scheduled is False
-    assert "databaze" in sync_spec.label
+    assert "sync_charge_sessions_to_db" not in manual_specs
 
 
 def test_smartfuelpass_report_manual_labels_distinguish_job_and_email_step():
@@ -1561,10 +1676,13 @@ def test_manual_run_worker_enables_scheduler_file_logging(monkeypatch):
     assert calls[2] == ("release", acquired_locks)
 
 
-def test_quarter_hour_schedule_and_manual_specs_include_manometry_import():
+def test_quarter_hour_schedule_and_manual_specs_include_kalorimetry_and_manometry_imports():
     quarter_hour_spec = next(job_spec for job_spec in get_scheduler_job_specs() if job_spec.id == "quarter_hour_job")
     manual_specs = scheduler.get_manual_run_specs()
 
+    assert "kalorimetru" in quarter_hour_spec.description
+    assert manual_specs["kalorimetry_db_import"].run_fn is scheduler.kalorimetry_db_import
+    assert manual_specs["kalorimetry_db_import"].lock_names == ("quarter_hour_job",)
     assert "manometru" in quarter_hour_spec.description
     assert manual_specs["manometry_db_import"].run_fn is scheduler.manometry_db_import
     assert manual_specs["manometry_db_import"].lock_names == ("quarter_hour_job",)

@@ -25,6 +25,7 @@ from moduly.apps.dashboard.kalorimetry_shared import (
     load_device_detail,
     load_ident_options,
     load_measurement_series,
+    load_prediction_series,
     render_device_photo,
     round_consumption_columns,
 )
@@ -38,6 +39,7 @@ from moduly.mereni.reset_detection import (
 
 ENERGY_CONSUMPTION_COLOR = "#dc2626"
 ENERGY_CONSUMPTION_TEXT_COLOR = "#991b1b"
+PREDICTION_COLOR = "#dedcd9"
 
 
 st.set_page_config(
@@ -194,7 +196,10 @@ def render_average_consumption_section(history_df: pd.DataFrame) -> None:
             )
 
 
-def build_daily_chart(daily_history: pd.DataFrame) -> alt.Chart:
+def build_daily_chart(
+    daily_history: pd.DataFrame,
+    prediction_df: pd.DataFrame | None = None,
+) -> alt.Chart:
     day_order = daily_history["day_label"].tolist()
     chart_df = daily_history.copy()
     chart_df["day_index"] = range(len(chart_df))
@@ -234,7 +239,65 @@ def build_daily_chart(daily_history: pd.DataFrame) -> alt.Chart:
             text=alt.Text("spotreba_label:N"),
         )
     )
-    return (bars + labels).properties(height=320)
+    chart = bars + labels
+    if prediction_df is not None and not prediction_df.empty:
+        prediction = prediction_df.copy()
+        prediction["date"] = pd.to_datetime(
+            prediction["date"], errors="coerce"
+        ).dt.normalize()
+        prediction = prediction.dropna(
+            subset=["date", "ocekavana_spotreba"]
+        )
+        day_indexes = {
+            pd.Timestamp(row.date).normalize(): int(row.day_index)
+            for row in chart_df[["date", "day_index"]].itertuples(index=False)
+        }
+        prediction["day_index"] = prediction["date"].map(day_indexes)
+        prediction = prediction.dropna(subset=["day_index"])
+        if not prediction.empty:
+            prediction_line = (
+                alt.Chart(prediction)
+                .mark_line(
+                    color=PREDICTION_COLOR,
+                    strokeWidth=2.5,
+                    point=True,
+                )
+                .encode(
+                    x=alt.X("day_index:Q"),
+                    y=alt.Y("ocekavana_spotreba:Q"),
+                    tooltip=[
+                        alt.Tooltip("yearmonthdate(date):T", title="Den"),
+                        alt.Tooltip(
+                            "ocekavana_spotreba:Q",
+                            title="Predikce",
+                            format=".3f",
+                        ),
+                    ],
+                )
+            )
+            chart = prediction_line + chart
+    return chart.properties(height=320)
+
+
+def render_prediction_status(prediction: dict[str, object]) -> None:
+    rows = prediction["rows"]
+    with st.container(border=True):
+        st.subheader("Predikce spotřeby energie")
+        if not prediction.get("prediction_available") or rows.empty:
+            st.metric("Predikce na posledních 31 dnů", "Nedostupné")
+            if prediction.get("availability_reason") == "insufficient_history":
+                st.caption(
+                    "Pro tento kalorimetr zatím není dostatečná historie."
+                )
+            return
+        st.metric(
+            "Predikce na posledních 31 dnů",
+            format_energy_metric(rows["ocekavana_spotreba"].sum()),
+        )
+        if prediction.get("availability_status") == "partial":
+            st.warning(
+                "Predikce je dostupná pouze pro část posledních 31 dnů."
+            )
 
 
 def build_change_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -285,6 +348,29 @@ def render_dashboard() -> None:
     device_detail = load_device_detail(selected_ident, allowed_devices, user_is_admin)
     history_df = prepare_consumption_history(measurements_df) if not measurements_df.empty else pd.DataFrame()
     change_table = build_change_table(history_df) if not history_df.empty else pd.DataFrame()
+    today = prague_today()
+    daily_prediction_start = today - datetime.timedelta(days=30)
+    monthly_prediction_start = (
+        pd.Timestamp(today).replace(day=1) - pd.DateOffset(months=23)
+    ).date()
+    daily_prediction = load_prediction_series(
+        selected_ident,
+        daily_prediction_start,
+        today,
+        "daily",
+        allowed_devices,
+        user_is_admin,
+    )
+    monthly_prediction = load_prediction_series(
+        selected_ident,
+        monthly_prediction_start,
+        today,
+        "monthly",
+        allowed_devices,
+        user_is_admin,
+    )
+    daily_prediction_df = daily_prediction["rows"]
+    monthly_prediction_df = monthly_prediction["rows"]
 
     top_cols = st.columns(5, vertical_alignment="bottom")
     first_measurement_date = "-"
@@ -332,6 +418,7 @@ def render_dashboard() -> None:
             meta_col_2.dataframe(metadata_df.iloc[midpoint:], width="stretch", hide_index=True)
 
     render_average_consumption_section(history_df)
+    render_prediction_status(daily_prediction)
 
     chart_col, status_col = st.columns([3, 2])
 
@@ -347,6 +434,10 @@ def render_dashboard() -> None:
                         <span style="display:inline-flex; align-items:center; gap:0.35rem; margin-left:0.9rem;">
                             <span style="display:inline-block; width:16px; border-top:2px dashed #f97316;"></span>
                             Průměrná měsíční spotřeba
+                        </span>
+                        <span style="display:inline-flex; align-items:center; gap:0.35rem; margin-left:0.9rem;">
+                            <span style="display:inline-block; width:16px; border-top:2px solid #dedcd9;"></span>
+                            Predikce
                         </span>
                     </div>
                     """,
@@ -405,7 +496,44 @@ def render_dashboard() -> None:
                         tooltip=[alt.Tooltip("prumerna_mesicni_spotreba:Q", title="Průměrná měsíční spotřeba", format=".3f")],
                     )
                 )
-                st.altair_chart((bars + labels + average_line).properties(height=320), width="stretch")
+                monthly_chart = bars + labels + average_line
+                if not monthly_prediction_df.empty:
+                    prediction_monthly = monthly_prediction_df.copy()
+                    prediction_monthly["month_label"] = pd.to_datetime(
+                        prediction_monthly["date"], errors="coerce"
+                    ).dt.strftime("%b %Y")
+                    prediction_monthly = prediction_monthly.loc[
+                        prediction_monthly["month_label"].isin(month_order)
+                    ].copy()
+                    if not prediction_monthly.empty:
+                        prediction_line = (
+                            alt.Chart(prediction_monthly)
+                            .mark_line(
+                                color=PREDICTION_COLOR,
+                                strokeWidth=2.5,
+                                point=True,
+                            )
+                            .encode(
+                                x=alt.X("month_label:N", sort=month_order),
+                                y=alt.Y("ocekavana_spotreba:Q"),
+                                tooltip=[
+                                    alt.Tooltip(
+                                        "yearmonth(date):T",
+                                        title="Měsíc",
+                                    ),
+                                    alt.Tooltip(
+                                        "ocekavana_spotreba:Q",
+                                        title="Predikce",
+                                        format=".3f",
+                                    ),
+                                ],
+                            )
+                        )
+                        monthly_chart = prediction_line + monthly_chart
+                st.altair_chart(
+                    monthly_chart.properties(height=320),
+                    width="stretch",
+                )
 
     with status_col:
         with st.container(border=True):
@@ -417,7 +545,22 @@ def render_dashboard() -> None:
                 if daily_history.empty:
                     st.info("Pro kalorimetr zatim neni dostatek dat pro denni graf.")
                 else:
-                    st.altair_chart(build_daily_chart(daily_history), width="stretch")
+                    seven_day_start = pd.Timestamp(
+                        daily_history["date"].min()
+                    ).normalize()
+                    seven_day_prediction = daily_prediction_df.loc[
+                        pd.to_datetime(
+                            daily_prediction_df["date"], errors="coerce"
+                        ).dt.normalize()
+                        >= seven_day_start
+                    ].copy()
+                    st.altair_chart(
+                        build_daily_chart(
+                            daily_history,
+                            seven_day_prediction,
+                        ),
+                        width="stretch",
+                    )
 
     with st.container(border=True):
         st.subheader("Poslední měsíc")
@@ -428,7 +571,13 @@ def render_dashboard() -> None:
             if month_history.empty:
                 st.info("Pro kalorimetr zatim neni dostatek dat pro mesicni denni graf.")
             else:
-                st.altair_chart(build_daily_chart(month_history), width="stretch")
+                st.altair_chart(
+                    build_daily_chart(
+                        month_history,
+                        daily_prediction_df,
+                    ),
+                    width="stretch",
+                )
 
     detail_left, detail_right = st.columns(2)
 

@@ -103,37 +103,24 @@ def score_new_measurements(
             print("No new measurements to score.")
             return 0
 
-        snapshots_by_identifier = {}
-        if per_identifier_selection_enabled:
-            snapshots_by_identifier = _load_selected_model_snapshots(
-                session,
-                measurements=measurements,
-                selection_mode=selection_mode,
-            )
-            selected_profile_versions = _selected_profile_versions(
-                snapshots_by_identifier,
-            )
-            profile_source_versions = {model_version, *selected_profile_versions}
-            if profile_source_versions != {model_version}:
-                profiles = _load_profiles(session, profile_source_versions)
-                profile_cache = _build_profile_cache(
-                    profiles,
-                    default_model_version=model_version,
-                )
-
         rows_to_insert = []
         max_processed_id = last_id
+        if per_identifier_selection_enabled:
+            rows_to_insert = _build_per_identifier_selected_score_rows(
+                session,
+                measurements=measurements,
+                output_model_version=model_version,
+                selection_mode=selection_mode,
+            )
+            max_processed_id = measurements[-1].id
 
         # -------------------------------------------------
         # 4️⃣ Scoring (čistá CPU část)
         # -------------------------------------------------
-        for m in measurements:
+        for m in (() if per_identifier_selection_enabled else measurements):
+            max_processed_id = m.id
 
-            profile_model_version = _profile_model_version_for_measurement(
-                m,
-                snapshots_by_identifier=snapshots_by_identifier,
-                default_model_version=model_version,
-            )
+            profile_model_version = model_version
             key = _profile_cache_key(
                 profile_model_version,
                 m,
@@ -141,7 +128,10 @@ def score_new_measurements(
 
             profile = profile_cache.get(key)
             if not profile and profile_model_version != model_version:
-                profile = profile_cache.get(_profile_cache_key(model_version, m))
+                raise RuntimeError(
+                    "Available vodomery selected profile is missing for a "
+                    "measurement slot."
+                )
             if not profile:
                 continue
 
@@ -188,8 +178,6 @@ def score_new_measurements(
                     "model_version": model_version,
                 }
             )
-
-            max_processed_id = m.id
 
         # -------------------------------------------------
         # 5️⃣ Jedna transakce
@@ -383,6 +371,8 @@ def _selected_profile_versions(snapshots_by_identifier) -> set[int]:
         int(snapshot.selected_model_version)
         for snapshots in snapshots_by_identifier.values()
         for snapshot in snapshots
+        if str(getattr(snapshot, "fallback_reason", "none"))
+        != "insufficient_history"
     }
 
 
@@ -391,19 +381,104 @@ def _profile_model_version_for_measurement(
     *,
     snapshots_by_identifier,
     default_model_version: int,
-) -> int:
+) -> int | None:
     if not snapshots_by_identifier:
-        return int(default_model_version)
+        return None
 
     measurement_date = getattr(measurement, "date", None)
     if measurement_date is None:
-        return int(default_model_version)
+        return None
 
     for snapshot in snapshots_by_identifier.get(measurement.identifikace, ()):
         if (
             snapshot.forecast_period_start <= measurement_date
             and measurement_date < snapshot.forecast_period_end
         ):
+            if (
+                str(getattr(snapshot, "fallback_reason", "none"))
+                == "insufficient_history"
+            ):
+                return None
             return int(snapshot.selected_model_version)
 
-    return int(default_model_version)
+    return None
+
+
+def _build_per_identifier_selected_score_rows(
+    session,
+    *,
+    measurements,
+    output_model_version: int,
+    selection_mode: str = SELECTION_MODE_ACTIVE,
+):
+    if not measurements:
+        return []
+
+    snapshots_by_identifier = _load_selected_model_snapshots(
+        session,
+        measurements=measurements,
+        selection_mode=selection_mode,
+    )
+    profiles = _load_profiles(
+        session,
+        _selected_profile_versions(snapshots_by_identifier),
+    )
+    profile_cache = _build_profile_cache(
+        profiles,
+        default_model_version=output_model_version,
+    )
+
+    rows = []
+    for measurement in measurements:
+        profile_model_version = _profile_model_version_for_measurement(
+            measurement,
+            snapshots_by_identifier=snapshots_by_identifier,
+            default_model_version=output_model_version,
+        )
+        if profile_model_version is None:
+            continue
+
+        profile = profile_cache.get(
+            _profile_cache_key(profile_model_version, measurement)
+        )
+        if profile is None:
+            raise RuntimeError(
+                "Available vodomery selected profile is missing for a "
+                "measurement slot."
+            )
+
+        expected_std = profile.std if profile.std > 0 else 0.0001
+        deviation = measurement.delta - profile.mean
+        z_score = deviation / expected_std
+        if abs(z_score) >= 5:
+            severity = "CRITICAL"
+        elif abs(z_score) >= 4:
+            severity = "HIGH"
+        elif abs(z_score) >= 3:
+            severity = "MEDIUM"
+        else:
+            severity = None
+
+        rows.append(
+            {
+                "measurement_id": measurement.id,
+                "identifikace": measurement.identifikace,
+                "date": measurement.date,
+                "actual_value": measurement.delta,
+                "expected_mean": profile.mean,
+                "expected_std": expected_std,
+                "expected_median": profile.median,
+                "expected_p10": profile.p10,
+                "expected_p90": profile.p90,
+                "deviation": deviation,
+                "z_score": z_score,
+                "is_anomaly": (
+                    measurement.delta > profile.p90
+                    or measurement.delta < profile.p10
+                    or abs(z_score) >= 3
+                ),
+                "severity": severity,
+                "model_version": output_model_version,
+            }
+        )
+    return rows

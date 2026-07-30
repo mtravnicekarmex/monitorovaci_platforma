@@ -2,7 +2,7 @@
 
 Purpose: implementation plan for a universal meter prediction pipeline that
 can add candidate models, select the best model per metering point for the next
-forecast period, and reuse the same architecture across water, gas, and
+forecast period, and reuse the same architecture across water, gas, heat, and
 electricity.
 
 Status: active plan, opened on 2026-07-09. The executable checklist lives in
@@ -17,8 +17,8 @@ rules.
 - Preserve media-specific semantics for measurements, calendars, imports,
   expected-zero behavior, outlier filtering, and reporting.
 - Keep global model selection as a fallback and operational comparison signal.
-- Start with `vodomery`, then adapt the same pipeline to `plynomery` and
-  `elektromery`.
+- Start with `vodomery`, then adapt the same pipeline to `plynomery`,
+  `kalorimetry`, and `elektromery`.
 
 ## Forecast Periods
 
@@ -27,6 +27,8 @@ rules.
   calendar month for the entire following calendar month.
 - `plynomery`: to be defined during gas integration, preserving weather-aware
   and expected-zero semantics.
+- `kalorimetry`: weekly Prague calendar periods, preserving heat-energy,
+  reset, gap, synthetic-row, outlier, and possible weather-demand semantics.
 
 The shared core must not assume that every medium uses weekly windows. Rolling
 backtests, profile generation, report labels, and selection storage must take a
@@ -66,6 +68,9 @@ Initial adapters:
 - `vodomery`: pilot implementation.
 - `plynomery`: preserve gas baseline, weather-aware, expected-zero, and
   outlier behavior.
+- `kalorimetry`: preserve cumulative heat-energy state, interval energy delta,
+  volume diagnostics, reset/gap/synthetic-row semantics, and validate any
+  weather candidate specifically for heat demand.
 - `elektromery`: monthly forecast periods, source cadence, tariff/calendar
   semantics, and future OTE/reporting needs.
 
@@ -154,7 +159,8 @@ credential data.
 - Step 8: extract the reusable media pipeline runner so adding models or
   parameter variants only requires plugin registration and adapter metadata.
 - Step 9: integrate `plynomery`.
-- Step 10: integrate `elektromery` with monthly next-month prediction.
+- Step 10: integrate `kalorimetry` with the shared Prague weekly contract.
+- Step 11: integrate `elektromery` with monthly next-month prediction.
 
 Each step should update tests and only be marked complete in `SESSION_NOTES.md`
 after targeted verification.

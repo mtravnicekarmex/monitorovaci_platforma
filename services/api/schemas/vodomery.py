@@ -92,6 +92,9 @@ class VodomeryPredictionProfilesResponse(BaseModel):
     identifikace: str
     start_date: date | None = None
     end_date: date | None = None
+    prediction_available: bool = True
+    availability_status: str = "available"
+    availability_reason: str | None = None
     total: int
     rows: list[VodomeryPredictionProfileRow]
 
@@ -315,11 +318,11 @@ class VodomeryOutlierReviewUpdateRequest(BaseModel):
 class VodomeryBranchHourlyRow(BaseModel):
     date: datetime
     spotreba: float
-    ocekavana_spotreba: float
+    ocekavana_spotreba: float | None = None
     fakturacni_spotreba: float
     kumulovana_spotreba: float
     fakturacni_kumulovana_spotreba: float
-    ocekavana_kumulovana_spotreba: float
+    ocekavana_kumulovana_spotreba: float | None = None
     kumulovana_spotreba_graf: float | None = None
     fakturacni_kumulovana_spotreba_graf: float | None = None
     navazna_predikce: float | None = None
@@ -422,8 +425,8 @@ class VodomeryBranchOverviewRow(BaseModel):
     actual_total: float
     device_consumption_rows: list[VodomeryBranchDeviceConsumptionRow]
     device_hourly_rows: list[VodomeryBranchDeviceHourlyRow]
-    expected_total: float
-    expected_end_of_day: float
+    expected_total: float | None = None
+    expected_end_of_day: float | None = None
     expected_vs_limit: float | None = None
     remaining_to_limit: float | None = None
 

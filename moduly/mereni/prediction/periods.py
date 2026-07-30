@@ -30,6 +30,24 @@ def next_month_start(value: datetime) -> datetime:
     return add_months(month_start(value), 1)
 
 
+def build_calendar_week_forecast_period(
+    *,
+    reference_time: datetime,
+    period_count: int = 1,
+) -> PredictionForecastPeriod:
+    if period_count <= 0:
+        raise ValueError("Calendar-week forecast period count must be positive.")
+    midnight = reference_time.replace(hour=0, minute=0, second=0, microsecond=0)
+    start = midnight - timedelta(days=midnight.weekday())
+    end = start + timedelta(days=7 * period_count)
+    return PredictionForecastPeriod(
+        start=start,
+        end=end,
+        cadence=PredictionForecastCadence.WEEKLY,
+        label=f"{start:%Y-%m-%d} - {end:%Y-%m-%d}",
+    )
+
+
 def build_next_forecast_period(
     *,
     reference_time: datetime,

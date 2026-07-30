@@ -444,6 +444,28 @@ def get_system_smartfuelpass_health(access_token: str) -> dict[str, object]:
     return dict(response.json())
 
 
+def get_smartfuelpass_interactive_import_status(
+    access_token: str,
+) -> dict[str, object]:
+    response = _request(
+        "GET",
+        "/api/v1/admin/smartfuelpass/interactive-import/status",
+        access_token=access_token,
+    )
+    return dict(response.json())
+
+
+def start_smartfuelpass_interactive_import(
+    access_token: str,
+) -> dict[str, object]:
+    response = _request(
+        "POST",
+        "/api/v1/admin/smartfuelpass/interactive-import/start",
+        access_token=access_token,
+    )
+    return dict(response.json())
+
+
 def get_prediction_performance(access_token: str) -> dict[str, object]:
     response = _request(
         "GET",
@@ -704,7 +726,7 @@ def get_vodomery_prediction_profiles(
     identifikace: str,
     start_date: str | None = None,
     end_date: str | None = None,
-) -> list[dict[str, object]]:
+) -> dict[str, object]:
     query_params: dict[str, object] = {"identifikace": identifikace}
     if start_date is not None:
         query_params["start_date"] = start_date
@@ -717,7 +739,10 @@ def get_vodomery_prediction_profiles(
         query_params=query_params,
     )
     payload = response.json()
-    return [dict(item) for item in payload.get("rows", [])]
+    return {
+        **dict(payload),
+        "rows": [dict(item) for item in payload.get("rows", [])],
+    }
 
 
 def get_vodomery_recent_anomalies(
@@ -927,6 +952,50 @@ def get_plynomery_devices(access_token: str, limit: int = 500) -> list[str]:
     )
     payload = response.json()
     return [str(item) for item in payload.get("devices", [])]
+
+
+def get_plynomery_prediction_series(
+    access_token: str,
+    *,
+    identifikace: str,
+    start_date: str,
+    end_date: str,
+    granularity: str,
+) -> dict[str, object]:
+    response = _request(
+        "GET",
+        "/api/v1/plynomery/prediction-series",
+        access_token=access_token,
+        query_params={
+            "identifikace": identifikace,
+            "start_date": start_date,
+            "end_date": end_date,
+            "granularity": granularity,
+        },
+    )
+    return dict(response.json())
+
+
+def get_kalorimetry_prediction_series(
+    access_token: str,
+    *,
+    identifikace: str,
+    start_date: str,
+    end_date: str,
+    granularity: str,
+) -> dict[str, object]:
+    response = _request(
+        "GET",
+        "/api/v1/kalorimetry/prediction-series",
+        access_token=access_token,
+        query_params={
+            "identifikace": identifikace,
+            "start_date": start_date,
+            "end_date": end_date,
+            "granularity": granularity,
+        },
+    )
+    return dict(response.json())
 
 
 def get_plynomery_recent_anomalies(

@@ -121,6 +121,7 @@ def _build_media_summary_dataframe(media: list[dict[str, object]]) -> pd.DataFra
                 "snapshot_period": _format_period(snapshot),
                 "snapshoty": snapshot.get("snapshot_count") or 0,
                 "fallbacky": snapshot.get("fallback_count") or 0,
+                "nedostupné": snapshot.get("unavailable_count") or 0,
                 "jiny_nez_global": snapshot.get("selected_differs_from_global_count") or 0,
             }
         )
@@ -358,7 +359,25 @@ def _render_page() -> None:
         if candidate_df.empty:
             st.info("Zadne ulozene candidate runy.")
         else:
-            st.dataframe(candidate_df, hide_index=True, use_container_width=True)
+            medium_options = sorted(
+                str(value)
+                for value in candidate_df["medium"].dropna().unique()
+            )
+            selected_medium = st.selectbox(
+                "Medium",
+                ["Vsechna media", *medium_options],
+                key="prediction_performance_candidate_medium",
+            )
+            filtered_candidate_df = candidate_df
+            if selected_medium != "Vsechna media":
+                filtered_candidate_df = candidate_df[
+                    candidate_df["medium"] == selected_medium
+                ]
+            st.dataframe(
+                filtered_candidate_df,
+                hide_index=True,
+                use_container_width=True,
+            )
 
     with tab_identifiers:
         if identifier_df.empty:

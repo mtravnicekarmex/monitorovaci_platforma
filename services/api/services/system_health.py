@@ -22,6 +22,7 @@ from core.scheduler.metrics import (
     SCHEDULER_HEARTBEAT_TTL_SECONDS,
     get_metrics_store,
 )
+from moduly.apps.smartfuelpass.interactive_import import read_interactive_import_status
 from moduly.apps.smartfuelpass.service import (
     current_month_period,
     last_completed_week_period,
@@ -56,6 +57,7 @@ LOCAL_CADDY_TIMEOUT_SECONDS = 8
 SCHEDULER_CORE_JOB_ID = "quarter_hour_job"
 SCHEDULER_CORE_JOB_MAX_AGE_SECONDS = 45 * 60
 SMARTFUELPASS_SYNC_JOB_ID = "sync_charge_sessions_to_db"
+SMARTFUELPASS_INTERACTIVE_JOB_ID = "smartfuelpass_interactive_import"
 SMARTFUELPASS_WEEKLY_REPORT_JOB_ID = "smartfuelpass_weekly_report_job"
 SMARTFUELPASS_TABLE_MAX_IMPORT_AGE_SECONDS = 36 * 60 * 60
 EXPECTED_POSTGRES_SCHEMAS = (
@@ -940,6 +942,45 @@ def _build_smartfuelpass_job_metric_status(
     )
 
 
+def _build_smartfuelpass_interactive_status() -> SystemSmartFuelPassJobMetricStatus:
+    stored = read_interactive_import_status()
+    if stored.state == "success":
+        status = "ok"
+        last_status = "success"
+        failure_count = 0
+        success_count = 1
+        detail = "Posledni rucni interaktivni import byl uspesny."
+    elif stored.state == "error":
+        status = "error"
+        last_status = "error"
+        failure_count = 1
+        success_count = 0
+        detail = "Posledni rucni interaktivni import skoncil chybou."
+    elif stored.state in {"starting", "waiting_for_login", "importing"}:
+        status = "degraded"
+        last_status = "running"
+        failure_count = 0
+        success_count = 0
+        detail = "Rucni interaktivni import prave probiha."
+    else:
+        status = "degraded"
+        last_status = "unknown"
+        failure_count = 0
+        success_count = 0
+        detail = "Rucni interaktivni import zatim nema zaznamenany beh."
+    return SystemSmartFuelPassJobMetricStatus(
+        job_id=SMARTFUELPASS_INTERACTIVE_JOB_ID,
+        label="Rucni interaktivni import",
+        status=status,
+        last_status=last_status,
+        last_run=_parse_datetime(stored.finished_at or stored.started_at),
+        success_count_24h=success_count,
+        failure_count_24h=failure_count,
+        last_duration_seconds=None,
+        detail=detail,
+    )
+
+
 def _build_smartfuelpass_table_status(
     row: dict[str, Any],
     *,
@@ -1116,11 +1157,7 @@ def collect_system_smartfuelpass_health() -> SystemSmartFuelPassHealthResponse:
     reference_datetime = datetime.now()
     checked_at = reference_datetime.astimezone()
     metrics = get_metrics_store(refresh_from_disk=True)
-    sync_job = _build_smartfuelpass_job_metric_status(
-        SMARTFUELPASS_SYNC_JOB_ID,
-        "Databazovy sync relaci",
-        metrics.jobs.get(SMARTFUELPASS_SYNC_JOB_ID),
-    )
+    sync_job = _build_smartfuelpass_interactive_status()
     weekly_report_job = _build_smartfuelpass_job_metric_status(
         SMARTFUELPASS_WEEKLY_REPORT_JOB_ID,
         "Tydenni email report",

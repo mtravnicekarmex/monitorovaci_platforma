@@ -37,7 +37,7 @@ DEFAULT_TIMEOUT_SECONDS = 120
 DEFAULT_LOGIN_TIMEOUT_SECONDS = 300
 DEFAULT_TABLE_WAIT_TIMEOUT_SECONDS = 45
 DEFAULT_FETCH_ATTEMPTS = 2
-DEFAULT_FETCH_RETRY_DELAY_SECONDS = 5
+DEFAULT_FETCH_RETRY_DELAY_SECONDS = 60
 DEFAULT_NAVIGATION_TIMEOUT_MS = 15000
 DEFAULT_PAGE_LENGTH = "100"
 DEFAULT_DASHBOARD_PATH = "/Fuel/Merchant/Dashboard?contractId=12147&accountId=0"
@@ -59,6 +59,10 @@ class SmartFuelPassError(RuntimeError):
 
 
 class SmartFuelPassAuthenticationError(SmartFuelPassError):
+    pass
+
+
+class SmartFuelPassTransientError(SmartFuelPassError):
     pass
 
 
@@ -640,9 +644,22 @@ def perform_playwright_login(
     if not resolved_email or not resolved_password:
         raise SmartFuelPassError("SmartFuelPass automatic login requires SMARTFUELPASS_EMAIL and SMARTFUELPASS_PASSWORD.")
 
-    page.goto(resolved_login_url, wait_until="domcontentloaded")
-    page.locator("#Email").fill(resolved_email)
-    page.locator("#Password").fill(resolved_password)
+    try:
+        response = page.goto(
+            resolved_login_url,
+            wait_until="domcontentloaded",
+            timeout=resolved_timeout_ms,
+        )
+        if _is_cloudflare_challenge_response(response):
+            raise SmartFuelPassTransientError(
+                "SmartFuelPass login is temporarily behind a Cloudflare challenge."
+            )
+        page.locator("#Email").fill(resolved_email, timeout=resolved_timeout_ms)
+        page.locator("#Password").fill(resolved_password, timeout=resolved_timeout_ms)
+    except playwright_timeout_error as exc:
+        raise SmartFuelPassTransientError(
+            "SmartFuelPass login page did not become ready within the configured timeout."
+        ) from exc
     _click_playwright_login_button(page, timeout_ms=resolved_timeout_ms)
 
     try:
@@ -665,6 +682,25 @@ def perform_playwright_login(
         )
 
     return page.url
+
+
+def _is_cloudflare_challenge_response(response: Any) -> bool:
+    if response is None:
+        return False
+    try:
+        headers = {
+            str(key).lower(): str(value).lower()
+            for key, value in response.all_headers().items()
+        }
+    except Exception:
+        headers = {}
+    return (
+        headers.get("cf-mitigated") == "challenge"
+        or (
+            int(getattr(response, "status", 0) or 0) == 403
+            and "cloudflare" in headers.get("server", "")
+        )
+    )
 
 
 def login_with_playwright(
@@ -1066,7 +1102,10 @@ def load_main_table(page: Any, *, timeout_seconds: int | None = None) -> pd.Data
 
 
 def _is_retryable_charge_sessions_fetch_error(error: Exception) -> bool:
-    return isinstance(error, SmartFuelPassError) and TABLE_NOT_FOUND_MESSAGE in str(error)
+    return isinstance(error, SmartFuelPassTransientError) or (
+        isinstance(error, SmartFuelPassError)
+        and TABLE_NOT_FOUND_MESSAGE in str(error)
+    )
 
 
 def fetch_charge_sessions_dataframe_with_retries(
@@ -1097,7 +1136,7 @@ def fetch_charge_sessions_dataframe_with_retries(
             if attempt >= resolved_attempts or not _is_retryable_charge_sessions_fetch_error(exc):
                 raise
             logger.warning(
-                "SmartFuelPass charge sessions table was not available on attempt %s/%s; retrying in %ss.",
+                "Transient SmartFuelPass fetch failure on attempt %s/%s; retrying in %ss.",
                 attempt,
                 resolved_attempts,
                 resolved_retry_delay,

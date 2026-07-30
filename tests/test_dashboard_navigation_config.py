@@ -243,6 +243,15 @@ def test_nabijecky_page_is_after_elektromery_pages():
     assert main_page_keys.index("elektromery_new_devices") < main_page_keys.index("nabijecky_overview")
 
 
+def test_smartfuelpass_interactive_login_is_admin_only_charger_page():
+    page = get_page_definition("smartfuelpass_interactive_login")
+
+    assert page is not None
+    assert page.section_key == "nabijecky"
+    assert page.admin_only is True
+    assert page.path.endswith("39_smartfuelpass_prihlaseni.py")
+
+
 def test_revize_page_is_after_kalorimetry_pages():
     main_page_keys = [page.key for page in get_dashboard_pages("main")]
 

@@ -19,12 +19,14 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from moduly.apps.dashboard.auth import require_page_access
 from moduly.apps.dashboard.kalorimetry_shared import (
+    build_prediction_metric_summary,
     format_consumption_dataframe,
     format_energy_metric,
     format_value,
     get_kalorimetry_access_context,
     load_ident_options,
     load_measurement_series,
+    load_prediction_series,
     normalize_date_range,
     render_page_styles,
     round_consumption_columns,
@@ -47,6 +49,7 @@ DETAIL_OPTIONS = ("Ne", "Měsíčně", "Denně", "Hodinově")
 GRAPH_OPTIONS = ("Ne", "Ano")
 ENERGY_STATE_COLOR = "#f97316"
 ENERGY_CONSUMPTION_COLOR = "#dc2626"
+PREDICTION_COLOR = "#dedcd9"
 
 
 st.set_page_config(
@@ -268,9 +271,105 @@ def build_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     ].copy()
 
 
-def render_summary_metrics(df: pd.DataFrame) -> None:
-    total_consumption = round(float(df["kumulovana_spotreba"].iloc[-1]), 3)
-    st.metric("Spotřeba energie za období", format_energy_metric(total_consumption))
+def render_overview_metrics(
+    measurements_df: pd.DataFrame,
+    prediction: dict[str, object],
+) -> None:
+    prediction_df = prediction["rows"]
+    prediction_available = (
+        bool(prediction.get("prediction_available"))
+        and not prediction_df.empty
+    )
+    summary = build_prediction_metric_summary(
+        measurements_df,
+        prediction_df if prediction_available else prediction_df.iloc[0:0],
+    )
+    with st.container(key="mobile_metric_grid_kalorimetry_summary"):
+        columns = st.columns(4)
+        columns[0].metric(
+            "Spotřeba energie",
+            format_energy_metric(summary["actual_total"]),
+        )
+        if prediction_available:
+            columns[1].metric(
+                "Očekávaná spotřeba",
+                format_energy_metric(summary["expected_total"]),
+            )
+            columns[2].metric(
+                "Odchylka",
+                format_energy_metric(summary["deviation"]),
+            )
+            columns[3].metric(
+                "Odchylka [%]",
+                (
+                    "N/A"
+                    if summary["deviation_pct"] is None
+                    else f"{summary['deviation_pct']:+.1f} %"
+                ),
+            )
+        else:
+            columns[1].metric("Očekávaná spotřeba", "Nedostupné")
+            columns[2].metric("Odchylka", "Nedostupné")
+            columns[3].metric("Odchylka [%]", "Nedostupné")
+    if prediction.get("availability_reason") == "insufficient_history":
+        st.caption("Pro tento kalorimetr zatím není dostatečná historie.")
+    if prediction.get("availability_status") == "partial":
+        st.warning("Predikce je dostupná pouze pro část vybraného období.")
+
+
+def render_prediction_summary(prediction: dict[str, object]) -> None:
+    rows = prediction["rows"]
+    if not prediction.get("prediction_available") or rows.empty:
+        st.metric("Očekávaná spotřeba", "Nedostupné")
+        return
+    st.metric(
+        "Očekávaná spotřeba",
+        format_energy_metric(rows["ocekavana_spotreba"].sum()),
+    )
+
+
+def build_prediction_chart(
+    prediction_df: pd.DataFrame,
+    *,
+    value_column: str = "ocekavana_spotreba",
+    y_title: str = "Spotřeba energie",
+    tooltip_title: str = "Očekávaná spotřeba",
+) -> alt.Chart:
+    return (
+        alt.Chart(prediction_df.dropna(subset=["date", value_column]))
+        .mark_line(color=PREDICTION_COLOR, strokeWidth=2.5)
+        .encode(
+            x=alt.X("date:T", title=None),
+            y=alt.Y(f"{value_column}:Q", title=y_title),
+            tooltip=[
+                alt.Tooltip("date:T", title="Datum"),
+                alt.Tooltip(
+                    f"{value_column}:Q",
+                    title=tooltip_title,
+                    format=".3f",
+                ),
+            ],
+        )
+        .properties(height=320)
+    )
+
+
+def render_graph_legend(show_prediction: bool) -> None:
+    items = [
+        '<span style="display:inline-flex;align-items:center;gap:0.4rem;margin-right:1rem;">'
+        f'<span style="display:inline-block;width:0.85rem;height:0.85rem;border-radius:999px;background:{ENERGY_CONSUMPTION_COLOR};"></span>'
+        "Spotřeba energie</span>"
+    ]
+    if show_prediction:
+        items.append(
+            '<span style="display:inline-flex;align-items:center;gap:0.4rem;">'
+            f'<span style="display:inline-block;width:0.85rem;height:0.85rem;border-radius:999px;background:{PREDICTION_COLOR};border:1px solid #cfcac4;"></span>'
+            "Predikce</span>"
+        )
+    st.markdown(
+        f'<div style="margin-top:0.75rem;font-size:0.92rem;">{"".join(items)}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def build_line_chart(
@@ -321,7 +420,12 @@ def build_bar_chart(
     )
 
 
-def render_graphs(df: pd.DataFrame, detail_df: pd.DataFrame, detail_level: str) -> None:
+def render_graphs(
+    df: pd.DataFrame,
+    detail_df: pd.DataFrame,
+    detail_level: str,
+    prediction_df: pd.DataFrame,
+) -> None:
     if detail_level == "Ne" or detail_df.empty:
         chart_source_df = round_consumption_columns(df, columns=("spotreba_energie", "spotreba"))
         chart_cols = st.columns(2)
@@ -333,10 +437,21 @@ def render_graphs(df: pd.DataFrame, detail_df: pd.DataFrame, detail_level: str) 
             )
         with chart_cols[1]:
             st.subheader("Spotřeba energie")
+            actual_chart = build_bar_chart(
+                chart_source_df,
+                "spotreba",
+                "Spotřeba energie",
+                ENERGY_CONSUMPTION_COLOR,
+            )
             st.altair_chart(
-                build_bar_chart(chart_source_df, "spotreba", "Spotřeba energie", ENERGY_CONSUMPTION_COLOR),
+                (
+                    build_prediction_chart(prediction_df) + actual_chart
+                    if not prediction_df.empty
+                    else actual_chart
+                ),
                 width="stretch",
             )
+        render_graph_legend(not prediction_df.empty)
         return
 
     rounded_detail_df = round_consumption_columns(
@@ -348,22 +463,51 @@ def render_graphs(df: pd.DataFrame, detail_df: pd.DataFrame, detail_level: str) 
         st.subheader(f"Spotřeba energie - {detail_level.lower()}")
         chart_df = rounded_detail_df[["date", "spotreba"]].copy()
         if detail_level == "Hodinově":
-            st.altair_chart(
-                build_line_chart(chart_df, "spotreba", "Spotřeba energie", ENERGY_CONSUMPTION_COLOR),
-                width="stretch",
+            actual_chart = build_line_chart(
+                chart_df,
+                "spotreba",
+                "Spotřeba energie",
+                ENERGY_CONSUMPTION_COLOR,
             )
         else:
-            st.altair_chart(
-                build_bar_chart(chart_df, "spotreba", "Spotřeba energie", ENERGY_CONSUMPTION_COLOR),
-                width="stretch",
+            actual_chart = build_bar_chart(
+                chart_df,
+                "spotreba",
+                "Spotřeba energie",
+                ENERGY_CONSUMPTION_COLOR,
             )
+        st.altair_chart(
+            (
+                build_prediction_chart(prediction_df) + actual_chart
+                if not prediction_df.empty
+                else actual_chart
+            ),
+            width="stretch",
+        )
     with chart_cols[1]:
         st.subheader(f"Kumulovaná spotřeba - {detail_level.lower()}")
         cumulative_df = rounded_detail_df[["date", "kumulovana_spotreba"]].copy()
+        actual_chart = build_line_chart(
+            cumulative_df,
+            "kumulovana_spotreba",
+            "Kumulovaná spotřeba",
+            ENERGY_CONSUMPTION_COLOR,
+        )
         st.altair_chart(
-            build_line_chart(cumulative_df, "kumulovana_spotreba", "Kumulovaná spotřeba", ENERGY_CONSUMPTION_COLOR),
+            (
+                build_prediction_chart(
+                    prediction_df,
+                    value_column="ocekavana_kumulovana_spotreba",
+                    y_title="Kumulovaná spotřeba",
+                    tooltip_title="Očekávaná kumulovaná spotřeba",
+                )
+                + actual_chart
+                if not prediction_df.empty
+                else actual_chart
+            ),
             width="stretch",
         )
+    render_graph_legend(not prediction_df.empty)
 
 
 def render_data_table(df: pd.DataFrame, detail_df: pd.DataFrame, detail_level: str) -> None:
@@ -451,9 +595,30 @@ def render_dashboard() -> None:
         user_is_admin,
     )
     measurements_df = prepare_measurements(measurements_df)
+    granularity = {
+        DETAIL_OPTIONS[1]: "monthly",
+        DETAIL_OPTIONS[2]: "daily",
+        DETAIL_OPTIONS[3]: "hourly",
+    }.get(detail_level, "hourly")
+    prediction = load_prediction_series(
+        selected_ident,
+        start_date,
+        end_date,
+        granularity,
+        allowed_devices,
+        user_is_admin,
+    )
+    prediction_df = prediction["rows"]
 
     if measurements_df.empty:
         st.info("Pro zvolený filtr nejsou k dispozici žádná měření.")
+        st.title(f"Spotřeba energie - {selected_ident}")
+        render_prediction_summary(prediction)
+        if graph_enabled and not prediction_df.empty:
+            st.altair_chart(
+                build_prediction_chart(prediction_df),
+                width="stretch",
+            )
         return
 
     detail_df = build_detail_table(measurements_df, detail_level)
@@ -465,7 +630,7 @@ def render_dashboard() -> None:
     actual_range = f"{format_value(measurements_df[axis_column].min())} - {format_value(measurements_df[axis_column].max())}"
     st.caption(f"Reálně načtený rozsah dat: {actual_range}")
 
-    render_summary_metrics(measurements_df)
+    render_overview_metrics(measurements_df, prediction)
 
     with st.container(border=True):
         st.subheader("Počáteční a konečný stav")
@@ -481,7 +646,12 @@ def render_dashboard() -> None:
 
     if graph_enabled:
         with st.container(border=True):
-            render_graphs(measurements_df, detail_df, detail_level)
+            render_graphs(
+                measurements_df,
+                detail_df,
+                detail_level,
+                prediction_df,
+            )
 
     with st.container(border=True):
         st.subheader("Data")

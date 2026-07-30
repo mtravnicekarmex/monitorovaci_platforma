@@ -36,7 +36,7 @@ SCHEDULER_JOB_SPECS: tuple[SchedulerJobSpec, ...] = (
     SchedulerJobSpec(
         id="quarter_hour_job",
         label="Quarter hour",
-        description="Import vodomeru, plynomeru a manometru, scoring, eventy a alerting.",
+        description="Import vodomeru, plynomeru, kalorimetru a manometru, scoring, eventy a alerting.",
         trigger_kwargs={"minute": "5,16,35,47", "second": 5},
     ),
     SchedulerJobSpec(
@@ -55,7 +55,7 @@ SCHEDULER_JOB_SPECS: tuple[SchedulerJobSpec, ...] = (
     SchedulerJobSpec(
         id="daily_job",
         label="Daily midnight",
-        description="SOFTLINK import, import elektromeru do monitoringu, meteo sync a SmartFuelPass sync relaci.",
+        description="SOFTLINK import, import elektromeru do monitoringu a meteo sync.",
         trigger_kwargs={"hour": 0, "minute": 15, "second": 5},
     ),
     SchedulerJobSpec(

@@ -44,6 +44,19 @@ def test_build_vodomery_weekly_forecast_period_uses_calendar_week():
     assert period.label == "2026-07-13 - 2026-07-20"
 
 
+def test_build_vodomery_weekly_forecast_period_defaults_to_prague_time(monkeypatch):
+    monkeypatch.setattr(
+        vodomery_prediction,
+        "prague_now_naive",
+        lambda: datetime.datetime(2026, 8, 2, 23, 30),
+    )
+
+    period = vodomery_prediction.build_vodomery_weekly_forecast_period()
+
+    assert period.start == datetime.datetime(2026, 7, 27)
+    assert period.end == datetime.datetime(2026, 8, 3)
+
+
 def test_get_candidate_model_versions_exposes_conditionally_deployable_candidates():
     assert get_candidate_model_versions() == (1, 2, 3, 4, 5)
     assert get_candidate_model_versions(include_measured_only=True) == (1, 2, 3, 4, 5)
@@ -1119,6 +1132,55 @@ def test_build_selected_model_decisions_uses_deployable_global_model_when_wape_i
     assert decision.metadata["selected_from_device_metrics"] is False
 
 
+def test_build_selected_model_decisions_marks_missing_history_unavailable():
+    forecast_period = vodomery_prediction.build_vodomery_weekly_forecast_period(
+        reference_time=datetime.datetime(2026, 7, 27, 4, 10, 5),
+    )
+    global_summary = ModelPerformanceSummary(
+        model_version=3,
+        model_name="Model 3 - recency weighted blend",
+        model_key="recency_weighted_blend",
+        validation_total_count=100,
+        matched_validation_count=100,
+        coverage=1.0,
+        mae=0.0,
+        rmse=0.0,
+        bias=0.0,
+        profile_count=1000,
+    )
+    new_meter_candidate = vodomery_prediction.DeviceModelPerformanceSummary(
+        identifikace="NEW_V1",
+        model_version=3,
+        model_key="recency_weighted_blend",
+        model_name="Model 3 - recency weighted blend",
+        selection_enabled=True,
+        rolling_backtest_fold_count=0,
+        rolling_validation_total_count=0,
+        rolling_matched_validation_count=0,
+        rolling_coverage=0.0,
+        rolling_mae=None,
+        rolling_rmse=None,
+        rolling_bias=None,
+        rolling_wape=None,
+    )
+
+    decision = vodomery_prediction._build_selected_model_decisions(
+        device_summaries=(new_meter_candidate,),
+        selected_summary=global_summary,
+        forecast_period=forecast_period,
+        selection_run_id=93,
+        deployable_profile_pairs={("NEW_V1", 3)},
+    )[0]
+
+    assert (
+        decision.fallback_reason
+        is vodomery_prediction.PredictionSelectionFallbackReason.INSUFFICIENT_HISTORY
+    )
+    assert decision.metadata["prediction_available"] is False
+    assert decision.metadata["availability_reason"] == "insufficient_history"
+    assert decision.metadata["deployable_profile_required"] is False
+
+
 def test_build_selected_model_decisions_fallbacks_below_coverage():
     forecast_period = vodomery_prediction.build_vodomery_weekly_forecast_period(
         reference_time=datetime.datetime(2026, 7, 13, 4, 10, 5),
@@ -1342,6 +1404,60 @@ def test_persist_selected_prediction_profile_snapshots_fails_missing_profiles():
         assert "missing source profiles" in str(exc)
     else:
         raise AssertionError("missing selected profiles should fail the rebuild")
+
+
+def test_insufficient_history_decision_does_not_archive_available_candidate_profile():
+    forecast_period = vodomery_prediction.build_vodomery_weekly_forecast_period(
+        reference_time=datetime.datetime(2026, 7, 27, 4, 10, 5),
+    )
+    decision = vodomery_prediction.PredictionSelectedModelDecision(
+        medium_key="vodomery",
+        identifier="NEW_V1",
+        forecast_period=forecast_period,
+        selection_run_id=93,
+        selected_model_version=3,
+        selected_model_key="recency_weighted_blend",
+        selected_model_name="Model 3 - recency weighted blend",
+        global_model_version=3,
+        global_model_key="recency_weighted_blend",
+        global_model_name="Model 3 - recency weighted blend",
+        fallback_reason=(
+            vodomery_prediction.PredictionSelectionFallbackReason.INSUFFICIENT_HISTORY
+        ),
+    )
+    profile = SimpleNamespace(
+        identifikace="NEW_V1",
+        model_version=3,
+        interval_minutes=15,
+        day_of_week=0,
+        slot=0,
+        mean=0.0,
+        median=0.0,
+        p10=0.0,
+        p90=0.0,
+        std=0.0001,
+        sample_size=1,
+        created_at=datetime.datetime(2026, 7, 27, 5, 0),
+    )
+
+    class FakeScalars:
+        def all(self):
+            return [profile]
+
+    class FakeResult:
+        def scalars(self):
+            return FakeScalars()
+
+    class FakeSession:
+        def execute(self, statement):
+            return FakeResult()
+
+    rows = vodomery_prediction._build_selected_prediction_profile_snapshot_rows(
+        FakeSession(),
+        (decision,),
+    )
+
+    assert rows == ()
 
 
 def test_build_selected_prediction_profile_snapshot_rows_can_skip_missing_profiles():

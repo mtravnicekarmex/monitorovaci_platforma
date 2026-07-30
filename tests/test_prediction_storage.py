@@ -308,6 +308,33 @@ def test_persist_prediction_profile_snapshots_skips_empty_batches():
     assert persist_prediction_profile_snapshots(FakeSession(), []) == 0
 
 
+def test_persist_prediction_profile_snapshots_batches_large_inserts():
+    batch_lengths = []
+
+    class FakeResult:
+        def __init__(self, rowcount):
+            self.rowcount = rowcount
+
+    class FakeSession:
+        def execute(self, statement):
+            row_count = len(statement._multi_values[0])
+            batch_lengths.append(row_count)
+            return FakeResult(row_count)
+
+    rows = [
+        {**_profile_snapshot_row(), "slot": slot}
+        for slot in range(5)
+    ]
+    inserted_count = persist_prediction_profile_snapshots(
+        FakeSession(),
+        rows,
+        batch_size=2,
+    )
+
+    assert inserted_count == 5
+    assert batch_lengths == [2, 2, 1]
+
+
 def test_persist_prediction_backfill_candidate_metrics_returns_inserted_count():
     captured = {}
 

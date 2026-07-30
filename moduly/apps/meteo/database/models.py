@@ -57,8 +57,12 @@ class MeteoForecastHourly(Base):
         {"schema": "monitoring"},
     )
 
-    datetime_hour: Mapped[datetime] = mapped_column(DateTime(timezone=False), primary_key=True, nullable=False)
-    forecast_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    datetime_hour: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False), primary_key=True, nullable=False
+    )
+    forecast_run_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False), primary_key=True, nullable=False
+    )
 
     temperature: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
     apparent_temperature: Mapped[float] = mapped_column(Numeric(5, 2), nullable=True)

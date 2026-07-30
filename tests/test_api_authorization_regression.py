@@ -10,6 +10,7 @@ from services.api.core import dependencies, tokens
 from services.api.core.dependencies import (
     get_current_admin_user,
     get_current_browser_session_user,
+    get_current_kalorimetry_user,
     get_current_map_image_session_user,
     get_current_manometry_user,
     get_current_plynomery_user,
@@ -19,9 +20,11 @@ from services.api.core.dependencies import (
 )
 from services.api.main import app
 from services.api.routes import manometry as manometry_routes
+from services.api.routes import kalorimetry as kalorimetry_routes
 from services.api.routes import plynomery as plynomery_routes
 from services.api.routes import vodomery as vodomery_routes
 from services.api.services import manometry as manometry_service
+from services.api.services import kalorimetry as kalorimetry_service
 from services.api.services import plynomery as plynomery_service
 from services.api.services import vodomery as vodomery_service
 from services.api.services.dashboard_auth import AuthorizationError, require_device_access
@@ -36,6 +39,8 @@ PUBLIC_OPERATIONS = {
 }
 
 EXPECTED_ADMIN_OPERATIONS = {
+    ("GET", "/api/v1/admin/smartfuelpass/interactive-import/status"),
+    ("POST", "/api/v1/admin/smartfuelpass/interactive-import/start"),
     ("GET", "/health/scheduler"),
     ("GET", "/health/scheduler/log"),
     ("POST", "/health/scheduler/jobs/{job_id}/run"),
@@ -82,6 +87,11 @@ EXPECTED_ADMIN_OPERATIONS = {
 }
 
 EXPECTED_SCOPED_OPERATIONS = {
+    get_current_kalorimetry_user: {
+        ("GET", "/api/v1/kalorimetry/measurement-series"),
+        ("GET", "/api/v1/kalorimetry/prediction-profiles"),
+        ("GET", "/api/v1/kalorimetry/prediction-series"),
+    },
     get_current_vodomery_user: {
         ("GET", "/api/v1/vodomery/devices"),
         ("GET", "/api/v1/vodomery/overview-metrics"),
@@ -101,6 +111,9 @@ EXPECTED_SCOPED_OPERATIONS = {
     },
     get_current_plynomery_user: {
         ("GET", "/api/v1/plynomery/devices"),
+        ("GET", "/api/v1/plynomery/measurement-series"),
+        ("GET", "/api/v1/plynomery/prediction-profiles"),
+        ("GET", "/api/v1/plynomery/prediction-series"),
         ("GET", "/api/v1/plynomery/recent-anomalies"),
         ("GET", "/api/v1/plynomery/open-events"),
         ("GET", "/api/v1/plynomery/resolved-events"),
@@ -117,6 +130,61 @@ EXPECTED_SCOPED_OPERATIONS = {
 
 DEVICE_ROUTE_CASES = (
     (
+        "kalorimetry-measurement-series",
+        kalorimetry_routes,
+        "load_measurement_series",
+        kalorimetry_routes.get_kalorimetry_measurement_series,
+        {
+            "start_date": date(2026, 6, 1),
+            "end_date": date(2026, 6, 2),
+        },
+        [],
+    ),
+    (
+        "kalorimetry-prediction-profiles",
+        kalorimetry_routes,
+        "load_prediction_profiles",
+        kalorimetry_routes.get_kalorimetry_prediction_profiles,
+        {},
+        {
+            "identifikace": "V-2",
+            "prediction_available": False,
+            "availability_status": "unavailable",
+            "availability_reason": "no_selection_snapshot",
+            "selection_mode": "active",
+            "start_date": None,
+            "end_date": None,
+            "selection_run_id": None,
+            "selected_model_version": None,
+            "selected_model_name": None,
+            "valid_from": None,
+            "valid_to": None,
+            "availability_periods": [],
+            "rows": [],
+        },
+    ),
+    (
+        "kalorimetry-prediction-series",
+        kalorimetry_routes,
+        "load_prediction_series",
+        kalorimetry_routes.get_kalorimetry_prediction_series,
+        {
+            "start_date": date(2026, 6, 1),
+            "end_date": date(2026, 6, 2),
+            "granularity": "daily",
+        },
+        {
+            "identifikace": "V-2",
+            "start_date": date(2026, 6, 1),
+            "end_date": date(2026, 6, 2),
+            "granularity": "daily",
+            "prediction_available": False,
+            "availability_status": "unavailable",
+            "availability_reason": "insufficient_history",
+            "rows": [],
+        },
+    ),
+    (
         "vodomery-measurement-series",
         vodomery_routes,
         "load_measurement_series",
@@ -131,10 +199,15 @@ DEVICE_ROUTE_CASES = (
     (
         "vodomery-prediction-profiles",
         vodomery_routes,
-        "load_prediction_profiles",
+        "load_prediction_profile_result",
         vodomery_routes.get_vodomery_prediction_profiles,
         {},
-        [],
+        {
+            "prediction_available": False,
+            "availability_status": "unavailable",
+            "availability_reason": "insufficient_history",
+            "rows": [],
+        },
     ),
     (
         "vodomery-recent-anomalies",
@@ -185,6 +258,50 @@ DEVICE_ROUTE_CASES = (
         None,
     ),
     (
+        "plynomery-measurement-series",
+        plynomery_routes,
+        "load_measurement_series",
+        plynomery_routes.get_plynomery_measurement_series,
+        {
+            "start_date": date(2026, 6, 1),
+            "end_date": date(2026, 6, 2),
+        },
+        [],
+    ),
+    (
+        "plynomery-prediction-profiles",
+        plynomery_routes,
+        "load_prediction_profiles",
+        plynomery_routes.get_plynomery_prediction_profiles,
+        {},
+        {
+            "identifikace": "V-2",
+            "prediction_available": False,
+            "availability_status": "unavailable",
+            "availability_reason": "insufficient_history",
+            "selection_mode": "active",
+            "start_date": None,
+            "end_date": None,
+            "selection_run_id": 21,
+            "selected_model_version": 2,
+            "selected_model_name": "Model 2",
+            "valid_from": datetime(2026, 6, 1),
+            "valid_to": datetime(2026, 6, 8),
+            "availability_periods": [
+                {
+                    "prediction_available": False,
+                    "availability_reason": "insufficient_history",
+                    "selection_run_id": 21,
+                    "selected_model_version": 2,
+                    "selected_model_name": "Model 2",
+                    "valid_from": datetime(2026, 6, 1),
+                    "valid_to": datetime(2026, 6, 8),
+                }
+            ],
+            "rows": [],
+        },
+    ),
+    (
         "plynomery-recent-anomalies",
         plynomery_routes,
         "load_recent_anomalies",
@@ -196,9 +313,60 @@ DEVICE_ROUTE_CASES = (
         },
         [],
     ),
+    (
+        "plynomery-prediction-series",
+        plynomery_routes,
+        "load_prediction_series",
+        plynomery_routes.get_plynomery_prediction_series,
+        {
+            "start_date": date(2026, 6, 1),
+            "end_date": date(2026, 6, 2),
+            "granularity": "daily",
+        },
+        {
+            "identifikace": "V-2",
+            "start_date": date(2026, 6, 1),
+            "end_date": date(2026, 6, 2),
+            "granularity": "daily",
+            "prediction_available": False,
+            "availability_status": "unavailable",
+            "availability_reason": "insufficient_history",
+            "rows": [],
+        },
+    ),
 )
 
 DEVICE_SERVICE_CASES = (
+    (
+        "kalorimetry-measurement-series",
+        kalorimetry_service,
+        kalorimetry_service.load_measurement_series,
+        {
+            "identifikace": "V-2",
+            "start_date": date(2026, 6, 1),
+            "end_date": date(2026, 6, 2),
+        },
+        ("get_session_pg",),
+    ),
+    (
+        "kalorimetry-prediction-profiles",
+        kalorimetry_service,
+        kalorimetry_service.load_prediction_profiles,
+        {"identifikace": "V-2"},
+        ("get_session_pg",),
+    ),
+    (
+        "kalorimetry-prediction-series",
+        kalorimetry_service,
+        kalorimetry_service.load_prediction_series,
+        {
+            "identifikace": "V-2",
+            "start_date": date(2026, 6, 1),
+            "end_date": date(2026, 6, 2),
+            "granularity": "daily",
+        },
+        ("get_session_pg",),
+    ),
     (
         "vodomery-measurement-series",
         vodomery_service,
@@ -264,6 +432,24 @@ DEVICE_SERVICE_CASES = (
         ("get_session_ms", "get_session_pg"),
     ),
     (
+        "plynomery-measurement-series",
+        plynomery_service,
+        plynomery_service.load_measurement_series,
+        {
+            "identifikace": "V-2",
+            "start_date": date(2026, 6, 1),
+            "end_date": date(2026, 6, 2),
+        },
+        ("get_session_pg",),
+    ),
+    (
+        "plynomery-prediction-profiles",
+        plynomery_service,
+        plynomery_service.load_prediction_profiles,
+        {"identifikace": "V-2"},
+        ("get_session_pg",),
+    ),
+    (
         "plynomery-recent-anomalies",
         plynomery_service,
         plynomery_service.load_recent_anomalies,
@@ -272,6 +458,18 @@ DEVICE_SERVICE_CASES = (
             "start_date": date(2026, 6, 1),
             "end_date": date(2026, 6, 2),
             "limit": 50,
+        },
+        ("get_session_pg",),
+    ),
+    (
+        "plynomery-prediction-series",
+        plynomery_service,
+        plynomery_service.load_prediction_series,
+        {
+            "identifikace": "V-2",
+            "start_date": date(2026, 6, 1),
+            "end_date": date(2026, 6, 2),
+            "granularity": "daily",
         },
         ("get_session_pg",),
     ),
@@ -503,6 +701,7 @@ def test_every_section_or_page_scoped_operation_rejects_missing_permission(
         (get_current_vodomery_user, "vodomery"),
         (get_current_manometry_user, "manometry"),
         (get_current_plynomery_user, "plynomery"),
+        (get_current_kalorimetry_user, "kalorimetry"),
     ),
 )
 def test_section_dependencies_allow_assigned_section_and_device(
@@ -634,7 +833,12 @@ def test_device_services_reject_unassigned_identifier_before_database_access(
 ):
     current_user = SimpleNamespace(
         is_admin=False,
-        allowed_sections=("vodomery", "manometry", "plynomery"),
+        allowed_sections=(
+            "vodomery",
+            "manometry",
+            "plynomery",
+            "kalorimetry",
+        ),
         allowed_devices=("V-1",),
     )
 

@@ -32,6 +32,7 @@ from moduly.mereni.vodomery.reporting.daily_branch_report import (
     _format_number,
     _format_percent,
     _format_percent_delta,
+    _format_prediction_volume,
     _format_volume,
     _load_image_data_uri,
     _load_playwright_api,
@@ -79,7 +80,7 @@ class BranchMonthlyReportSection:
     title: str
     billing_ident: str
     actual_total: float
-    expected_total: float
+    expected_total: float | None
     period_limit: float | None
     remaining_to_limit: float | None
     billing_total: float | None
@@ -332,7 +333,15 @@ def build_monthly_vodomery_branch_report(
             branch_payload = branch_payload_by_key.get(config_item.key)
 
             actual_total = round(float((branch_payload or {}).get("actual_total", 0.0) or 0.0), 3)
-            expected_total = round(float((branch_payload or {}).get("expected_total", 0.0) or 0.0), 3)
+            expected_total_raw = (branch_payload or {}).get(
+                "expected_total",
+                0.0,
+            )
+            expected_total = (
+                None
+                if expected_total_raw is None
+                else round(float(expected_total_raw), 3)
+            )
             billing_total = _sum_billing_total((branch_payload or {}).get("hourly_rows") or ())
             branch_hourly_df = pd.DataFrame((branch_payload or {}).get("hourly_rows") or ())
             device_hourly_df = pd.DataFrame((branch_payload or {}).get("device_hourly_rows") or ())
@@ -353,7 +362,14 @@ def build_monthly_vodomery_branch_report(
                 accumulator["period_limit"] = round(float(accumulator["period_limit"]) + float(daily_limit_value), 3)
 
             accumulator["actual_total"] = round(float(accumulator["actual_total"]) + actual_total, 3)
-            accumulator["expected_total"] = round(float(accumulator["expected_total"]) + expected_total, 3)
+            accumulator["expected_total"] = (
+                None
+                if accumulator["expected_total"] is None or expected_total is None
+                else round(
+                    float(accumulator["expected_total"]) + expected_total,
+                    3,
+                )
+            )
             accumulator["billing_total"] = round(float(accumulator["billing_total"]) + billing_total, 3)
             accumulator["billing_night_consumption"] = round(
                 float(accumulator["billing_night_consumption"]) + float(billing_night_consumption or 0.0),
@@ -400,7 +416,12 @@ def build_monthly_vodomery_branch_report(
                 if not identifier:
                     continue
                 actual_value = round(float(row.get("spotreba", 0.0) or 0.0), 3)
-                expected_value = round(float(row.get("ocekavana_spotreba", 0.0) or 0.0), 3)
+                expected_value_raw = row.get("ocekavana_spotreba", 0.0)
+                expected_value = (
+                    None
+                    if expected_value_raw is None
+                    else round(float(expected_value_raw), 3)
+                )
                 accumulator["unique_devices"].add(identifier)
                 device_stats = accumulator["device_map"].setdefault(
                     identifier,
@@ -434,7 +455,16 @@ def build_monthly_vodomery_branch_report(
                     float(device_stats["nocni_spotreba"]) + float(night_consumption_by_device.get(identifier, 0.0)),
                     3,
                 )
-                device_stats["ocekavana_spotreba"] = round(float(device_stats["ocekavana_spotreba"]) + expected_value, 3)
+                device_stats["ocekavana_spotreba"] = (
+                    None
+                    if device_stats["ocekavana_spotreba"] is None
+                    or expected_value is None
+                    else round(
+                        float(device_stats["ocekavana_spotreba"])
+                        + expected_value,
+                        3,
+                    )
+                )
                 device_values[identifier] = actual_value
 
             accumulator["daily_rows"].append(
@@ -451,7 +481,11 @@ def build_monthly_vodomery_branch_report(
     for config_item in BRANCH_DASHBOARD_CONFIGS:
         accumulator = accumulators[config_item.key]
         actual_total = round(float(accumulator["actual_total"]), 3)
-        expected_total = round(float(accumulator["expected_total"]), 3)
+        expected_total = (
+            None
+            if accumulator["expected_total"] is None
+            else round(float(accumulator["expected_total"]), 3)
+        )
         billing_total = round(float(accumulator["billing_total"]), 3)
         period_limit = (
             round(float(accumulator["period_limit"]), 3) if accumulator["period_limit"] is not None else None
@@ -534,7 +568,7 @@ def _build_branch_section_html(section: BranchMonthlyReportSection, *, is_first:
         f"<div class='branch-summary-card'>{_build_metric_card_html('Součet spotřeby vs. fakturační vodoměr', main_value, main_detail, primary=True)}</div>"
         "</div>"
         "<div class='metric-grid'>"
-        f"{_build_metric_card_html('Predikce období', _format_volume(section.expected_total), _format_percent_delta(_prediction_delta_percent(section.actual_total, section.expected_total)))}"
+        f"{_build_metric_card_html('Predikce období', _format_prediction_volume(section.expected_total), _format_percent_delta(_prediction_delta_percent(section.actual_total, section.expected_total)))}"
         f"{_build_metric_card_html('Součet spotřeby', _format_volume(section.actual_total))}"
         f"{_build_metric_card_html('SPOTŘEBA SČVK', _format_volume(section.billing_total))}"
         "</div>"

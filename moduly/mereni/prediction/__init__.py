@@ -32,6 +32,7 @@ from moduly.mereni.prediction.contracts import (
 )
 from moduly.mereni.prediction.periods import (
     add_months,
+    build_calendar_week_forecast_period,
     build_next_forecast_period,
     month_start,
     next_month_start,
@@ -104,6 +105,7 @@ __all__ = [
     "SELECTION_MODE_ACTIVE",
     "SELECTION_MODE_DRY_RUN",
     "add_months",
+    "build_calendar_week_forecast_period",
     "build_insert_prediction_backfill_candidate_metrics_statement",
     "build_insert_prediction_profile_snapshots_statement",
     "build_insert_selected_model_snapshots_statement",

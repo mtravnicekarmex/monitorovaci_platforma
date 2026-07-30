@@ -21,7 +21,6 @@ from moduly.apps.dashboard.api_client import DashboardApiError
 from moduly.apps.dashboard.auth import require_page_access
 from moduly.apps.dashboard.time_semantics import add_chart_time, time_axis_column
 from moduly.apps.dashboard.vodomery_shared import (
-    apply_prediction_profiles,
     build_period_prediction,
     format_consumption_dataframe,
     format_consumption_with_unit,
@@ -97,6 +96,7 @@ def render_overview_sidebar(
 
     if apply_filters:
         st.session_state[APPLIED_KEY] = True
+        load_prediction_profiles.clear()
 
     start_date, end_date = normalize_date_range(date_range)
     graph_enabled = graph_option == "Ano"
@@ -123,14 +123,6 @@ def prepare_measurements(df: pd.DataFrame) -> pd.DataFrame:
     prepared["spotreba"] = prepared["spotreba"].round(3)
     prepared["kumulovana_spotreba"] = prepared["spotreba"].cumsum().round(3)
     return prepared
-
-
-def apply_prediction_layer(df: pd.DataFrame, profiles_df: pd.DataFrame) -> pd.DataFrame:
-    return apply_prediction_profiles(df, profiles_df)
-
-
-def has_prediction_data(df: pd.DataFrame) -> bool:
-    return "ocekavana_spotreba" in df.columns and df["ocekavana_spotreba"].notna().any()
 
 
 def build_full_day_hourly_prediction(profiles_df: pd.DataFrame, target_date: datetime.date) -> pd.DataFrame:
@@ -219,37 +211,25 @@ def build_detail_table(df: pd.DataFrame, detail_level: str) -> pd.DataFrame:
         "Denně": "D",
         "Hodinově": "h",
     }
-    aggregation_map: dict[str, str] = {
-        "objem": "last",
-        "identifikace": "first",
-        "seriove_cislo": "last",
-        "zdroj": "last",
-        "spotreba": "sum",
-        "kumulovana_spotreba": "last",
-        "synthetic": "max",
-        "nocni_odber": "max",
-        "gap_detected": "max",
-        "reset_detected": "sum",
-    }
-    if "model_version" in df.columns:
-        aggregation_map["model_version"] = "max"
-    if "ocekavana_spotreba" in df.columns:
-        aggregation_map["ocekavana_spotreba"] = "sum"
-    if "ocekavana_kumulovana_spotreba" in df.columns:
-        aggregation_map["ocekavana_kumulovana_spotreba"] = "last"
-
     axis_column = time_axis_column(df)
     resampled = (
         df.set_index(axis_column)
         .resample(freq_map[detail_level])
-        .agg(aggregation_map)
+        .agg(
+            objem=("objem", "last"),
+            identifikace=("identifikace", "first"),
+            seriove_cislo=("seriove_cislo", "last"),
+            spotreba=("spotreba", "sum"),
+            kumulovana_spotreba=("kumulovana_spotreba", "last"),
+            platne=("platne", "min"),
+            reset_detected=("reset_detected", "sum"),
+        )
         .reset_index()
         .rename(columns={axis_column: "date"})
     )
     resampled = resampled.rename(
         columns={
-            "synthetic": "synteticka_data",
-            "gap_detected": "mezera_v_datech",
+            "platne": "platna_data",
             "reset_detected": "pocet_resetu",
         }
     )
@@ -259,13 +239,6 @@ def build_detail_table(df: pd.DataFrame, detail_level: str) -> pd.DataFrame:
 
     resampled["spotreba"] = resampled["spotreba"].round(3)
     resampled["kumulovana_spotreba"] = resampled["kumulovana_spotreba"].round(3)
-    if "ocekavana_spotreba" in resampled.columns:
-        resampled["ocekavana_spotreba"] = pd.to_numeric(resampled["ocekavana_spotreba"], errors="coerce").round(3)
-    if "ocekavana_kumulovana_spotreba" in resampled.columns:
-        resampled["ocekavana_kumulovana_spotreba"] = pd.to_numeric(
-            resampled["ocekavana_kumulovana_spotreba"],
-            errors="coerce",
-        ).round(3)
     resampled["pocet_resetu"] = resampled["pocet_resetu"].fillna(0).astype(int)
     return resampled
 
@@ -311,13 +284,22 @@ def build_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     ].copy()
 
 
-def render_summary_metrics(df: pd.DataFrame, change_table: pd.DataFrame) -> None:
+def render_summary_metrics(
+    df: pd.DataFrame,
+    change_table: pd.DataFrame,
+    prediction_df: pd.DataFrame,
+    *,
+    prediction_availability_reason: str | None = None,
+) -> None:
     total_consumption = round(float(df["kumulovana_spotreba"].iloc[-1]), 3)
     with st.container(key="mobile_metric_grid_vodomery_summary"):
         metric_cols = st.columns(4)
         metric_cols[0].metric("Spotřeba za období", format_consumption_with_unit(total_consumption))
-        if has_prediction_data(df):
-            expected_total = round(float(df["ocekavana_spotreba"].fillna(0).sum()), 3)
+        if not prediction_df.empty:
+            expected_total = round(
+                float(prediction_df["ocekavana_spotreba"].fillna(0).sum()),
+                3,
+            )
             deviation = round(total_consumption - expected_total, 3)
             if expected_total != 0:
                 deviation_pct = (deviation / expected_total) * 100
@@ -327,6 +309,10 @@ def render_summary_metrics(df: pd.DataFrame, change_table: pd.DataFrame) -> None
             metric_cols[1].metric("Očekávaná spotřeba", format_consumption_with_unit(expected_total))
             metric_cols[2].metric("Odchylka", format_consumption_with_unit(deviation, signed=True))
             metric_cols[3].metric("Odchylka [%]", deviation_pct_label)
+        elif prediction_availability_reason == "insufficient_history":
+            metric_cols[1].metric("Očekávaná spotřeba", "Nedostupné")
+            metric_cols[2].metric("Odchylka", "Nedostupné")
+            metric_cols[3].metric("Odchylka [%]", "Nedostupné")
         else:
             metric_cols[1].metric(
                 "Resety a výměny",
@@ -342,9 +328,7 @@ def render_graphs(
     df: pd.DataFrame,
     detail_df: pd.DataFrame,
     detail_level: str,
-    start_date: datetime.date,
-    end_date: datetime.date,
-    profiles_df: pd.DataFrame,
+    prediction_df: pd.DataFrame,
 ) -> None:
     if detail_level == "Ne" or detail_df.empty:
         chart_source_df = round_consumption_columns(df, columns=("objem", "spotreba"))
@@ -359,20 +343,7 @@ def render_graphs(
         return
 
     use_line_chart = detail_level == "Hodinově"
-    prediction_available = has_prediction_data(detail_df)
-    prediction_frequency = {
-        "Měsíčně": "ME",
-        "Denně": "D",
-        "Hodinově": "h",
-    }[detail_level]
-    period_prediction_df = build_period_prediction(
-        profiles_df,
-        start_date=start_date,
-        end_date=end_date,
-        frequency=prediction_frequency,
-    )
-    if not period_prediction_df.empty:
-        prediction_available = True
+    prediction_available = not prediction_df.empty
     rounded_detail_df = round_consumption_columns(
         detail_df,
         columns=("spotreba", "kumulovana_spotreba", "ocekavana_spotreba", "ocekavana_kumulovana_spotreba"),
@@ -382,17 +353,14 @@ def render_graphs(
         st.subheader(f"Spotřeba - {detail_level.lower()}")
         chart_df = rounded_detail_df[["date", "spotreba"]].rename(columns={"spotreba": "Spotřeba"}).copy()
         if prediction_available:
-            if not period_prediction_df.empty:
-                chart_df = chart_df.merge(
-                    round_consumption_columns(
-                        period_prediction_df,
-                        columns=("ocekavana_spotreba",),
-                    )[["date", "ocekavana_spotreba"]],
-                    on="date",
-                    how="outer",
-                ).sort_values("date")
-            else:
-                chart_df["ocekavana_spotreba"] = rounded_detail_df["ocekavana_spotreba"].values
+            chart_df = chart_df.merge(
+                round_consumption_columns(
+                    prediction_df,
+                    columns=("ocekavana_spotreba",),
+                )[["date", "ocekavana_spotreba"]],
+                on="date",
+                how="outer",
+            ).sort_values("date")
             chart_df = chart_df.rename(columns={"ocekavana_spotreba": "Očekávaná spotřeba"})
         if prediction_available:
             actual_chart = alt.Chart(chart_df).mark_line(
@@ -424,17 +392,14 @@ def render_graphs(
             columns={"kumulovana_spotreba": "Kumulovaná spotřeba"}
         ).copy()
         if prediction_available:
-            if not period_prediction_df.empty:
-                cumulative_df = cumulative_df.merge(
-                    round_consumption_columns(
-                        period_prediction_df,
-                        columns=("ocekavana_kumulovana_spotreba",),
-                    )[["date", "ocekavana_kumulovana_spotreba"]],
-                    on="date",
-                    how="outer",
-                ).sort_values("date")
-            else:
-                cumulative_df["ocekavana_kumulovana_spotreba"] = rounded_detail_df["ocekavana_kumulovana_spotreba"].values
+            cumulative_df = cumulative_df.merge(
+                round_consumption_columns(
+                    prediction_df,
+                    columns=("ocekavana_kumulovana_spotreba",),
+                )[["date", "ocekavana_kumulovana_spotreba"]],
+                on="date",
+                how="outer",
+            ).sort_values("date")
             cumulative_df = cumulative_df.rename(
                 columns={"ocekavana_kumulovana_spotreba": "Očekávaná kumulovaná spotřeba"}
             )
@@ -459,24 +424,20 @@ def render_data_table(df: pd.DataFrame, detail_df: pd.DataFrame, detail_level: s
             df.rename(
                 columns={
                     "date": "Datum",
-                    "identifikace": "Vodomer",
-                    "seriove_cislo": "Seriove cislo",
-                    "zdroj": "Zdroj",
+                    "identifikace": "Vodoměr",
+                    "seriove_cislo": "Sériové číslo",
                     "objem": "Objem",
-                    "delta": "Delta",
-                    "spotreba": "Spotreba",
-                    "kumulovana_spotreba": "Kumulovana spotreba",
-                    "synthetic": "Synteticka data",
-                    "nocni_odber": "Nocni odber",
-                    "gap_detected": "Mezera v datech",
-                    "reset_detected": "Reset detekovan",
+                    "platne": "Platné",
+                    "spotreba": "Spotřeba",
+                    "kumulovana_spotreba": "Kumulovaná spotřeba",
+                    "reset_detected": "Reset detekován",
                 }
             )
             .sort_values("Datum", ascending=False)
         )
         table_df = format_consumption_dataframe(
             table_df,
-            columns=("Objem", "Delta", "Spotreba", "Kumulovana spotreba"),
+            columns=("Objem", "Spotřeba", "Kumulovaná spotřeba"),
         )
         st.dataframe(table_df, width="stretch", hide_index=True)
         return
@@ -484,25 +445,18 @@ def render_data_table(df: pd.DataFrame, detail_df: pd.DataFrame, detail_level: s
     table_df = detail_df.rename(
         columns={
             "date": "Datum",
-            "identifikace": "Vodomer",
-            "seriove_cislo": "Seriove cislo",
-            "zdroj": "Zdroj",
+            "identifikace": "Vodoměr",
+            "seriove_cislo": "Sériové číslo",
             "objem": "Objem",
-            "spotreba": "Spotreba",
-            "kumulovana_spotreba": "Kumulovana spotreba",
-            "ocekavana_spotreba": "Ocekavana spotreba",
-            "ocekavana_kumulovana_spotreba": "Ocekavana kumulovana spotreba",
-            "synteticka_data": "Synteticka data",
-            "nocni_odber": "Nocni odber",
-            "mezera_v_datech": "Mezera v datech",
-            "pocet_resetu": "Pocet resetu",
+            "spotreba": "Spotřeba",
+            "kumulovana_spotreba": "Kumulovaná spotřeba",
+            "platna_data": "Platná data",
+            "pocet_resetu": "Počet resetů",
         }
     ).sort_values("Datum", ascending=True)
-    if not has_prediction_data(detail_df):
-        table_df = table_df.drop(columns=["Ocekavana spotreba", "Ocekavana kumulovana spotreba"], errors="ignore")
     table_df = format_consumption_dataframe(
         table_df,
-        columns=("Objem", "Spotreba", "Kumulovana spotreba", "Ocekavana spotreba", "Ocekavana kumulovana spotreba"),
+        columns=("Objem", "Spotřeba", "Kumulovaná spotřeba"),
     )
     st.dataframe(table_df, width="stretch", hide_index=True)
 
@@ -557,7 +511,17 @@ def render_dashboard() -> None:
         start_date,
         end_date,
     )
-    measurements_df = apply_prediction_layer(measurements_df, profiles_df)
+    prediction_frequency = {
+        "Měsíčně": "ME",
+        "Denně": "D",
+        "Hodinově": "h",
+    }.get(detail_level, "h")
+    prediction_df = build_period_prediction(
+        profiles_df,
+        start_date=start_date,
+        end_date=end_date,
+        frequency=prediction_frequency,
+    )
 
     if measurements_df.empty:
         st.info("Pro zvolený filtr nejsou k dispozici žadná měření.")
@@ -572,7 +536,19 @@ def render_dashboard() -> None:
     actual_range = f"{format_value(measurements_df[axis_column].min())} - {format_value(measurements_df[axis_column].max())}"
     st.caption(f"Realně načtený rozsah dat: {actual_range}")
 
-    render_summary_metrics(measurements_df, change_table)
+    prediction_availability_reason = profiles_df.attrs.get(
+        "availability_reason"
+    )
+    render_summary_metrics(
+        measurements_df,
+        change_table,
+        prediction_df,
+        prediction_availability_reason=prediction_availability_reason,
+    )
+    if prediction_availability_reason == "insufficient_history":
+        st.caption(
+            "Pro tento vodoměr zatím není dostatečná historie pro predikci."
+        )
 
     with st.container(border=True):
         st.subheader("Počáteční a konečný stav")
@@ -588,18 +564,17 @@ def render_dashboard() -> None:
 
     if graph_enabled:
         with st.container(border=True):
-            render_graphs(measurements_df, detail_df, detail_level, start_date, end_date, profiles_df)
-            show_prediction_legend = has_prediction_data(detail_df) or (
-                detail_level == "Hodinově"
-                and start_date == end_date == prague_today()
-                and not profiles_df.empty
+            render_graphs(
+                measurements_df,
+                detail_df,
+                detail_level,
+                prediction_df,
             )
-            render_graph_legend(show_prediction_legend)
+            render_graph_legend(not prediction_df.empty)
 
-    if detail_level != "Ne":
-        with st.container(border=True):
-            st.subheader(f"Agregovaná data - {detail_level.lower()}")
-            render_data_table(measurements_df, detail_df, detail_level)
+    with st.container(border=True):
+        st.subheader("Data")
+        render_data_table(measurements_df, detail_df, detail_level)
 
 
 try:

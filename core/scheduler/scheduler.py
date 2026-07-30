@@ -46,6 +46,7 @@ from decouple import config
 from moduly.mereni.vodomery.database.vodomery_db_vse import vodomery_db_import
 from moduly.mereni.elektromery.database.elektromery_db_vse import elektromery_db_import
 from moduly.mereni.manometry.database.manometry_db_vse import manometry_db_import
+from moduly.mereni.kalorimetry.database.kalorimetry_db_vse import kalorimetry_db_import
 from moduly.mereni.vodomery.vodomery_prediction import (
     get_candidate_model_versions,
     get_runtime_model_version,
@@ -85,7 +86,7 @@ from moduly.mereni.plynomery.plynomery_events import detect_events_from_scores a
 from moduly.mereni.plynomery.alerting import process_plynomery_alerts
 from moduly.mereni.plynomery.reporting import send_plynomery_model_rebuild_report
 from moduly.apps.meteo.meteo_sync import meteo_sync
-from moduly.apps.smartfuelpass import send_charge_sessions_report_email, sync_charge_sessions_to_db
+from moduly.apps.smartfuelpass import send_charge_sessions_report_email
 
 if os.name == "nt":
     import msvcrt
@@ -1330,7 +1331,7 @@ def _run_database_preflight_or_skip(job_id: str) -> SkippedJobResult | None:
 #
 # Přesné časy běhu jsou definované v `core.scheduler.job_schedule`.
 
-# Import vodomeru, scoring, eventy a alerting.
+# Import vodomeru, plynomeru, kalorimetru a manometru, scoring, eventy a alerting.
 @locked_job
 def quarter_hour_job():
     preflight_result = _run_database_preflight_or_skip("quarter_hour_job")
@@ -1376,6 +1377,10 @@ def quarter_hour_job():
             score_new_plynomery_measurements,
             model_version=model_version,
             bootstrap_to_latest_if_missing=True,
+            use_per_identifier_selection=(
+                model_version == active_plynomery_model_version
+            ),
+            selection_mode=SELECTION_MODE_ACTIVE,
         )
         plynomery_event_result = safe_call(
             detect_plynomery_events_from_scores,
@@ -1389,6 +1394,7 @@ def quarter_hour_job():
         active_event_ids=active_plynomery_event_result.get("active_event_ids", []),
         resolved_event_ids=active_plynomery_event_result.get("resolved_event_ids", []),
     )
+    safe_call(kalorimetry_db_import)
     safe_call(manometry_db_import)
 
 
@@ -1412,7 +1418,7 @@ def daily_seven_and_two_job():
     safe_call(daily_web_monitor_job)
 
 
-# Nocni SOFTLINK import, synchronizace meteo dat a SmartFuelPass relaci.
+# Nocni SOFTLINK import a synchronizace meteo dat.
 @locked_job
 def daily_job():
     preflight_result = _run_database_preflight_or_skip("daily_job")
@@ -1421,7 +1427,6 @@ def daily_job():
 
     safe_call(SOFTLINK_save_to_database_all)
     safe_call(elektromery_softlink_monitoring_import)
-    safe_call(sync_charge_sessions_to_db)
     safe_call(meteo_sync)
 
 
@@ -1543,10 +1548,13 @@ def _run_vodomery_alerting_step() -> None:
 
 
 def _run_plynomery_scoring_step() -> None:
+    active_model_version = get_plynomery_runtime_model_version()
     for model_version in get_plynomery_candidate_model_versions():
         score_new_plynomery_measurements(
             model_version=model_version,
             bootstrap_to_latest_if_missing=True,
+            use_per_identifier_selection=model_version == active_model_version,
+            selection_mode=SELECTION_MODE_ACTIVE,
         )
 
 
@@ -1563,6 +1571,8 @@ def _run_plynomery_alerting_step() -> None:
     score_new_plynomery_measurements(
         model_version=active_model_version,
         bootstrap_to_latest_if_missing=True,
+        use_per_identifier_selection=True,
+        selection_mode=SELECTION_MODE_ACTIVE,
     )
     event_result = detect_plynomery_events_from_scores(
         model_version=active_model_version,
@@ -1715,6 +1725,15 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             kind="internal_step",
         ),
         ManualRunnableSpec(
+            id="kalorimetry_db_import",
+            label="Import kalorimetru",
+            description="Import aktualnich kalorimetrickych mereni z MSSQL do monitoring.Mereni_kalorimetry_vse.",
+            run_fn=kalorimetry_db_import,
+            lock_names=("quarter_hour_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
             id="manometry_db_import",
             label="Import manometru",
             description="Import aktualnich tlakovych mereni manometru do monitoring.Mereni_manometry_vse.",
@@ -1755,15 +1774,6 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             label="Import SOFTLINK elektromeru do monitoringu",
             description="Denní import SOFTLINK elektromernych dat do monitoring.Mereni_elektromery_vse.",
             run_fn=elektromery_softlink_monitoring_import,
-            lock_names=("daily_job",),
-            is_scheduled=False,
-            kind="internal_step",
-        ),
-        ManualRunnableSpec(
-            id="sync_charge_sessions_to_db",
-            label="Zapis SmartFuelPass relaci do databaze",
-            description="Synchronizace SmartFuelPass nabijecich relaci do databaze.",
-            run_fn=sync_charge_sessions_to_db,
             lock_names=("daily_job",),
             is_scheduled=False,
             kind="internal_step",

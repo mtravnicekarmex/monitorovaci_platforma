@@ -14,6 +14,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.db.connect import get_session_ms, get_session_pg
 from moduly.apps.dashboard.auth import get_allowed_devices, is_admin
+from moduly.apps.dashboard.api_client import (
+    DashboardApiError,
+    get_kalorimetry_prediction_series,
+)
 from moduly.apps.dashboard.device_photo import (
     build_photo_data_uri,
     render_clickable_device_photo,
@@ -30,6 +34,7 @@ from moduly.apps.dashboard.vodomery_shared import (
     format_value,
     normalize_date_range,
     render_page_styles,
+    require_dashboard_api_token,
     round_consumption_columns,
 )
 from moduly.mereni.time_semantics import build_time_columns
@@ -174,6 +179,88 @@ def load_measurement_series(
         return add_time_semantics_columns(measurements)
     finally:
         session.close()
+
+
+@st.cache_data(ttl=60)
+def load_prediction_series(
+    identifikace: str,
+    start_date: datetime.date,
+    end_date: datetime.date,
+    granularity: str,
+    allowed_devices: tuple[str, ...],
+    user_is_admin: bool,
+) -> dict[str, object]:
+    del allowed_devices, user_is_admin
+    try:
+        payload = get_kalorimetry_prediction_series(
+            require_dashboard_api_token(),
+            identifikace=identifikace,
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat(),
+            granularity=granularity,
+        )
+    except DashboardApiError as exc:
+        if exc.status_code != 404:
+            raise
+        payload = {
+            "prediction_available": False,
+            "availability_status": "unavailable",
+            "availability_reason": "prediction_endpoint_unavailable",
+            "rows": [],
+        }
+    rows = pd.DataFrame(
+        payload.get("rows", []),
+        columns=[
+            "date",
+            "ocekavana_spotreba",
+            "interval_count",
+            "candidate_interval_count",
+            "prediction_complete",
+            "model_versions",
+            "profile_kinds",
+            "ocekavana_kumulovana_spotreba",
+        ],
+    )
+    if not rows.empty:
+        rows["date"] = pd.to_datetime(rows["date"], errors="coerce")
+        rows["ocekavana_spotreba"] = pd.to_numeric(
+            rows["ocekavana_spotreba"], errors="coerce"
+        ).clip(lower=0.0)
+        rows = rows.sort_values("date", kind="stable").reset_index(drop=True)
+        rows["ocekavana_kumulovana_spotreba"] = (
+            rows["ocekavana_spotreba"].cumsum().round(3)
+        )
+    return {**payload, "rows": rows}
+
+
+def build_prediction_metric_summary(
+    measurements_df: pd.DataFrame,
+    prediction_df: pd.DataFrame,
+) -> dict[str, float | None]:
+    actual_total = round(
+        float(measurements_df["kumulovana_spotreba"].iloc[-1]), 3
+    )
+    if prediction_df.empty:
+        return {
+            "actual_total": actual_total,
+            "expected_total": None,
+            "deviation": None,
+            "deviation_pct": None,
+        }
+    expected_total = round(
+        float(prediction_df["ocekavana_spotreba"].sum()), 3
+    )
+    deviation = round(actual_total - expected_total, 3)
+    return {
+        "actual_total": actual_total,
+        "expected_total": expected_total,
+        "deviation": deviation,
+        "deviation_pct": (
+            None
+            if expected_total == 0
+            else (deviation / expected_total) * 100
+        ),
+    }
 
 
 def _serialize_device_detail(device: Kalorimetr_areal_Zarizeni) -> dict[str, object]:

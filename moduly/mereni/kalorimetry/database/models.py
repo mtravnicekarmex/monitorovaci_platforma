@@ -132,6 +132,359 @@ class Mereni_kalorimetry(Base):
     reset_detected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
+class KalorimetryProfilesAnomaly(Base):
+    __tablename__ = "kalorimetry_anomaly_profiles"
+    __table_args__ = (
+        UniqueConstraint(
+            "identifikace",
+            "interval_minutes",
+            "day_of_week",
+            "slot",
+            "model_version",
+            name="uq_kalorimetry_profile_key",
+        ),
+        Index(
+            "ix_kalorimetry_profile_lookup",
+            "identifikace",
+            "interval_minutes",
+            "day_of_week",
+            "slot",
+        ),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
+    interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    day_of_week: Mapped[int] = mapped_column(Integer, nullable=False)
+    slot: Mapped[int] = mapped_column(Integer, nullable=False)
+    median: Mapped[float] = mapped_column(Float, nullable=False)
+    mean: Mapped[float] = mapped_column(Float, nullable=False)
+    p10: Mapped[float] = mapped_column(Float, nullable=False)
+    p90: Mapped[float] = mapped_column(Float, nullable=False)
+    std: Mapped[float] = mapped_column(Float, nullable=False)
+    model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    sample_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        nullable=False,
+    )
+
+
+class KalorimetryWeatherModelProfile(Base):
+    __tablename__ = "kalorimetry_weather_model_profiles"
+    __table_args__ = (
+        UniqueConstraint(
+            "identifikace",
+            "interval_minutes",
+            "day_of_week",
+            "slot",
+            "model_version",
+            name="uq_kalorimetry_weather_profile_key",
+        ),
+        Index(
+            "ix_kalorimetry_weather_profile_lookup",
+            "identifikace",
+            "interval_minutes",
+            "day_of_week",
+            "slot",
+        ),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
+    interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    day_of_week: Mapped[int] = mapped_column(Integer, nullable=False)
+    slot: Mapped[int] = mapped_column(Integer, nullable=False)
+    base_mean: Mapped[float] = mapped_column(Float, nullable=False)
+    hdd_slope: Mapped[float] = mapped_column(Float, nullable=False)
+    hdd_24h_mean: Mapped[float] = mapped_column(Float, nullable=False)
+    residual_mean: Mapped[float] = mapped_column(Float, nullable=False)
+    residual_median: Mapped[float] = mapped_column(Float, nullable=False)
+    residual_p10: Mapped[float] = mapped_column(Float, nullable=False)
+    residual_p90: Mapped[float] = mapped_column(Float, nullable=False)
+    residual_std: Mapped[float] = mapped_column(Float, nullable=False)
+    model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    sample_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        nullable=False,
+    )
+
+
+class KalorimetryModelSelectionRun(Base):
+    __tablename__ = "kalorimetry_model_selection_runs"
+    __table_args__ = (
+        Index("ix_kalorimetry_model_selection_runs_created", "created_at"),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    train_start: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    train_end: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    validation_start: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    validation_end: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    deploy_start: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    deploy_end: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    selected_model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    selected_model_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        nullable=False,
+    )
+
+
+class KalorimetryModelValidationRun(Base):
+    __tablename__ = "kalorimetry_model_validation_runs"
+    __table_args__ = (
+        Index(
+            "ix_kalorimetry_model_validation_runs_model_reference",
+            "model_version",
+            "reference_end",
+        ),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    reference_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        nullable=False,
+    )
+    fold_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        nullable=False,
+    )
+
+
+class KalorimetryModelValidationMetric(Base):
+    __tablename__ = "kalorimetry_model_validation_metrics"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "identifikace",
+            name="uq_kalorimetry_validation_metric_run_ident",
+        ),
+        Index("ix_kalorimetry_validation_metric_run", "run_id"),
+        Index(
+            "ix_kalorimetry_validation_metric_model_wape",
+            "model_version",
+            "wape",
+        ),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "monitoring.kalorimetry_model_validation_runs.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
+    rolling_backtest_fold_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    matched_fold_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    validation_total_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    matched_validation_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    coverage: Mapped[float] = mapped_column(Float, nullable=False)
+    mae: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rmse: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bias: Mapped[float | None] = mapped_column(Float, nullable=True)
+    wape: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        nullable=False,
+    )
+
+
+class KalorimetryAnomalyScore(Base):
+    __tablename__ = "kalorimetry_anomaly_scores"
+    __table_args__ = (
+        UniqueConstraint(
+            "measurement_id",
+            "model_version",
+            name="uq_kalorimetry_score_measurement_model",
+        ),
+        Index(
+            "ix_kalorimetry_score_ident_date",
+            "identifikace",
+            "date",
+        ),
+        Index("ix_kalorimetry_score_is_anomaly", "is_anomaly"),
+        Index("ix_kalorimetry_score_processed", "processed"),
+        Index(
+            "ix_kalorimetry_score_selection_snapshot",
+            "selection_snapshot_id",
+        ),
+        Index(
+            "ix_kalorimetry_score_profile_snapshot",
+            "profile_snapshot_id",
+        ),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    measurement_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "monitoring.Mereni_kalorimetry_vse.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
+    date: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    actual_value: Mapped[float] = mapped_column(Float, nullable=False)
+    expected_mean: Mapped[float] = mapped_column(Float, nullable=False)
+    expected_std: Mapped[float] = mapped_column(Float, nullable=False)
+    expected_median: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expected_p10: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expected_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    deviation: Mapped[float] = mapped_column(Float, nullable=False)
+    z_score: Mapped[float] = mapped_column(Float, nullable=False)
+    is_anomaly: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    severity: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    selected_model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    selection_snapshot_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    profile_snapshot_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        nullable=False,
+    )
+    processed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+    )
+
+
+class KalorimetryScoringState(Base):
+    __tablename__ = "kalorimetry_scoring_state"
+    __table_args__ = {"schema": "monitoring"}
+
+    model_version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    last_measurement_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        onupdate=text("now()"),
+        nullable=False,
+    )
+
+
+class KalorimetryAnomalyEvent(Base):
+    __tablename__ = "kalorimetry_anomaly_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('SPIKE','SUSTAINED_HIGH_USAGE')",
+            name="ck_kalorimetry_event_type_valid",
+        ),
+        Index(
+            "uq_kalorimetry_event_active",
+            "identifikace",
+            "event_type",
+            "model_version",
+            unique=True,
+            postgresql_where=text("is_active = true"),
+        ),
+        Index(
+            "ix_kalorimetry_event_lookup",
+            "identifikace",
+            "event_type",
+            "model_version",
+        ),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        nullable=False,
+    )
+    end_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False),
+        nullable=True,
+    )
+    duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_z_score: Mapped[float] = mapped_column(Float, nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    resolved: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False),
+        nullable=True,
+    )
+    last_score_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        nullable=False,
+    )
+
+
+class KalorimetryEventState(Base):
+    __tablename__ = "kalorimetry_event_state"
+    __table_args__ = (
+        UniqueConstraint(
+            "identifikace",
+            "event_type",
+            "model_version",
+            name="uq_kalorimetry_event_state_identity",
+        ),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    model_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    consecutive_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_event_active: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    event_start_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False),
+        nullable=True,
+    )
+    max_z_score: Mapped[float] = mapped_column(Float, nullable=False)
+    last_score_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False),
+        nullable=True,
+    )
+
+
+class KalorimetryEventEngineState(Base):
+    __tablename__ = "kalorimetry_event_engine_state"
+    __table_args__ = {"schema": "monitoring"}
+
+    model_version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    last_score_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=text("now()"),
+        onupdate=text("now()"),
+        nullable=False,
+    )
+
+
 class KalorimetryOutlierReview(Base):
     __tablename__ = "kalorimetry_outlier_reviews"
     __table_args__ = (

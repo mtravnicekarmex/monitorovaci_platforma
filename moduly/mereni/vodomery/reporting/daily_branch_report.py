@@ -65,7 +65,7 @@ class BranchDailyReportSection:
     title: str
     billing_ident: str
     actual_total: float
-    expected_total: float
+    expected_total: float | None
     daily_limit: float | None
     remaining_to_limit: float | None
     billing_total: float | None
@@ -149,6 +149,10 @@ def _format_volume(value: object, *, signed: bool = False) -> str:
         numeric_value = 0.0
     format_spec = "+.3f" if signed else ".3f"
     return f"{numeric_value:{format_spec}} m³"
+
+
+def _format_prediction_volume(value: object) -> str:
+    return "Nedostupné" if value is None else _format_volume(value)
 
 
 def _format_number(value: object, *, digits: int = 3) -> str:
@@ -685,7 +689,12 @@ def build_daily_branch_report(
         billing_end_value_raw = branch.get("billing_end_value")
         billing_end_value = None if billing_end_value_raw is None else round(float(billing_end_value_raw), 3)
         actual_total = round(float(branch.get("actual_total", 0.0) or 0.0), 3)
-        expected_total = round(float(branch.get("expected_total", 0.0) or 0.0), 3)
+        expected_total_raw = branch.get("expected_total")
+        expected_total = (
+            None
+            if expected_total_raw is None
+            else round(float(expected_total_raw), 3)
+        )
         daily_limit = branch.get("daily_limit")
         remaining_to_limit = None if daily_limit is None else round(float(daily_limit) - actual_total, 3)
         difference_vs_billing = None if billing_total is None else round(actual_total - billing_total, 3)
@@ -767,7 +776,7 @@ def _build_device_table_row_html(row: BranchDeviceReportRow, *, extra_class: str
         f"<td class='numeric'>{escape(_format_volume(row.spotreba))}</td>"
         f"<td class='numeric'>{escape(_format_percent(row.podil_procent))}</td>"
         f"<td class='numeric'>{escape(_format_volume(row.night_consumption))}</td>"
-        f"<td class='numeric'>{escape(_format_volume(row.ocekavana_spotreba))}</td>"
+        f"<td class='numeric'>{escape(_format_prediction_volume(row.ocekavana_spotreba))}</td>"
         f"<td class='numeric'>{escape(_format_percent(row.spotreba_ku_ocekavani_procent))}</td>"
         "</tr>"
     )
@@ -834,7 +843,7 @@ def _build_branch_section_html(section: BranchDailyReportSection, *, is_first: b
         "</div>"
         "<div class='metric-grid'>"
         f"{_build_metric_card_html('Do limitu SČVK', limit_value, alert=limit_exceeded)}"
-        f"{_build_metric_card_html('Celodenní predikce', _format_volume(section.expected_total), _format_percent_delta(_prediction_delta_percent(section.actual_total, section.expected_total)))}"
+        f"{_build_metric_card_html('Celodenní predikce', _format_prediction_volume(section.expected_total), _format_percent_delta(_prediction_delta_percent(section.actual_total, section.expected_total)))}"
         f"{_build_metric_card_html('Součet spotřeby', _format_volume(section.actual_total))}"
         f"{_build_metric_card_html('SPOTŘEBA SČVK', _format_volume(section.billing_total))}"
         "</div>"

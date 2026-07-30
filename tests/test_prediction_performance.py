@@ -38,11 +38,14 @@ class _FakeResult:
 class _FakePredictionSession:
     def __init__(self):
         self.closed = False
+        self.worst_identifier_limits: list[int] = []
         self.tables = {
             "monitoring.vodomery_model_selection_runs",
             "monitoring.vodomery_model_selection_candidates",
             "monitoring.plynomery_model_selection_runs",
             "monitoring.plynomery_model_selection_candidates",
+            "monitoring.kalorimetry_model_selection_runs",
+            "monitoring.kalorimetry_model_validation_metrics",
             "monitoring.prediction_selected_model_snapshots",
             "monitoring.prediction_profile_snapshots",
             "monitoring.prediction_backfill_candidate_metrics",
@@ -87,6 +90,22 @@ class _FakePredictionSession:
                 }
             )
 
+        if "prediction_performance:latest_run:kalorimetry" in statement_text:
+            return _FakeResult(
+                first_row={
+                    "selection_run_id": 7,
+                    "selected_model_version": 1,
+                    "selected_model_name": "Kalorimetry calendar-week slot baseline",
+                    "train_start": datetime(2025, 7, 27),
+                    "train_end": datetime(2026, 7, 27),
+                    "validation_start": datetime(2026, 5, 27),
+                    "validation_end": datetime(2026, 7, 27),
+                    "deploy_start": datetime(2026, 7, 27),
+                    "deploy_end": datetime(2026, 8, 3),
+                    "created_at": datetime(2026, 7, 27, 12, 10),
+                }
+            )
+
         if "prediction_performance:candidates:vodomery" in statement_text:
             return _FakeResult(
                 all_rows=[
@@ -126,10 +145,10 @@ class _FakePredictionSession:
                     {
                         "selection_run_id": 14,
                         "model_version": 2,
-                        "model_key": None,
+                        "model_key": "weather_adjusted_baseline",
                         "model_name": "Model 2 - weather adjusted baseline",
-                        "training_window_months": None,
-                        "validation_window_months": None,
+                        "training_window_months": 3,
+                        "validation_window_months": 1,
                         "selection_enabled": True,
                         "selected": True,
                         "validation_total_count": 50,
@@ -139,23 +158,90 @@ class _FakePredictionSession:
                         "rmse": 0.7,
                         "bias": 0.05,
                         "wape": None,
-                        "rolling_backtest_fold_count": 0,
-                        "rolling_validation_total_count": None,
-                        "rolling_matched_validation_count": None,
-                        "rolling_coverage": None,
-                        "rolling_mae": None,
-                        "rolling_rmse": None,
-                        "rolling_bias": None,
-                        "rolling_wape": None,
+                        "rolling_backtest_fold_count": 8,
+                        "rolling_validation_total_count": 400,
+                        "rolling_matched_validation_count": 360,
+                        "rolling_coverage": 0.9,
+                        "rolling_mae": 0.45,
+                        "rolling_rmse": 0.65,
+                        "rolling_bias": 0.03,
+                        "rolling_wape": 0.14,
                         "profile_count": 3360,
                         "created_at": datetime(2026, 7, 10, 12, 5),
                     }
                 ]
             )
 
+        if "prediction_performance:candidates:kalorimetry" in statement_text:
+            return _FakeResult(
+                all_rows=[
+                    {
+                        "selection_run_id": 7,
+                        "model_version": 1,
+                        "model_key": "calendar_week_slot_baseline",
+                        "model_name": None,
+                        "training_window_months": None,
+                        "validation_window_months": None,
+                        "selection_enabled": True,
+                        "selected": True,
+                        "validation_total_count": 800,
+                        "matched_validation_count": 760,
+                        "coverage": 0.95,
+                        "mae": 1.5,
+                        "rmse": 2.4,
+                        "bias": -0.2,
+                        "wape": 0.22,
+                        "rolling_backtest_fold_count": 8,
+                        "rolling_validation_total_count": 800,
+                        "rolling_matched_validation_count": 760,
+                        "rolling_coverage": 0.95,
+                        "rolling_mae": 1.5,
+                        "rolling_rmse": 2.4,
+                        "rolling_bias": -0.2,
+                        "rolling_wape": 0.22,
+                        "profile_count": 0,
+                        "created_at": datetime(2026, 7, 27, 12, 10),
+                    }
+                ]
+            )
+
         if "prediction_performance:snapshot_summary" in statement_text:
-            if params["medium_key"] != "vodomery":
+            if params["medium_key"] == "elektromery":
                 return _FakeResult(first_row=None)
+            if params["medium_key"] == "kalorimetry":
+                return _FakeResult(
+                    first_row={
+                        "medium_key": "kalorimetry",
+                        "selection_mode": "dry_run",
+                        "forecast_period_start": datetime(2026, 7, 27),
+                        "forecast_period_end": datetime(2026, 8, 3),
+                        "forecast_period_label": "2026-07-27 - 2026-08-03",
+                        "forecast_cadence": "weekly",
+                        "selection_run_id": 7,
+                        "snapshot_count": 14,
+                        "fallback_count": 4,
+                        "unavailable_count": 0,
+                        "selected_differs_from_global_count": 5,
+                        "latest_created_at": datetime(2026, 7, 27, 12, 10),
+                    }
+                )
+            if params["medium_key"] == "plynomery":
+                return _FakeResult(
+                    first_row={
+                        "medium_key": "plynomery",
+                        "selection_mode": "dry_run",
+                        "forecast_period_start": datetime(2026, 7, 27),
+                        "forecast_period_end": datetime(2026, 8, 3),
+                        "forecast_period_label": "2026-07-27 - 2026-08-03",
+                        "forecast_cadence": "weekly",
+                        "selection_run_id": 14,
+                        "snapshot_count": 5,
+                        "fallback_count": 2,
+                        "unavailable_count": 2,
+                        "selected_differs_from_global_count": 3,
+                        "latest_created_at": datetime(2026, 7, 27, 12, 5),
+                    }
+                )
             return _FakeResult(
                 first_row={
                     "medium_key": "vodomery",
@@ -197,8 +283,28 @@ class _FakePredictionSession:
             )
 
         if "prediction_performance:snapshot_identity" in statement_text:
-            if params["medium_key"] != "vodomery":
+            if params["medium_key"] == "elektromery":
                 return _FakeResult(first_row=None)
+            if params["medium_key"] == "kalorimetry":
+                return _FakeResult(
+                    first_row={
+                        "medium_key": "kalorimetry",
+                        "selection_mode": "dry_run",
+                        "forecast_period_start": datetime(2026, 7, 27),
+                        "forecast_period_end": datetime(2026, 8, 3),
+                        "forecast_cadence": "weekly",
+                    }
+                )
+            if params["medium_key"] == "plynomery":
+                return _FakeResult(
+                    first_row={
+                        "medium_key": "plynomery",
+                        "selection_mode": "dry_run",
+                        "forecast_period_start": datetime(2026, 7, 27),
+                        "forecast_period_end": datetime(2026, 8, 3),
+                        "forecast_cadence": "weekly",
+                    }
+                )
             return _FakeResult(
                 first_row={
                     "medium_key": "vodomery",
@@ -210,6 +316,63 @@ class _FakePredictionSession:
             )
 
         if "prediction_performance:worst_identifiers" in statement_text:
+            self.worst_identifier_limits.append(int(params["limit"]))
+            if params["medium_key"] == "kalorimetry":
+                return _FakeResult(
+                    all_rows=[
+                        {
+                            "medium_key": "kalorimetry",
+                            "identifier": "K-001",
+                            "selection_mode": "dry_run",
+                            "selection_run_id": 7,
+                            "forecast_period_start": datetime(2026, 7, 27),
+                            "forecast_period_end": datetime(2026, 8, 3),
+                            "forecast_period_label": "2026-07-27 - 2026-08-03",
+                            "selected_model_version": 1,
+                            "selected_model_name": "Kalorimetry calendar-week slot baseline",
+                            "global_model_version": 1,
+                            "global_model_name": "Kalorimetry calendar-week slot baseline",
+                            "uses_fallback": True,
+                            "fallback_reason": "missing_profile",
+                            "validation_total_count": 100,
+                            "matched_validation_count": 90,
+                            "coverage": 0.9,
+                            "mae": 1.5,
+                            "rmse": 2.4,
+                            "bias": -0.2,
+                            "wape": 0.4,
+                            "created_at": datetime(2026, 7, 27, 12, 10),
+                        }
+                    ]
+                )
+            if params["medium_key"] == "plynomery":
+                return _FakeResult(
+                    all_rows=[
+                        {
+                            "medium_key": "plynomery",
+                            "identifier": "P-001",
+                            "selection_mode": "dry_run",
+                            "selection_run_id": 14,
+                            "forecast_period_start": datetime(2026, 7, 27),
+                            "forecast_period_end": datetime(2026, 8, 3),
+                            "forecast_period_label": "2026-07-27 - 2026-08-03",
+                            "selected_model_version": 2,
+                            "selected_model_name": "Model 2 - weather adjusted baseline",
+                            "global_model_version": 2,
+                            "global_model_name": "Model 2 - weather adjusted baseline",
+                            "uses_fallback": True,
+                            "fallback_reason": "below_coverage_threshold",
+                            "validation_total_count": 100,
+                            "matched_validation_count": 80,
+                            "coverage": 0.8,
+                            "mae": 0.6,
+                            "rmse": 0.8,
+                            "bias": 0.1,
+                            "wape": 0.3,
+                            "created_at": datetime(2026, 7, 27, 12, 5),
+                        }
+                    ]
+                )
             return _FakeResult(
                 all_rows=[
                     {
@@ -319,9 +482,15 @@ def test_collect_prediction_performance_report_merges_media_runs_snapshots_and_c
     assert response.status == "ok"
     assert response.checked_at == datetime(2026, 7, 10, 14, 30)
     assert session.closed is True
+    assert session.worst_identifier_limits == [500, 500, 500]
 
     by_medium = {item.medium_key: item for item in response.media}
-    assert set(by_medium) == {"vodomery", "plynomery", "elektromery"}
+    assert set(by_medium) == {
+        "vodomery",
+        "plynomery",
+        "kalorimetry",
+        "elektromery",
+    }
 
     vodomery = by_medium["vodomery"]
     assert vodomery.status == "ok"
@@ -342,7 +511,25 @@ def test_collect_prediction_performance_report_merges_media_runs_snapshots_and_c
     assert plynomery.latest_selection_run.selection_run_id == 14
     assert plynomery.candidate_performance[0].model_key == "weather_adjusted_baseline"
     assert plynomery.candidate_performance[0].training_window_months == 3
+    assert plynomery.candidate_performance[0].rolling_backtest_fold_count == 8
+    assert plynomery.candidate_performance[0].rolling_wape == 0.14
+    assert plynomery.snapshot_summary.selection_mode == "dry_run"
+    assert plynomery.snapshot_summary.snapshot_count == 5
+    assert plynomery.snapshot_summary.fallback_count == 2
+    assert plynomery.snapshot_summary.unavailable_count == 2
+    assert plynomery.worst_identifier_selections[0].identifier == "P-001"
     assert plynomery.historical_candidate_performance == []
+
+    kalorimetry = by_medium["kalorimetry"]
+    assert kalorimetry.status == "ok"
+    assert kalorimetry.latest_selection_run.selection_run_id == 7
+    assert len(kalorimetry.candidate_catalog) == 2
+    assert kalorimetry.candidate_catalog[0].forecast_cadence == "weekly"
+    assert kalorimetry.candidate_performance[0].model_version == 1
+    assert kalorimetry.candidate_performance[0].rolling_coverage == 0.95
+    assert kalorimetry.snapshot_summary.snapshot_count == 14
+    assert kalorimetry.snapshot_summary.fallback_count == 4
+    assert kalorimetry.worst_identifier_selections[0].identifier == "K-001"
 
     elektromery = by_medium["elektromery"]
     assert elektromery.status == "not_run"

@@ -4,6 +4,7 @@ import warnings
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -13,6 +14,7 @@ from services.api.services.vodomery import (
     _build_branch_billing_payload,
     _load_archived_prediction_profiles,
     _load_branch_archived_prediction_rows,
+    _load_branch_unavailable_prediction_identifiers,
     _load_current_prediction_profiles,
     _prepare_branch_measurements,
     _serialize_dataframe_rows,
@@ -184,6 +186,111 @@ def test_load_current_prediction_profiles_prefers_period_active_snapshot(monkeyp
         datetime.date(2026, 7, 27),
         datetime.date(2026, 7, 27),
     )
+
+
+def test_prediction_profile_result_exposes_insufficient_history(monkeypatch):
+    monkeypatch.setattr(
+        vodomery_service,
+        "load_prediction_profiles",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        vodomery_service,
+        "prague_now_naive",
+        lambda: datetime.datetime(2026, 7, 27, 8, 0),
+    )
+
+    class DecisionSession:
+        def execute(self, statement, params):
+            return _FakeMappingResult(
+                [
+                    {
+                        "forecast_period_start": datetime.datetime(2026, 7, 27),
+                        "forecast_period_end": datetime.datetime(2026, 8, 3),
+                        "fallback_reason": "insufficient_history",
+                    }
+                ]
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        vodomery_service,
+        "get_session_pg",
+        lambda: DecisionSession(),
+    )
+
+    result = vodomery_service.load_prediction_profile_result(
+        object(),
+        identifikace="NEW_V1",
+        start_date=datetime.date(2026, 7, 27),
+        end_date=datetime.date(2026, 8, 2),
+    )
+
+    assert result == {
+        "prediction_available": False,
+        "availability_status": "unavailable",
+        "availability_reason": "insufficient_history",
+        "rows": [],
+    }
+
+
+def test_prediction_profile_result_fails_when_available_profile_is_missing(monkeypatch):
+    monkeypatch.setattr(
+        vodomery_service,
+        "load_prediction_profiles",
+        lambda *args, **kwargs: [],
+    )
+
+    class DecisionSession:
+        def execute(self, statement, params):
+            return _FakeMappingResult(
+                [
+                    {
+                        "forecast_period_start": datetime.datetime(2026, 7, 27),
+                        "forecast_period_end": datetime.datetime(2026, 8, 3),
+                        "fallback_reason": "none",
+                    }
+                ]
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        vodomery_service,
+        "get_session_pg",
+        lambda: DecisionSession(),
+    )
+
+    with pytest.raises(RuntimeError, match="missing its profile"):
+        vodomery_service.load_prediction_profile_result(
+            object(),
+            identifikace="BROKEN_V1",
+            start_date=datetime.date(2026, 7, 27),
+            end_date=datetime.date(2026, 8, 2),
+        )
+
+
+def test_branch_unavailable_lookup_uses_latest_period_decision():
+    connection = _FakeConnection(
+        [
+            ("NEW_V1", "insufficient_history"),
+            ("READY_V1", "none"),
+        ]
+    )
+
+    unavailable = _load_branch_unavailable_prediction_identifiers(
+        connection,
+        identifiers=("NEW_V1", "READY_V1"),
+        day_start=datetime.datetime(2026, 7, 27),
+        day_end=datetime.datetime(2026, 7, 28),
+    )
+
+    assert unavailable == {"NEW_V1"}
+    assert "DISTINCT ON (identifier)" in str(connection.statement)
+    assert "forecast_period_start DESC" in str(connection.statement)
 
 
 def test_load_current_prediction_profiles_falls_back_to_global(monkeypatch):

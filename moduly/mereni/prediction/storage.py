@@ -77,6 +77,7 @@ BACKFILL_CANDIDATE_METRIC_IDENTITY_COLUMNS = (
     "archive_version",
     "model_version",
 )
+PREDICTION_PROFILE_SNAPSHOT_INSERT_BATCH_SIZE = 1000
 
 
 class Base(DeclarativeBase):
@@ -685,15 +686,24 @@ def build_insert_prediction_backfill_candidate_metrics_statement(
 def persist_prediction_profile_snapshots(
     session,
     rows: Sequence[Mapping[str, object]],
+    *,
+    batch_size: int = PREDICTION_PROFILE_SNAPSHOT_INSERT_BATCH_SIZE,
 ) -> int:
     if not rows:
         return 0
+    if batch_size <= 0:
+        raise ValueError("Prediction profile snapshot batch size must be positive.")
 
-    result = session.execute(build_insert_prediction_profile_snapshots_statement(rows))
-    rowcount = getattr(result, "rowcount", None)
-    if rowcount is None or rowcount < 0:
-        return 0
-    return int(rowcount)
+    inserted_count = 0
+    for start in range(0, len(rows), batch_size):
+        batch = rows[start : start + batch_size]
+        result = session.execute(
+            build_insert_prediction_profile_snapshots_statement(batch)
+        )
+        rowcount = getattr(result, "rowcount", None)
+        if rowcount is not None and rowcount >= 0:
+            inserted_count += int(rowcount)
+    return inserted_count
 
 
 def persist_prediction_backfill_candidate_metrics(

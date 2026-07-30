@@ -228,6 +228,14 @@ PAGES: tuple[DashboardPage, ...] = (
         configurable=True,
     ),
     DashboardPage(
+        key="smartfuelpass_interactive_login",
+        path="pages/39_smartfuelpass_prihlaseni.py",
+        title="Přihlášení SmartFuelPass",
+        icon="🔑",
+        section_key="nabijecky",
+        admin_only=True,
+    ),
+    DashboardPage(
         key="kalorimetry_list",
         path="pages/33_kalorimetry_seznam.py",
         title="Seznam",

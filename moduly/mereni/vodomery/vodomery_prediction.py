@@ -9,7 +9,7 @@ from typing import Callable, Sequence
 
 from sqlalchemy import bindparam, insert, select, text
 
-from app.time_utils import utc_now_naive
+from app.time_utils import prague_now_naive, utc_now_naive
 from core.db.connect import get_session_pg
 from moduly.mereni.prediction import (
     ARCHIVE_SOURCE_WEEKLY_REBUILD,
@@ -26,6 +26,7 @@ from moduly.mereni.prediction import (
     PredictionSelectionFallbackReason,
     PredictionRebuildWindows,
     SELECTION_MODE_ACTIVE,
+    build_calendar_week_forecast_period,
     build_prediction_rebuild_windows,
     build_rolling_weekly_folds,
     ensure_prediction_profile_snapshot_table,
@@ -482,20 +483,11 @@ def build_model_2_rebuild_windows(
 def build_vodomery_weekly_forecast_period(
     reference_time: datetime | None = None,
 ) -> PredictionForecastPeriod:
-    resolved_reference_time = reference_time or utc_now_naive()
-    start = _floor_calendar_week_start(resolved_reference_time)
-    end = start + timedelta(days=7)
-    return PredictionForecastPeriod(
-        start=start,
-        end=end,
-        cadence=PredictionForecastCadence.WEEKLY,
-        label=f"{start:%Y-%m-%d} - {end:%Y-%m-%d}",
+    resolved_reference_time = reference_time or prague_now_naive()
+    return build_calendar_week_forecast_period(
+        reference_time=resolved_reference_time,
+        period_count=VODOMERY_FORECAST_PERIOD_DEFINITION.period_count,
     )
-
-
-def _floor_calendar_week_start(value: datetime) -> datetime:
-    midnight = value.replace(hour=0, minute=0, second=0, microsecond=0)
-    return midnight - timedelta(days=midnight.weekday())
 
 
 def _subtract_months(value: datetime, months: int) -> datetime:
@@ -1277,6 +1269,40 @@ def _build_selected_model_decisions(
     for identifikace in all_identifiers:
         valid_summaries = valid_by_identifier.get(identifikace, [])
         fallback_summaries = fallback_by_identifier.get(identifikace, [])
+        if not fallback_summaries:
+            decisions.append(
+                PredictionSelectedModelDecision(
+                    medium_key=VODOMERY_MEDIUM_KEY,
+                    identifier=identifikace,
+                    forecast_period=forecast_period,
+                    selection_run_id=selection_run_id,
+                    selected_model_version=selected_summary.model_version,
+                    selected_model_key=_model_summary_key(selected_summary),
+                    selected_model_name=selected_summary.model_name,
+                    global_model_version=selected_summary.model_version,
+                    global_model_key=_model_summary_key(selected_summary),
+                    global_model_name=selected_summary.model_name,
+                    fallback_reason=(
+                        PredictionSelectionFallbackReason.INSUFFICIENT_HISTORY
+                    ),
+                    metrics=None,
+                    metadata={
+                        "selection_policy": (
+                            "eligible_rolling_wape_min_coverage_conditional_challenger"
+                        ),
+                        "selection_mode": selection_mode,
+                        "coverage_threshold": coverage_threshold,
+                        "prediction_available": False,
+                        "availability_reason": (
+                            PredictionSelectionFallbackReason.INSUFFICIENT_HISTORY.value
+                        ),
+                        "deployable_profile_required": False,
+                        "selected_from_device_metrics": False,
+                        "metric_winner_missing_profile": False,
+                    },
+                )
+            )
+            continue
         eligible_summaries = [
             summary
             for summary in valid_summaries
@@ -1529,10 +1555,16 @@ def _build_selected_prediction_profile_snapshot_rows(
 
     rows: list[dict[str, object]] = []
     archived_pairs: set[tuple[str, int]] = set()
+    unavailable_identifiers = {
+        decision.identifier
+        for decision in decisions
+        if decision.fallback_reason
+        is PredictionSelectionFallbackReason.INSUFFICIENT_HISTORY
+    }
     for profile in profiles:
         pair = (profile.identifikace, int(profile.model_version))
         decision = selected_pairs.get(pair)
-        if decision is None:
+        if decision is None or decision.identifier in unavailable_identifiers:
             continue
 
         archived_pairs.add(pair)
@@ -1575,7 +1607,12 @@ def _build_selected_prediction_profile_snapshot_rows(
             }
         )
 
-    missing_pair_count = len(set(selected_pairs) - archived_pairs)
+    required_pairs = {
+        pair
+        for pair, decision in selected_pairs.items()
+        if decision.identifier not in unavailable_identifiers
+    }
+    missing_pair_count = len(required_pairs - archived_pairs)
     if missing_pair_count and require_all_pairs:
         raise RuntimeError(
             "Selected prediction profile archive is missing source profiles "

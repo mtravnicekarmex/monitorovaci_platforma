@@ -25,6 +25,112 @@ class PlynomeryDeviceListResponse(BaseModel):
     devices: list[str]
 
 
+class PlynomeryMeasurementSeriesRow(BaseModel):
+    date: datetime
+    identifikace: str
+    seriove_cislo: str | None = None
+    zdroj: str
+    objem: float
+    delta: float | None = None
+    platne: bool
+    interval_minutes: int
+    day_of_week: int
+    slot: int
+    synthetic: bool
+    nocni_odber: bool
+    gap_detected: bool
+    reset_detected: bool
+    source_date: datetime | None = None
+    time_utc: datetime | None = None
+    time_basis: str | None = None
+    source_timezone: str | None = None
+    source_utc_offset_minutes: int | None = None
+    time_fold: int | None = None
+    timestamp_position: str | None = None
+
+
+class PlynomeryMeasurementSeriesResponse(BaseModel):
+    identifikace: str
+    start_date: date
+    end_date: date
+    total: int
+    rows: list[PlynomeryMeasurementSeriesRow]
+
+
+class PlynomeryPredictionProfileRow(BaseModel):
+    interval_minutes: int
+    day_of_week: int
+    slot: int
+    expected_mean: float
+    expected_median: float | None = None
+    expected_p10: float | None = None
+    expected_p90: float | None = None
+    expected_std: float | None = None
+    sample_size: int | None = None
+    model_version: int
+    model_key: str | None = None
+    profile_kind: str
+    base_mean: float | None = None
+    hdd_slope: float | None = None
+    hdd_24h_mean: float | None = None
+    selection_run_id: int | None = None
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+
+
+class PlynomeryPredictionAvailabilityPeriod(BaseModel):
+    prediction_available: bool
+    availability_reason: str | None = None
+    selection_run_id: int | None = None
+    selected_model_version: int | None = None
+    selected_model_name: str | None = None
+    valid_from: datetime
+    valid_to: datetime
+
+
+class PlynomeryPredictionProfilesResponse(BaseModel):
+    identifikace: str
+    prediction_available: bool
+    availability_status: str
+    availability_reason: str | None = None
+    selection_mode: str
+    start_date: date | None = None
+    end_date: date | None = None
+    selection_run_id: int | None = None
+    selected_model_version: int | None = None
+    selected_model_name: str | None = None
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+    total: int
+    availability_periods: list[PlynomeryPredictionAvailabilityPeriod] = Field(
+        default_factory=list
+    )
+    rows: list[PlynomeryPredictionProfileRow]
+
+
+class PlynomeryPredictionSeriesRow(BaseModel):
+    date: datetime
+    ocekavana_spotreba: float
+    interval_count: int
+    candidate_interval_count: int
+    prediction_complete: bool
+    model_versions: list[int]
+    profile_kinds: list[str]
+    ocekavana_kumulovana_spotreba: float
+
+
+class PlynomeryPredictionSeriesResponse(BaseModel):
+    identifikace: str
+    start_date: date
+    end_date: date
+    granularity: str
+    prediction_available: bool
+    availability_status: str
+    availability_reason: str | None = None
+    total: int
+    rows: list[PlynomeryPredictionSeriesRow]
+
+
 class PlynomeryAnomalyRow(BaseModel):
     date: datetime
     identifikace: str

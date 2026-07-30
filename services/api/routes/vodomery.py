@@ -49,7 +49,7 @@ from services.api.services.vodomery import (
     load_event_history,
     load_measurement_series,
     load_overview_metrics,
-    load_prediction_profiles,
+    load_prediction_profile_result,
     load_recent_anomalies,
     load_recent_resolved_events,
 )
@@ -194,7 +194,7 @@ def get_vodomery_prediction_profiles(
     current_user: DashboardUserContext = Depends(get_current_vodomery_user),
 ) -> VodomeryPredictionProfilesResponse:
     try:
-        rows = load_prediction_profiles(
+        result = load_prediction_profile_result(
             current_user,
             identifikace=identifikace,
             start_date=start_date,
@@ -215,8 +215,11 @@ def get_vodomery_prediction_profiles(
         identifikace=identifikace,
         start_date=start_date,
         end_date=end_date,
-        total=len(rows),
-        rows=rows,
+        prediction_available=result["prediction_available"],
+        availability_status=result["availability_status"],
+        availability_reason=result["availability_reason"],
+        total=len(result["rows"]),
+        rows=result["rows"],
     )
 
 

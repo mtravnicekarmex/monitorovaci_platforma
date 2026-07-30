@@ -777,6 +777,107 @@ def load_prediction_profiles(
         session.close()
 
 
+def load_prediction_profile_result(
+    user_context: DashboardUserContext,
+    *,
+    identifikace: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> dict[str, object]:
+    rows = load_prediction_profiles(
+        user_context,
+        identifikace=identifikace,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    current_date = prague_now_naive().date()
+    range_start_date = start_date or current_date
+    range_end_date = end_date or current_date
+    range_start = datetime.combine(range_start_date, time.min)
+    range_end = datetime.combine(range_end_date + timedelta(days=1), time.min)
+
+    session = get_session_pg()
+    try:
+        decisions = session.execute(
+            text(
+                """
+                SELECT DISTINCT ON (
+                    forecast_period_start,
+                    forecast_period_end
+                )
+                    forecast_period_start,
+                    forecast_period_end,
+                    fallback_reason
+                FROM monitoring.prediction_selected_model_snapshots
+                WHERE medium_key = 'vodomery'
+                  AND selection_mode = 'active'
+                  AND identifier = :identifikace
+                  AND forecast_period_start < :range_end
+                  AND forecast_period_end > :range_start
+                ORDER BY
+                    forecast_period_start,
+                    forecast_period_end,
+                    selection_run_id DESC NULLS LAST,
+                    created_at DESC,
+                    id DESC
+                """
+            ),
+            {
+                "identifikace": identifikace,
+                "range_start": range_start,
+                "range_end": range_end,
+            },
+        ).mappings().all()
+    finally:
+        session.close()
+
+    insufficient_periods = [
+        decision
+        for decision in decisions
+        if str(decision["fallback_reason"]) == "insufficient_history"
+    ]
+    available_periods = [
+        decision
+        for decision in decisions
+        if str(decision["fallback_reason"]) != "insufficient_history"
+    ]
+    insufficient_periods = [
+        decision
+        for decision in insufficient_periods
+        if not any(
+            available["forecast_period_start"]
+            >= decision["forecast_period_start"]
+            and available["forecast_period_start"]
+            < decision["forecast_period_end"]
+            for available in available_periods
+        )
+    ]
+    if available_periods and not rows:
+        raise RuntimeError(
+            "Available vodomery prediction selection is missing its profile."
+        )
+    if insufficient_periods and not available_periods:
+        return {
+            "prediction_available": False,
+            "availability_status": "unavailable",
+            "availability_reason": "insufficient_history",
+            "rows": [],
+        }
+    if insufficient_periods:
+        return {
+            "prediction_available": bool(rows),
+            "availability_status": "partial",
+            "availability_reason": "insufficient_history",
+            "rows": rows,
+        }
+    return {
+        "prediction_available": bool(rows),
+        "availability_status": "available" if rows else "unavailable",
+        "availability_reason": None if rows else "no_selection_snapshot",
+        "rows": rows,
+    }
+
+
 def _load_current_prediction_profiles(
     session,
     *,
@@ -1353,6 +1454,14 @@ def load_branch_day_overview(
                 day_start=day_start,
                 day_end=day_end,
             )
+            unavailable_prediction_identifiers = (
+                _load_branch_unavailable_prediction_identifiers(
+                    conn,
+                    identifiers=active_devices,
+                    day_start=day_start,
+                    day_end=day_end,
+                )
+            )
 
             prediction_df = pd.DataFrame(
                 prediction_rows,
@@ -1390,7 +1499,14 @@ def load_branch_day_overview(
 
             hourly_rows: list[dict[str, object]] = []
             device_actual_totals = {identifier: 0.0 for identifier in active_devices}
-            device_expected_totals = {identifier: 0.0 for identifier in active_devices}
+            device_expected_totals: dict[str, float | None] = {
+                identifier: (
+                    None
+                    if identifier in unavailable_prediction_identifiers
+                    else 0.0
+                )
+                for identifier in active_devices
+            }
             device_hourly_rows: list[dict[str, object]] = []
             last_actual_hour = pd.Timestamp(last_actual_timestamp).floor("h") if last_actual_timestamp is not None else None
             for hour_start in pd.date_range(start=day_start, periods=24, freq="h"):
@@ -1401,17 +1517,45 @@ def load_branch_day_overview(
                     for identifier in active_hour_devices
                 }
                 predicted_values_by_device = {
-                    identifier: round(float(hourly_prediction_lookup.get((identifier, hour_start), 0.0)), 3)
+                    identifier: (
+                        None
+                        if identifier in unavailable_prediction_identifiers
+                        else round(
+                            float(
+                                hourly_prediction_lookup.get(
+                                    (identifier, hour_start),
+                                    0.0,
+                                )
+                            ),
+                            3,
+                        )
+                    )
                     for identifier in active_hour_devices
                 }
                 actual_sum = round(sum(actual_values_by_device.values()), 3)
-                predicted_sum = round(sum(predicted_values_by_device.values()), 3)
+                predicted_sum = (
+                    None
+                    if any(
+                        value is None
+                        for value in predicted_values_by_device.values()
+                    )
+                    else round(
+                        sum(
+                            float(value)
+                            for value in predicted_values_by_device.values()
+                        ),
+                        3,
+                    )
+                )
                 for identifier, actual_value in actual_values_by_device.items():
                     device_actual_totals[identifier] = round(device_actual_totals.get(identifier, 0.0) + actual_value, 3)
                 if last_actual_hour is not None and hour_start <= last_actual_hour:
                     for identifier, expected_value in predicted_values_by_device.items():
+                        if expected_value is None:
+                            continue
                         device_expected_totals[identifier] = round(
-                            device_expected_totals.get(identifier, 0.0) + expected_value,
+                            float(device_expected_totals.get(identifier) or 0.0)
+                            + expected_value,
                             3,
                         )
                 for identifier in active_devices:
@@ -1437,7 +1581,14 @@ def load_branch_day_overview(
             ]
             hourly_df["kumulovana_spotreba"] = hourly_df["spotreba"].cumsum().round(3)
             hourly_df["fakturacni_kumulovana_spotreba"] = hourly_df["fakturacni_spotreba"].cumsum().round(3)
-            hourly_df["ocekavana_kumulovana_spotreba"] = hourly_df["ocekavana_spotreba"].cumsum().round(3)
+            hourly_df["ocekavana_kumulovana_spotreba"] = (
+                pd.to_numeric(
+                    hourly_df["ocekavana_spotreba"],
+                    errors="coerce",
+                )
+                .cumsum()
+                .round(3)
+            )
             hourly_df["kumulovana_spotreba_graf"] = hourly_df["kumulovana_spotreba"]
             hourly_df["fakturacni_kumulovana_spotreba_graf"] = hourly_df["fakturacni_kumulovana_spotreba"]
             hourly_df["navazna_predikce"] = pd.NA
@@ -1446,7 +1597,7 @@ def load_branch_day_overview(
                 last_actual_hour = pd.Timestamp(last_actual_timestamp).floor("h")
                 hourly_df.loc[hourly_df["date"] > last_actual_hour.to_pydatetime(), "kumulovana_spotreba_graf"] = pd.NA
                 actual_mask = hourly_df["date"] <= last_actual_hour.to_pydatetime()
-                if actual_mask.any():
+                if actual_mask.any() and not unavailable_prediction_identifiers:
                     last_actual_cumulative = float(hourly_df.loc[actual_mask, "kumulovana_spotreba"].iloc[-1])
                     future_prediction = (
                         hourly_df.loc[~actual_mask, "ocekavana_spotreba"]
@@ -1471,9 +1622,20 @@ def load_branch_day_overview(
                 hourly_df["fakturacni_kumulovana_spotreba_graf"] = pd.NA
 
             actual_total = round(float(hourly_df["spotreba"].sum()), 3) if not hourly_df.empty else 0.0
-            expected_total = round(float(hourly_df["ocekavana_spotreba"].sum()), 3) if not hourly_df.empty else 0.0
+            expected_total = (
+                None
+                if unavailable_prediction_identifiers
+                else (
+                    round(float(hourly_df["ocekavana_spotreba"].sum()), 3)
+                    if not hourly_df.empty
+                    else 0.0
+                )
+            )
             expected_end_of_day = expected_total
-            if hourly_df["navazna_predikce"].notna().any():
+            if (
+                expected_total is not None
+                and hourly_df["navazna_predikce"].notna().any()
+            ):
                 expected_end_of_day = round(
                     float(pd.to_numeric(hourly_df["navazna_predikce"], errors="coerce").dropna().iloc[-1]),
                     3,
@@ -1486,10 +1648,17 @@ def load_branch_day_overview(
                         "start_value": device_state_lookup.get(identifier, (None, None))[0],
                         "end_value": device_state_lookup.get(identifier, (None, None))[1],
                         "spotreba": round(float(device_actual_totals.get(identifier, 0.0)), 3),
-                        "ocekavana_spotreba": round(float(device_expected_totals.get(identifier, 0.0)), 3),
+                        "ocekavana_spotreba": (
+                            None
+                            if device_expected_totals.get(identifier) is None
+                            else round(
+                                float(device_expected_totals[identifier]),
+                                3,
+                            )
+                        ),
                         "odchylka_od_ocekavani_procent": calculate_percentage_deviation(
                             device_actual_totals.get(identifier, 0.0),
-                            device_expected_totals.get(identifier, 0.0),
+                            device_expected_totals.get(identifier),
                         ),
                     }
                     for identifier in active_devices
@@ -1511,7 +1680,7 @@ def load_branch_day_overview(
 
             remaining_to_limit = None
             expected_vs_limit = None
-            if config_item.daily_limit is not None:
+            if config_item.daily_limit is not None and expected_total is not None:
                 remaining_to_limit = round(float(config_item.daily_limit) - expected_total, 3)
                 expected_vs_limit = round(float(expected_end_of_day) - float(config_item.daily_limit), 3)
 
@@ -1590,3 +1759,44 @@ def _load_branch_archived_prediction_rows(
             },
         ).all()
     )
+
+
+def _load_branch_unavailable_prediction_identifiers(
+    connection,
+    *,
+    identifiers: tuple[str, ...],
+    day_start: datetime,
+    day_end: datetime,
+) -> set[str]:
+    if not identifiers:
+        return set()
+    statement = text(
+        """
+        SELECT DISTINCT ON (identifier) identifier, fallback_reason
+        FROM monitoring.prediction_selected_model_snapshots
+        WHERE medium_key = 'vodomery'
+          AND selection_mode = 'active'
+          AND identifier IN :identifiers
+          AND forecast_period_start < :day_end
+          AND forecast_period_end > :day_start
+        ORDER BY
+            identifier,
+            forecast_period_start DESC,
+            selection_run_id DESC NULLS LAST,
+            created_at DESC,
+            id DESC
+        """
+    ).bindparams(bindparam("identifiers", expanding=True))
+    rows = connection.execute(
+        statement,
+        {
+            "identifiers": list(identifiers),
+            "day_start": day_start,
+            "day_end": day_end,
+        },
+    ).all()
+    return {
+        str(row[0])
+        for row in rows
+        if str(row[1]) == "insufficient_history"
+    }

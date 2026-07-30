@@ -10,6 +10,7 @@ from moduly.mereni.prediction import (
     PredictionForecastPeriodDefinition,
     PredictionProfilePoint,
     PredictionTimeWindow,
+    build_calendar_week_forecast_period,
     build_next_forecast_period,
     build_rolling_backtest_folds,
     build_rolling_weekly_folds,
@@ -135,6 +136,31 @@ def test_build_next_forecast_period_supports_weekly_and_monthly_cadence():
     assert monthly.start == datetime.datetime(2026, 8, 1)
     assert monthly.end == datetime.datetime(2026, 9, 1)
     assert monthly.label == "2026-08"
+
+
+@pytest.mark.parametrize(
+    "reference_time",
+    [
+        datetime.datetime(2026, 7, 27),
+        datetime.datetime(2026, 7, 29, 14, 30, 15, 123456),
+        datetime.datetime(2026, 8, 2, 23, 59, 59, 999999),
+    ],
+)
+def test_build_calendar_week_forecast_period_is_monday_to_monday(reference_time):
+    period = build_calendar_week_forecast_period(reference_time=reference_time)
+
+    assert period.start == datetime.datetime(2026, 7, 27)
+    assert period.end == datetime.datetime(2026, 8, 3)
+    assert period.cadence is PredictionForecastCadence.WEEKLY
+    assert period.label == "2026-07-27 - 2026-08-03"
+
+
+def test_build_calendar_week_forecast_period_rejects_non_positive_count():
+    with pytest.raises(ValueError, match="must be positive"):
+        build_calendar_week_forecast_period(
+            reference_time=datetime.datetime(2026, 7, 27),
+            period_count=0,
+        )
 
 
 def test_build_rolling_backtest_folds_supports_monthly_calendar_folds():

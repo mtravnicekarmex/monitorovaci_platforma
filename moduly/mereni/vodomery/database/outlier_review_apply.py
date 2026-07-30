@@ -33,7 +33,13 @@ from moduly.mereni.vodomery.database.vodomery_db_vse import (
     prepare_rows,
 )
 from moduly.mereni.vodomery.vodomery_events import EVENT_CONFIG, _compute_severity
-from moduly.mereni.vodomery.vodomery_prediction import get_candidate_model_versions
+from moduly.mereni.vodomery.vodomery_anomaly import (
+    _build_per_identifier_selected_score_rows,
+)
+from moduly.mereni.vodomery.vodomery_prediction import (
+    get_candidate_model_versions,
+    get_runtime_model_version,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -90,14 +96,20 @@ def _rebuild_after_review_update(session: Session, review_row: VodomeryOutlierRe
     measurement_summary = _rebuild_measurements_for_review(session, review_row)
     score_summaries = []
     event_summaries = []
+    active_model_version = get_runtime_model_version(session=session)
 
     for model_version in get_candidate_model_versions():
+        # Active history mirrors production per-identifier selection.
+        # Non-active versions remain pure candidates for comparison.
         score_summaries.append(
             _rebuild_scores_for_ident(
                 session,
                 identifikace=review_row.identifikace,
                 model_version=model_version,
                 start_date=review_row.date,
+                use_per_identifier_selection=(
+                    model_version == active_model_version
+                ),
             )
         )
         event_summaries.append(
@@ -281,6 +293,7 @@ def _rebuild_scores_for_ident(
     identifikace: str,
     model_version: int,
     start_date,
+    use_per_identifier_selection: bool = False,
 ) -> dict[str, object]:
     session.execute(
         delete(VodomeryAnomalyScore).where(
@@ -289,6 +302,25 @@ def _rebuild_scores_for_ident(
             VodomeryAnomalyScore.date >= start_date,
         )
     )
+
+    if use_per_identifier_selection:
+        measurements = _load_measurements_for_score_rebuild(
+            session,
+            identifikace=identifikace,
+            start_date=start_date,
+        )
+        rows_to_insert = _build_per_identifier_selected_score_rows(
+            session,
+            measurements=measurements,
+            output_model_version=model_version,
+        )
+        if rows_to_insert:
+            session.execute(insert(VodomeryAnomalyScore), rows_to_insert)
+        return {
+            "model_version": model_version,
+            "inserted_scores": len(rows_to_insert),
+            "profile_source": "active_per_identifier_selection",
+        }
 
     profiles = session.execute(
         select(VodomeryProfilesAnomaly).where(
@@ -312,18 +344,11 @@ def _rebuild_scores_for_ident(
         for profile in profiles
     }
 
-    measurements = session.execute(
-        select(Mereni_vodomery)
-        .where(
-            Mereni_vodomery.identifikace == identifikace,
-            Mereni_vodomery.date >= start_date,
-            Mereni_vodomery.synthetic.is_(False),
-            Mereni_vodomery.platne.is_(True),
-            Mereni_vodomery.reset_detected.is_(False),
-            Mereni_vodomery.delta.is_not(None),
-        )
-        .order_by(Mereni_vodomery.id.asc())
-    ).scalars().all()
+    measurements = _load_measurements_for_score_rebuild(
+        session,
+        identifikace=identifikace,
+        start_date=start_date,
+    )
 
     rows_to_insert = []
     for measurement in measurements:
@@ -383,6 +408,26 @@ def _rebuild_scores_for_ident(
         "model_version": model_version,
         "inserted_scores": len(rows_to_insert),
     }
+
+
+def _load_measurements_for_score_rebuild(
+    session: Session,
+    *,
+    identifikace: str,
+    start_date,
+):
+    return session.execute(
+        select(Mereni_vodomery)
+        .where(
+            Mereni_vodomery.identifikace == identifikace,
+            Mereni_vodomery.date >= start_date,
+            Mereni_vodomery.synthetic.is_(False),
+            Mereni_vodomery.platne.is_(True),
+            Mereni_vodomery.reset_detected.is_(False),
+            Mereni_vodomery.delta.is_not(None),
+        )
+        .order_by(Mereni_vodomery.id.asc())
+    ).scalars().all()
 
 
 def _rebuild_events_for_ident(

@@ -756,6 +756,71 @@ def test_fetch_charge_sessions_dataframe_with_retries_forwards_timeout_and_dashb
     ]
 
 
+def test_fetch_charge_sessions_dataframe_retries_transient_login_timeout(monkeypatch):
+    expected = pd.DataFrame([{"col": "value"}])
+    fetch_calls = []
+    sleep_calls = []
+
+    def fake_fetch(**kwargs):
+        fetch_calls.append(kwargs)
+        if len(fetch_calls) == 1:
+            raise service.SmartFuelPassTransientError("login page timeout")
+        return expected
+
+    monkeypatch.setattr(service, "fetch_charge_sessions_dataframe", fake_fetch)
+    monkeypatch.setattr(service.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    result = service.fetch_charge_sessions_dataframe_with_retries(
+        attempts=2,
+        retry_delay_seconds=60,
+    )
+
+    assert result is expected
+    assert len(fetch_calls) == 2
+    assert sleep_calls == [60]
+
+
+def test_fetch_charge_sessions_dataframe_does_not_retry_authentication_error(monkeypatch):
+    fetch_calls = []
+    sleep_calls = []
+
+    def fake_fetch(**kwargs):
+        fetch_calls.append(kwargs)
+        raise service.SmartFuelPassAuthenticationError("login rejected")
+
+    monkeypatch.setattr(service, "fetch_charge_sessions_dataframe", fake_fetch)
+    monkeypatch.setattr(service.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    with pytest.raises(service.SmartFuelPassAuthenticationError, match="login rejected"):
+        service.fetch_charge_sessions_dataframe_with_retries(
+            attempts=2,
+            retry_delay_seconds=60,
+        )
+
+    assert len(fetch_calls) == 1
+    assert sleep_calls == []
+
+
+@pytest.mark.parametrize(
+    ("status", "headers", "expected"),
+    [
+        (403, {"cf-mitigated": "challenge", "server": "cloudflare"}, True),
+        (403, {"server": "cloudflare"}, True),
+        (403, {"server": "nginx"}, False),
+        (200, {"server": "cloudflare"}, False),
+    ],
+)
+def test_cloudflare_challenge_response_detection(status, headers, expected):
+    class FakeResponse:
+        def __init__(self):
+            self.status = status
+
+        def all_headers(self):
+            return headers
+
+    assert service._is_cloudflare_challenge_response(FakeResponse()) is expected
+
+
 def test_load_main_table_error_includes_url_and_selector_counts(monkeypatch):
     class FakeLocatorCollection:
         def count(self):

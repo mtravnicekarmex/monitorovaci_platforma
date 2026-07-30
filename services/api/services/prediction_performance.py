@@ -8,6 +8,10 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from core.db.connect import get_session_pg
+from moduly.mereni.kalorimetry.kalorimetry_prediction import (
+    KALORIMETRY_PIPELINE_SETTINGS,
+    get_candidate_model_specs as get_kalorimetry_candidate_model_specs,
+)
 from moduly.mereni.elektromery.elektromery_prediction import (
     ELEKTROMERY_PIPELINE_SETTINGS,
     get_candidate_model_specs as get_elektromery_candidate_model_specs,
@@ -38,7 +42,9 @@ from services.api.schemas.prediction import (
 SNAPSHOT_TABLE = "monitoring.prediction_selected_model_snapshots"
 PROFILE_SNAPSHOT_TABLE = "monitoring.prediction_profile_snapshots"
 BACKFILL_CANDIDATE_TABLE = "monitoring.prediction_backfill_candidate_metrics"
-WORST_IDENTIFIER_LIMIT = 25
+# Keep the admin response bounded while allowing the device table to include
+# the complete current inventory for each supported medium.
+WORST_IDENTIFIER_LIMIT = 500
 HISTORICAL_SNAPSHOT_PERIOD_LIMIT = 160
 
 
@@ -71,6 +77,15 @@ MEDIA_CONFIGS: tuple[PredictionMediumConfig, ...] = (
         selection_run_table="monitoring.plynomery_model_selection_runs",
         candidate_table="monitoring.plynomery_model_selection_candidates",
         candidate_table_shape="plynomery",
+    ),
+    PredictionMediumConfig(
+        medium_key="kalorimetry",
+        medium_label="Kalorimetry",
+        settings=KALORIMETRY_PIPELINE_SETTINGS,
+        specs_loader=get_kalorimetry_candidate_model_specs,
+        selection_run_table="monitoring.kalorimetry_model_selection_runs",
+        candidate_table="monitoring.kalorimetry_model_validation_metrics",
+        candidate_table_shape="kalorimetry",
     ),
     PredictionMediumConfig(
         medium_key="elektromery",
@@ -285,6 +300,12 @@ def _load_candidate_performance(
         rows = _load_vodomery_candidate_rows(session, config, selection_run_id)
     elif config.candidate_table_shape == "plynomery":
         rows = _load_plynomery_candidate_rows(session, config, selection_run_id)
+    elif config.candidate_table_shape == "kalorimetry":
+        rows = _load_kalorimetry_candidate_rows(
+            session,
+            config,
+            selection_run_id,
+        )
     else:
         rows = []
 
@@ -359,11 +380,11 @@ def _load_plynomery_candidate_rows(
                 SELECT
                     selection_run_id,
                     model_version,
-                    NULL::varchar AS model_key,
+                    model_key,
                     model_name,
-                    NULL::integer AS training_window_months,
-                    NULL::integer AS validation_window_months,
-                    TRUE AS selection_enabled,
+                    training_window_months,
+                    validation_window_months,
+                    selection_enabled,
                     selected,
                     validation_total_count,
                     matched_validation_count,
@@ -372,19 +393,114 @@ def _load_plynomery_candidate_rows(
                     rmse,
                     bias,
                     NULL::double precision AS wape,
-                    0 AS rolling_backtest_fold_count,
-                    NULL::integer AS rolling_validation_total_count,
-                    NULL::integer AS rolling_matched_validation_count,
-                    NULL::double precision AS rolling_coverage,
-                    NULL::double precision AS rolling_mae,
-                    NULL::double precision AS rolling_rmse,
-                    NULL::double precision AS rolling_bias,
-                    NULL::double precision AS rolling_wape,
+                    rolling_backtest_fold_count,
+                    rolling_validation_total_count,
+                    rolling_matched_validation_count,
+                    rolling_coverage,
+                    rolling_mae,
+                    rolling_rmse,
+                    rolling_bias,
+                    rolling_wape,
                     profile_count,
                     created_at
                 FROM {config.candidate_table}
                 WHERE selection_run_id = :selection_run_id
                 ORDER BY model_version
+                """
+            ),
+            {"selection_run_id": selection_run_id},
+        )
+        .mappings()
+        .all()
+    )
+
+
+def _load_kalorimetry_candidate_rows(
+    session,
+    config: PredictionMediumConfig,
+    selection_run_id: int,
+) -> Sequence[Mapping[str, object]]:
+    return (
+        session.execute(
+            text(
+                f"""
+                /* prediction_performance:candidates:{config.medium_key} */
+                WITH selection_run AS (
+                    SELECT id, selected_model_version, deploy_start
+                    FROM {config.selection_run_table}
+                    WHERE id = :selection_run_id
+                ),
+                latest_validation_runs AS (
+                    SELECT DISTINCT ON (run.model_version)
+                        run.id,
+                        run.model_version,
+                        run.model_key,
+                        run.fold_count,
+                        run.created_at
+                    FROM monitoring.kalorimetry_model_validation_runs run
+                    CROSS JOIN selection_run selection
+                    WHERE run.reference_end <= selection.deploy_start
+                    ORDER BY
+                        run.model_version,
+                        run.reference_end DESC,
+                        run.created_at DESC,
+                        run.id DESC
+                )
+                SELECT
+                    selection.id AS selection_run_id,
+                    run.model_version,
+                    run.model_key,
+                    NULL::varchar AS model_name,
+                    NULL::integer AS training_window_months,
+                    NULL::integer AS validation_window_months,
+                    TRUE AS selection_enabled,
+                    (run.model_version = selection.selected_model_version)
+                        AS selected,
+                    COALESCE(SUM(metric.validation_total_count), 0)::integer
+                        AS validation_total_count,
+                    COALESCE(SUM(metric.matched_validation_count), 0)::integer
+                        AS matched_validation_count,
+                    CASE
+                        WHEN COALESCE(SUM(metric.validation_total_count), 0) = 0
+                        THEN 0.0
+                        ELSE
+                            SUM(metric.matched_validation_count)::double precision
+                            / SUM(metric.validation_total_count)
+                    END AS coverage,
+                    AVG(metric.mae) AS mae,
+                    AVG(metric.rmse) AS rmse,
+                    AVG(metric.bias) AS bias,
+                    AVG(metric.wape) AS wape,
+                    run.fold_count AS rolling_backtest_fold_count,
+                    COALESCE(SUM(metric.validation_total_count), 0)::integer
+                        AS rolling_validation_total_count,
+                    COALESCE(SUM(metric.matched_validation_count), 0)::integer
+                        AS rolling_matched_validation_count,
+                    CASE
+                        WHEN COALESCE(SUM(metric.validation_total_count), 0) = 0
+                        THEN 0.0
+                        ELSE
+                            SUM(metric.matched_validation_count)::double precision
+                            / SUM(metric.validation_total_count)
+                    END AS rolling_coverage,
+                    AVG(metric.mae) AS rolling_mae,
+                    AVG(metric.rmse) AS rolling_rmse,
+                    AVG(metric.bias) AS rolling_bias,
+                    AVG(metric.wape) AS rolling_wape,
+                    0::integer AS profile_count,
+                    run.created_at
+                FROM selection_run selection
+                JOIN latest_validation_runs run ON TRUE
+                LEFT JOIN monitoring.kalorimetry_model_validation_metrics metric
+                  ON metric.run_id = run.id
+                GROUP BY
+                    selection.id,
+                    selection.selected_model_version,
+                    run.model_version,
+                    run.model_key,
+                    run.fold_count,
+                    run.created_at
+                ORDER BY run.model_version
                 """
             ),
             {"selection_run_id": selection_run_id},
@@ -468,6 +584,9 @@ def _load_latest_snapshot_summary(
                     COUNT(*)::integer AS snapshot_count,
                     COUNT(*) FILTER (WHERE uses_fallback)::integer AS fallback_count,
                     COUNT(*) FILTER (
+                        WHERE fallback_reason = 'insufficient_history'
+                    )::integer AS unavailable_count,
+                    COUNT(*) FILTER (
                         WHERE selected_model_version <> global_model_version
                            OR selected_model_key <> global_model_key
                     )::integer AS selected_differs_from_global_count,
@@ -508,6 +627,7 @@ def _load_latest_snapshot_summary(
         forecast_cadence=str(row["forecast_cadence"]),
         snapshot_count=int(row.get("snapshot_count") or 0),
         fallback_count=int(row.get("fallback_count") or 0),
+        unavailable_count=int(row.get("unavailable_count") or 0),
         selected_differs_from_global_count=int(
             row.get("selected_differs_from_global_count") or 0
         ),
@@ -536,6 +656,7 @@ def _load_model_distribution(
                   AND forecast_period_start = :forecast_period_start
                   AND forecast_period_end = :forecast_period_end
                   AND forecast_cadence = :forecast_cadence
+                  AND fallback_reason <> 'insufficient_history'
                 GROUP BY selected_model_version, selected_model_name
                 ORDER BY row_count DESC, selected_model_version
                 """

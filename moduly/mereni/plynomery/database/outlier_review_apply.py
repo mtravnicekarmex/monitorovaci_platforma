@@ -35,6 +35,7 @@ from moduly.mereni.plynomery.database.plynomery_db_vse import (
 )
 from moduly.mereni.plynomery.plynomery_anomaly import (
     MIN_STD,
+    _build_per_identifier_selected_score_rows,
     _build_score_row,
     _load_hdd_24h_by_measurement_id,
 )
@@ -42,6 +43,7 @@ from moduly.mereni.plynomery.plynomery_events import EVENT_CONFIG, _compute_seve
 from moduly.mereni.plynomery.plynomery_prediction import (
     MODEL_VERSION_WEATHER_ADJUSTED,
     get_candidate_model_versions,
+    get_runtime_model_version,
 )
 
 
@@ -99,14 +101,20 @@ def _rebuild_after_review_update(session: Session, review_row: PlynomeryOutlierR
     measurement_summary = _rebuild_measurements_for_review(session, review_row)
     score_summaries = []
     event_summaries = []
+    active_model_version = get_runtime_model_version(session=session)
 
     for model_version in get_candidate_model_versions():
+        # Active history must mirror production per-identifier selection.
+        # Non-active versions remain pure candidates for comparison.
         score_summaries.append(
             _rebuild_scores_for_ident(
                 session,
                 identifikace=review_row.identifikace,
                 model_version=model_version,
                 start_date=review_row.date,
+                use_per_identifier_selection=(
+                    model_version == active_model_version
+                ),
             )
         )
         event_summaries.append(
@@ -289,6 +297,7 @@ def _rebuild_scores_for_ident(
     identifikace: str,
     model_version: int,
     start_date,
+    use_per_identifier_selection: bool = False,
 ) -> dict[str, object]:
     session.execute(
         delete(PlynomeryAnomalyScore).where(
@@ -297,6 +306,25 @@ def _rebuild_scores_for_ident(
             PlynomeryAnomalyScore.date >= start_date,
         )
     )
+
+    if use_per_identifier_selection:
+        measurements = _load_measurements_for_score_rebuild(
+            session,
+            identifikace=identifikace,
+            start_date=start_date,
+        )
+        rows_to_insert = _build_per_identifier_selected_score_rows(
+            session,
+            measurements=measurements,
+            output_model_version=model_version,
+        )
+        if rows_to_insert:
+            session.execute(insert(PlynomeryAnomalyScore), rows_to_insert)
+        return {
+            "model_version": model_version,
+            "inserted_scores": len(rows_to_insert),
+            "profile_source": "active_per_identifier_selection",
+        }
 
     if model_version == MODEL_VERSION_WEATHER_ADJUSTED:
         return _rebuild_weather_adjusted_scores_for_ident(
@@ -515,8 +543,10 @@ def _rebuild_events_for_ident(
     *,
     identifikace: str,
     model_version: int,
+    ensure_schema: bool = True,
 ) -> dict[str, object]:
-    ensure_expected_zero_table()
+    if ensure_schema:
+        ensure_expected_zero_table()
 
     event_ids = session.execute(
         select(PlynomeryAnomalyEvent.id).where(

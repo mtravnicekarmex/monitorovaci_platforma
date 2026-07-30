@@ -23,7 +23,7 @@ OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
 REQUEST_TIMEOUT = 10
 MAX_RETRIES = 3
-FORECAST_DAYS = 7
+FORECAST_DAYS = 9
 
 FORECAST_HOURLY_VARIABLES = (
     "temperature_2m",
@@ -80,7 +80,7 @@ def _ensure_meteo_forecast_hourly_table(conn) -> None:
         text(
             """
             CREATE TABLE IF NOT EXISTS monitoring.meteo_forecast_hourly (
-                datetime_hour TIMESTAMP WITHOUT TIME ZONE PRIMARY KEY,
+                datetime_hour TIMESTAMP WITHOUT TIME ZONE NOT NULL,
                 forecast_run_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
                 temperature NUMERIC(5, 2) NOT NULL,
                 apparent_temperature NUMERIC(5, 2),
@@ -92,8 +92,37 @@ def _ensure_meteo_forecast_hourly_table(conn) -> None:
                 surface_pressure NUMERIC(7, 2),
                 heating_degree_hours NUMERIC(5, 2) NOT NULL,
                 cooling_degree_hours NUMERIC(5, 2) NOT NULL,
-                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now()
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now(),
+                PRIMARY KEY (forecast_run_at, datetime_hour)
             )
+            """
+        )
+    )
+    conn.execute(
+        text(
+            """
+            DO $$
+            DECLARE
+                current_definition TEXT;
+            BEGIN
+                SELECT pg_get_constraintdef(oid)
+                INTO current_definition
+                FROM pg_constraint
+                WHERE conrelid =
+                    'monitoring.meteo_forecast_hourly'::regclass
+                  AND contype = 'p';
+
+                IF current_definition IS DISTINCT FROM
+                   'PRIMARY KEY (forecast_run_at, datetime_hour)' THEN
+                    ALTER TABLE monitoring.meteo_forecast_hourly
+                        DROP CONSTRAINT IF EXISTS
+                        meteo_forecast_hourly_pkey;
+                    ALTER TABLE monitoring.meteo_forecast_hourly
+                        ADD CONSTRAINT meteo_forecast_hourly_pkey
+                        PRIMARY KEY (forecast_run_at, datetime_hour);
+                END IF;
+            END
+            $$;
             """
         )
     )
@@ -260,7 +289,7 @@ def upsert_forecast(session, data, *, forecast_run_at: datetime | None = None):
 
     stmt = insert(MeteoForecastHourly).values(rows)
     stmt = stmt.on_conflict_do_update(
-        index_elements=["datetime_hour"],
+        index_elements=["forecast_run_at", "datetime_hour"],
         set_={c: stmt.excluded[c] for c in rows[0].keys()},
     )
     session.execute(stmt)

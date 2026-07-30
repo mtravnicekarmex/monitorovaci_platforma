@@ -42,6 +42,38 @@ At the end of every substantive session:
 - `moduly/mereni/prediction/storage.py`: shared prediction selected-model
   snapshot ORM/storage for per-medium, per-identifier, per-forecast-period
   model selection.
+- `moduly/mereni/kalorimetry/reporting/model_rebuild_report.py`: pure
+  aggregate kalorimetry candidate/selection rebuild report and escaped HTML
+  rendering without delivery side effects.
+- `moduly/mereni/kalorimetry/production_dry_run.py`: read-only production
+  kalorimetry orchestration that preloads observations, runs candidates in
+  memory, checks coherent forecast coverage, and returns aggregate results
+  without persistence or activation.
+- `moduly/mereni/kalorimetry/prediction_backfill.py`: pure weekly historical
+  kalorimetry planner/calculator producing leakage-safe candidate metrics,
+  decisions, and shared snapshot rows without an apply path.
+- `moduly/mereni/kalorimetry/prediction_backfill_workflow.py`: explicit
+  dry-run/apply/resume/verify workflow with immutable identity comparison,
+  content fingerprints, conflict rejection, and atomic weekly writes.
+- `moduly/mereni/kalorimetry/production_backfill.py`: approved-range
+  kalorimetry historical backfill orchestration with aggregate preflight,
+  controlled apply/resume, and exact post-write verification.
+- `moduly/mereni/kalorimetry/active_profile.py`: batched period-valid
+  kalorimetry selected-decision and exact profile-slot lookup for scoring and
+  future consumers.
+- `moduly/mereni/kalorimetry/kalorimetry_anomaly.py`: period-valid
+  active-selection anomaly scoring, idempotent score persistence, and atomic
+  per-stream checkpoint advancement.
+- `moduly/mereni/kalorimetry/events.py`: heat-specific spike/sustained-high
+  event state machine, transactional event checkpoint integration, and
+  delivery-disabled alert transition planning.
+- `moduly/mereni/kalorimetry/reconciliation.py`: bounded, aggregate-only,
+  transaction-read-only comparison of expected historical kalorimetry
+  scores/events against optional persisted state.
+- `scripts/kalorimetry_reconciliation_dry_run.py`: JSON aggregate entry point
+  for the kalorimetry historical score/event reconciliation.
+- `scripts/kalorimetry_controlled_backfill.py`: explicit-confirmation CLI for
+  the controlled kalorimetry historical backfill.
 - `services/api/main.py`: FastAPI application entry point and router registration.
 - `services/api/core/config.py`: FastAPI runtime settings, including token and CORS configuration.
 - `services/api/core/tokens.py`: custom HMAC bearer token implementation.
@@ -51,6 +83,10 @@ At the end of every substantive session:
 - `services/api/services/prediction_performance.py`: read-only cross-media
   prediction performance aggregation for candidate runs, selected-model
   snapshots, and candidate catalogs.
+- `services/api/routes/kalorimetry.py`: admin outlier-review routes plus
+  authenticated kalorimetry measurement and period-valid profile reads.
+- `services/api/services/kalorimetry.py`: section/device-scoped kalorimetry
+  measurement series and current/historical active profile availability.
 - `services/api/routes/system_health.py`: admin-only system health API routes
   for safe post-restart/runtime checks.
 - `services/api/services/system_health.py`: sanitized Windows runtime probes
@@ -92,6 +128,21 @@ At the end of every substantive session:
 - `PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`: active step-by-step implementation
   and verification plan for per-identifier plynomery prediction, scoring,
   dashboard, and report integration.
+- `PLYNOMERY_REPORT_CONSUMER_INVENTORY.md`: reviewed classification of every
+  gas report/output and direct prediction-profile consumer, including
+  intentionally actual-only outputs and the step 20 direct-read review queue.
+- `PLYNOMERY_POST_RESTART_RUNBOOK.md`: mandatory gas-pipeline restart,
+  post-boot verification, score/event reconciliation safety contract, and
+  aggregate completion checks.
+- `KALORIMETRY_PREDICTION_PIPELINE_PLAN.md`: active step-by-step plan for the
+  complete kalorimetry import, profile, selection, historical backfill,
+  scoring, API, dashboard, and downstream-consumer lifecycle.
+- `KALORIMETRY_CONSUMER_INVENTORY.md`: reviewed classification of every
+  kalorimetry prediction-bearing, actual-only, anomaly/event, model-rebuild,
+  device/inventory, report, and scheduler consumer.
+- `KALORIMETRY_ACTIVATION_RUNBOOK.md`: mandatory Monday 2026-08-03 forecast
+  preflight, approval, current-snapshot activation, scoring/event pilot,
+  scheduler, regression, restart, and post-rollout checklist.
 - `SECURITY_SECRET_INVENTORY.md`: non-secret inventory of production secret,
   credential, session, and sensitive runtime artifact locations.
 - `requirements-production.in`: reviewed direct production dependency pins.
@@ -182,13 +233,194 @@ Known hygiene topics to handle only after explicit approval:
   model plugins, configurable forecast periods, rolling backtests, and
   per-identifier model selection. Implement one checklist step at a time and
   mark it complete only after targeted verification.
+- All production prediction media use one Prague calendar-week validity
+  contract: Monday 00:00 inclusive through the following Monday 00:00
+  exclusive. Plynomery and vodomery use the shared calendar-week period
+  builder; kalorimetry and elektromery must reuse the same builder when their
+  prediction pipelines are added.
+- Kalorimetry prediction work follows
+  `KALORIMETRY_PREDICTION_PIPELINE_PLAN.md` one verified checklist item at a
+  time. Predict normalized non-negative energy `delta`, not cumulative
+  `spotreba_energie` or `objem`; retain explicit reset, gap, synthetic,
+  validity, outlier, time, and device-access semantics. Do not copy gas
+  weather behavior until heat-specific historical evidence and weather-input
+  availability have been reviewed.
+- Kalorimetry model input and scoring require valid, non-reset, finite
+  non-negative energy deltas and exclude both `synthetic` and `gap_detected`
+  rows. Consumption display may retain valid gap continuity rows, while meter
+  state display may retain finite cumulative states without a usable delta.
+  Zero delta is a real observation and must not be removed to improve metrics.
+- Kalorimetry timezone-aware forecast references are converted to
+  Europe/Prague wall time before calling the shared calendar-week builder.
+  Naive references already represent Prague wall time. Do not duplicate the
+  Monday-to-Monday calculation in kalorimetry modules.
+- Kalorimetry normalized prediction observations are loaded through
+  `moduly/mereni/kalorimetry/prediction_adapter.py`. Its SQL prefilter and pure
+  DEC-078 classifier form one fail-closed boundary; later candidates must not
+  read `Mereni_kalorimetry_vse` directly and weaken those filters.
+- Kalorimetry calendar baseline model 1 uses a 12-month window and requires
+  eight eligible samples for every one of 672 weekday/15-minute slots. Never
+  publish a partial identifier profile; incomplete coverage is
+  `insufficient_history`. Model 1 is not production-active merely because its
+  profile can be built.
+- Kalorimetry weather model 2 is only a per-identifier challenger. It uses a
+  leakage-safe trailing 24-hour HDD feature and a non-negative per-slot slope.
+  Deploy profiles require complete weather for the full Prague week; any
+  missing hour is `missing_forecast_weather` with no fallback to zero,
+  training mean, historical/stale weather, or baseline under model 2 identity.
+- Kalorimetry rolling comparison uses the production Prague week shape and a
+  preceding 12-month training window per fold. Weather validation actuals
+  must be loaded independently from HDD matches so missing weather reduces
+  coverage. Persist per-identifier WAPE, MAE, RMSE, bias, coverage, observed
+  fold count, and matched fold count in the caller's transaction.
+- Kalorimetry selection may consume only entries from
+  `deployable_catalog.py` marked available. Available means exactly 672 unique
+  15-minute slots for one identifier/model with finite non-negative
+  statistics, ordered quantiles, and positive sample sizes. Never attach a
+  partial profile or relabel baseline as weather when model 2 is unavailable.
+- Kalorimetry dry-run selection requires finite WAPE, MAE, RMSE, and bias,
+  coverage of at least 85 percent, at least eight matched weekly folds, and an
+  available deployable profile. Rank by WAPE, MAE, RMSE, absolute bias,
+  descending matched observations, then model version. If the metric winner
+  has no deployable profile, select the next eligible candidate and preserve
+  the profile-unavailability reason in the audit. Selection alone must not
+  persist or activate anything.
+- Kalorimetry selected-model and profile snapshots use the shared prediction
+  storage with `medium_key='kalorimetry'`. Build and validate the complete
+  persistence batch before SQL execution; every available decision requires
+  the exact selected model key and all 672 profile points for the same period.
+  Do not persist unavailable identifiers as selected. Execute decision and
+  profile inserts in one caller-owned transaction/savepoint and never commit
+  them independently.
+- The shared prediction-performance API/dashboard includes kalorimetry as a
+  registered weekly medium. Before its first controlled persisted run it must
+  report `not_run`; afterward it may expose only aggregate candidate metrics,
+  snapshot winner/fallback distributions, coverage, and a bounded
+  worst-identifier list. The kalorimetry rebuild report is a pure aggregate
+  renderer and must not include raw measurements or invent email recipients.
+- The 2026-07-29 kalorimetry production dry-run is not an activation approval.
+  PostgreSQL observations ended on 2026-05-18, leaving all eight current
+  validation folds empty and all 14 identifiers without selection metrics.
+  Baseline profiles were deployable for all 14, but the coherent weather
+  forecast supplied only 145 of 168 required trailing-24-hour features.
+  Complete the reviewed measurement backlog import and extend/verify forecast
+  coverage before repeating a current-period dry-run or activating snapshots.
+- The measurement-backlog part of that blocker cleared after the 2026-07-29
+  restart. A 2026-07-30 aggregate audit found PostgreSQL current with MSSQL and
+  eligible observations for all 14 identifiers through 2026-07-26. The repeat
+  current-period dry-run evaluated 75,190 validation rows at 100 percent
+  aggregate coverage. Activation remains blocked: the latest coherent forecast
+  supplied only 95 required HDD values, weather profiles were unavailable for
+  all 14 identifiers, and seven identifiers still had no eligible selection
+  metrics. Do not activate weekly snapshots or scoring from this result.
+- Weather forecast synchronization now requests nine days and archives rows
+  by composite `(forecast_run_at, datetime_hour)` identity. A kalorimetry
+  deployment must select one coherent issuance strictly before the Prague
+  week starts and require all raw hours for 168 trailing-24-hour HDD values.
+  Do not use a run issued after Monday to reconstruct that week. Operational
+  gas consumers must resolve the latest issuance per target hour now that
+  multiple runs are retained.
+- Return to `KALORIMETRY_ACTIVATION_RUNBOOK.md` on Monday 2026-08-03 morning.
+  Do not begin step 25 scheduler writes before the Sunday pre-week forecast,
+  current dry-run, snapshot approval, snapshot verification, and separate
+  scoring/event approval gates are satisfied.
+- Kalorimetry historical backfill weeks hard-cut measurement and weather
+  observations at the Monday period start. Historical weather deployment
+  requires explicit forecast provenance issued strictly before that start.
+  Snapshot batches use `selection_mode='active'`,
+  `archive_source='historical_backfill'`, and `selection_run_id=NULL`; they
+  must not alter the current runtime selection identity. Step 13 defines only
+  planning/calculation—production dry-run/apply/resume/conflict handling
+  belongs to step 14 and requires separate approval.
+- Kalorimetry historical workflow classifies each identifier/week/archive
+  batch as absent, exactly complete, or conflict. Resume may skip only exact
+  model/count/content fingerprint equality across decisions, both candidate
+  metrics, and all profile points. Apply requires `confirm_apply=True`, all
+  shared tables to exist, exact insert counts, one savepoint per week, and a
+  weekly commit only after validation. Never use apply merely because the
+  function exists; production execution remains a separate explicit approval.
+- The approved kalorimetry historical backfill completed on 2026-07-29 for
+  `[2025-07-28, 2026-05-18)`: 42 weeks, 588 identifier-weeks, 430 baseline
+  decisions, 1,176 candidate metrics, and 288,960 profile points. All weeks
+  verify complete with zero conflicts and all selected profiles have 672
+  points. Historical weather was unavailable for every week because no
+  complete coherent pre-week forecast archive existed. Snapshots cover 13 of
+  14 identifiers and retain `selection_run_id=NULL`; current kalorimetry
+  selection/profile/validation tables were not created or activated.
+- Kalorimetry active-profile lookup uses half-open snapshot validity and
+  resolves overlapping decisions by latest period start, creation time, and
+  row id. Within the selected decision it resolves only the exact selected
+  model, period, interval, weekday, and slot, preferring highest archive
+  version, creation time, and row id. `no_selection_snapshot`,
+  `insufficient_history`, and `missing_profile` are unavailable and must not
+  fall back to a global, current, stale, zero, or other-model profile.
+- Kalorimetry active-selection anomaly scores use stable output
+  `model_version=1` and separately record the selected candidate model,
+  decision snapshot id, and profile snapshot id. Only observations eligible
+  under the shared kalorimetry scoring-quality contract may be scored.
+  Explicitly unavailable selections receive no score but advance the
+  checkpoint; an available decision missing its exact profile is a hard error
+  before commit. Conflict-safe score insertion and checkpoint advancement
+  share one transaction. Do not create the score/checkpoint tables or run
+  production scoring without the separately reviewed activation/reconciliation
+  sequence.
+- Kalorimetry event detection supports only `SPIKE` and
+  `SUSTAINED_HIGH_USAGE`. Do not copy gas/water night-use or expected-zero
+  semantics without a separate heat-domain decision. Event state, active
+  events, processed-score flags, and the event-engine checkpoint share one
+  transaction. Alert transition plans remain delivery-disabled until an
+  aggregate dry-run is reviewed and sending is explicitly approved.
+- Kalorimetry outlier-review repair rebuilds active scoring rows only through
+  exact period-valid selected snapshots. It is a no-op before scoring-table
+  activation, never changes the global checkpoint, and must not write
+  non-active candidate comparisons, profiles, or metrics.
+- The 2026-07-29 kalorimetry historical reconciliation covered
+  `[2025-07-28, 2026-05-18)` read-only: 401,363 measurements, 395,149 eligible,
+  6,214 ineligible, 285,766 expected scores, 109,383 eligible rows without an
+  available period-valid selection, and 3,456 created plus 3,456 resolved
+  expected event episodes. Score/event tables did not exist, so persisted
+  counts were zero and all expected scores/created episodes were missing.
+  Zero mismatch/flag/severity changes reflect no overlapping persisted state,
+  not successful score activation. Do not apply this result without separate
+  approval.
+- Kalorimetry measurement/profile API reads require both `kalorimetry` section
+  access and requested-device access, with service-level checks before opening
+  PostgreSQL. Measurement ranges use Prague-local date boundaries converted to
+  half-open UTC. Current profile reads use only a covering active snapshot;
+  historical ranges return only overlapping active periods. Duplicate profile
+  slots resolve by highest archive version, newest creation time, and highest
+  row id. `no_selection_snapshot`, `insufficient_history`, and
+  `missing_profile` remain explicit without global/current/stale/zero fallback.
+- Kalorimetry prediction series use the authenticated device-scoped API and
+  exact period-valid profile snapshots for hourly, daily, and monthly output.
+  Negative expected interval consumption is clamped to zero before
+  aggregation. Expected cumulative consumption is derived across the complete
+  requested range and must not reset at weekly snapshot boundaries; uncovered
+  ranges remain explicitly unavailable or partial.
+- `Kalorimetry / Přehled` loads predictions only through that API. It shows
+  actual, expected, absolute-deviation, and percentage-deviation metrics and
+  overlays light-gray interval and cumulative predictions below actual energy
+  consumption. Unavailable values display `Nedostupné`; do not restore a
+  direct Streamlit prediction-profile database read.
+- `Kalorimetry / Detail` reuses the same API: daily series for its seven-day
+  and 31-day charts and monthly series for its 24-month history. Expected
+  lines remain below actual bars, and unavailable/partial periods stay
+  explicit. Preserve the page's device metadata, photograph, reset history,
+  measurement tables, and responsive layout.
+- Only `Kalorimetry / Přehled` and `Kalorimetry / Detail` are currently
+  prediction-bearing user outputs. The JORDAN monthly report's kalorimetry row
+  remains intentionally actual-only and derives consumption from two valid
+  cumulative states. Do not add prediction or change delivery without
+  separate approval; use `KALORIMETRY_CONSUMER_INVENTORY.md` as the reviewed
+  consumer baseline.
 - Vodomery production scoring now reads `active` per-identifier selected-model
   snapshots for the globally active model. The selected snapshot controls the
   source profile per odběrné místo for the forecast period; inserted anomaly
   scores still use the global active `model_version` so existing event and
   alert flows remain compatible. Missing or unusable per-identifier selections
-  fall back to the global active model profile. Non-active candidate scoring
-  remains pure per-candidate scoring for comparison.
+  produce no active score; available selections with missing profiles fail.
+  Non-active candidate scoring remains pure per-candidate scoring for
+  comparison.
 - Vodomery daily, weekly, and monthly branch PDF predictions use period-bounded
   `active` profile snapshots per identifier. Historical report days must not
   use the current global profile; duplicate snapshot slots resolve by highest
@@ -198,15 +430,83 @@ Known hygiene topics to handle only after explicit approval:
   per-identifier profile snapshot valid at the current Prague time. Overlapping
   periods resolve to the latest period start; the global current profile is
   only a fallback when no active snapshot covers the current instant.
+- Plynomery measurement and prediction-profile API reads require both
+  `plynomery` section access and device access. Current profile reads use only
+  the period-valid `active` selected/profile snapshot. `insufficient_history`,
+  `no_selection_snapshot`, and `missing_profile` are explicit unavailable
+  states with empty profile rows; do not replace them with zero or a global
+  profile.
+- Plynomery profile API date ranges return only overlapping `active` snapshot
+  periods and carry per-period availability plus profile validity metadata.
+  Mixed ranges may be `partial`. Historical reads must never project the
+  current or global profile backward.
+- Plynomery historical prediction coverage begins on 2026-04-21 through
+  weekly per-identifier backfill snapshots. Historical backfill evaluates
+  candidate models using only information available before each calendar
+  week, stores active decisions with `selection_run_id=NULL`, uses
+  `archive_source=historical_backfill`, and must not change the current
+  runtime selection identity. Identifiers without three months of history
+  remain explicitly unavailable.
+- Shared plynomery prediction series are built from period-valid profile
+  snapshots for hourly, daily, and monthly output. Overlaps resolve by latest
+  period start and then newest selection run. Weather-adjusted rows require
+  the applicable 24-hour HDD input; missing weather must remain unavailable
+  and must not fall back to the stored training HDD mean or zero.
+- `Plynomery / Prehled` obtains prediction series through the authenticated,
+  device-scoped FastAPI endpoint. It renders the full selected period at the
+  chosen hourly, daily, or monthly granularity, reports partial availability,
+  and shows `Nedostupné` for unavailable predictions. Actual series remain
+  bounded by the last real measurement.
+- `Plynomery / Prehled` renders the expected-consumption line in the same light
+  gray (`#dedcd9`) as vodomery, includes expected cumulative consumption in
+  the cumulative chart, draws actual consumption above the prediction layer,
+  shows the shared consumption/prediction legend below the charts, and
+  presents the four summary metrics actual, expected, absolute deviation, and
+  percentage deviation.
+- The dashboard gas prediction loader sorts API series chronologically and
+  derives expected cumulative consumption from expected bucket consumption
+  across the complete selected range. Do not trust, reset, or independently
+  splice cumulative values at weekly snapshot boundaries.
+- Gas prediction series clamp negative expected bucket consumption to zero
+  before aggregation and cumulative summation. Expected cumulative
+  consumption must therefore be monotonic non-decreasing.
+- `Plynomery / Detail` reuses the same device-scoped prediction-series API.
+  Its 7-day and 31-day charts use daily predictions and its 24-month history
+  uses monthly predictions. Historical gaps remain gaps, and
+  `insufficient_history` is displayed as `Nedostupné`.
+- Plynomery currently have no consumption PDF reports. When one is added, it
+  must use the shared period-valid prediction-series contract for every report
+  timestamp, display `Nedostupné` for unavailable periods, and must not
+  substitute zero, the current profile, or a stale/global profile.
+- Plynomery outlier-review repair rebuilds the globally active score identity
+  through period-valid active per-identifier selection. Non-active model
+  versions remain pure candidate rebuilds from their candidate profile tables.
+  Missing/insufficient active selections produce no repaired score rather than
+  a global fallback.
 - Vodomery per-identifier selection may choose only a candidate that produced
   a deployable profile for that identifier. If the metric winner has no
   profile, select the next best eligible candidate with sufficient coverage
   and record `missing_profile`; if no candidate profile exists, fail the
   rebuild before persisting selections. Do not hide historical missing-profile
   gaps by copying a later or stale profile into the archive.
+- Vodomery identifiers without any valid rolling fallback metrics are persisted
+  as `insufficient_history`. They publish no selected profile and receive no
+  active score, while the scoring checkpoint still advances. API, dashboard,
+  and branch PDF consumers display `Nedostupné`; they must not substitute a
+  global, zero, copied, synthetic, current, or stale profile. An available
+  decision with a missing profile is a hard error.
+- Vodomery outlier-review repair rebuilds the globally active score identity
+  through the same period-valid active per-identifier selection as normal
+  scoring. Non-active model versions remain pure candidate rebuilds for model
+  comparison. Missing selection, insufficient history, or a missing selected
+  profile must not fall back to a global, current, or stale profile.
 - SmartFuelPass automation logs in with configured credentials for each portal
   run. Do not restore JSON cookie/session persistence or
   `SMARTFUELPASS_SESSION_COOKIES_PATH`.
+- SmartFuelPass portal fetches classify a Cloudflare mitigation response or a
+  login-page load timeout as transient. Retry at most once after the configured
+  60-second delay. Do not retry missing credentials or rejected authentication,
+  and do not bypass the portal's Cloudflare protection.
 - SmartFuelPass charge-session data is synchronized into PostgreSQL by
   `daily_job` after midnight. Weekly SmartFuelPass reports must be built from
   `monitoring.smartfuelpass_relace`, not by reading the portal directly during
@@ -215,6 +515,15 @@ Known hygiene topics to handle only after explicit approval:
   when the portal later corrects or enriches a session.
 - SmartFuelPass weekly report periods use the previous completed calendar week
   from Monday through Sunday and filter by session end time.
+- SmartFuelPass portal synchronization is an explicit admin-initiated
+  interactive workflow. The scheduled `daily_job` must not perform a headless
+  portal login. The dedicated Windows task opens a visible temporary browser
+  only in a logged-on desktop session; the administrator completes Cloudflare
+  and portal login manually, after which the existing idempotent database
+  upsert continues. Do not persist or expose portal credentials, cookies,
+  browser storage, raw rows, or Cloudflare clearance values.
+- The database-backed SmartFuelPass weekly report remains scheduled and must
+  not open the portal.
 - `Mapove podklady` uses general FastAPI map endpoints and admin-configured metadata in `dashboard.Map_Layers`.
 - Map feature images must be resolved server-side from `layer_id` and device identifier; do not expose an endpoint that serves arbitrary client-supplied file paths.
 - Browser map image loading must use same-origin `/api/v1/map/images` through Caddy, which routes `/api/*` to FastAPI and other requests to Streamlit.
@@ -253,6 +562,11 @@ Known hygiene topics to handle only after explicit approval:
   proxy; application code uses the trusted request scope rather than parsing
   raw `X-Forwarded-For` headers.
 - `https://monitoring.armexholding.cz` is the only supported public client entry point; direct client access through the public IP address is not required or supported.
+- This multi-homed production workstation cannot validate the public dashboard
+  through its own public address because the Internet path has no working
+  hairpin route. Post-restart checks must use local Caddy TLS/SNI for on-host
+  routing and an actual external client for independent public reachability;
+  an on-host public-hostname timeout alone is not a dashboard outage.
 - `start_api_dashboard.bat` starts or reloads `C:\Program Files\Caddy\caddy.exe` only after FastAPI and Streamlit health checks pass.
 - Production FastAPI, Streamlit, and scheduler processes use the isolated
   `.venv-production` environment. Startup fails closed if Python is not 3.14,

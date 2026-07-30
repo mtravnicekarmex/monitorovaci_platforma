@@ -287,14 +287,21 @@ def load_prediction_profiles(
 ) -> pd.DataFrame:
     del allowed_devices, user_is_admin
     access_token = require_dashboard_api_token()
-    rows = api_get_vodomery_prediction_profiles(
+    payload = api_get_vodomery_prediction_profiles(
         access_token,
         identifikace=identifikace,
         start_date=start_date.isoformat() if start_date is not None else None,
         end_date=end_date.isoformat() if end_date is not None else None,
     )
+    if isinstance(payload, list):
+        payload = {
+            "prediction_available": bool(payload),
+            "availability_status": "available" if payload else "unavailable",
+            "availability_reason": None,
+            "rows": payload,
+        }
     frame = pd.DataFrame(
-        rows,
+        payload.get("rows", []),
         columns=[
             "interval_minutes",
             "day_of_week",
@@ -314,7 +321,20 @@ def load_prediction_profiles(
         ],
     )
     for column in ("valid_from", "valid_to"):
-        frame[column] = pd.to_datetime(frame[column], errors="coerce")
+        frame[column] = pd.to_datetime(
+            frame[column],
+            errors="coerce",
+            format="mixed",
+        )
+    frame.attrs["prediction_available"] = bool(
+        payload.get("prediction_available", not frame.empty)
+    )
+    frame.attrs["availability_status"] = str(
+        payload.get("availability_status") or (
+            "available" if not frame.empty else "unavailable"
+        )
+    )
+    frame.attrs["availability_reason"] = payload.get("availability_reason")
     return frame
 
 
@@ -408,7 +428,11 @@ def build_period_prediction(
     if profiles_df.empty or start_date > end_date:
         return pd.DataFrame()
 
-    profiles = profiles_df.copy()
+    profiles = select_prediction_profiles_for_range(
+        profiles_df,
+        start_date=start_date,
+        end_date=end_date,
+    )
     for column in ("interval_minutes", "day_of_week", "slot", "expected_mean"):
         profiles[column] = pd.to_numeric(profiles[column], errors="coerce")
     profiles = profiles.dropna(
@@ -479,6 +503,54 @@ def build_period_prediction(
         "ocekavana_spotreba"
     ].cumsum().round(3)
     return prediction
+
+
+def select_prediction_profiles_for_range(
+    profiles_df: pd.DataFrame,
+    *,
+    start_date: datetime.date,
+    end_date: datetime.date,
+) -> pd.DataFrame:
+    """Prefer the newest snapshot that covers the complete requested range."""
+    profiles = profiles_df.copy()
+    if profiles.empty or start_date > end_date:
+        return profiles
+    if not {"valid_from", "valid_to"}.issubset(profiles.columns):
+        return profiles
+
+    profiles["valid_from"] = pd.to_datetime(
+        profiles["valid_from"],
+        errors="coerce",
+        format="mixed",
+    )
+    profiles["valid_to"] = pd.to_datetime(
+        profiles["valid_to"],
+        errors="coerce",
+        format="mixed",
+    )
+    range_start = pd.Timestamp(datetime.datetime.combine(start_date, datetime.time.min))
+    range_end = pd.Timestamp(
+        datetime.datetime.combine(
+            end_date + datetime.timedelta(days=1),
+            datetime.time.min,
+        )
+    )
+    complete = profiles.loc[
+        (profiles["valid_from"] <= range_start)
+        & (profiles["valid_to"] >= range_end)
+    ].copy()
+    if complete.empty:
+        return profiles
+
+    latest_start = complete["valid_from"].max()
+    latest_end = complete.loc[
+        complete["valid_from"] == latest_start,
+        "valid_to",
+    ].max()
+    return complete.loc[
+        (complete["valid_from"] == latest_start)
+        & (complete["valid_to"] == latest_end)
+    ].copy()
 
 
 @st.cache_data(ttl=60)

@@ -77,6 +77,7 @@ class PredictionSnapshotSummary(BaseModel):
     forecast_cadence: str
     snapshot_count: int = Field(ge=0)
     fallback_count: int = Field(ge=0)
+    unavailable_count: int = Field(default=0, ge=0)
     selected_differs_from_global_count: int = Field(ge=0)
     latest_created_at: datetime | None = None
     model_distribution: list[PredictionDistributionRecord] = Field(default_factory=list)

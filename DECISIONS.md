@@ -1423,3 +1423,1341 @@ Implications:
   consumption.
 - Period prediction construction respects profile validity and resolves
   overlapping snapshots in favor of the latest period start.
+
+## DEC-058: Plynomery Use The Current Prague Calendar Week
+
+Date: 2026-07-27
+
+Decision: Plynomery selected-model and profile snapshots use the current
+Prague calendar week from Monday 00:00 inclusive through the following Monday
+00:00 exclusive. The weekly rebuild remains scheduled for Monday at 06:10
+Prague time and writes the snapshot for the week already in progress.
+
+Rationale: This matches the established vodomery weekly period boundary,
+produces stable historical and dashboard date ranges, and avoids making
+snapshot identity depend on the exact scheduler start or rebuild duration.
+The first hours of Monday are already measured by the time the scheduled
+rebuild starts.
+
+Implications:
+
+- A manual rebuild during the same calendar week targets the same forecast
+  period and shared conflict rules prevent duplicate snapshot slots.
+- Rolling validation for per-identifier selection must use seven-day windows
+  aligned to completed Prague calendar weeks.
+- Weather-adjusted profile coefficients are independent of the forecast
+  weather rows. Future expected values may use hourly weather forecasts only
+  where the required HDD inputs are available.
+- The current meteorological sync requests a rolling seven-day hourly
+  forecast, which does not guarantee that every hour through the end of the
+  current calendar week is available at Monday rebuild time. Dashboard
+  activation therefore requires an explicit, tested missing-future-weather
+  fallback; missing weather must not be silently interpreted as zero HDD.
+
+## DEC-059: New Plynomery Without Sufficient History Have No Prediction
+
+Date: 2026-07-27
+
+Decision: A plynomery identifier that does not have enough valid history to
+produce any deployable candidate profile is an expected unavailable state, not
+a rebuild failure. The rebuild persists an auditable selected-model snapshot
+with `fallback_reason='insufficient_history'` and
+`metadata.prediction_available=false`, but intentionally persists no profile
+snapshot for that identifier and forecast period.
+
+Rationale: Newly installed gas meters can have valid measurements while still
+being below the minimum profile-history thresholds. Generating a zero, copied,
+or synthetic profile would misrepresent the forecast. Failing the complete
+rebuild would also prevent established meters from receiving valid snapshots.
+
+Implications:
+
+- Missing profiles remain a hard error for identifiers marked as prediction
+  available.
+- Scoring, API, dashboard, and report consumers must treat
+  `insufficient_history` as `Nedostupné`, never as zero consumption and never
+  as permission to use a stale profile.
+- Winner/model distributions exclude unavailable identifiers; unavailable
+  counts are reported separately.
+- Once enough history exists, a later rebuild may create a deployable profile
+  and replace the unavailable state for the new forecast period.
+- The current plynomery UI has no prediction view and the project has no
+  plynomery prediction PDF. Their future implementations must consume this
+  availability contract.
+
+## DEC-060: Plynomery Per-Identifier Lookup Requires A Period-Valid Decision
+
+Date: 2026-07-27
+
+Decision: When plynomery per-identifier selection is enabled, a measurement
+may use a candidate profile only from a selected-model snapshot whose
+half-open forecast period contains the measurement timestamp. Overlapping
+snapshots resolve by latest forecast-period start, then latest creation time,
+then highest snapshot id. A recorded fallback decision may select the global
+model. If no period-valid snapshot exists, lookup returns
+`no_selection_snapshot` and no profile; it must not silently use the current
+global profile.
+
+Rationale: Silent global fallback would hide missing selection coverage and
+could project a current or stale profile into a period for which no decision
+was made. Explicit unavailability keeps scoring, dashboard, and report
+behavior auditable.
+
+Implications:
+
+- The lookup remains disabled by default behind
+  `PLYNOMERY_PER_IDENTIFIER_MODEL_SELECTION_ENABLED`.
+- `insufficient_history` and `no_selection_snapshot` both resolve to no
+  prediction profile, but retain distinct reasons.
+- Candidate versions referenced only by unavailable snapshots are not loaded.
+- Step 10 must advance the scoring checkpoint when either unavailable state is
+  encountered.
+
+## DEC-061: Plynomery Mixed Scoring Retains The Global Score Identity
+
+Date: 2026-07-27
+
+Decision: When per-identifier plynomery selection is enabled for the globally
+active scoring stream, one batch may evaluate identifiers through either the
+static baseline profile or the weather-adjusted profile selected by their
+period-valid snapshots. Persisted anomaly scores retain the globally active
+`model_version`, regardless of the source profile version.
+
+Rationale: Existing event, alert, checkpoint, and uniqueness flows identify
+the production scoring stream by the global active model version. Changing
+that identity per identifier would fragment downstream processing. The source
+profile selection is already auditable through selected-model and profile
+snapshots.
+
+Implications:
+
+- Static profiles are loaded only for selected static versions.
+- Weather profiles and HDD inputs are loaded only when at least one available
+  measurement selects the weather-adjusted model; HDD is calculated only for
+  those measurements.
+- `insufficient_history`, `no_selection_snapshot`, a missing selected profile,
+  or missing HDD produces no score for that measurement but still advances
+  the global stream checkpoint.
+- Non-active candidate streams remain pure per-candidate scoring for model
+  comparison.
+- Production behavior remains disabled until step 11 explicitly activates the
+  per-identifier flag and completes alert/event verification.
+
+## DEC-062: Plynomery Weekly Rebuilds Publish Active Per-Identifier Snapshots
+
+Date: 2026-07-27
+
+Decision: The default full plynomery rebuild publishes selected-model and
+matching profile snapshots with `selection_mode='active'`. Dry-run publication
+remains available only through an explicit rebuild argument. Scheduler scoring
+and alerting pass active per-identifier selection only to the globally active
+candidate; non-active candidates remain isolated comparison streams.
+
+Rationale: The reviewed dry-run and insufficient-history behavior passed the
+production aggregate gate. Publishing active snapshots is required before the
+scoring stream can consume period-valid per-identifier decisions.
+
+Implications:
+
+- Active selected-model decisions without sufficient history intentionally
+  have no profile snapshot.
+- Every decision marked prediction available must have a matching active
+  profile pair.
+- Persisted anomaly scores continue to use the global active model version.
+- The current running scheduler does not load these code changes until the
+  supported full-workstation restart in rollout step 24.
+- Step 12 may perform a controlled manual scoring verification without
+  sending alerts or running unrelated scheduler jobs.
+
+## DEC-063: Plynomery Profile API Returns Explicit Availability
+
+Date: 2026-07-27
+
+Decision: Authenticated plynomery measurement and prediction-profile API
+endpoints require section and device authorization. The current profile
+endpoint reads only the period-valid `active` selected-model decision and its
+matching profile snapshot. It returns an explicit availability status and
+empty profile rows for `insufficient_history`, `no_selection_snapshot`, or
+`missing_profile`; it never substitutes zero or the current global profile.
+
+Rationale: Dashboard consumers need to distinguish a real zero prediction
+from the absence of a trustworthy prediction. Device-level authorization must
+also be enforced before database access because measurements and profiles are
+operationally sensitive.
+
+Implications:
+
+- The measurement endpoint uses canonical UTC bounds derived from the selected
+  Prague local date range and returns the stored time-semantics fields.
+- Weather-adjusted profile responses preserve `profile_kind`, `base_mean`,
+  `hdd_slope`, and `hdd_24h_mean`.
+- The current endpoint resolves overlapping decisions by latest period start,
+  creation time, and snapshot id.
+- Historical date-range profile loading remains step 14 and must not project a
+  current profile backward.
+- Both routes are included in the explicit API authorization inventory and
+  must return HTTP 401 without authentication and HTTP 403 without device
+  access.
+
+## DEC-064: Historical Plynomery Profiles Are Period-Bounded And Snapshot-Only
+
+Date: 2026-07-27
+
+Decision: Plynomery prediction-profile requests with a date range return only
+overlapping `active` selected-model and profile snapshots. Each availability
+period and profile row carries its own validity bounds and selection run.
+Ranges containing both available and unavailable periods report `partial`.
+When no active historical decision exists, the API returns
+`no_selection_snapshot` with no rows and does not read a current or global
+profile.
+
+Rationale: A current profile can encode a different model, weather
+relationship, or training window than the profile that was valid historically.
+Projecting it backward would create predictions that were never selected for
+that period and would hide genuine history gaps.
+
+Implications:
+
+- `start_date` and `end_date` must be supplied together and use an inclusive
+  Prague local-date request converted to a half-open timestamp range.
+- Current requests without dates continue to resolve at the exact current
+  Prague timestamp.
+- Current overlap precedence remains latest forecast-period start, latest
+  creation time, then highest snapshot id.
+- Historical consumers receive validity metadata and must resolve any
+  overlapping periods deterministically when constructing time series.
+- No historical API branch may fall back to
+  `plynomery_anomaly_profiles` or `plynomery_weather_model_profiles`.
+## DEC-065: Plynomery prediction-series construction is period-valid and weather-strict
+
+Date: 2026-07-27
+
+Status: Accepted
+
+Decision:
+
+- One shared plynomery helper constructs hourly, daily, and monthly prediction
+  series from active profile snapshot rows.
+- A timestamp covered by overlapping profile snapshots uses the latest
+  `valid_from`, then the highest `selection_run_id`, followed by deterministic
+  validity/model ordering.
+- Static profiles use `expected_mean`.
+- Weather-adjusted profiles use `base_mean + hdd_slope * hdd_24h`, matching
+  production anomaly scoring.
+- The 24-hour HDD value is calculated from hourly weather inputs using the
+  same partial rolling-window semantics as scoring. Historical weather can
+  override forecast input before it reaches the helper.
+- Missing HDD, profile coefficients, or a period-valid profile creates no
+  prediction value. The helper must not substitute `hdd_24h_mean`, zero, or a
+  stale/global profile.
+
+Consequences:
+
+- Dashboard and report consumers can share one deterministic construction
+  path.
+- Consumers remain responsible for displaying explicit availability from the
+  profile API; absent constructed rows are not interpreted as zero.
+## DEC-066: Plynomery overview predictions use a device-scoped API series
+
+Date: 2026-07-27
+
+Status: Accepted
+
+Decision:
+
+- `Plynomery / Prehled` loads constructed predictions from
+  `GET /api/v1/plynomery/prediction-series`.
+- The endpoint enforces both plynomery section access and per-device access
+  before database reads.
+- Weather history and forecast inputs remain server-side. Historical weather
+  overrides forecast values for the same UTC hour before rolling HDD is
+  calculated.
+- The overview requests hourly output for raw/hourly display, daily output for
+  daily detail, and month-end output for monthly detail.
+- The prediction is constructed independently across the complete selected
+  date range. Actual and cumulative-actual data continue to end at the latest
+  real measurement.
+- `insufficient_history` and other fully unavailable states display
+  `Nedostupné`. Partial profile or weather coverage is displayed as partial
+  and is never filled with zero, training HDD, or a stale/global profile.
+
+Consequences:
+
+- Browser code receives only authorized, constructed prediction data and no
+  raw weather-table access.
+- The same endpoint and construction helper can be reused by the detail page
+  and later report work.
+## DEC-067: Plynomery detail reuses the overview prediction contract
+
+Date: 2026-07-27
+
+Status: Accepted
+
+Decision:
+
+- `Plynomery / Detail` uses the same authenticated, device-scoped
+  prediction-series endpoint and shared construction helper as
+  `Plynomery / Prehled`.
+- The last-7-days and last-31-days charts consume daily series. The
+  24-month history consumes month-end series.
+- The page requests only its defined display windows. It does not load a
+  current profile and project it backward across the complete measurement
+  history.
+- A fully unavailable prediction displays `Nedostupné`; an
+  `insufficient_history` state includes a short explanation. Partial
+  snapshot/weather coverage remains explicitly partial.
+- Prediction lines are layered onto existing charts without changing the
+  measurement, device metadata, reset, average-consumption, or permission
+  behavior.
+
+Consequences:
+
+- Overview and detail cannot choose different profile sources for the same
+  identifier and timestamp.
+- Existing actual-history charts remain bounded by actual measurements, while
+  prediction availability is evaluated independently.
+## DEC-068: No legacy plynomery consumption report requires prediction conversion
+
+Date: 2026-07-27
+
+Status: Accepted
+
+Decision:
+
+- The tracked plynomery reporting inventory contains no consumption PDF and no
+  scheduled daily, weekly, or monthly consumption report.
+- The weekly plynomery email is a model-rebuild performance/audit report, not a
+  consumption forecast.
+- The overview Excel export remains intentionally actual-only. Device lists,
+  measurement/detail tables, anomaly/event views, outlier review, and alert
+  emails also remain non-prediction outputs.
+- Steps 16-17 cover the only current user-facing gas consumption predictions:
+  `Plynomery / Prehled` and `Plynomery / Detail`.
+- Step 19 is therefore a regression-backed no-op confirmation. It must not
+  invent a new PDF, email recipient, report, or scheduler job.
+- Remaining direct candidate-profile reads belong to scoring, candidate
+  evaluation, rebuild, or outlier repair and must be explicitly retained or
+  corrected in step 20.
+
+Consequences:
+
+- Future gas consumption reports must use the shared period-valid series and
+  explicit unavailable-state contract.
+- `PLYNOMERY_REPORT_CONSUMER_INVENTORY.md` is the review baseline for steps
+  19-20.
+## DEC-069: Future plynomery PDFs must adopt the prediction contract at creation
+
+Date: 2026-07-27
+
+Status: Accepted
+
+Decision:
+
+- The user confirmed that plynomery currently have no PDF reports and that
+  these reports may be added in the future.
+- Step 19 is complete without creating or converting a report.
+- A future prediction-bearing gas PDF must use the shared period-valid
+  per-identifier series for each report timestamp.
+- `insufficient_history`, missing snapshot, missing profile, and missing
+  required weather remain unavailable states. The PDF must display
+  `Nedostupné` and must not substitute zero, the current profile, or a
+  stale/global profile.
+- A future report addition must update
+  `PLYNOMERY_REPORT_CONSUMER_INVENTORY.md`, report/scheduler registration, and
+  regression coverage before recipients or delivery are enabled.
+
+Consequences:
+
+- The current reporting package remains limited to model-rebuild reporting.
+- The regression guard intentionally fails when a new report module is added
+  until its classification and contract are reviewed.
+## DEC-070: Active outlier repair follows per-identifier selection
+
+Date: 2026-07-27
+
+Status: Accepted
+
+Decision:
+
+- Rebuilding plynomery scores after an outlier-review status change must use
+  period-valid active per-identifier model selection for the globally active
+  score identity.
+- The repair path shares score-row construction with normal active scoring,
+  including mixed baseline/weather profiles and HDD requirements.
+- Repaired rows retain the global active `model_version`, preserving event,
+  alert, and candidate identity compatibility.
+- An unavailable selection, insufficient history, missing selected profile,
+  or missing HDD produces no score. There is no active global-profile
+  fallback.
+- Non-active versions continue to rebuild from their own candidate profile
+  tables. This is intentional candidate evaluation, not a user-facing or
+  active-production fallback.
+- Rebuild/backtest internals and explicitly disabled per-identifier
+  compatibility scoring retain direct candidate-profile reads. User-facing
+  prediction APIs and dashboard consumers do not.
+
+Consequences:
+
+- Outlier correction can no longer silently change the active model source for
+  an identifier relative to normal scheduler scoring.
+- Candidate comparison remains available after a correction.
+
+## DEC-071: Plynomery historical predictions use a weekly per-identifier backfill
+
+Date: 2026-07-28
+
+Status: Accepted
+
+Decision:
+
+- Historical gas prediction coverage begins at the requested date
+  `2026-04-21`; the first stored forecast period is the containing calendar
+  week beginning `2026-04-20`.
+- Backfill periods are Monday-to-Monday calendar weeks and use only
+  measurements and weather information available before each forecast week.
+- Each week independently evaluates gas candidate models v1 and v2 through
+  the same rolling-backtest and deployable-profile selection policy as the
+  live pipeline.
+- A historical week atomically stores an `active` selected-model decision,
+  the selected period-valid profile with
+  `archive_source=historical_backfill`, and versioned candidate metrics.
+- Historical decisions use `selection_run_id=NULL`; they cannot change the
+  current runtime model identity or supersede the live weekly rebuild.
+- Backfill planning requires three months of identifier history. Identifiers
+  without that history remain unavailable and receive no synthetic, copied,
+  current, or global profile.
+- Write mode holds the `quarter_hour_job` process lock, commits only complete
+  weeks, is insert-only under the shared snapshot identities, and prints
+  aggregate results without identifiers.
+
+Consequences:
+
+- `Plynomery / Prehled` and `Plynomery / Detail` can render period-valid
+  historical expected-consumption curves from 2026-04-21 for eligible
+  identifiers.
+- Re-running the same archive version is resumable and does not overwrite
+  existing snapshot identities.
+
+## DEC-072: Plynomery per-identifier prediction pipeline is the production contract
+
+Date: 2026-07-28
+
+Status: Accepted
+
+Decision:
+
+- The 25-step plynomery prediction pipeline plan is complete.
+- Active scoring, active outlier-review repair, authenticated prediction APIs,
+  and dashboard prediction consumers use period-valid active per-identifier
+  selected-model and profile snapshots.
+- Direct reads of baseline and weather candidate profile tables remain
+  permitted only for rebuild/backtest internals, non-active candidate
+  comparison, and explicitly documented candidate repair.
+- Unavailable history, selection, profile, or required weather input remains
+  unavailable; production consumers must not substitute a global, current,
+  stale, copied, synthetic, or zero profile.
+- The weekly live rebuild and the controlled historical weekly backfill are
+  the supported ways to publish active gas prediction coverage.
+
+Consequences:
+
+- Future plynomery prediction-bearing consumers must adopt the shared
+  period-valid prediction-series contract.
+- Adding a new direct candidate-profile consumer requires classification in
+  `PLYNOMERY_REPORT_CONSUMER_INVENTORY.md` and regression coverage.
+- The two water-specific follow-up items remain outside the completed
+  plynomery plan.
+
+Retained consequence from DEC-071:
+- Missing historical eligibility remains visible as `Nedostupné`.
+
+## DEC-073: Vodomery insufficient history is explicitly unavailable
+
+Date: 2026-07-28
+
+Status: Accepted
+
+Decision:
+
+- A vodomery identifier without valid rolling fallback metrics is persisted
+  with `fallback_reason=insufficient_history`.
+- The unavailable decision retains model identity only for audit
+  compatibility; it does not publish a selected profile and does not produce
+  an active anomaly score.
+- The scoring checkpoint advances past unavailable measurements so one new
+  meter cannot block later eligible measurements.
+- Prediction APIs, the overview dashboard, and daily, weekly, and monthly
+  branch PDF reports preserve unavailable values and display `Nedostupné`
+  instead of zero.
+- A decision not marked unavailable must have its selected profile. Missing
+  profiles for available decisions are hard errors and must not fall back to a
+  global, current, copied, synthetic, or stale profile.
+
+Consequences:
+
+- New water meters cannot create misleading zero predictions or alerts before
+  sufficient history exists.
+- Overlapping decisions resolve by the latest forecast-period start and newest
+  run before availability is evaluated.
+- The change becomes active only after the pending supported runtime restart.
+
+## DEC-074: Vodomery active outlier repair follows per-identifier selection
+
+Date: 2026-07-28
+
+Status: Accepted
+
+Decision:
+
+- After an outlier-review change, the globally active water score identity is
+  rebuilt through the same period-valid active per-identifier selected-model
+  path as normal production scoring.
+- The score row retains the globally active output `model_version`; the
+  selected snapshot determines which identifier profile supplies its expected
+  values for each measurement timestamp.
+- An unavailable or missing selection produces no active repaired score.
+  `insufficient_history` remains unavailable, and a selected available profile
+  missing its required slot is a hard error.
+- Non-active model versions continue to rebuild directly from their own
+  candidate profiles solely for intentional model comparison.
+
+Consequences:
+
+- Outlier repair cannot silently replace historical selected profiles with a
+  global, current, stale, copied, or synthetic profile.
+- Event rebuilds consume the repaired scores under their existing model
+  identities.
+- The change becomes active only after the pending supported runtime restart.
+
+## DEC-075: All prediction media share Prague calendar-week boundaries
+
+Date: 2026-07-28
+
+Status: Accepted
+
+Decision:
+
+- Production prediction snapshots use a half-open Prague calendar-week
+  validity period: Monday 00:00 inclusive through the following Monday 00:00
+  exclusive.
+- Plynomery and vodomery construct this period through one shared prediction
+  helper. Default period resolution uses current Europe/Prague wall time, not
+  UTC.
+- The future kalorimetry and elektromery prediction pipelines must reuse the
+  same period helper and the established per-identifier selection, profile
+  snapshot, availability, scoring, API, dashboard, and consumer contracts.
+- A manual rebuild at any instant within the same Prague calendar week targets
+  the same snapshot period. Stored and queried timestamps remain half-open;
+  Sunday is represented by its prediction buckets, not by an inclusive
+  `23:59:59.999999` period end.
+
+Consequences:
+
+- DST and the Sunday-to-Monday UTC offset cannot move a manual rebuild into a
+  different forecast week.
+- Media-specific candidate models may differ, but period identity and consumer
+  semantics must not diverge between plynomery, vodomery, kalorimetry, and
+  elektromery.
+
+## DEC-076: SmartFuelPass portal import requires an explicit interactive login
+
+Date: 2026-07-28
+
+Status: Accepted
+
+Decision:
+
+- Remove SmartFuelPass portal synchronization from the unattended
+  `daily_job` and its generic scheduler manual-run registry.
+- An authenticated dashboard administrator starts only one fixed FastAPI
+  operation. FastAPI starts a dedicated Windows task configured for an
+  interactive logged-on desktop session.
+- The task opens a visible temporary Chrome/Chromium context. The
+  administrator completes Cloudflare and portal login manually; automation
+  resumes only after the portal leaves the login path.
+- The existing table normalization and idempotent PostgreSQL upsert by
+  `id_relace` remain authoritative.
+- Status shared with FastAPI and Streamlit contains only safe aggregate counts,
+  timestamps, state, and sanitized error categories. Credentials, cookies,
+  browser storage, portal HTML, raw session rows, and Cloudflare clearance
+  values are not persisted or exposed.
+- The scheduled weekly report remains database-backed and does not access the
+  portal.
+
+Consequences:
+
+- Portal data freshness now depends on an administrator completing the
+  interactive import.
+- The workflow requires a logged-on and unlocked Windows desktop session on
+  the production workstation.
+- Cloudflare protection is not bypassed or automated, and no reusable portal
+  session is restored.
+
+## DEC-077: SmartFuelPass portal integration is paused pending a supported access path
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- The SmartFuelPass portal integration is temporarily closed as active work
+  after the Cloudflare challenge could not be completed manually from the
+  production workstation.
+- Do not retry the portal import, automate or bypass Cloudflare, change network
+  identity to evade the restriction, or restore persistent cookies or browser
+  sessions.
+- Keep the interactive import task available but idle and without an automatic
+  trigger. The unattended portal sync remains removed from `daily_job`.
+- Return to SmartFuelPass only when a supported access path is available,
+  preferably after coordination with the portal operator or through an
+  official API/export.
+- The scheduled weekly report remains database-backed and may continue using
+  the last successfully imported rows. Its output must not imply that portal
+  data are current when no new import has succeeded.
+
+Consequences:
+
+- SmartFuelPass data freshness is intentionally paused and must remain visible
+  as an open follow-up.
+- No further portal action is authorized by the current implementation work.
+- Resuming the integration requires a new review of the supported access
+  method and a controlled verification plan.
+
+## DEC-078: Kalorimetry prediction uses explicit purpose-specific row quality
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- Kalorimetry prediction and scoring use normalized interval energy `delta`;
+  cumulative `spotreba_energie` remains meter state and cumulative `objem`
+  remains a separate diagnostic.
+- A model/scoring observation must have an identifier, timestamp, positive
+  interval length, finite cumulative energy state, `platne=true`,
+  `reset_detected=false`, and a finite non-negative delta.
+- Model input and scoring additionally exclude both `synthetic=true` and
+  `gap_detected=true`. These flags are independent in persisted data and must
+  not be treated as aliases.
+- Consumption display may retain valid synthetic and gap-affected deltas to
+  preserve the existing continuity view. Meter-state display may retain a
+  finite cumulative state even when the row is invalid, reset, or lacks a
+  usable delta.
+- A zero delta is a valid measured observation. Heating-season, shutdown, and
+  expected-zero behavior must be modeled explicitly; zero rows must not be
+  discarded merely to improve candidate metrics.
+- Pending or confirmed outliers continue to be represented through the
+  existing import/rebuild validity and delta semantics. A confirmed
+  consumption becomes eligible only after the reviewed rebuild publishes it
+  as a normal valid delta.
+
+Consequences:
+
+- Training, backtests, profile construction, and scoring share one testable
+  eligibility contract and reason taxonomy.
+- Dashboard continuity and model quality intentionally use different,
+  explicit purposes.
+- Later SQL loaders must reproduce this contract and receive regression
+  coverage against the pure classifier.
+
+## DEC-079: Kalorimetry model 1 is a complete weekly slot baseline
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- Kalorimetry model 1 is a calendar baseline keyed by identifier, 15-minute
+  interval, weekday, and slot.
+- It trains on 12 months of DEC-078-eligible observations and publishes 672
+  points per identifier for the shared Prague calendar week.
+- Every slot requires at least eight historical observations. If any slot is
+  missing or below this threshold, the identifier publishes no partial
+  profile and remains explicitly `insufficient_history`.
+- Zero energy deltas remain valid profile inputs. Non-finite, negative,
+  non-15-minute, and malformed observations cannot satisfy coverage.
+- Mean, median, p10, and p90 are clamped to non-negative energy; standard
+  deviation retains a small positive floor for downstream anomaly math.
+- The candidate is selection-eligible but must not become production-active
+  before rolling backtests, per-identifier selection, snapshot persistence,
+  and controlled review are complete.
+
+Consequences:
+
+- Profile completeness is deterministic and auditable at 672 points per
+  eligible identifier.
+- The baseline intentionally does not claim to model heating-season or
+  weather response. Those are evaluated separately.
+- Table bootstrap is idempotent and occurs only when the candidate rebuild is
+  intentionally run; defining or testing the candidate performs no production
+  database write.
+
+## DEC-080: Kalorimetry weather model is a per-identifier challenger
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- Kalorimetry model 2 is an HDD-adjusted challenger, not a global replacement
+  for calendar baseline model 1.
+- It fits a non-negative linear HDD slope per identifier and exact
+  weekday/15-minute slot using a trailing 24-hour mean of historical heating
+  degree hours. The feature window ends at the observation hour and must not
+  use future weather.
+- Each weather profile follows the same 672-point completeness and
+  eight-samples-per-slot threshold as model 1. Low HDD variance yields a zero
+  slope; it does not manufacture a weather relationship.
+- Model 2 may be selected only through leakage-safe per-identifier rolling
+  metrics. Evidence showed aggregate improvement but heterogeneous
+  per-identifier results, so it must not be activated globally merely because
+  its aggregate WAPE is lower.
+- A deploy profile requires applicable weather for every hour mapped from the
+  complete half-open Prague forecast period. Any missing or non-finite weather
+  makes the candidate explicitly unavailable for that deploy period.
+- Missing future weather must never fall back to zero, the training HDD mean,
+  historical weather, stale forecast data, or model 1 under the identity of
+  model 2.
+
+Consequences:
+
+- Candidate selection can retain model 1 for identifiers or weeks where model
+  2 is worse or not deployable.
+- Weather fit metadata is stored separately from static profile statistics
+  and is carried into later shared snapshots.
+- Weather forecast synchronization must be reviewed before activation so its
+  horizon reliably covers all weather-dependent forecast models.
+
+## DEC-081: Kalorimetry candidate selection metrics use weekly rolling folds
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- Kalorimetry model comparison uses leakage-safe rolling folds with the same
+  half-open Prague calendar-week shape as production.
+- Each fold trains only on its preceding 12-month window. Validation
+  observations never contribute to that fold's baseline or HDD fit.
+- Persist global diagnostics and per-identifier validation total, matched
+  count, coverage, MAE, RMSE, bias, WAPE, observed fold count, and matched
+  fold count.
+- Coverage is measured against all DEC-078-eligible validation observations.
+  Weather actuals are loaded independently from weather matches, so missing
+  HDD remains an unmatched prediction and lowers coverage.
+- A zero actual remains in MAE, RMSE, bias, and coverage. WAPE is unavailable
+  only when the matched absolute actual sum is zero; it must not be replaced
+  by zero or another metric.
+- Metric persistence is transaction-scoped to a validation run. It does not
+  commit independently of the rebuild transaction.
+
+Consequences:
+
+- Candidate 2 cannot gain apparent coverage by dropping rows with missing
+  weather.
+- Later selection policy can require both minimum fold count and coverage
+  before ranking by per-identifier WAPE.
+- Production metrics are not written until the controlled dry-run stage.
+
+## DEC-082: Kalorimetry selection considers only complete deployable profiles
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- Before selection, build one deployable catalog entry for every
+  candidate/identifier pair.
+- An available entry must contain exactly 672 unique weekday/15-minute slots
+  for one identifier and model version, with complete weekly coverage,
+  finite non-negative expected statistics, ordered p10/p90, and positive
+  sample sizes.
+- An unavailable entry contains no profile and records an explicit reason:
+  `insufficient_history`, `missing_forecast_weather`, `incomplete_profile`,
+  or `invalid_profile`.
+- Weather unavailability affects model 2 only. The catalog must not copy,
+  relabel, or expose model 1 as a weather profile.
+- Selection may rank only entries marked available. An available metric winner
+  whose deploy profile fails validation is not selectable.
+
+Consequences:
+
+- Partial or malformed profiles fail before selection or snapshot
+  persistence.
+- Candidate availability and metric performance remain separate audit
+  dimensions.
+- Later selection can choose the next eligible candidate without hiding why
+  another candidate was unavailable.
+
+## DEC-083: Kalorimetry per-identifier selection is eligibility-gated and auditable
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- Kalorimetry candidate selection first requires finite WAPE, MAE, RMSE, and
+  bias, coverage of at least 85 percent, at least eight matched weekly folds,
+  and an available deployable-catalog profile.
+- Eligible candidates rank deterministically by WAPE, MAE, RMSE, absolute
+  bias, descending matched-observation count, and stable model version.
+- The candidate with the best metrics is audited independently from profile
+  deployability. If it cannot be deployed, the next eligible candidate may be
+  selected, while the unavailable candidate's explicit profile reason remains
+  the decision fallback reason.
+- If no candidate is eligible, the identifier remains unavailable with an
+  explicit reason. Selection must not synthesize, copy, relabel, or silently
+  substitute a profile.
+- Step 9 is a pure dry-run contract. It performs no database persistence,
+  snapshot publication, production activation, scoring, or alerting.
+
+Consequences:
+
+- A weather candidate cannot win by reporting metrics for rows or folds that
+  do not meet the production coverage contract.
+- Missing forecast weather can legitimately leave model 2 unavailable while
+  allowing model 1 to be selected under its own identity.
+- Atomic persistence of the selected decision, candidate audit, and exact
+  period-valid profile remains a separate step and must fail before commit if
+  an available selection has no profile.
+
+## DEC-084: Kalorimetry decisions and profiles publish as one validated snapshot batch
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- Kalorimetry uses the shared selected-model and prediction-profile snapshot
+  tables with `medium_key='kalorimetry'`; no medium-specific snapshot archive
+  is introduced.
+- Construct and validate the entire persistence plan before the first SQL
+  statement. Each available decision must resolve to the exact identifier,
+  model version, model key, forecast period, and complete validated 672-point
+  deployable profile.
+- An available decision with a missing, unavailable, mismatched, partial, or
+  invalid profile aborts before persistence. An explicitly unavailable
+  identifier is reported by the batch but is not stored as a selected model.
+- Preserve the shared fallback enum for consumer compatibility and retain the
+  exact kalorimetry fallback/profile reason plus complete candidate audit in
+  snapshot metadata.
+- Insert selected-model rows and profile rows inside one nested transaction.
+  The helper flushes but does not commit; the caller owns the surrounding
+  rebuild transaction and atomic commit or rollback.
+
+Consequences:
+
+- Consumers cannot observe a newly selected kalorimetry model without its
+  matching period-valid profile from a successfully committed rebuild.
+- Idempotent shared-table conflict handling is retained without weakening
+  profile completeness validation.
+- Production table bootstrap and the first snapshot publication remain
+  controlled later rollout actions, not side effects of defining this
+  contract.
+
+## DEC-085: Kalorimetry performance reporting reuses the shared aggregate surface
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- Register kalorimetry as a weekly medium in the existing admin-only
+  prediction-performance API and Streamlit dashboard instead of creating a
+  separate monitoring page.
+- Publish only candidate catalog metadata, aggregate validation metrics,
+  snapshot winner/fallback distributions, coverage, availability totals, and
+  a bounded worst-identifier list. Do not expose raw measurements, profile
+  points, weather rows, or operational credentials.
+- Candidate performance for a selection run uses the latest persisted
+  validation run per model whose reference boundary is no later than the
+  selection deploy start.
+- Before the relevant tables and first controlled run exist, the medium
+  reports `not_run` rather than failing the whole cross-media response.
+- The kalorimetry rebuild report is a pure aggregate data builder plus escaped
+  HTML renderer. It does not send email or establish recipients; delivery
+  requires a later explicit consumer decision.
+
+Consequences:
+
+- The existing prediction-performance dashboard automatically renders
+  kalorimetry with the same candidate, selection, history, and catalog
+  structure as other media.
+- Winner counts and fallback reasons derive from the shared period-valid
+  snapshots, while pre-persistence dry-run availability remains visible in
+  the rebuild report.
+- Step 12 can review one production dry-run through aggregate outputs without
+  enabling scoring, alerting, report delivery, or active consumption.
+
+## DEC-086: The first kalorimetry production dry-run blocks activation
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- Treat the 2026-07-29 production dry-run as a successful read-only pipeline
+  safety review but not as model or snapshot activation approval.
+- PostgreSQL kalorimetry data ended at 2026-05-18 07:45:13. Consequently both
+  candidates had zero validation observations across the eight current weekly
+  folds, and every one of 14 identifiers remained
+  `no_identifier_metrics`.
+- Calendar baseline deployment profiles were complete for all 14 identifiers.
+  The coherent forecast run at 2026-07-26 22:17:28 produced only 145 of 168
+  required trailing-24-hour HDD features, so weather deployment was
+  unavailable for all identifiers.
+- Before repeating an activation-eligible current-period dry-run, complete a
+  separately reviewed kalorimetry measurement backlog import and correct and
+  verify the weather forecast horizon.
+- Do not persist a selected-model snapshot, activate scoring, send alerts, or
+  deliver a rebuild report from this dry-run result.
+
+Consequences:
+
+- Empty current metrics cannot silently fall back to an otherwise complete
+  baseline profile.
+- The required weather forecast follow-up is now a demonstrated production
+  blocker rather than a theoretical risk.
+- Historical-backfill implementation may proceed independently, but any
+  production apply must preserve its separate approval and must not disguise
+  the stale current import state.
+
+## DEC-087: Kalorimetry historical snapshots are recomputed at each weekly boundary
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- Kalorimetry historical backfill is a sequence of immutable Prague
+  Monday-to-Monday identifier/week calculations, not a projection of a
+  current profile into the past.
+- Before candidate evaluation, exclude every measurement and historical
+  weather observation at or after the forecast-period start. Recompute both
+  eight-fold candidates and deployable profiles independently for each week.
+- Historical weather deployment requires an explicit forecast issue timestamp
+  strictly earlier than the forecast week. Missing provenance or a forecast
+  issued at/after the boundary is invalid; missing/incomplete eligible
+  forecast coverage leaves the weather candidate unavailable.
+- Prepare two candidate audit metric rows per evaluated identifier, one
+  selected-model decision when available, and the exact selected 672-point
+  profile.
+- Shared historical snapshots use `selection_mode='active'`,
+  `archive_source='historical_backfill'`, a versioned archive identity, and
+  `selection_run_id=NULL`. They must not change the current selection run or
+  runtime model identity.
+- Step 13 contains no production apply function. Dry-run, apply, resume,
+  conflict detection, and verification are a separate reviewed step.
+
+Consequences:
+
+- Future measurements, corrected later observations, or later weather cannot
+  leak into an already calculated historical week.
+- A lack of archived pre-week forecast data can make model 2 unavailable
+  historically without blocking a valid baseline snapshot.
+- Production backfill remains non-authorized until the step 14 controls are
+  implemented and explicitly approved.
+
+## DEC-088: Kalorimetry backfill resumes only from exact immutable identities
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- Backfill workflow has separate `dry_run`, `apply`, `resume`, and `verify`
+  behavior. Dry-run and verify perform no writes. Apply requires an explicit
+  confirmation argument and pre-existing reviewed shared tables.
+- Classify each planned weekly batch as `absent`, `complete`, or `conflict`.
+  An empty reviewed identity is absent. Complete requires exact equality of
+  selected decisions, candidate rows, selected flags, profile model/count
+  pairs, and deterministic content fingerprints.
+- Fingerprint selected-decision metrics and fallback identity, candidate
+  eligibility/ranking/metrics, and every profile slot/statistic. Equal row
+  counts with different content are a conflict.
+- Treat partial state, non-null historical decision/profile selection-run
+  references, a non-historical profile source, missing subsets, extra rows,
+  or any changed fingerprint as conflict. Never patch a conflict in place.
+- For an absent week, insert selected decisions, both candidate metrics, and
+  selected profiles inside one savepoint. Require insert counts to equal the
+  calculated batch exactly before flush and weekly commit; otherwise roll
+  back.
+- Resume skips only a complete week. It must not rewrite it or infer
+  completeness from an archive run label alone.
+
+Consequences:
+
+- Interrupted runs can continue deterministically without duplicating or
+  silently modifying immutable historical weeks.
+- Concurrent insertion or an unexpected idempotent conflict becomes an insert
+  count mismatch and rolls back rather than producing a partial commit.
+- The presence of an apply function is not authorization to execute it.
+  Step 15 production execution remains separately approval-gated.
+
+## DEC-089: The first controlled kalorimetry historical backfill is baseline-only
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- After explicit execution approval, apply and verify the immutable
+  kalorimetry historical archive for `[2025-07-28, 2026-05-18)`, covering 42
+  complete Prague calendar weeks and 588 identifier-weeks.
+- Accept only the exact verified final state: 430 selected decisions, 1,176
+  candidate metric rows, and 288,960 profile points. Every selected profile
+  contains exactly 672 quarter-hour points and all 42 weekly identities are
+  complete with zero conflicts.
+- Retain baseline model 1 for all 430 available decisions. Model 2 remains
+  historically unavailable because no evaluated week has a complete coherent
+  forecast archive issued before the week boundary.
+- Preserve explicit unavailability: 13 of 14 identifiers receive historical
+  snapshots; the other identifier retains candidate audit metrics without a
+  fabricated selection or profile.
+- Keep `selection_run_id=NULL` on every historical decision and profile. Do
+  not create or populate current kalorimetry selection, active-profile, weather
+  profile, or validation tables as part of the backfill, and do not run
+  scoring, events, alerts, or report delivery.
+
+Consequences:
+
+- Period-valid historical consumers can proceed to implementation against a
+  complete, verified baseline archive without changing current runtime model
+  identity.
+- Historical absence of forecast weather remains visible and cannot be hidden
+  by later observations, stale weather, zero, or a training mean.
+- Current activation remains blocked by the stale measurement import and
+  incomplete current forecast horizon identified by DEC-086.
+
+## DEC-090: Kalorimetry profile lookup is period-valid and exact-slot only
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- Load kalorimetry selected decisions and profile snapshots in bounded batches
+  scoped by medium, explicit selection mode, identifiers, and overlapping
+  timestamp range.
+- Treat forecast validity as half-open. For overlapping decisions choose the
+  latest forecast-period start, then newest creation time, then highest row id.
+- After selecting a decision, accept only a profile row with the same
+  identifier, exact forecast boundaries, selected model version, interval,
+  Prague weekday, and slot. Resolve duplicate archive candidates by highest
+  archive version, newest creation time, and highest row id.
+- Return explicit unavailability for `no_selection_snapshot`,
+  `insufficient_history`, and `missing_profile`. Never substitute a global,
+  current, stale, zero, or different-model profile.
+- This lookup is read-only. Step 16 does not create active scoring rows,
+  checkpoints, events, or alerts.
+
+Consequences:
+
+- Historical scoring can consume the immutable backfill without projecting a
+  current profile backward or crossing a weekly validity boundary.
+- An available decision with a missing exact profile remains observable as a
+  data-integrity failure for the next scoring step instead of silently
+  changing model identity.
+- Step 17 may implement anomaly scoring against this lookup while preserving
+  explicit unavailable rows as no-score observations.
+
+## DEC-091: Kalorimetry scoring separates stream identity from selected model identity
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- Use `model_version=1` as the stable identity of the kalorimetry
+  active-selection scoring stream. Store the actual per-identifier selected
+  candidate version, selected-decision snapshot id, and exact profile snapshot
+  id on every score row.
+- Score only observations accepted by the kalorimetry `SCORING` quality
+  contract and the exact period-valid lookup from DEC-090.
+- For invalid observations, `no_selection_snapshot`, or
+  `insufficient_history`, write no score and advance the stream checkpoint
+  through the processed batch. Never substitute another profile.
+- Treat `missing_profile` for an otherwise available decision as a hard
+  integrity error. Abort before either score insertion or checkpoint
+  advancement.
+- Insert scores idempotently by measurement id and stable scoring identity.
+  Persist score rows and checkpoint advancement in one transaction.
+- Step 17 adds table models and bootstrap code but does not authorize creating
+  the production tables or running production scoring. Activation and
+  historical reconciliation remain later reviewed steps.
+
+Consequences:
+
+- Events and downstream consumers can retain one stable active scoring stream
+  while every score remains traceable to the exact candidate decision and
+  immutable profile point that produced it.
+- Missing history does not block later measurements from being processed, but
+  corrupt available snapshot state cannot be silently skipped.
+- The current stale-import and forecast-horizon blockers remain unchanged.
+
+## DEC-092: Kalorimetry events are heat-specific and alert delivery remains disabled
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- Detect only `SPIKE` and `SUSTAINED_HIGH_USAGE` from kalorimetry anomaly
+  scores. A spike requires z-score above 5; sustained high usage requires
+  eight consecutive z-scores above 3.
+- Do not inherit gas/water night-usage or expected-zero event semantics without
+  a separately reviewed heat-domain contract.
+- Persist event state, created/resolved event changes, processed-score flags,
+  and the event-engine checkpoint in one transaction.
+- Produce deterministic `CREATED` and `RESOLVED` alert transition plans with
+  `delivery_enabled=False`. Do not add recipients, delivery records, email
+  sending, API mutation, or scheduler execution before an aggregate dry-run is
+  reviewed and alert sending receives explicit approval.
+- When an outlier-review change rebuilds kalorimetry measurements, delete and
+  rebuild only the stable active scoring stream from the affected timestamp
+  using exact period-valid selected profiles. If scoring has not been
+  activated and its table does not exist, score repair is a no-op.
+- Do not persist any non-active candidate repair through the active scoring
+  table. Candidate comparison remains isolated in candidate metrics/profiles.
+
+Consequences:
+
+- Event semantics reflect heat behavior instead of mechanically copying all
+  water/gas alert categories.
+- Review corrections cannot reintroduce global or current-profile fallback
+  into historical active scores and do not move the global scoring checkpoint.
+- Step 18 creates no production state. Step 19 must reconcile expected
+  historical score/event effects in dry-run mode before any activation.
+
+## DEC-093: Kalorimetry historical score/event reconciliation is an impact estimate
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- Reconcile only the controlled historical range
+  `[2025-07-28, 2026-05-18)` in a PostgreSQL read-only transaction, processing
+  measurements in bounded batches and rolling the transaction back.
+- Treat absent score/event tables as an empty persisted baseline. Never create
+  schema or call score/event apply paths from the dry-run.
+- Record the reviewed aggregate result: 401,363 measurements; 395,149
+  scoring-eligible; 6,214 ineligible; 285,766 expected scores; 109,383
+  eligible observations without an available period-valid selection; and
+  115,597 intentionally unscored observations in total.
+- Expected event impact is 3,456 created and 3,456 resolved episodes. With no
+  persisted score/event tables, persisted counts are zero, all 285,766 scores
+  and 3,456 created episodes are missing, and unexpected/mismatched/flag/
+  severity/event-mismatch counts are zero.
+- Interpret zero mismatch and change counts only as absence of overlapping
+  persisted state, not as validation of an activated scoring/event database.
+- This dry-run is not apply or alert-delivery approval.
+
+Consequences:
+
+- Historical activation impact is quantified before any score, checkpoint,
+  event, alert, or email state exists.
+- The large intentionally-unscored population remains explicit and cannot be
+  filled from global or stale profiles.
+- API/dashboard work may proceed independently while score/event activation
+  remains a later explicitly reviewed operation.
+
+## DEC-094: Kalorimetry measurement and profile API reads are device-scoped
+
+Date: 2026-07-29
+
+Status: Accepted
+
+Decision:
+
+- Expose bearer-authenticated kalorimetry measurement-series and
+  prediction-profile GET endpoints through FastAPI.
+- Require `kalorimetry` section access in the route dependency and repeat
+  section plus requested-device authorization in the service before opening a
+  database session.
+- Convert measurement date ranges from Prague local dates to half-open UTC
+  boundaries and retain canonical source/time metadata in the response.
+- A profile request without dates reads only the active decision covering the
+  current Prague instant. A dated request requires both boundaries and returns
+  only overlapping active snapshot periods with explicit per-period
+  availability.
+- Resolve profile duplicates only within the exact selected decision/model/
+  period/slot by highest archive version, newest creation time, and highest row
+  id.
+- Return `no_selection_snapshot`, `insufficient_history`, or
+  `missing_profile` explicitly. Do not read a global profile or project a
+  current/stale profile into an uncovered historical period.
+- Keep the existing `/kalorimetry/devices` route admin-only for outlier-review
+  administration; step 20 does not broaden that endpoint.
+
+Consequences:
+
+- Kalorimetry browser consumers receive the same authorization boundary and
+  historical availability semantics established for gas.
+- Current stale import state appears as explicit current-profile
+  unavailability rather than a misleading historical fallback.
+- Prediction-series construction remains isolated to step 21.
+
+## DEC-095: Kalorimetry prediction series are period-valid and cumulative
+
+Date: 2026-07-30
+
+Status: Accepted
+
+Decision:
+
+- Expose hourly, daily, and monthly kalorimetry prediction series through a
+  bearer-authenticated, section- and device-scoped FastAPI endpoint.
+- Build every interval only from the selected profile snapshot whose half-open
+  validity covers that timestamp. Never fill uncovered timestamps from a
+  global, current, stale, copied, or zero profile.
+- Clamp negative expected interval consumption to zero before aggregation.
+- Derive expected cumulative consumption over the complete chronologically
+  ordered requested range; do not reset it at weekly snapshot boundaries.
+- Preserve explicit unavailable/partial status and model/profile-kind audit
+  metadata for consumers.
+
+Consequences:
+
+- Overview and detail pages can share one trusted series contract in steps 22
+  and 23.
+- Historical weekly snapshot boundaries do not create artificial cumulative
+  resets.
+- Missing historical coverage remains visible instead of being silently
+  manufactured.
+
+## DEC-096: Kalorimetry overview consumes the shared prediction-series API
+
+Date: 2026-07-30
+
+Status: Accepted
+
+Decision:
+
+- `Kalorimetry / Přehled` obtains expected consumption only from the
+  authenticated, device-scoped kalorimetry prediction-series endpoint.
+- Present actual consumption, expected consumption, absolute deviation, and
+  percentage deviation while retaining heat-specific labels and existing
+  energy value formatting.
+- Draw expected interval and cumulative consumption in light gray below the
+  actual series. Derive the displayed cumulative expectation from the complete
+  chronologically ordered API response and never reset it at snapshot
+  boundaries.
+- Display `Nedostupné` for unavailable predictions and a visible warning for
+  partial coverage. Do not substitute current, global, stale, or zero
+  profiles.
+
+Consequences:
+
+- The overview has no privileged direct prediction-profile database path.
+- Actual measurements remain usable when prediction coverage is unavailable.
+- Step 23 can reuse the same API and presentation semantics in the detail
+  page.
+
+## DEC-097: Kalorimetry detail reuses daily and monthly prediction series
+
+Date: 2026-07-30
+
+Status: Accepted
+
+Decision:
+
+- `Kalorimetry / Detail` reads expected consumption only through the shared
+  authenticated, device-scoped prediction-series dashboard loader.
+- Use daily prediction rows for the seven-day and 31-day views and monthly
+  prediction rows for the 24-month history.
+- Align predictions only to the calendar days or months already represented
+  by each chart. Draw the light-gray prediction below the actual energy bars.
+- Keep unavailable, `insufficient_history`, and partial coverage explicit.
+  Do not fill gaps from current, global, stale, copied, or zero profiles.
+- Preserve existing device metadata, photograph, reset/change history,
+  measurement tables, and responsive layout.
+
+Consequences:
+
+- Overview and detail now share one authorization and historical-availability
+  contract.
+- Prediction unavailability does not hide actual measurements or device
+  information.
+- Downstream-consumer inventory can proceed as step 24 without introducing a
+  second dashboard prediction path.
+
+## DEC-098: Only two current kalorimetry outputs are prediction-bearing
+
+Date: 2026-07-30
+
+Status: Accepted
+
+Decision:
+
+- Treat `Kalorimetry / Přehled` and `Kalorimetry / Detail` as the only current
+  user-facing prediction-bearing kalorimetry outputs. Both must retain the
+  authenticated device-scoped prediction-series API.
+- Keep dashboard exports, measurement/state tables, device metadata and list,
+  reset history, and global monitoring-health summaries intentionally
+  actual-only.
+- Keep the scheduled JORDAN monthly report actual-only. Its kalorimetry row is
+  a difference between two valid cumulative energy states; do not add a
+  prediction, recipient, or new report without separate approval.
+- Keep score/event/outlier paths classified as anomaly/event and candidate,
+  backfill, reconciliation, performance, and rebuild-report paths classified
+  as model rebuild/audit.
+- Candidate profile tables must remain internal to candidate adapter/rebuild
+  code and must not become direct dashboard or consumption-report sources.
+
+Consequences:
+
+- Step 25 scheduler work has an explicit boundary and cannot use the inventory
+  as authorization for report or alert delivery.
+- Existing actual-only outputs remain stable and are not forced to display a
+  prediction merely because snapshot data exists.
+- Future prediction-bearing reports require an inventory update and explicit
+  product/delivery approval.
+
+## DEC-099: Weather forecasts are archived by issuance and cover nine days
+
+Date: 2026-07-30
+
+Status: Accepted
+
+Decision:
+
+- Request nine forecast days from Open-Meteo so a Sunday synchronization can
+  cover the complete following Prague Monday-to-Monday period plus the
+  trailing 24-hour HDD input window.
+- Store forecast rows by composite identity `(forecast_run_at,
+  datetime_hour)`. Never overwrite an older issuance merely because a newer
+  run contains the same target hour.
+- A current kalorimetry deployment may use only one coherent forecast run
+  issued strictly before the forecast-period start. It must contain every raw
+  hour needed to derive all 168 trailing-24-hour HDD values.
+- Consumers that need the latest operational forecast for a target hour must
+  resolve the newest issuance deterministically now that multiple runs are
+  retained.
+- Do not reconstruct or activate the already-started current week from a run
+  issued after Monday.
+
+Consequences:
+
+- Historical forecast provenance is retained for leakage-safe backfill and
+  audit.
+- The daily 00:15 synchronization creates an eligible Sunday run before the
+  next weekly Monday rebuild.
+- Existing gas weather consumers remain deterministic with archived runs.

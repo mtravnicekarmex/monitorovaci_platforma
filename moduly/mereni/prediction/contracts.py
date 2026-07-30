@@ -20,6 +20,7 @@ class PredictionSelectionFallbackReason(str, Enum):
     BELOW_COVERAGE_THRESHOLD = "below_coverage_threshold"
     BELOW_FOLD_COUNT_THRESHOLD = "below_fold_count_threshold"
     MISSING_PROFILE = "missing_profile"
+    INSUFFICIENT_HISTORY = "insufficient_history"
 
 
 @dataclass(frozen=True)

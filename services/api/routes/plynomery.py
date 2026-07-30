@@ -12,18 +12,24 @@ from services.api.schemas.plynomery import (
     PlynomeryDeviceListResponse,
     PlynomeryExpectedZeroListResponse,
     PlynomeryExpectedZeroUpdateRequest,
+    PlynomeryMeasurementSeriesResponse,
     PlynomeryOpenEventsResponse,
     PlynomeryOutlierReviewListResponse,
     PlynomeryOutlierReviewRow,
     PlynomeryOutlierReviewUpdateRequest,
     PlynomeryRecentAnomaliesResponse,
     PlynomeryResolvedEventsResponse,
+    PlynomeryPredictionProfilesResponse,
+    PlynomeryPredictionSeriesResponse,
 )
 from services.api.services.dashboard_auth import DashboardUserContext
 from services.api.services.dashboard_auth import AuthorizationError
 from services.api.services.plynomery import (
     list_accessible_devices,
     load_all_open_events,
+    load_measurement_series,
+    load_prediction_profiles,
+    load_prediction_series,
     load_recent_anomalies,
     load_recent_resolved_events,
 )
@@ -58,6 +64,122 @@ def get_plynomery_devices(
     return PlynomeryDeviceListResponse(
         total=len(devices),
         devices=devices,
+    )
+
+
+@router.get(
+    "/measurement-series",
+    response_model=PlynomeryMeasurementSeriesResponse,
+    summary="Get plynomery measurement series",
+    description="Vrací časovou řadu měření pro oprávněné odběrné místo.",
+)
+def get_plynomery_measurement_series(
+    identifikace: str,
+    start_date: date,
+    end_date: date,
+    current_user: DashboardUserContext = Depends(get_current_plynomery_user),
+) -> PlynomeryMeasurementSeriesResponse:
+    try:
+        rows = load_measurement_series(
+            current_user,
+            identifikace=identifikace,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except AuthorizationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return PlynomeryMeasurementSeriesResponse(
+        identifikace=identifikace,
+        start_date=start_date,
+        end_date=end_date,
+        total=len(rows),
+        rows=rows,
+    )
+
+
+@router.get(
+    "/prediction-profiles",
+    response_model=PlynomeryPredictionProfilesResponse,
+    summary="Get current plynomery prediction profile",
+    description=(
+        "Vrací právě platný aktivní profil nebo explicitní stav nedostupnosti. "
+        "Nedostatečná historie se nikdy nenahrazuje nulovou predikcí."
+    ),
+)
+def get_plynomery_prediction_profiles(
+    identifikace: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    current_user: DashboardUserContext = Depends(get_current_plynomery_user),
+) -> PlynomeryPredictionProfilesResponse:
+    try:
+        result = load_prediction_profiles(
+            current_user,
+            identifikace=identifikace,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except AuthorizationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return PlynomeryPredictionProfilesResponse(
+        **{**result, "identifikace": identifikace},
+        total=len(result["rows"]),
+    )
+
+
+@router.get(
+    "/prediction-series",
+    response_model=PlynomeryPredictionSeriesResponse,
+    summary="Get period-valid plynomery prediction series",
+    description=(
+        "VracĂ­ hodinovou, dennĂ­ nebo mÄ›sĂ­ÄŤnĂ­ predikci z aktivnĂ­ch "
+        "snapshotĹŻ a dostupnĂ˝ch meteorologickĂ˝ch dat."
+    ),
+)
+def get_plynomery_prediction_series(
+    identifikace: str,
+    start_date: date,
+    end_date: date,
+    granularity: str = Query(pattern="^(hourly|daily|monthly)$"),
+    current_user: DashboardUserContext = Depends(get_current_plynomery_user),
+) -> PlynomeryPredictionSeriesResponse:
+    try:
+        result = load_prediction_series(
+            current_user,
+            identifikace=identifikace,
+            start_date=start_date,
+            end_date=end_date,
+            granularity=granularity,
+        )
+    except AuthorizationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return PlynomeryPredictionSeriesResponse(
+        **{**result, "identifikace": identifikace},
+        total=len(result["rows"]),
     )
 
 

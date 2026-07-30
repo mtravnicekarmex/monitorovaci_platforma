@@ -351,3 +351,29 @@ class SystemSmartFuelPassHealthResponse(BaseModel):
     sync_job: SystemSmartFuelPassJobMetricStatus
     weekly_report_job: SystemSmartFuelPassJobMetricStatus
     report_periods: list[SystemSmartFuelPassPeriodSummary]
+
+
+class SmartFuelPassInteractiveImportStatusResponse(BaseModel):
+    state: str = Field(
+        ...,
+        pattern="^(idle|starting|waiting_for_login|importing|success|error)$",
+    )
+    updated_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    task_registered: bool
+    task_state: str | None = None
+    interactive_user_available: bool
+    raw_row_count: int | None = Field(default=None, ge=0)
+    completed_row_count: int | None = Field(default=None, ge=0)
+    invalid_row_count: int | None = Field(default=None, ge=0)
+    skipped_missing_id_count: int | None = Field(default=None, ge=0)
+    upserted_count: int | None = Field(default=None, ge=0)
+    error_category: str | None = None
+    message: str | None = None
+
+
+class SmartFuelPassInteractiveImportStartResponse(BaseModel):
+    status: str = Field(..., pattern="^started$")
+    requested_at: datetime
+    detail: str

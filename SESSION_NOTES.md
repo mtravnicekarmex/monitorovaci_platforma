@@ -14212,3 +14212,3031 @@ Changed:
 Follow-up:
 - Start checklist step 1: freeze the current plynomery baseline with focused
   tests and safe production aggregate evidence.
+
+### 2026-07-27 - Plynomery pipeline step 1
+
+Scope:
+- Froze the current global plynomery prediction/scoring baseline before adding
+  per-identifier production behavior.
+
+Changed:
+- Added direct regression coverage for weather-adjusted scoring from
+  `base_mean + hdd_slope * hdd_24h`, residual bounds, and checkpoint
+  persistence.
+- Corrected the scheduler regression setup so it proves that both plynomery
+  candidate models are scored and evaluated while alerts use only the globally
+  active model's event result.
+- Marked checklist step 1 complete in
+  `PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`.
+- No production application behavior changed.
+
+Verified:
+- Focused anomaly scoring, plynomery prediction/adapter/import/outlier/alert,
+  and scheduler coverage reported `88 passed`.
+- `git diff --check` passed.
+- A production read-only aggregate check found selection run 17 with two
+  candidates and active model v2.
+- Static model v1 and weather-adjusted model v2 each had 3,360 profile rows
+  covering five identifiers.
+- Both scoring streams covered five identifiers and were current through
+  2026-07-27 10:15:17.
+- The expected-zero configuration contained zero devices.
+
+Decisions/notes:
+- Current global validation coverage was approximately 30.5 percent for model
+  v1 and 29.3 percent for model v2, below the configured 85-percent selection
+  threshold. The existing rebuild therefore retains the previous active model
+  through its global fallback behavior.
+- This is baseline evidence, not approval to lower the coverage threshold.
+
+Follow-up:
+- Step 2: confirm and test the plynomery forecast-period contract against the
+  weekly scheduler cadence, weather forecast availability, and intended
+  dashboard horizon.
+
+### 2026-07-27 - Plynomery pipeline step 2
+
+Scope:
+- Defined the production forecast-period boundary for per-identifier
+  plynomery selected-model and profile snapshots.
+
+Changed:
+- Added `build_plynomery_weekly_forecast_period()`, returning the current
+  Prague calendar week from Monday 00:00 inclusive to the following Monday
+  00:00 exclusive.
+- Added contract tests for the scheduled Monday 06:10 rebuild and a midweek
+  rebuild.
+- Recorded the durable rule in `DEC-058`.
+- Marked checklist step 2 complete in
+  `PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`.
+- The helper is not yet consumed by the production rebuild, so production
+  selection and scoring behavior remain unchanged in this step.
+
+Verified:
+- The central scheduler runs `weekly_job` on Monday at 06:10:05 in
+  `Europe/Prague`.
+- Forecast-period, shared prediction contract/pipeline/backtest, and scheduler
+  coverage reported `87 passed`.
+- Python compilation for the changed plynomery prediction module and its test
+  passed.
+- `git diff --check` passed.
+- Production read-only weather aggregates showed hourly HDD forecast rows
+  present, with the latest forecast run at 2026-07-26 22:17:28 UTC and stored
+  forecast coverage through 2026-08-01 23:00 UTC.
+- The meteorological sync requests seven forecast days and refreshes daily.
+
+Decisions/notes:
+- Snapshot identity must not depend on the exact scheduler start time.
+- Rolling validation in step 3 must align to completed Prague calendar weeks.
+- The rolling seven-day weather source does not guarantee the complete
+  calendar-week horizon at Monday rebuild time. A missing-future-weather
+  fallback must be designed and tested before weather-adjusted dashboard
+  predictions are activated; missing HDD must not be treated as zero.
+
+Follow-up:
+- Step 3: produce per-identifier rolling metrics for both gas candidates using
+  completed calendar-week validation folds.
+
+### 2026-07-27 - Plynomery pipeline step 3
+
+Scope:
+- Added per-identifier rolling validation metrics for plynomery candidate
+  models v1 and v2.
+
+Changed:
+- Configured eight seven-day rolling folds ending at completed Prague calendar
+  week boundaries.
+- Added temporary fold profile versions and guaranteed cleanup for both static
+  and weather-adjusted profile tables.
+- Added per-identifier validation SQL for baseline and weather-adjusted
+  predictions using the existing gas measurement and meteorological filters.
+- Added fold aggregation for coverage, WAPE, MAE, RMSE, and bias.
+- Extended plynomery candidate summaries with rolling metrics and added
+  `per_identifier_candidates` to the in-memory rebuild result.
+- Kept global active-model selection on the existing global validation path;
+  this step does not activate per-identifier selection or scoring.
+- Marked checklist step 3 complete in
+  `PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`.
+
+Verified:
+- Added tests for cross-fold per-identifier metric aggregation and WAPE.
+- Added a calendar-alignment/temporary-profile cleanup test.
+- Added a rebuild orchestration test proving that both candidates expose
+  rolling and per-identifier results without changing global selection.
+- Shared prediction, plynomery prediction/adapter/scoring/import/outlier/alert,
+  and scheduler coverage reported `118 passed`.
+- Python compilation and `git diff --check` passed.
+
+Not verified:
+- No production rebuild was run because it would write candidate profiles and
+  a new global selection run.
+- No selection snapshot, scoring, scheduler job, report, alert, or email was
+  triggered.
+
+Follow-up:
+- Step 4: normalize baseline and weather-adjusted deployable profiles into a
+  candidate/identifier catalog suitable for shared profile snapshots.
+
+### 2026-07-27 - Plynomery pipeline step 4
+
+Scope:
+- Added a normalized deployable profile catalog for baseline and
+  weather-adjusted plynomery candidates.
+
+Changed:
+- Added catalog loading keyed by `(identifier, model_version)` for every
+  candidate/identifier pair with a current deployable profile.
+- Normalized static profiles into the shared `PredictionProfilePoint`
+  contract.
+- Normalized weather-adjusted profiles using the expected value at the
+  training HDD mean while preserving `base_mean`, `hdd_slope`,
+  `hdd_24h_mean`, and all residual statistics in profile features.
+- Added fail-closed validation for empty identifiers, invalid cadence fields,
+  non-positive sample/std values, non-finite coefficients, and inverted
+  prediction bounds.
+- Added aggregate deployable pair and profile counts to the in-memory rebuild
+  result.
+- Marked checklist step 4 complete in
+  `PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`.
+- No shared snapshot rows or production selections are persisted by this step.
+
+Verified:
+- Added tests for weather profile normalization and coefficient preservation.
+- Added rejection coverage for non-finite weather coefficients.
+- Added catalog grouping coverage for baseline and weather-adjusted profiles.
+- Shared prediction/storage, plynomery prediction/adapter/scoring/import/
+  outlier/alert, and scheduler coverage reported `143 passed`.
+- Python compilation and `git diff --check` passed.
+
+Not verified:
+- No production rebuild or database-writing profile catalog verification was
+  run.
+- No selection snapshot, scoring, scheduler job, report, alert, or email was
+  triggered.
+
+Follow-up:
+- Step 5: use per-identifier metrics plus the deployable catalog to build
+  dry-run selected-model decisions with explicit fallback reasons.
+
+### 2026-07-27 - Plynomery pipeline step 5
+
+Scope:
+- Added dry-run per-identifier model decisions for plynomery without snapshot
+  persistence or production scoring activation.
+
+Changed:
+- Added an eight-fold minimum, 85-percent coverage gate, and ranking by WAPE,
+  MAE, RMSE, absolute bias, matched count, and model version.
+- Required every selected candidate to have a deployable catalog profile.
+- Added fallback to the deployable global model with explicit
+  `no_identifier_metrics`, `no_eligible_candidate`,
+  `below_fold_count_threshold`, `below_coverage_threshold`, and
+  `missing_profile` reasons.
+- When the metric winner has no profile, selection uses the next best
+  deployable eligible candidate and records `missing_profile`.
+- The rebuild fails before commit when an identifier has no deployable
+  candidate profile at all.
+- Added dry-run decisions, fallback totals, and winner counts to the in-memory
+  rebuild result.
+- Marked checklist step 5 complete in
+  `PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`.
+- No rows are written to shared selected-model or profile snapshot tables in
+  this step.
+
+Verified:
+- Added tests for minimum-WAPE selection, missing-profile runner-up selection,
+  coverage fallback, fold-count fallback, undefined-WAPE fallback, and
+  fail-closed missing profiles.
+- Shared prediction/storage/performance, plynomery prediction/adapter/scoring/
+  import/outlier/alert, and scheduler coverage reported `151 passed`.
+- Python compilation and `git diff --check` passed.
+
+Not verified:
+- No production rebuild or database-writing dry-run was executed.
+- No production selection, scoring, scheduler job, report, alert, or email was
+  triggered.
+
+Follow-up:
+- Step 6: atomically persist dry-run selected-model and matching normalized
+  profile snapshots under the shared conflict/immutability rules.
+
+### 2026-07-27 - Plynomery pipeline step 6
+
+Scope:
+- Added atomic dry-run selected-model and normalized profile snapshot
+  persistence to the plynomery rebuild transaction.
+
+Changed:
+- Ensured the shared selected-model and profile snapshot tables before the
+  rebuild transaction.
+- Built and validated the complete selected profile row set before the first
+  snapshot insert.
+- Persisted dry-run selected-model decisions and their matching profile rows
+  through the same database session as the plynomery selection run, followed
+  by one commit.
+- Added explicit rollback for any rebuild/persistence exception.
+- Used shared conflict-safe snapshot identities, `selection_mode='dry_run'`,
+  `archive_source='weekly_rebuild'`, archive version 1, and a selection-run
+  archive id.
+- Stored baseline/weather profile kind and all weather coefficients in
+  deterministic `metadata_json`.
+- Added inserted selected-model/profile counts and profile-pair counts to the
+  rebuild result.
+- Marked checklist step 6 complete in
+  `PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`.
+- Production scoring still ignores dry-run snapshots.
+
+Verified:
+- Added snapshot row coverage for period, training/validation windows, archive
+  identity, and preserved weather metadata.
+- Added fail-before-insert coverage for a missing selected profile pair.
+- Rebuild orchestration proves selected-model and profile inserts use the same
+  session and precede a single commit.
+- Shared conflict-safe storage tests remain green.
+- Shared prediction/storage/performance, plynomery prediction/adapter/scoring/
+  import/outlier/alert, and scheduler coverage reported `153 passed`.
+- Python compilation and `git diff --check` passed.
+
+Not verified:
+- No production rebuild or snapshot insert was executed.
+- No production selection, scoring, scheduler job, report, alert, or email was
+  triggered.
+
+Follow-up:
+- Step 7: extend the plynomery rebuild report and prediction performance API
+  with dry-run winner, fallback, missing-profile, and worst-identifier
+  aggregates.
+
+### 2026-07-27 - Plynomery pipeline step 7
+
+Scope:
+- Extended persisted plynomery candidate performance, the weekly model rebuild
+  report, and the admin prediction-performance API for dry-run review.
+
+Changed:
+- Added additive plynomery candidate-table columns for model metadata and
+  rolling fold count, totals, coverage, MAE, RMSE, bias, and WAPE.
+- Persisted those rolling fields with each new plynomery global selection run.
+- Updated prediction-performance candidate loading to read persisted gas
+  rolling values instead of returning placeholders.
+- The existing generic snapshot aggregation now exposes the latest plynomery
+  dry-run snapshot mode, winner distribution, fallback distribution, selected
+  versus global count, and worst-identifier rows.
+- Extended the plynomery rebuild email with rolling coverage/WAPE, dry-run
+  winner counts, fallback reasons, deployable pair/profile counts, and up to
+  ten worst identifiers by rolling WAPE.
+- Escaped identifier and fallback labels in HTML output.
+- Added dry-run fallback count to the report delivery result.
+- Marked checklist step 7 complete in
+  `PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`.
+- The prediction-performance route remains admin-only and the explicit API
+  authorization inventory remains green.
+
+Verified:
+- Added report tests for aggregates, rolling columns, and HTML escaping.
+- Added candidate ORM persistence coverage for all rolling fields.
+- Extended performance-service coverage for plynomery rolling candidates,
+  dry-run snapshot summary, fallback count, and worst identifiers.
+- Report, shared prediction/storage/performance, API authorization,
+  plynomery prediction/adapter/scoring/import/outlier/alert, and scheduler
+  coverage reported `332 passed`.
+- Python compilation and `git diff --check` passed.
+
+Not verified:
+- The additive candidate-table migration was not applied to production because
+  no production rebuild/bootstrap was run.
+- No snapshot insert, scheduler job, report delivery, alert, or email was
+  triggered.
+
+Follow-up:
+- Step 8: run and review one controlled production dry-run rebuild, recording
+  only aggregate winner/fallback/profile and error evidence before any
+  production scoring activation.
+
+### 2026-07-27 - Plynomery pipeline step 8
+
+Scope:
+- Ran and reviewed one controlled production dry-run rebuild with aggregate-only
+  output and without report delivery or per-identifier scoring activation.
+
+Result:
+- The rebuild failed closed before commit because one or more rolling-backtest
+  identifiers had no deployable candidate profile.
+- Aggregate diagnosis found 18 identifiers with valid recent measurements,
+  while both candidate profile catalogs covered 5 identifiers; 13 identifiers
+  had no profile in either candidate.
+- Rollback verification confirmed the latest plynomery selection run remained
+  17, with zero plynomery dry-run selected-model snapshots and zero plynomery
+  dry-run profile snapshots.
+- The additive candidate-table migration was applied by the pre-transaction
+  table bootstrap.
+- No raw identifiers or measurement values were printed.
+
+Not changed:
+- No production per-identifier scoring was activated.
+- No report, alert, or email was sent.
+- The missing-profile fail-before-commit rule remains intact.
+
+Follow-up:
+- Before step 9, resolve why the 13 recent identifiers do not meet deployable
+  profile eligibility, or define a reviewed selection universe that excludes
+  them without hiding missing-profile gaps. Steps 9-12 remain blocked until
+  that decision is implemented and a dry-run rebuild commits successfully.
+
+### 2026-07-27 - Plynomery insufficient-history resolution
+
+Decision:
+- Newly installed identifiers without enough valid history are explicitly
+  recorded as prediction unavailable with
+  `fallback_reason='insufficient_history'` and
+  `metadata.prediction_available=false`.
+- No profile snapshot is created for those identifiers. Available identifiers
+  still require a deployable profile; missing required profiles remain a hard
+  error.
+- Dashboard and future PDF prediction output must show `Nedostupné`, never
+  zero or a stale profile. This is recorded as `DEC-059`.
+
+Changed:
+- Added the shared `insufficient_history` fallback reason.
+- Plynomery dry-run selection now persists unavailable selected snapshots and
+  intentionally skips their profile snapshots.
+- Added unavailable counts to rebuild results, rebuild reporting, prediction
+  performance API, and the admin prediction-performance dashboard.
+- Winner/model distributions exclude intentionally unavailable identifiers.
+- Added the unavailable behavior to the phase 4 dashboard and phase 5 PDF
+  acceptance criteria. The current plynomery UI has no prediction view and no
+  plynomery prediction PDF exists yet.
+
+Verified:
+- Focused contracts, plynomery rebuild/report, and prediction-performance
+  coverage reported `39 passed`.
+- The complete project suite reported `941 passed`.
+- Controlled production dry-run selection run 20 committed with 18 selected
+  audit snapshots, 13 `insufficient_history` states, five selected profile
+  pairs, and 3,360 profile snapshot rows.
+- The global active model remained v2. No per-identifier scoring was activated
+  and no report, alert, or email was sent.
+
+Follow-up:
+- Step 9 may proceed. Its lookup must skip scoring for
+  `insufficient_history` while preserving checkpoint progress.
+
+### 2026-07-27 - Plynomery pipeline step 9
+
+Scope:
+- Added period-valid per-identifier selected-model lookup behind an explicit,
+  disabled-by-default selection flag.
+
+Changed:
+- Added `PLYNOMERY_PER_IDENTIFIER_MODEL_SELECTION_ENABLED`, defaulting to
+  false.
+- Added batch snapshot loading filtered by medium, explicit selection mode,
+  identifiers, and overlapping measurement time range.
+- Added deterministic overlap precedence by latest forecast-period start,
+  creation time, and snapshot id.
+- Added a typed lookup result carrying model version, availability, fallback
+  reason, and source snapshot.
+- `insufficient_history` resolves to no profile.
+- A missing period-valid snapshot resolves to `no_selection_snapshot`; there
+  is no silent global fallback. A stored fallback decision can still select
+  the global model explicitly.
+- Candidate version discovery excludes unavailable snapshots.
+- Recorded the durable behavior in `DEC-060`.
+- Added a post-pipeline vodomery task at the end of
+  `PLYNOMERY_PREDICTION_PIPELINE_PLAN.md` for the same insufficient-history
+  behavior in water dashboard and PDF outputs.
+
+Verified:
+- Tests cover explicit dry-run mode, deterministic overlap precedence,
+  half-open period boundaries, recorded global fallback, insufficient history,
+  missing snapshots, and the disabled default flag.
+- Targeted plynomery scoring, prediction storage/rebuild, and scheduler
+  coverage reported `110 passed`.
+- The complete project suite reported `946 passed`.
+- Python compilation passed.
+
+Not changed:
+- The lookup is not yet wired into the plynomery scoring loop.
+- Production scoring, scheduler behavior, alerts, reports, and email delivery
+  remain unchanged.
+
+Follow-up:
+- Step 10: use the lookup to support mixed baseline and weather-adjusted
+  scoring in one batch while advancing checkpoints for unavailable profiles.
+
+### 2026-07-27 - Plynomery pipeline step 10
+
+Scope:
+- Added mixed baseline and weather-adjusted per-identifier scoring in one
+  active-model batch behind the disabled production flag.
+
+Changed:
+- The scoring entry point now accepts explicit per-identifier enablement and
+  selection mode arguments.
+- Environment-controlled enablement applies only to the globally active
+  candidate; non-active candidates retain pure per-candidate scoring.
+- The mixed path resolves one period-valid selection per measurement.
+- It loads only selected static profile versions and loads weather profiles
+  only when needed.
+- HDD input is requested only for measurements whose stored decision selects
+  the weather-adjusted model.
+- Scores built from either profile type retain the global active
+  `model_version`.
+- `insufficient_history`, `no_selection_snapshot`, missing selected profiles,
+  and missing HDD values create no score but still advance the checkpoint.
+- Recorded the durable behavior in `DEC-061`.
+
+Verified:
+- Added a mixed-batch regression covering one baseline identifier, one
+  weather-adjusted identifier, one insufficient-history identifier, and one
+  identifier without a period-valid snapshot.
+- The regression proves weather input is loaded only for the weather
+  measurement, two scores retain the global model version, and the checkpoint
+  advances through all four measurements.
+- Added coverage proving environment enablement applies only to the active
+  candidate.
+- Targeted scoring, scheduler, plynomery rebuild, and prediction-storage tests
+  reported `112 passed`.
+- The complete project suite reported `948 passed`.
+- Python compilation passed.
+
+Not changed:
+- `PLYNOMERY_PER_IDENTIFIER_MODEL_SELECTION_ENABLED` remains false by default.
+- No production scoring, event detection, alerting, scheduler job, report, or
+  email was executed.
+
+Follow-up:
+- Step 11: activate per-identifier production scoring only after final anomaly,
+  expected-zero, outlier, event, alert, and scheduler regression review.
+
+### 2026-07-27 - Plynomery pipeline step 11
+
+Scope:
+- Published active per-identifier plynomery snapshots and staged active-model
+  scoring consumption for the supported runtime rollout.
+
+Changed:
+- Full plynomery rebuilds now default to `selection_mode='active'`; explicit
+  dry-run mode remains available.
+- Rebuild decisions, profile rows, result metadata, and report labels carry
+  the selected mode.
+- Quarter-hour and manual scheduler scoring pass active per-identifier
+  selection only to the globally active plynomery candidate.
+- The alerting scoring pass uses the same active per-identifier mode.
+- Non-active candidate scoring remains pure per-candidate scoring.
+- Recorded the durable activation contract in `DEC-062`.
+
+Verified:
+- Focused plynomery prediction, scoring, adapter, model rebuild report,
+  expected-zero/alert rules, outlier notification/review, prediction
+  performance, API authorization, dashboard shared behavior, and scheduler
+  coverage reported `293 passed`.
+- The complete project suite reported `950 passed`.
+- Python compilation passed.
+- Controlled production active rebuild created selection run 21 for the Prague
+  week 2026-07-27 through 2026-08-03.
+- Aggregate result: 18 active decisions, 13 `insufficient_history` states,
+  five available predictions, five selected profile pairs, and 3,360 profile
+  rows. Available winners were model v1 for one identifier and v2 for four.
+- Read-only relational verification found zero missing available profile pairs
+  and zero profiles attached to unavailable identifiers.
+- The global active model remained v2.
+
+Not changed:
+- No production scoring, event detection, outlier application, alert delivery,
+  scheduler job, report delivery, or email was run.
+- The already running production processes still use the pre-change code.
+  Active scheduler consumption starts only after the mandatory handoff and
+  supported full-workstation restart in step 24.
+
+Follow-up:
+- Step 12: perform a controlled production scoring verification with aggregate
+  counts only and without alert or unrelated scheduler execution.
+
+### 2026-07-27 - Plynomery pipeline step 12
+
+Scope:
+- Performed controlled production verification of active per-identifier
+  scoring without event detection, alerting, scheduler execution, reports, or
+  email.
+
+Production checks:
+- A fail-closed isolated scoring call required active model v2 and active
+  selection snapshots before execution.
+- The production scoring stream had zero valid backlog. The call therefore
+  inserted zero scores and correctly left the checkpoint unchanged.
+- A subsequent read-only evaluation ran the same active lookup, selected
+  profile loading, and HDD availability logic over up to 1,000 valid
+  measurements from the active Prague week.
+- The available sample contained 900 measurements: 50 selected baseline v1,
+  200 selected weather-adjusted v2, and 650 intentionally unavailable through
+  `insufficient_history`.
+- All 250 available measurements were scoreable.
+- Missing selected profile count was zero and missing HDD count was zero.
+- No identifiers, raw measurements, expected values, or anomaly values were
+  printed.
+
+Verified:
+- Step 11 regression baseline remains `293 passed` for the focused activation
+  matrix and `950 passed` for the complete project suite.
+- The controlled scoring command did not invoke event, outlier, alert,
+  scheduler, report, or email code.
+
+Not changed:
+- No score rows were inserted because the stream was already current.
+- No checkpoint, event, outlier, alert, report, or email state changed.
+- Running production processes still require the supported rollout restart in
+  step 24 before scheduled scoring uses the new code.
+
+Follow-up:
+- Step 13: add authenticated FastAPI measurement/profile endpoints needed by
+  plynomery dashboard prediction views.
+
+### 2026-07-27 - Plynomery pipeline step 13
+
+Scope:
+- Added authenticated, device-scoped FastAPI measurement-series and current
+  prediction-profile endpoints for plynomery dashboard consumers.
+
+Changed:
+- Added `GET /api/v1/plynomery/measurement-series` with Prague local-date to
+  canonical UTC bounds and stored time-semantics fields.
+- Added `GET /api/v1/plynomery/prediction-profiles` for the currently valid
+  active selected-model/profile snapshot.
+- Profile responses expose prediction availability, reason, selection run,
+  selected model, validity period, profile statistics, and weather
+  coefficients.
+- `insufficient_history`, `no_selection_snapshot`, and `missing_profile`
+  return empty rows with explicit unavailability; there is no zero or global
+  fallback.
+- Both service functions enforce section and device access before opening a
+  database session.
+- Added both routes to the explicit API authorization inventory.
+- Recorded the durable API contract in `DEC-063` and `AGENTS.md`.
+
+Verified:
+- Added service tests for insufficient history, missing active selection,
+  weather metadata preservation, and invalid measurement date ranges.
+- Route authorization tests cover assigned and unassigned devices.
+- API inventory proves both routes are plynomery-scoped protected operations.
+- Focused plynomery service, API authorization, prediction, and performance
+  coverage reported `216 passed`.
+- The complete project suite reported `964 passed`.
+- Python compilation passed.
+
+Not changed:
+- Historical period-bounded profile loading is deferred to step 14.
+- The running FastAPI process still uses pre-change code until the supported
+  rollout restart in step 24.
+- No production database write, scoring, event, alert, report, or email was
+  triggered.
+
+Follow-up:
+- Step 14: add historical period-bounded active profile loading and exact
+  current-time overlap precedence without backward global projection.
+
+### 2026-07-27 - Plynomery pipeline step 14
+
+Scope:
+- Added period-bounded historical active profile loading while preserving
+  exact-current lookup behavior.
+
+Changed:
+- `GET /api/v1/plynomery/prediction-profiles` now accepts optional
+  `start_date` and `end_date`, which must be supplied together.
+- Historical requests read only overlapping active selected-model and profile
+  snapshots.
+- Responses include per-period availability and per-profile validity bounds
+  plus selection run ids.
+- Mixed available/unavailable ranges report `availability_status='partial'`.
+- A historical range without snapshots returns `no_selection_snapshot` and
+  does not query global profile tables.
+- Current no-date requests retain exact Prague-time validity and deterministic
+  precedence by latest period start, creation time, and snapshot id.
+- Recorded the durable behavior in `DEC-064` and `AGENTS.md`.
+
+Verified:
+- Added historical partial-range coverage with one available and one
+  `insufficient_history` period.
+- Added proof that missing historical snapshots return no rows without a
+  global-profile query.
+- Current lookup tests verify deterministic precedence and weather metadata.
+- Focused plynomery service, API authorization, prediction, and performance
+  coverage reported `218 passed`.
+- The complete project suite reported `966 passed`.
+- Python compilation passed.
+
+Not changed:
+- Prediction time-series construction is deferred to step 15.
+- The running FastAPI process still uses pre-change code until the supported
+  rollout restart in step 24.
+- No production database write, scoring, event, alert, report, or email was
+  triggered.
+
+Follow-up:
+- Step 15: construct hourly, daily, and monthly plynomery predictions from
+  period-valid baseline/weather profiles with deterministic overlap handling.
+### 2026-07-27 - Plynomery pipeline step 15
+
+Scope:
+- Added shared construction of period-valid plynomery prediction series.
+
+Changed:
+- Added hourly, daily, and monthly aggregation from profile snapshot rows.
+- Added deterministic overlap precedence by latest period start, selection
+  run, validity end, and model version.
+- Static profiles use their expected mean; weather-adjusted profiles use the
+  production scoring formula with a timestamp-applicable 24-hour HDD input.
+- Missing weather or weather coefficients produce no prediction instead of a
+  zero, training-mean, stale, or global fallback.
+- Mixed baseline/weather periods retain model-version and profile-kind
+  provenance in aggregate rows.
+- Recorded the construction contract in `DEC-065` and marked checklist step
+  15 complete.
+
+Verified:
+- Unit coverage includes all three granularities, overlap precedence, rolling
+  HDD construction, missing-HDD behavior, mixed-model aggregation, and invalid
+  input rejection.
+
+Not changed:
+- Dashboard integration is deferred to step 16.
+- No production database, scoring, event, alert, report, or email state was
+  changed.
+- Running production processes remain on pre-change code until the supported
+  rollout restart in step 24.
+
+Follow-up:
+- Step 16: integrate the shared series into `Plynomery / Prehled`, including
+  explicit `Nedostupné` rendering and actual-series cutoff behavior.
+### 2026-07-27 - Plynomery pipeline step 16
+
+Scope:
+- Integrated period-valid gas predictions into `Plynomery / Prehled`.
+
+Changed:
+- Added authenticated, device-scoped
+  `GET /api/v1/plynomery/prediction-series`.
+- The API loads active profile snapshots plus server-side historical/forecast
+  weather, constructs hourly/daily/monthly rows through the step 15 helper,
+  and returns explicit full/partial/unavailable status.
+- Historical weather takes precedence over forecast rows for matching UTC
+  hours.
+- Added candidate-versus-available interval counts so incomplete weather
+  coverage is reported as partial rather than silently accepted.
+- The overview requests prediction granularity matching the selected detail,
+  shows a prediction metric and chart overlay for the complete selected
+  period, and displays `Nedostupné` for insufficient history.
+- The prediction is independent from actual measurements; actual and
+  cumulative-actual series still end at the last real measurement.
+- Added the new route to the explicit authorization inventory.
+- Recorded the dashboard/API contract in `DEC-066` and marked checklist step
+  16 complete.
+
+Verified:
+- Focused prediction construction, service, route authorization, and
+  responsive-dashboard coverage reported `212 passed`.
+- Python compilation passed for the API, dashboard client/shared module, page,
+  schema, and construction helper.
+
+Not changed:
+- `Plynomery / Detail` integration remains step 17.
+- No production database write, scoring, event, alert, report, or email was
+  triggered.
+- Running API and Streamlit processes remain on pre-change code until the
+  supported rollout restart in step 24.
+
+Follow-up:
+- Step 17: integrate the same endpoint and unavailable-state behavior into
+  `Plynomery / Detail`.
+### 2026-07-27 - Plynomery pipeline step 17
+
+Scope:
+- Integrated the shared gas prediction series into `Plynomery / Detail`.
+
+Changed:
+- The detail page now requests daily predictions for its 31-day window and
+  monthly predictions for its 24-month history through the same authenticated,
+  device-scoped API as the overview.
+- The 7-day and 31-day charts layer daily predictions over existing actual
+  consumption bars.
+- The monthly history layers period-valid monthly predictions while retaining
+  the existing average-consumption reference line.
+- Added a dedicated prediction status/total panel. Fully unavailable
+  predictions show `Nedostupné`; insufficient history includes a concise Czech
+  explanation and partial ranges remain visibly partial.
+- Empty API series retain a stable dataframe schema so unavailable states do
+  not break chart filtering.
+- Device metadata, permissions, measurement history, reset detection, average
+  consumption, and recent-measurement behavior remain unchanged.
+- Recorded the detail contract in `DEC-067` and marked checklist step 17
+  complete.
+
+Verified:
+- Added dashboard shared-loader coverage for unavailable empty payloads and
+  typed available rows.
+- Focused dashboard helper, construction, service, API authorization, and
+  responsive coverage reported `214 passed`.
+- Python compilation passed for the changed detail/shared modules and tests.
+
+Not changed:
+- Report/downstream inventory starts in step 18.
+- No production database write, scoring, event, alert, report, or email was
+  triggered.
+- Running API and Streamlit processes remain on pre-change code until the
+  supported rollout restart in step 24.
+
+Follow-up:
+- Step 18: inventory every plynomery report and downstream profile consumer,
+  classifying prediction-bearing and intentionally actual-only paths.
+### 2026-07-27 - Plynomery pipeline step 18
+
+Scope:
+- Inventoried every tracked plynomery report/output and downstream prediction
+  profile consumer without changing runtime behavior.
+
+Findings:
+- The only gas report email is the weekly model rebuild performance/audit
+  report.
+- There is no plynomery consumption PDF or scheduled daily, weekly, or monthly
+  gas consumption report.
+- The only user-facing prediction-bearing outputs are the overview and detail
+  dashboard pages already converted in steps 16-17.
+- The overview Excel export, device list, measurement/detail tables, anomaly
+  and event views, outlier review, alert administration, and alert/outlier
+  emails are intentionally non-prediction outputs.
+- Direct profile consumers are limited to the period-valid API/series,
+  production/candidate scoring, rebuild internals, performance audit, and
+  candidate-wide outlier repair.
+- `outlier_review_apply.py` requires explicit step 20 review because it repairs
+  every candidate from candidate profile tables and must not leave active
+  history inconsistent with per-identifier selection.
+
+Changed:
+- Added `PLYNOMERY_REPORT_CONSUMER_INVENTORY.md` with classifications, sources,
+  dispositions, scheduler inventory, step 19 scope, and the step 20 queue.
+- Recorded `DEC-068` and marked checklist step 18 complete.
+
+Verified:
+- Repository searches covered plynomery files, reporting/PDF/Excel/email
+  references, scheduler registration, shared snapshot tables, candidate
+  profile models/tables, scores, and events.
+- Focused rebuild-report, outlier repair/notification, scoring, prediction,
+  API authorization, dashboard helper, and scheduler coverage reported
+  `309 passed`.
+
+Not changed:
+- No application code, database state, scheduler, report, alert, or email was
+  changed or executed in this step.
+
+Follow-up:
+- Step 19: perform the documented regression-backed no-op confirmation for
+  report paths.
+### 2026-07-27 - Plynomery pipeline step 19
+
+Scope:
+- Completed the report-conversion step as the documented no-op established by
+  the step 18 inventory.
+
+User confirmation:
+- Plynomery do not currently have PDF reports.
+- Consumption PDF reports may be added in the future.
+
+Changed:
+- Added a regression guard proving that the current plynomery reporting
+  package exposes only the model rebuild report and contains no consumption
+  report module.
+- Updated the report inventory with the confirmed step 19 result and the
+  required review path for future reports.
+- Recorded the future PDF contract in `DEC-069`, added it to `AGENTS.md`, and
+  marked checklist step 19 complete.
+
+Verified:
+- Plynomery rebuild-report and scheduler coverage reported `59 passed`.
+- The complete project suite reported `985 passed`.
+- Python compilation passed for the changed test.
+
+Not changed:
+- No PDF, report module, recipient, scheduler job, production report, email,
+  database state, or runtime behavior was added or changed.
+
+Follow-up:
+- Step 20: explicitly retain or correct every remaining direct global
+  candidate-profile read, with special attention to outlier-review repair.
+### 2026-07-27 - Plynomery pipeline step 20
+
+Scope:
+- Reviewed every remaining direct gas candidate/global profile read and
+  corrected active outlier-review repair.
+
+Changed:
+- Extracted shared period-valid selected score-row construction from normal
+  active scoring.
+- Outlier-review repair now determines the global active model once and uses
+  the shared per-identifier builder only for that score identity.
+- Non-active candidates continue to rebuild from their own static/weather
+  profile tables for comparison.
+- Active repaired scores preserve the global active model version.
+- Missing/insufficient selections, selected profiles, or HDD inputs create no
+  repaired score and never fall back to a global profile.
+- Updated the consumer inventory with the final retained-read dispositions.
+- Recorded `DEC-070` and marked checklist step 20 complete.
+
+Verified:
+- Added orchestration coverage proving only the active model enables
+  per-identifier repair.
+- Added coverage proving active repair delegates to the shared selected
+  builder.
+- Added explicit retained-read coverage for non-active static and weather
+  candidate repair.
+- Focused scoring, outlier repair, prediction, performance, service, and
+  scheduler coverage reported `117 passed`.
+- The complete project suite reported `989 passed`.
+- Python compilation passed for the changed scoring/repair modules and tests.
+
+Not changed:
+- No production outlier review, score, event, alert, report, email, or database
+  operation was executed.
+- Running production processes still require the supported rollout restart in
+  step 24.
+
+Follow-up:
+- Step 21: run the complete targeted regression matrix across shared
+  prediction, plynomery, API/dashboard, report, and scheduler paths.
+- After the plynomery pipeline is complete, review vodomery outlier-review
+  repair for the same active per-identifier selection consistency fixed for
+  gas in step 20. This follow-up is recorded at the end of
+  `PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`.
+### 2026-07-27 - Plynomery pipeline step 21
+
+Scope:
+- Ran the complete targeted regression matrix for the implemented gas
+  prediction pipeline.
+
+Verified:
+- Shared prediction contracts, pipeline runner, rolling backtest, storage, and
+  prediction performance.
+- Plynomery adapter, candidate rebuild/selection, prediction-series
+  construction, anomaly scoring, database import, outlier repair, outlier
+  notifications, and alert-rule validation.
+- Expected-zero/event/alert scheduler orchestration and shared dashboard
+  alerting behavior.
+- API authorization inventory, plynomery API services, dashboard prediction
+  loader, shared outlier/alert helpers, navigation, responsive rules, and model
+  rebuild reporting.
+- Scheduler execution and scheduler metrics.
+- Exact result: `423 passed` with no failures in `2.45s`.
+
+Changed:
+- Marked checklist step 21 complete and recorded the exact targeted matrix
+  result.
+
+Not changed:
+- No production database, rebuild, scoring, outlier, event, alert, report,
+  email, scheduler, or runtime operation was executed.
+
+Follow-up:
+- Step 22: run and record the complete project test suite as the formal
+  pipeline-wide verification gate.
+### 2026-07-27 - Plynomery pipeline step 22
+
+Scope:
+- Ran the complete project test suite as the formal pipeline-wide verification
+  gate.
+
+Verified:
+- Command:
+  `.venv\Scripts\python.exe -m pytest tests -q --tb=short`
+- Exact result: `989 passed in 26.97s`.
+- There were no failures, skipped regressions requiring acceptance, or
+  unrelated baseline exceptions.
+
+Changed:
+- Marked checklist step 22 complete and recorded the exact full-suite result.
+
+Not changed:
+- No production database, rebuild, scoring, outlier, event, alert, report,
+  email, scheduler, or runtime operation was executed.
+
+Follow-up:
+- Step 23: perform read-only production aggregate checks for active identifier
+  decisions, profile coverage, scoring source, and dashboard/report
+  consumption without printing identifiers or measurements.
+### 2026-07-27 - Plynomery pipeline step 23 read-only check
+
+Scope:
+- Performed aggregate-only production checks in explicit read-only database
+  transactions without printing identifiers or measurements.
+
+Passed checks:
+- Latest active gas selection run is 21 for one weekly period.
+- All 18 identifiers with valid, non-synthetic measurements in the active
+  period have one active decision; none is missing.
+- Five decisions are prediction-available across two selected model versions.
+- Thirteen decisions are explicitly `insufficient_history`.
+- The five available decisions have five matching profile pairs with 672 rows
+  each and 3,360 profile rows in total.
+- Available decisions have zero missing profile pairs, unavailable decisions
+  have zero profile pairs, and period/model matching has zero mismatches.
+- Active-identity scores in the period exist only for available decisions;
+  zero scores are attached to `insufficient_history`.
+- User-facing dashboard/API code and the report inventory remain on the
+  period-valid snapshot source; no gas consumption PDF exists.
+
+Blocking scoring finding:
+- Thirty-five active-identity scores were created after the active snapshots.
+- All 35 resolve to an expected per-identifier selection and none is
+  unexpected.
+- Seven belong to an identifier selected on a non-global model.
+- Six of those seven do not numerically match either the current selected
+  builder result or the archived period-valid selected profile.
+- Recalculation changes neither anomaly flag nor severity for the six rows,
+  but all six have already been processed by event handling.
+- This is consistent with the documented pre-restart runtime still executing
+  the old global scoring path after active snapshots were published.
+
+Decision/status:
+- Step 23 is not marked complete. Passing snapshot/profile checks do not
+  override the scoring-source mismatch.
+- Completion requires an approved controlled reconciliation of affected
+  active-period score/event state after the new code is loaded, followed by
+  the same aggregate checks with zero mismatches.
+
+Not changed:
+- No database row, score, event, alert, report, email, scheduler state, or
+  runtime process was modified.
+
+Follow-up:
+- Prepare the remediation and mandatory restart handoff before step 24, then
+  reconcile and re-run step 23 aggregates.
+
+### 2026-07-27 14:19 +02:00 - Mandatory workstation restart handoff
+
+Purpose:
+- Restart the complete production workstation so the startup task reloads the
+  current gas prediction pipeline code. The supported recovery procedure is a
+  full Windows workstation restart; do not stop and recreate individual
+  production processes from the interactive session.
+- Continue from `PLYNOMERY_POST_RESTART_RUNBOOK.md` after startup. That runbook
+  is the authoritative ordered checklist for immediate health checks,
+  read-only reconciliation dry-run, approval, controlled repair, and final
+  pipeline acceptance.
+
+Current task state:
+- Plynomery prediction pipeline steps 1 through 22 are complete.
+- Step 21 targeted regression matrix: `423 passed in 2.45s`.
+- Step 22 complete suite: `989 passed in 26.97s`.
+- Step 23 remains open because the read-only production audit found scoring
+  drift from the runtime that was started before the new selected-profile
+  scoring code existed.
+- Step 24 remains pending. It must not be marked complete merely because the
+  workstation starts; the post-restart runtime, reconciliation, and one fresh
+  scheduled scoring observation must also pass.
+
+Reason for restart:
+- Windows boot time before this handoff was 2026-07-27 09:58:22 +02:00.
+- The startup task last ran at 2026-07-27 09:58:32 +02:00 and returned result
+  zero.
+- Active gas selected-model snapshots were created later, at approximately
+  10:22 +02:00. The running scheduler therefore still has the earlier Python
+  code loaded and has continued using the old global-profile scoring path.
+- A restart is required to load the current scheduler, scoring, API, and
+  dashboard code consistently through the established startup mechanism.
+
+Production data baseline, read-only:
+- Active gas selection run: 21.
+- Active weekly forecast period: 2026-07-27 00:00 +02:00 through
+  2026-08-03 00:00 +02:00.
+- There are 18 active measured identifiers and all 18 have an active decision:
+  5 prediction-available and 13 explicitly `insufficient_history`.
+- The five available decisions have five profile pairs, 672 rows per pair and
+  3,360 profile rows total. Profile/decision integrity is clean.
+- There are 1,026 eligible measurements in the active period. The selected
+  builder intentionally produces 285 predictions; 741 remain deliberately
+  unavailable because their identifier lacks sufficient history.
+- There are 285 persisted active-identity scores. No score is missing or
+  unexpected, and no score belongs to an intentionally unavailable decision.
+- Across the active period, 135 persisted numeric scores differ from the
+  current period-valid selected builder/profile result. All 135 have already
+  been processed by event handling.
+- Controlled recalculation would change 10 anomaly flags and zero severity
+  values. Consequently reconciliation must rebuild both score and dependent
+  event state; changing numeric score columns alone is forbidden.
+- The smaller post-snapshot slice contains 35 scores, including 7 selected on
+  a non-global model and 6 numeric mismatches. Those six do not change anomaly
+  flag or severity, but are already event-processed.
+- No candidate run was created after the active snapshots. The latest
+  candidate is run 21 and predates snapshot publication.
+
+Mutation and notification safety:
+- No reconciliation write has been executed.
+- No production score, event, alert, outlier, report, email, scheduler state,
+  or selection row was changed during step 23 or restart preparation.
+- After restart, first run the aggregate reconciliation dry-run described in
+  `PLYNOMERY_POST_RESTART_RUNBOOK.md`. Do not execute the database repair until
+  its exact scope is reviewed and the user explicitly approves the write.
+- Do not use ad-hoc SQL. Use the normal application scoring/event contracts so
+  score and event state remain consistent.
+- The repair must not send alerts, reports, or emails for historical
+  reconciliation rows.
+- Never print identifiers, raw measurements, credentials, tokens, cookies,
+  connection strings, device-photo paths, or other sensitive runtime data.
+
+Pre-restart runtime baseline:
+- Local FastAPI `/health/live`: HTTP 200.
+- Local FastAPI `/health/ready`: HTTP 200.
+- Local Streamlit `/_stcore/health`: HTTP 200.
+- Local Caddy admin `/config/`: HTTP 200.
+- Windows task `API_dashboard_caddy`: `Ready`, last task result `0`.
+- Scheduler metrics file was fresh at 2026-07-27 14:16:11 +02:00.
+- Production environment reports Python 3.14.0 and the package consistency
+  check passed.
+- Expected application listeners were present:
+  Caddy on ports 80 and 443, Caddy admin on `127.0.0.1:2019`, FastAPI on
+  `127.0.0.1:8000`, and Streamlit on `127.0.0.1:8001`.
+- Temporary/development listeners 8010 and 8011 were absent.
+- An additional Tailscale-owned listener on port 443 is expected and is not an
+  application duplicate.
+- Public hostname probes from this workstation timed out before restart,
+  despite healthy local surfaces. Treat this as a possible local
+  routing/hairpin condition, not as proof of public availability; verify the
+  public HTTPS surface externally after startup.
+
+Expected processes and listeners after restart:
+- One scheduler process started from `main.py`.
+- One production Uvicorn/FastAPI process, without reload, on
+  `127.0.0.1:8000`.
+- One production Streamlit process on `127.0.0.1:8001`.
+- Caddy serving ports 80 and 443 with admin API on `127.0.0.1:2019`.
+- Ports 8010 and 8011 must remain unused unless an explicitly named
+  development session is intentionally started.
+
+Immediate post-restart verification:
+1. Confirm the Windows boot time is later than this handoff and
+   `API_dashboard_caddy` ran after that boot with result zero.
+2. Confirm the expected process set and listener ownership without exposing
+   raw command lines or environment values.
+3. Check local FastAPI `/health/live` and `/health/ready`, Streamlit
+   `/_stcore/health`, and Caddy admin `/config/`; all must return HTTP 200.
+4. Confirm scheduler metrics are fresh and advance after startup. Verify the
+   central `quarter_hour_job` schedule at minutes 5, 16, 35 and 47, second 5;
+   do not assume regular fifteen-minute intervals.
+5. Verify local Caddy routing and externally verify:
+   public HTTPS dashboard availability, `/api/v1/auth/users-exist`,
+   unauthenticated protection of `/api/v1/auth/me`, protected map-image
+   behavior, HTTP-to-HTTPS redirect, and HTTP 404 for `/docs`, `/redoc`, and
+   `/openapi.json`.
+6. Perform an authenticated dashboard login and safe authenticated API check
+   without recording or printing bearer tokens or cookie values.
+7. Run the gas reconciliation aggregate dry-run and compare it with this
+   baseline. Unexpected scope growth or any score on an
+   `insufficient_history` decision is a stop condition.
+8. Present the exact aggregate repair scope for explicit approval. Only after
+   approval, reconcile score and dependent event state with historical
+   notifications suppressed.
+9. Re-run the step 23 aggregate checks. Required result: zero score/profile
+   mismatches, zero unexpected or missing scores, zero scores for intentionally
+   unavailable decisions, and consistent processed/event state.
+10. Observe at least one new `quarter_hour_job` scoring cycle under the
+    restarted code, then verify its newly persisted gas scores against the
+    period-valid selected builder/profile with zero mismatches.
+11. Verify dashboard/API prediction availability: five available decisions
+    expose the selected prediction series and thirteen insufficient-history
+    decisions display `nedostupné`, without fallback to the global profile.
+12. Only after all preceding checks pass, complete steps 23 and 24 and record
+    exact results in the plan and session notes.
+
+Changed and uncommitted files at restart handoff:
+- Documentation:
+  `AGENTS.md`, `DECISIONS.md`, `PLYNOMERY_PREDICTION_PIPELINE_PLAN.md`,
+  `SESSION_NOTES.md`, new `PLYNOMERY_POST_RESTART_RUNBOOK.md`, and new
+  `PLYNOMERY_REPORT_CONSUMER_INVENTORY.md`.
+- Scheduler and shared contracts:
+  `core/scheduler/scheduler.py` and
+  `moduly/mereni/prediction/contracts.py`.
+- Gas pipeline and persistence:
+  `moduly/mereni/plynomery/database/models.py`,
+  `moduly/mereni/plynomery/database/outlier_review_apply.py`,
+  `moduly/mereni/plynomery/plynomery_anomaly.py`,
+  `moduly/mereni/plynomery/plynomery_prediction.py`,
+  new `moduly/mereni/plynomery/prediction_series.py`, and
+  `moduly/mereni/plynomery/reporting/model_rebuild_report.py`.
+- FastAPI:
+  `services/api/routes/plynomery.py`,
+  `services/api/schemas/plynomery.py`,
+  `services/api/schemas/prediction.py`,
+  `services/api/services/plynomery.py`, and
+  `services/api/services/prediction_performance.py`.
+- Streamlit:
+  `moduly/apps/dashboard/api_client.py`,
+  `moduly/apps/dashboard/pages/9_plynomery.py`,
+  `moduly/apps/dashboard/pages/10_plynomery_detail.py`,
+  `moduly/apps/dashboard/pages/38_prediction_performance.py`, and
+  `moduly/apps/dashboard/plynomery_shared.py`.
+- Tests:
+  `tests/test_anomaly_scoring.py`,
+  `tests/test_api_authorization_regression.py`,
+  new `tests/test_dashboard_plynomery_shared.py`,
+  new `tests/test_plynomery_model_rebuild_report.py`,
+  `tests/test_plynomery_outlier_review_apply.py`,
+  `tests/test_plynomery_prediction.py`,
+  new `tests/test_plynomery_prediction_series.py`,
+  new `tests/test_plynomery_service.py`,
+  `tests/test_prediction_performance.py`, and
+  `tests/test_scheduler.py`.
+
+Deployment state:
+- All listed source and documentation changes are present only in the current
+  uncommitted working tree.
+- The current running production processes were started before those changes
+  were loaded. The workstation restart is the deployment activation mechanism.
+- No commit, push, release, database migration command, or code-integrity
+  baseline was created during this preparation.
+
+### 2026-07-27 15:01 +02:00 - Second restart handoff after reconciliation dry-run blocker
+
+Purpose:
+- Restart the complete production workstation through the supported startup
+  task so the scheduler loads the new identifier-scoped profile loaders.
+- Continue from `PLYNOMERY_POST_RESTART_RUNBOOK.md`; do not start scheduler,
+  API, Streamlit, or Caddy manually.
+
+Completed after the first restart:
+- Boot time `2026-07-27 14:22:10 +02:00` and startup task run
+  `2026-07-27 14:22:20 +02:00` were confirmed; task result was zero.
+- Local API liveness/readiness, Streamlit health, and Caddy admin returned
+  HTTP 200.
+- Expected listeners 80, 443, 2019, 8000, and 8001 were present; temporary
+  ports 8010 and 8011 were absent.
+- Local Caddy hostname/SNI routing returned dashboard HTTP 200, protected API
+  HTTP 401, blocked docs HTTP 404, and HTTP-to-HTTPS redirect HTTP 308 with
+  the reviewed security headers.
+- Public hostname requests from this workstation still timed out. External
+  client verification and authenticated dashboard/API verification remain
+  pending.
+
+New implementation:
+- Added `moduly/mereni/plynomery/reconciliation.py`, a fail-closed,
+  aggregate-only reconciliation dry-run fixed to selection run 21 and the
+  reviewed active period. Its public runner sets the PostgreSQL transaction
+  to `READ ONLY` and always rolls it back.
+- Added `scripts/plynomery_active_period_reconciliation.py`; only the
+  `dry-run` command exists. There is no apply command and no production write
+  is authorized.
+- Added `tests/test_plynomery_reconciliation.py`.
+- Scoped active selected-profile loading in
+  `moduly/mereni/plynomery/plynomery_anomaly.py` to only identifiers required
+  by the current measurement batch. The pre-change process loaded complete
+  candidate profile tables.
+- Added regression coverage for identifier-scoped static and weather profile
+  queries.
+
+Verification:
+- Reconciliation, scoring, and outlier-repair focused coverage reported
+  `24 passed`.
+- Compilation passed for the reconciliation helper, CLI, scoring module, and
+  tests.
+- `git diff --check` passed; line-ending warnings only.
+- Two production reconciliation dry-run attempts timed out after 120 seconds
+  without output or database mutation, once in the normal sandbox and once
+  with approved network access.
+- The second attempt used a pure read-only runtime-model SELECT and did not
+  call schema/table ensure helpers.
+- The complete test-suite attempt and a verbose collection attempt also timed
+  out during the workstation blockage. The focused suite had passed
+  immediately beforehand.
+
+Operational blocker:
+- The last successful `quarter_hour_job` remained
+  `2026-07-27 14:35:12 +02:00`.
+- The `14:47` run had not completed by `15:01`; no failure timestamp was
+  recorded. Scheduler heartbeat continued through `14:57`, so the scheduler
+  process remained alive while the job was unfinished.
+- `scheduler.log` had not advanced after the `14:35` success.
+- Do not run reconciliation concurrently with this unfinished job and do not
+  stop or recreate an individual production process from the interactive
+  session.
+
+Changed and uncommitted files added by this continuation:
+- `moduly/mereni/plynomery/reconciliation.py`
+- `scripts/plynomery_active_period_reconciliation.py`
+- `tests/test_plynomery_reconciliation.py`
+- Additional edits in `moduly/mereni/plynomery/plynomery_anomaly.py` and
+  `tests/test_anomaly_scoring.py`
+- All files listed in the prior `14:19` restart handoff remain intentionally
+  dirty and must be preserved.
+
+Expected post-restart processes and listeners:
+- One scheduler from `main.py`.
+- One production Uvicorn/FastAPI process on `127.0.0.1:8000`, without reload.
+- One production Streamlit process on `127.0.0.1:8001`.
+- Caddy on ports 80 and 443 with admin on `127.0.0.1:2019`.
+- Ports 8010 and 8011 remain unused.
+
+Mandatory post-restart verification:
+1. Confirm boot time is later than this handoff and the startup task ran after
+   boot with result zero.
+2. Repeat all local process, listener, health, Caddy routing, security-header,
+   scheduler heartbeat, public/external, and authenticated checks from
+   `PLYNOMERY_POST_RESTART_RUNBOOK.md`.
+3. Confirm a fresh `quarter_hour_job` completes successfully with the new
+   identifier-scoped loader.
+4. Re-run the focused tests and complete project suite.
+5. Away from scheduler slots, run only:
+   `.venv-production\Scripts\python.exe -m scripts.plynomery_active_period_reconciliation dry-run`.
+6. Stop on any scope guard. If the dry-run succeeds, present its aggregate
+   counts for explicit user approval before implementing or executing any
+   reconciliation write.
+
+Mutation and notification safety:
+- No reconciliation write, score/event repair, alert, report, email, model
+  rebuild, or selection change was executed.
+- No identifiers, measurements, credentials, tokens, cookies, recipients, or
+  raw event rows were printed.
+- Do not create a code-integrity baseline for the dirty tree.
+
+### 2026-07-27 15:23 +02:00 - Final plynomery reconciliation implementation
+
+Scope:
+- Implemented the final controlled score/event reconciliation apply path.
+- Did not execute the production write.
+
+Safety:
+- Apply requires the SHA-256 of the complete approved dry-run aggregate and
+  fails closed if any aggregate changes before the transaction starts.
+- Apply acquires the existing `quarter_hour_job` process lock.
+- Affected active-identity scores and dependent event state rebuild in one
+  transaction through the reviewed per-identifier selection and outlier
+  repair contracts.
+- Schema ensure and all alert, report, and email delivery paths are excluded.
+- An in-transaction aggregate audit must report zero mismatched, missing,
+  unexpected, and unavailable-selection scores before the single commit.
+- Any error rolls back the transaction and releases the scheduler lock.
+
+Verification:
+- Compilation passed for the reconciliation module, CLI, outlier repair
+  module, and tests.
+- Focused reconciliation, scoring, and event-repair coverage: `27 passed`.
+- Complete project suite: `998 passed in 27.51s`.
+- `git diff --check` passed; line-ending warnings only.
+
+Status:
+- Steps 23 and 24 remain open.
+- Run a fresh aggregate-only dry-run away from a scheduler slot and present
+  its exact SHA-256-bound scope for explicit approval before production apply.
+
+### 2026-07-27 15:36 +02:00 - Approved reconciliation applied and verified
+
+Apply:
+- The user explicitly approved the SHA-256-bound production scope
+  `63013e130b69e78fe118fdd8b38c05862666630828c5b6287c10bdf4c31f006a`.
+- The single transaction acquired the `quarter_hour_job` process lock and
+  committed successfully.
+- It rebuilt 310 active-period scores for five affected identifiers and
+  consistently rebuilt their dependent event state.
+- No alert, report, or email delivery function was called.
+
+In-transaction and independent post-commit results:
+- Active decisions: 18; available: 5; `insufficient_history`: 13.
+- Expected and persisted scores: 310.
+- Mismatched, missing, unexpected, and unavailable-selection scores: 0.
+- Remaining affected identifiers and anomaly/severity changes: 0.
+- Profile integrity remained clean with five complete pairs and 3,360 rows.
+
+Fresh scheduler observation:
+- A normal `quarter_hour_job` completed successfully at
+  `2026-07-27 15:35:12 +02:00`.
+- The subsequent read-only audit covered 1,134 eligible measurements,
+  315 expected/persisted scores, and 819 intentionally unavailable rows.
+- Mismatched, missing, unexpected, and unavailable-selection scores remained
+  zero after the fresh scheduled scoring cycle.
+
+Checklist:
+- Step 23 is complete.
+- Step 24 remains open only for external public-client verification and an
+  authenticated dashboard/API gas behavior check. Public hostname access from
+  this workstation still times out while local Caddy SNI routing is healthy.
+
+### 2026-07-28 - Plynomery historical weekly backfill
+
+Finding:
+- The authenticated overview showed predictions only for the current week.
+- Production contained only the active week beginning 2026-07-27; historical
+  API behavior correctly refused to project that current profile backward.
+- The prediction chart color was hard-coded red.
+
+Changed:
+- Changed the overview prediction curve to the vodomery light gray `#dedcd9`.
+- Added isolated gas historical backfill plan, dry-run, write, and verify
+  tooling modeled on the reviewed water backfill.
+- Backfill uses gas candidates v1/v2, three months of identifier history,
+  weekly period-valid active decisions/profiles, versioned candidate metrics,
+  aggregate-only output, per-week atomic commits, and the
+  `quarter_hour_job` process lock.
+
+Production execution:
+- Requested range: 2026-04-21 through 2026-07-27 exclusive.
+- Stored forecast weeks: 14, beginning 2026-04-20 and ending 2026-07-27.
+- Eligible identifiers: 5; 13 remained outside scope for insufficient
+  history.
+- Inserted 70 active decision snapshots, 140 candidate metric rows, and
+  47,040 selected profile rows (70 complete identifier-week pairs).
+- No scoring, event, alert, report, email, or current runtime model identity
+  was changed.
+
+Verified:
+- Aggregate verify: 14 weeks, 70 decisions, 70 profile pairs, 47,040 profile
+  rows, 140 candidate metrics, and no missing tables.
+- A bounded historical service calculation returned `available` with seven
+  complete daily prediction rows.
+- Current active reconciliation remained on selection run 21 with zero
+  mismatch, missing, unexpected, or unavailable-selection scores.
+- Focused gas/backfill/service/dashboard tests: 51 passed.
+- Complete project suite after the final implementation: `1006 passed in
+  27.70s`.
+- `git diff --check` passed; line-ending warnings only.
+
+Follow-up:
+- Refresh the authenticated `Plynomery / Prehled` page and confirm a light-gray
+  historical prediction curve for an eligible identifier.
+- Step 24 remains open until that browser check and the external public-client
+  check pass.
+
+### 2026-07-28 - Plynomery overview visual parity
+
+Confirmed:
+- Historical prediction data display correctly after the weekly backfill.
+- The current prediction ends on 2026-08-02, as required.
+
+Changed:
+- Both the regular and cumulative consumption charts now include the
+  expected-consumption curve in the vodomery light gray `#dedcd9`.
+- Prediction is the lower chart layer, so actual consumption remains visible
+  above it, and the shared consumption/prediction legend appears below the
+  charts.
+- The overview now shows four summary metrics: actual consumption, expected
+  consumption, absolute deviation, and percentage deviation.
+
+Verified:
+- Focused gas dashboard and prediction tests: 22 passed.
+- Complete project suite after the final chart-order and legend change:
+  `1008 passed in 26.85s`.
+- `git diff --check` passed; existing line-ending warnings only.
+
+Follow-up:
+- None for step 24; the refreshed authenticated browser check passed.
+
+### 2026-07-28 - Plynomery pipeline step 24 completed
+
+Verified:
+- The user confirmed the deployed `Plynomery / Prehled` page matches the
+  intended result.
+- Historical and current prediction coverage, the 2026-08-02 forecast end,
+  light-gray prediction curves, prediction-below-actual layer order,
+  cumulative prediction, four summary metrics, and the chart legend are
+  visible and correct.
+- Step 24 is complete. Step 25 remains the separate final plan-closure task.
+
+### 2026-07-28 - Plynomery pipeline step 25 completed
+
+Scope:
+- Final plan, consumer-path, regression, and documentation audit.
+
+Verified:
+- Checklist items 1 through 24 were already complete.
+- Active scoring, active outlier repair, prediction APIs, and dashboard
+  consumers use period-valid per-identifier snapshots.
+- Every remaining direct candidate-profile read is documented as
+  rebuild/backtest, non-active candidate comparison, or candidate repair.
+- No undocumented global production-profile fallback remains.
+- Focused closure regression matrix: 70 passed.
+- The complete project suite last passed after the final implementation:
+  `1008 passed in 26.85s`.
+- `git diff --check` passed; existing line-ending warnings only.
+
+Changed:
+- Added DEC-072 as the durable completed production contract.
+- Marked step 25 and the full plynomery pipeline plan complete.
+
+Follow-up:
+- The separately listed vodomery insufficient-history and outlier-review
+  improvements remain future work and are not blockers for this plan.
+
+### 2026-07-28 - Plynomery cumulative prediction chart correction
+
+Finding:
+- The expected curve in the cumulative overview chart did not visually
+  accumulate correctly.
+
+Changed:
+- The shared dashboard gas prediction loader now sorts prediction buckets by
+  timestamp and rebuilds expected cumulative consumption as the cumulative
+  sum of expected bucket consumption across the complete selected range.
+- The dashboard no longer depends on a possibly inconsistent cumulative
+  helper value supplied in the API payload.
+
+Verified:
+- A regression test supplies out-of-order rows and deliberately incorrect
+  cumulative payload values; the dashboard reconstructs `12.5, 15.0`.
+- Focused dashboard/series/service tests: 22 passed.
+- Complete project suite: `1008 passed in 26.60s`.
+
+### 2026-07-28 - Plynomery negative prediction correction
+
+Finding:
+- The supplied browser screenshot showed that the gray hourly prediction
+  contained negative consumption values. Their cumulative sum therefore
+  decreased and produced the incorrect wavy cumulative curve.
+
+Changed:
+- The shared server-side gas prediction-series builder clamps negative
+  expected interval consumption to zero before aggregation.
+- The dashboard loader applies the same non-negative guard before rebuilding
+  the cumulative prediction, covering responses from an already running API.
+- Expected cumulative gas consumption is now monotonic non-decreasing.
+
+Verified:
+- Regression coverage includes a negative expected interval followed by a
+  positive interval and asserts cumulative values `0.0, 0.4`.
+- Dashboard regression coverage rejects a negative API bucket and asserts a
+  non-decreasing reconstructed cumulative series.
+- Focused dashboard/series/service tests: 23 passed.
+- Complete project suite: `1009 passed in 26.86s`.
+
+### 2026-07-28 - Vodomery insufficient-history follow-up
+
+Changed:
+- Identifiers without valid rolling fallback metrics now persist an explicit
+  `insufficient_history` decision and publish no selected profile.
+- Normal active scoring skips unavailable measurements while advancing its
+  checkpoint. Available selections with missing profiles fail instead of
+  falling back globally.
+- The authenticated profile API carries prediction availability metadata.
+- `Vodomery / Prehled` shows `Nedostupné` for expected consumption and
+  deviations when history is insufficient.
+- Daily, weekly, and monthly branch payloads/PDFs preserve unavailable
+  prediction values instead of converting them to zero.
+
+Verified:
+- Focused selection, scoring, API, dashboard, authorization, and report
+  matrix: 270 passed before the final overlap-resolution guard.
+- Complete project suite after the final overlap-resolution regression:
+  `1017 passed in 28.21s`.
+- Additional branch availability regression tests: 22 passed.
+
+Operational state:
+- No production database write, scoring, event, alert, report, or email action
+  was executed.
+- The change is not active in running production processes until the planned
+  supported workstation restart.
+
+Follow-up:
+- Review vodomery outlier repair against the same period-valid selected-model
+  and unavailable-state contract before preparing the restart handoff.
+
+### 2026-07-28 - Vodomery outlier-repair follow-up
+
+Changed:
+- Active-model score repair after a water outlier-review change now calls the
+  shared period-valid per-identifier selected-profile score builder used by
+  normal active scoring.
+- Missing selection and `insufficient_history` produce no repaired active
+  score. A selected available profile missing its measurement slot fails
+  instead of falling back.
+- Non-active model versions retain direct candidate-profile repair for model
+  comparison; event rebuilds continue under the corresponding score identity.
+- Added regression coverage that distinguishes active selected repair,
+  unavailable active repair, and retained non-active candidate repair.
+
+Operational state:
+- No production database write, scoring, event, alert, report, or email action
+  was executed.
+- The change is not active in running production processes until the planned
+  supported workstation restart.
+
+Follow-up:
+- Run the focused and complete regression suites, then prepare and verify the
+  mandatory pre-restart handoff.
+
+Verified:
+- Focused water scoring/outlier/prediction matrix: 56 passed.
+- Complete project suite: `1021 passed in 26.28s`.
+- `git diff --check` passed; existing line-ending warnings only.
+
+### 2026-07-28 - Pre-restart handoff: completed gas pipeline and water follow-ups
+
+Reason for restart:
+- Load the completed gas per-identifier pipeline and both completed water
+  follow-ups into the scheduler, FastAPI, and Streamlit production processes.
+- Replace the pre-change runtime path that truncated the water prediction
+  curve after 2026-07-27 04:00 even though the current weekly profile contains
+  complete coverage through 2026-08-02 23:45.
+
+Completed and pending:
+- The 25-step gas pipeline, historical backfill, overview/detail UI, and gas
+  cumulative prediction correction are complete.
+- Water insufficient-history behavior and water active outlier-review repair
+  are complete in source.
+- Full suite passes: `1021 passed in 26.28s`.
+- Pending after boot: runtime/health/routing verification, authenticated gas
+  and water UI/API verification, and read-only score/event consistency audits.
+- Any reconciliation database write remains separately approval-gated.
+
+Changed/uncommitted state:
+- The working tree is intentionally dirty with the reviewed gas pipeline,
+  water API/dashboard/report/scoring/outlier changes, tests, plans, decisions,
+  runbook, reconciliation/backfill helpers, and scheduler integration.
+- Relevant water files include `vodomery_anomaly.py`,
+  `database/outlier_review_apply.py`, `vodomery_prediction.py`, water API
+  route/schema/service, dashboard water helpers/page, three branch reports,
+  and their tests.
+- Relevant gas files and untracked helpers are enumerated by `git status
+  --short` and `PLYNOMERY_POST_RESTART_RUNBOOK.md`.
+- Do not reset, checkout, clean, delete, commit, or create a code-integrity
+  baseline during restart handling.
+
+Deployment and safety state:
+- Current production processes have not loaded the final water changes.
+- No production database write, scoring, event, alert, report, or email action
+  was executed while implementing the water follow-ups.
+- Do not start or stop individual runtime processes manually. Restart the
+  complete workstation and allow scheduled task `API_dashboard_caddy` to
+  launch the runtime.
+- Do not print or modify credentials, tokens, cookies, recipients, raw meter
+  rows, or other sensitive runtime artifacts.
+
+Expected post-restart processes and listeners:
+- Scheduler process from `main.py`.
+- FastAPI/Uvicorn on `127.0.0.1:8000`.
+- Streamlit on `127.0.0.1:8001`.
+- Caddy on ports 80 and 443, with admin API on `127.0.0.1:2019`.
+- Temporary listeners 8010 and 8011 must be absent.
+
+Exact post-restart verification:
+1. Confirm Windows boot time is newer than this handoff.
+2. Confirm scheduled task `API_dashboard_caddy` ran after boot, has expected
+   state, and last result 0.
+3. Confirm all expected processes/listeners above and no temporary listeners.
+4. Require HTTP 200 from local FastAPI `/health/live` and `/health/ready`,
+   Streamlit `/_stcore/health`, and Caddy admin `/config/` without printing
+   the Caddy response body.
+5. Confirm scheduler metrics heartbeat is newer than boot; observe a normal
+   `quarter_hour_job` slot at minute 5, 16, 35, or 47 (second 5).
+6. Through authenticated `Health systemu`, verify runtime, proxy, scheduler,
+   PostgreSQL/MSSQL, and SmartFuelPass summaries without exposing secrets.
+7. Verify public HTTPS dashboard and users-exist routing; protected API without
+   bearer must return 401; `/docs`, `/redoc`, and `/openapi.json` must return
+   404; HTTP must redirect to HTTPS; security headers must remain present.
+8. Verify `Plynomery / Prehled` and `/ Detail`: full period prediction,
+   unavailable meters as `Nedostupné`, cumulative curve, granularities, and
+   device authorization.
+9. Verify `Vodomery / Prehled` for 2026-07-27 through 2026-08-02: the expected
+   curve reaches 2026-08-02 23:45 source coverage (hourly chart through 23:00),
+   actual data stop at the latest real measurement, and expected metrics are
+   available where history is sufficient.
+10. Verify a water meter with insufficient history shows `Nedostupné` and
+    creates no active score; verify an eligible active score uses the
+    period-valid selected profile and not the global/current fallback.
+11. Run aggregate-only gas and water score/event consistency audits. Stop and
+    diagnose on any missing selection/profile, unavailable score, selected
+    profile mismatch, runtime failure, listener failure, or readiness failure.
+12. Do not apply reconciliation, send alerts/reports/email, or run a manual
+    rebuild without a separate dry-run summary and explicit user approval.
+
+Reference:
+- Follow the stricter reconciliation and UI/API checks in
+  `PLYNOMERY_POST_RESTART_RUNBOOK.md`; this handoff adds the two water-specific
+  verification paths.
+
+### 2026-07-28 12:51 +02:00 - Pre-restart handoff: vodomery overview API-client correction
+
+Reason for restart:
+- Load the corrected vodomery prediction-profile API-client contract into the
+  production Streamlit process.
+- The authenticated `Vodomery / Prehled` page continued to render only the
+  overlapping legacy prediction segment through 2026-07-27 04:00 after the
+  11:37 workstation restart and a browser `Ctrl+F5`.
+
+Finding and correction:
+- Production contains the complete active `A_V1` profile for
+  `2026-07-27 00:00` through `2026-08-03 00:00`, with 672 quarter-hour rows.
+- The reviewed local period builder produces 168 hourly rows through
+  `2026-08-02 23:00`.
+- `get_vodomery_prediction_profiles()` declared a response-envelope return
+  type but discarded that envelope and returned only `rows`.
+- The client now preserves the complete response, including prediction
+  availability metadata and every overlapping profile row.
+- Added `tests/test_dashboard_vodomery_api_client.py` to lock the response
+  contract for an older period ending at `2026-07-27 04:10:05` and the newer
+  complete weekly period.
+
+Verification:
+- Focused API-client, dashboard-profile, and vodomery-service tests:
+  `19 passed`.
+- Complete project suite: `1022 passed in 27.91s`.
+- `git diff --check` passed; existing line-ending warnings only.
+
+Changed/uncommitted state:
+- The working tree remains intentionally dirty with the previously reviewed
+  gas pipeline and water follow-up work listed by `git status --short`.
+- This correction additionally changes
+  `moduly/apps/dashboard/api_client.py` and adds
+  `tests/test_dashboard_vodomery_api_client.py`.
+- Do not reset, checkout, clean, delete, commit, or create a code-integrity
+  baseline during restart handling.
+
+Deployment and safety:
+- The correction is not active in the running production Streamlit process.
+- No database write, reconciliation, model rebuild, score/event repair,
+  alert, report, or email action was performed.
+- Do not stop or recreate individual production processes. Restart the whole
+  workstation and allow scheduled task `API_dashboard_caddy` to launch them.
+- Do not print or modify credentials, tokens, cookies, recipients, raw meter
+  rows, or other sensitive runtime artifacts.
+
+Expected post-restart processes and listeners:
+- Scheduler from `main.py`.
+- FastAPI/Uvicorn on `127.0.0.1:8000`.
+- Streamlit on `127.0.0.1:8001`.
+- Caddy on ports 80 and 443, with admin API on `127.0.0.1:2019`.
+- Temporary listeners 8010 and 8011 must be absent.
+
+Exact post-restart verification:
+1. Confirm Windows boot time is later than `2026-07-28 12:51 +02:00`.
+2. Confirm scheduled task `API_dashboard_caddy` ran after boot, is in the
+   expected state, and has last result 0.
+3. Confirm the expected processes and listeners above and absence of 8010 and
+   8011.
+4. Require HTTP 200 from local FastAPI `/health/live` and `/health/ready`,
+   Streamlit `/_stcore/health`, and Caddy admin `/config/` without printing its
+   body.
+5. Confirm scheduler heartbeat is newer than boot and observe a successful
+   `quarter_hour_job` at minute 5, 16, 35, or 47, second 5.
+6. Verify local Caddy TLS/SNI routing, protected API 401 without bearer,
+   blocked documentation paths, security headers, and external public routing
+   when an external client is available.
+7. In a fresh authenticated `Vodomery / Prehled` session, select `A_V1`,
+   `2026-07-27` through `2026-08-02`, hourly detail, and load data.
+8. Require the light-gray expected hourly curve and its cumulative curve to
+   cover the complete selected period through `2026-08-02 23:00`; actual data
+   must still stop at the latest real measurement.
+9. Require hourly prediction rows after `2026-07-27 04:00` to retain their
+   model identity and expected values rather than `None`/zero caused by the
+   superseded overlapping period.
+10. Recheck an insufficient-history water meter remains `Nedostupne` with no
+    global, current, zero, or stale-profile fallback.
+11. Run the aggregate-only gas reconciliation dry-run and stop on any score,
+    profile, selection, listener, readiness, or runtime mismatch.
+12. Do not apply reconciliation, run a manual rebuild, or send alerts,
+    reports, or email without a separate dry-run and explicit approval.
+
+### 2026-07-28 13:15 +02:00 - Pre-restart handoff: vodomery overview prediction and table parity
+
+Reason for restart:
+- Load the corrected `Vodomery / Prehled` rendering path into the production
+  Streamlit process.
+- The post-12:53 restart browser check still showed the prediction ending with
+  the superseded profile at 2026-07-27 04:00 and displayed a water-specific
+  detail-table structure inconsistent with `Plynomery / Prehled`.
+
+Finding and correction:
+- Production contains two complete overlapping `A_V1` profile snapshots:
+  672 quarter-hour rows ending 2026-07-27 04:10:05 and 672 rows for the
+  current period 2026-07-27 00:00 through 2026-08-03 00:00.
+- The service returns all 1,344 rows and the shared period builder resolves
+  the overlap to 168 complete hourly prediction rows through
+  2026-08-02 23:00.
+- `Vodomery / Prehled` now builds one independent period prediction series
+  before rendering, matching the working plynomery overview pattern. Charts,
+  cumulative prediction, summary metrics, and the legend consume that series
+  instead of prediction values attached only to actual measurement rows.
+- The water detail table now matches the gas table's user-facing structure:
+  date, meter identifier, serial number, volume, consumption, cumulative
+  consumption, data validity, and reset count. Prediction and water-specific
+  technical columns are no longer mixed into the detail table.
+- The data container is consistently titled `Data` and remains available for
+  raw as well as aggregated detail.
+
+Verification:
+- Focused water/gas dashboard, API-client, and water-service tests: 26 passed.
+- Complete project suite: `1024 passed in 28.43s`.
+- Direct read-only production calculation returned 168 hourly prediction rows
+  from 2026-07-27 00:00 through 2026-08-02 23:00.
+- `git diff --check` passed; existing line-ending warnings only.
+
+Changed/uncommitted state:
+- This correction changes `moduly/apps/dashboard/pages/2_vodomery.py`,
+  `tests/test_dashboard_vodomery_shared.py`, and this handoff in addition to
+  the previously reviewed dirty working tree.
+- Do not reset, checkout, clean, delete, commit, or create a code-integrity
+  baseline during restart handling.
+
+Deployment and safety:
+- The correction is not active in the running production Streamlit process.
+- No database write, reconciliation, rebuild, score/event repair, alert,
+  report, or email action was performed.
+- Do not stop or recreate individual production processes. Restart the whole
+  workstation and allow scheduled task `API_dashboard_caddy` to launch them.
+
+Exact post-restart verification:
+1. Repeat the runtime, task, listener, health, scheduler, Caddy, and routing
+   checks from the preceding handoff.
+2. In a fresh authenticated `Vodomery / Prehled` session select `A_V1`,
+   2026-07-27 through 2026-08-02, hourly detail, and load data.
+3. Require the light-gray expected and cumulative curves to cover the complete
+   range through 2026-08-02 23:00 while actual data stop at the latest real
+   measurement.
+4. Require summary expected consumption and deviations to use the complete
+   selected prediction range.
+5. Require the `Data` table to use the same logical columns as plynomery:
+   date, meter, serial number, volume, consumption, cumulative consumption,
+   valid data, and reset count.
+6. Recheck an insufficient-history water meter remains `Nedostupne`.
+7. Do not apply reconciliation, run a manual rebuild, or send alerts, reports,
+   or email without a separate dry-run and explicit approval.
+
+### 2026-07-28 - Vodomery overview complete-snapshot selection correction
+
+Finding:
+- After the 13:19 workstation restart, `Vodomery / Prehled` loaded the new
+  table structure but still rendered only the older overlapping prediction
+  snapshot through 2026-07-27 04:00.
+- Read-only production inspection confirmed that A_V1 has both 672-row
+  snapshots and that the current snapshot covers 2026-07-27 00:00 through
+  2026-08-03 00:00.
+
+Changed:
+- The dashboard prediction builder now explicitly selects the newest snapshot
+  that covers the complete requested range before constructing the period
+  series. Mixed historical ranges without one complete covering snapshot keep
+  the existing per-timestamp overlap resolution.
+- Submitting `Nacist data` clears the cached vodomery prediction-profile load.
+
+Verified:
+- The production A_V1 aggregate calculation selects 672 current-snapshot rows
+  from the 1,344-row API result and builds 168 hourly rows through
+  2026-08-02 23:00; 116 hourly rows are non-zero.
+- Focused dashboard API-client and vodomery service tests: 22 passed.
+- `git diff --check` passed; existing line-ending warnings only.
+
+Operational state:
+- The correction is not active in the running Streamlit process.
+- No database write, reconciliation, rebuild, alert, report, or email action
+  was performed.
+- A new mandatory pre-restart handoff is required before the next supported
+  full-workstation restart.
+
+### 2026-07-28 13:41 +02:00 - Pre-restart handoff: vodomery complete-snapshot selection
+
+Reason for restart:
+- Load the corrected `Vodomery / Prehled` complete-snapshot selection and
+  prediction-profile cache invalidation into the production Streamlit process.
+- The browser check after the 13:19 restart showed the new table structure,
+  but the light-gray prediction still used only the older overlapping snapshot
+  and ended at 2026-07-27 04:00.
+
+Finding and correction:
+- Read-only production inspection confirmed two A_V1 snapshots with 672 rows
+  each: the older snapshot ends at 2026-07-27 04:10:05 and the current
+  snapshot covers 2026-07-27 00:00 through 2026-08-03 00:00.
+- The dashboard prediction builder now selects the newest snapshot that covers
+  the complete requested range before constructing the period series.
+- Historical mixed ranges without one complete covering snapshot retain the
+  existing per-timestamp overlap resolution.
+- Submitting `Nacist data` clears the cached vodomery prediction-profile load.
+
+Verification before restart:
+- Complete project suite: `1025 passed in 28.80s`.
+- Focused dashboard API-client and vodomery service tests: 22 passed.
+- Read-only A_V1 calculation selected 672 current-snapshot rows from the
+  1,344-row API result and built 168 hourly rows from 2026-07-27 00:00 through
+  2026-08-02 23:00, including 116 non-zero hourly rows.
+- `git diff --check` passed; existing line-ending warnings only.
+- Current pre-restart runtime is healthy: startup task last result 0, expected
+  listeners are present, temporary listeners 8010/8011 are absent, scheduler
+  heartbeat is current, and the 13:35 `quarter_hour_job` succeeded.
+
+Changed/uncommitted state:
+- The working tree remains intentionally dirty with the previously reviewed
+  gas pipeline, water follow-ups, dashboard/API/report/scoring changes, tests,
+  plans, decisions, runbook, and helper scripts listed by `git status --short`.
+- This correction additionally changes
+  `moduly/apps/dashboard/vodomery_shared.py`,
+  `moduly/apps/dashboard/pages/2_vodomery.py`,
+  `tests/test_dashboard_vodomery_shared.py`, and this handoff.
+- Do not reset, checkout, clean, delete, commit, or create a code-integrity
+  baseline during restart handling.
+
+Deployment and safety state:
+- The complete-snapshot correction is not active in the running Streamlit
+  process.
+- No production database write, reconciliation, model rebuild, score/event
+  repair, alert, report, or email action was performed.
+- Do not start or stop individual runtime processes manually. Restart the
+  complete workstation and allow scheduled task `API_dashboard_caddy` to
+  launch the runtime.
+- Do not print or modify credentials, tokens, cookies, recipients, raw meter
+  rows, or other sensitive runtime artifacts.
+
+Expected post-restart processes and listeners:
+- Scheduler process from `main.py`.
+- FastAPI/Uvicorn on `127.0.0.1:8000`.
+- Streamlit on `127.0.0.1:8001`.
+- Caddy on ports 80 and 443, with admin API on `127.0.0.1:2019`.
+- Temporary listeners 8010 and 8011 must be absent.
+
+Exact post-restart verification:
+1. Confirm Windows boot time is later than `2026-07-28 13:41 +02:00`.
+2. Confirm scheduled task `API_dashboard_caddy` ran after boot, is in the
+   expected state, and has last result 0.
+3. Confirm the expected processes and listeners above and absence of 8010 and
+   8011.
+4. Require HTTP 200 from local FastAPI `/health/live` and `/health/ready`,
+   Streamlit `/_stcore/health`, and Caddy admin `/config/` without printing its
+   body.
+5. Confirm scheduler metrics heartbeat is newer than boot and observe a
+   successful `quarter_hour_job` at minute 5, 16, 35, or 47, second 5.
+6. Verify local Caddy TLS/SNI routing, protected API 401 without bearer,
+   blocked `/docs`, `/redoc`, and `/openapi.json`, security headers, HTTP to
+   HTTPS redirect, and external public routing when available.
+7. In a fresh authenticated `Vodomery / Prehled` session select A_V1,
+   2026-07-27 through 2026-08-02, hourly detail, enable the graph, and click
+   `Nacist data`.
+8. Require the light-gray hourly prediction and cumulative prediction to cover
+   all 168 hours through 2026-08-02 23:00. The prediction must not end at
+   2026-07-27 04:00.
+9. Require the prediction to use only the current snapshot covering
+   2026-07-27 00:00 through 2026-08-03 00:00; the older snapshot ending
+   2026-07-27 04:10:05 must not supply the displayed period.
+10. Require actual measurements and cumulative actual consumption to stop at
+    the latest real measurement while expected metrics use the complete
+    selected prediction range.
+11. Confirm the `Data` table retains the reviewed gas-parity columns and an
+    insufficient-history water meter remains `Nedostupne`.
+12. Recheck `Plynomery / Prehled` and `/ Detail`, then run aggregate-only gas
+    and water score/event consistency audits.
+13. Stop and diagnose on any prediction-range, snapshot-selection, profile,
+    score, listener, readiness, routing, or runtime mismatch.
+14. Do not apply reconciliation, run a manual rebuild, repair scores/events,
+    or send alerts, reports, or email without a separate dry-run summary and
+    explicit user approval.
+
+### 2026-07-28 14:17 +02:00 - Pre-restart handoff: vodomery mixed-precision snapshot timestamps
+
+Reason for restart:
+- Load the corrected vodomery prediction snapshot timestamp parsing into the
+  production Streamlit process.
+- The authenticated `Vodomery / Prehled` page still displayed only five
+  prediction hours through `2026-07-27 04:00` after the 13:44 restart.
+
+Finding and correction:
+- The API returns the older snapshot timestamps with fractional seconds, for
+  example `2026-07-20T04:10:05.081179`, while the current calendar-week
+  snapshot uses whole seconds, for example `2026-07-27T00:00:00`.
+- Pandas' single inferred datetime format parsed the current snapshot
+  timestamps as `NaT`. The dashboard therefore retained only the older
+  snapshot ending `2026-07-27 04:10:05`.
+- Vodomery dashboard profile loading and complete-range snapshot selection now
+  parse API timestamps with mixed-format datetime handling.
+- Added a regression test covering the real mixed-precision API timestamp
+  shapes.
+
+Verification before restart:
+- Focused dashboard tests:
+  `11 passed`.
+- A read-only production JSON round-trip now builds 168 hourly prediction rows
+  from `2026-07-27 00:00` through `2026-08-02 23:00`, including 116 non-zero
+  hours.
+- `git diff --check` passed; existing line-ending warnings only.
+
+Changed/uncommitted state:
+- The working tree remains intentionally dirty with the previously reviewed
+  gas pipeline, water follow-ups, dashboard/API/report/scoring changes, tests,
+  plans, decisions, runbook, and helper scripts listed by
+  `git status --short`.
+- This correction additionally changes
+  `moduly/apps/dashboard/vodomery_shared.py`,
+  `tests/test_dashboard_vodomery_shared.py`, and this handoff.
+- Do not reset, checkout, clean, delete, commit, or create a code-integrity
+  baseline during restart handling.
+
+Deployment and safety:
+- The mixed-precision correction is not active in the running Streamlit
+  process.
+- No database write, reconciliation, rebuild, score/event repair, alert,
+  report, or email action was performed.
+- Restart the complete workstation and allow scheduled task
+  `API_dashboard_caddy` to launch the runtime. Do not recreate individual
+  production processes.
+- Do not print or modify credentials, tokens, cookies, recipients, raw meter
+  rows, or other sensitive runtime artifacts.
+
+Expected post-restart processes and listeners:
+- Scheduler process from `main.py`.
+- FastAPI/Uvicorn on `127.0.0.1:8000`.
+- Streamlit on `127.0.0.1:8001`.
+- Caddy on ports 80 and 443, with admin API on `127.0.0.1:2019`.
+- Temporary listeners 8010 and 8011 must be absent.
+
+Exact post-restart verification:
+1. Confirm Windows boot time is later than `2026-07-28 14:17 +02:00`.
+2. Confirm scheduled task `API_dashboard_caddy` ran after boot and has last
+   result 0.
+3. Confirm the expected processes/listeners and absence of 8010 and 8011.
+4. Require HTTP 200 from local FastAPI `/health/live` and `/health/ready`,
+   Streamlit `/_stcore/health`, and Caddy admin `/config/`.
+5. Confirm scheduler heartbeat is newer than boot and observe a successful
+   `quarter_hour_job` at minute 5, 16, 35, or 47, second 5.
+6. Verify Caddy routing, protected API 401 without bearer, blocked
+   documentation paths, security headers, and HTTP-to-HTTPS redirect.
+7. In a fresh authenticated `Vodomery / Prehled` session select A_V1,
+   `2026-07-27` through `2026-08-02`, hourly detail, enable the graph, and
+   click `Nacist data`.
+8. Require 168 hourly prediction points through `2026-08-02 23:00`, including
+   the expected and cumulative curves. The prediction must not end at
+   `2026-07-27 04:00`.
+9. Confirm actual measurements stop at the latest real measurement and the
+   reviewed `Data` table columns remain unchanged.
+10. Do not apply reconciliation, run a manual rebuild, repair scores/events,
+    or send alerts, reports, or email without a separate dry-run summary and
+    explicit approval.
+### 2026-07-28 - Shared prediction calendar-week boundary contract
+
+- Confirmed the corrected `Vodomery / Prehled` rendering works after restart.
+- Standardized weekly prediction validity on one shared helper: Prague Monday
+  00:00 inclusive through the following Monday 00:00 exclusive.
+- Plynomery and vodomery now call the same helper. Vodomery default week
+  resolution was corrected from UTC to Europe/Prague wall time.
+- Kalorimetry and elektromery must reuse this period helper and preserve the
+  same per-identifier selection, profile snapshot, availability, scoring, API,
+  dashboard, and downstream-consumer semantics when their pipelines are
+  implemented.
+### 2026-07-28 - SmartFuelPass transient retry and Cloudflare diagnosis
+
+- The Health systemu SmartFuelPass error came from `daily_job` at 00:15:
+  Playwright timed out waiting for `#Email`; PostgreSQL remained reachable and
+  the weekly database-backed report succeeded.
+- Added a bounded retry for transient login-page load failures: two total
+  attempts separated by 60 seconds. Login navigation and field waits now use
+  the configured 300-second login timeout. Missing credentials and rejected
+  authentication are not retried.
+- Added immediate detection of Cloudflare mitigation responses so the retry
+  delay is used without waiting 300 seconds for login fields that are absent.
+- Controlled production-environment sync verification received HTTP 403
+  `Cf-Mitigated: challenge` on both attempts, including with the installed
+  Chrome channel. No login or database upsert occurred; the safe aggregate
+  remained 24 sessions with the prior `last_imported_at`.
+- The workstation has one IPv4 default route through `Ethernet Internet`.
+  SmartFuelPass DNS and HTTPS routing work on that interface; the failure is
+  the portal challenge against headless automation, not adapter selection.
+- The public dashboard cannot be independently tested from the same workstation
+  through its public address because that path times out without hairpin
+  routing. Use local Caddy TLS/SNI on-host and an external client for public
+  verification.
+### 2026-07-28 15:08 +02:00 - Pre-restart handoff: shared forecast weeks and SmartFuelPass retry
+
+Reason for restart:
+- Load the shared Prague calendar-week forecast-period helper into the
+  production scheduler, API, and Streamlit processes.
+- Load the corrected vodomery default week resolution and the bounded
+  SmartFuelPass transient-login retry/Cloudflare detection.
+- The user confirmed after the preceding restart that `Vodomery / Prehled`
+  now renders the complete reviewed prediction range correctly.
+
+Prediction-period change:
+- All production prediction media now have one half-open Prague calendar-week
+  contract: Monday 00:00 inclusive through the following Monday 00:00
+  exclusive.
+- Plynomery and vodomery call the same shared helper.
+- Vodomery default week resolution now uses Europe/Prague wall time instead of
+  UTC, preventing a Sunday/Monday boundary mismatch during manual rebuilds.
+- Future kalorimetry and elektromery pipelines must reuse the same helper and
+  preserve the established per-identifier selection, profile snapshot,
+  explicit availability, scoring, API, dashboard, and consumer semantics.
+
+SmartFuelPass finding and change:
+- The Health systemu error is caused by the 2026-07-28 00:15 `daily_job`.
+  PostgreSQL and the other daily steps were available, but the
+  `sync_charge_sessions_to_db` step timed out waiting for login field `#Email`.
+- Direct read-only network diagnostics confirmed one IPv4 default route through
+  `Ethernet Internet`; SmartFuelPass DNS and HTTPS routing work on that
+  interface.
+- The portal returns HTTP 403 with `Cf-Mitigated: challenge` to both bundled
+  Playwright Chromium and the installed Chrome channel in headless mode.
+- SmartFuelPass fetch now uses at most two attempts separated by 60 seconds.
+  Login navigation and field waits use the configured 300-second login
+  timeout. A Cloudflare mitigation response is classified immediately as a
+  transient failure. Missing credentials and rejected authentication are not
+  retried.
+- The controlled sync ran only `sync_charge_sessions_to_db`, not `daily_job`.
+  Both attempts received the Cloudflare challenge. No login, database upsert,
+  report, email, scoring, alert, or unrelated scheduler action occurred.
+- Safe database aggregates remained 24 sessions with the prior
+  `last_imported_at`; the weekly database-backed SmartFuelPass report metric
+  remains successful.
+- Do not attempt to bypass Cloudflare, restore cookie/session persistence, or
+  run another portal sync until options are reviewed with the user after
+  restart.
+
+Verification before restart:
+- Focused SmartFuelPass, sync, system-health, and scheduler tests:
+  `112 passed`.
+- Complete project suite: `1037 passed in 28.22s`.
+- `git diff --check` passed; existing line-ending warnings only.
+- Runtime at 2026-07-28 15:08 +02:00: startup task state `Ready`, last result
+  0; listeners 80, 443, 2019, 8000, and 8001 present; temporary listeners
+  8010/8011 absent; scheduler heartbeat current; 15:05 `quarter_hour_job`
+  successful.
+
+Changed/uncommitted state:
+- The working tree remains intentionally dirty with the previously reviewed
+  gas pipeline, water follow-ups, dashboard/API/report/scoring changes, tests,
+  plans, decisions, runbook, and helper scripts listed by
+  `git status --short`.
+- This session additionally changes `.env.example`, `AGENTS.md`,
+  `DECISIONS.md`, `SESSION_NOTES.md`,
+  `moduly/apps/smartfuelpass/service.py`,
+  `moduly/mereni/prediction/periods.py`,
+  `moduly/mereni/prediction/__init__.py`,
+  `moduly/mereni/plynomery/plynomery_prediction.py`,
+  `moduly/mereni/vodomery/vodomery_prediction.py`,
+  `tests/test_prediction_backtest.py`,
+  `tests/test_vodomery_prediction.py`, and
+  `tests/test_smartfuelpass_service.py`.
+- Do not reset, checkout, clean, delete, commit, or create a code-integrity
+  baseline during restart handling.
+
+Deployment and safety:
+- The shared week helper, vodomery Prague-time correction, and SmartFuelPass
+  retry/Cloudflare detection are not active in the currently running
+  production processes.
+- Do not stop or recreate individual production processes. Restart the whole
+  workstation and allow scheduled task `API_dashboard_caddy` to launch them.
+- Do not print or modify credentials, tokens, cookies, recipients, raw
+  SmartFuelPass rows, raw meter rows, or other sensitive runtime artifacts.
+
+Expected post-restart processes and listeners:
+- Scheduler process from `main.py`.
+- FastAPI/Uvicorn on `127.0.0.1:8000`.
+- Streamlit on `127.0.0.1:8001`.
+- Caddy on ports 80 and 443, with admin API on `127.0.0.1:2019`.
+- Temporary listeners 8010 and 8011 must be absent.
+
+Exact post-restart verification:
+1. Confirm Windows boot time is later than `2026-07-28 15:08 +02:00`.
+2. Confirm scheduled task `API_dashboard_caddy` ran after boot, is in the
+   expected state, and has last result 0.
+3. Confirm the expected processes/listeners above and absence of 8010/8011.
+4. Require HTTP 200 from local FastAPI `/health/live` and `/health/ready`,
+   Streamlit `/_stcore/health`, and Caddy admin `/config/` without printing
+   its body.
+5. Confirm scheduler heartbeat is newer than boot and observe a successful
+   `quarter_hour_job` at minute 5, 16, 35, or 47, second 5.
+6. Verify local Caddy TLS/SNI routing, protected API 401 without bearer,
+   blocked `/docs`, `/redoc`, and `/openapi.json`, reviewed security headers,
+   and HTTP-to-HTTPS redirect.
+7. Do not classify an on-host timeout to the dashboard public IP as an outage.
+   This multi-homed workstation has no working public-address hairpin route.
+   Use local Caddy TLS/SNI on-host and an actual external client for
+   independent public reachability.
+8. In a fresh authenticated `Vodomery / Prehled` session recheck A_V1 for
+   2026-07-27 through 2026-08-02 at hourly detail: prediction and cumulative
+   prediction must cover all 168 hours through 2026-08-02 23:00 while actual
+   measurements stop at the latest real measurement.
+9. Confirm the active plynomery and vodomery selected/profile snapshot periods
+   remain exactly 2026-07-27 00:00 inclusive through 2026-08-03 00:00
+   exclusive. Do not run a manual rebuild merely to verify the helper.
+10. Expect Health systemu SmartFuelPass to retain the persisted historical
+    `daily_job` error until a later successful scheduled run updates metrics;
+    this alone is not a restart failure. Confirm the table remains present,
+    UTC completeness is unchanged, and the weekly report metric remains OK.
+11. Do not run SmartFuelPass login/sync during the immediate post-restart
+    check. After runtime verification, review supported options for the
+    Cloudflare challenge with the user before any further portal action.
+12. Recheck `Plynomery / Prehled` and `/ Detail`, then run only the previously
+    approved aggregate-only gas and water score/event consistency audits.
+13. Stop and diagnose on any prediction-range, week-boundary, snapshot,
+    profile, score, listener, readiness, routing, or runtime mismatch.
+14. Do not apply reconciliation, run a manual prediction rebuild, repair
+    scores/events, bypass Cloudflare, or send alerts, reports, or email without
+    a separate dry-run summary and explicit user approval.
+### 2026-07-28 15:21 +02:00 - Post-restart verification after shared-week/SmartFuelPass restart
+
+- Windows booted at `2026-07-28 15:11:26 +02:00`, after the 15:08 handoff.
+- Scheduled task `API_dashboard_caddy` ran at 15:11:39, returned result `0`,
+  and is `Ready`.
+- Caddy, FastAPI, and Streamlit processes are present. Required listeners
+  80, 443, 2019, 8000, and 8001 are present; temporary listeners 8010 and
+  8011 are absent.
+- Local FastAPI live/ready, Streamlit health, and Caddy admin checks all
+  returned HTTP 200.
+- Scheduler heartbeat is newer than boot. The first checked post-restart
+  `quarter_hour_job` completed successfully at 15:16:13.
+- Local Caddy TLS/SNI checks returned dashboard/users-exist HTTP 200,
+  protected API HTTP 401, documentation paths HTTP 404, and HTTP-to-HTTPS
+  redirect 308. Reviewed security headers are present and `Server`/`Via`
+  headers are absent.
+- Active plynomery and vodomery selections use the exact period
+  `2026-07-27 00:00` inclusive through `2026-08-03 00:00` exclusive.
+- The aggregate-only plynomery reconciliation dry-run is clean: 18 decisions,
+  5 available profiles, 13 unavailable decisions, 790 expected/persisted
+  scores, and zero missing, unexpected, mismatched, unavailable-selection,
+  anomaly-flag-change, or severity-change rows. No reconciliation write is
+  needed or authorized.
+- SmartFuelPass table remains present with 24 aggregate sessions, all 24 with
+  normalized UTC end time and zero missing UTC ends. The historical sync
+  error remains persisted as expected; the weekly report metric remains
+  successful. No portal login or sync was run.
+- No rebuild, reconciliation apply, score/event repair, alert, report, email,
+  SmartFuelPass portal action, or other production write was performed.
+- Still requires a fresh authenticated browser check of `Vodomery / Prehled`
+  for A_V1 over 2026-07-27 through 2026-08-02 and the reviewed plynomery
+  overview/detail checks. Independent public reachability also remains for an
+  actual external client; on-host local TLS/SNI routing is verified.
+- User subsequently confirmed in a fresh authenticated browser that both the
+  vodomery and plynomery graphs render correctly. The authenticated graph
+  verification is complete.
+
+### 2026-07-29 07:17 +02:00 - Pre-restart handoff: interactive SmartFuelPass import
+
+Reason for restart:
+
+- Load the new admin-only `Nabíječky / Přihlášení SmartFuelPass` page,
+  authenticated FastAPI boundary, interactive import status service, and
+  scheduler separation into the production API, Streamlit, and scheduler
+  processes.
+- Replace unattended headless portal synchronization with an explicit manual
+  Cloudflare/login workflow in a visible temporary browser.
+
+Implemented:
+
+- Added `SMARTFUELPASS_INTERACTIVE_LOGIN_PLAN.md` as the implementation and
+  deployment checklist.
+- Added a single-run interactive helper that opens visible installed Chrome
+  with Chromium fallback, waits for manual login, reuses the existing portal
+  table loader, and performs the existing idempotent PostgreSQL upsert by
+  `id_relace`.
+- The helper stores only atomic sanitized state and aggregate counts under
+  ProgramData. It does not persist or expose credentials, cookies, browser
+  storage, portal HTML, raw rows, or Cloudflare clearance values.
+- Added fixed admin-only FastAPI status/start endpoints. Clients cannot supply
+  a task name, executable, arguments, command, or path.
+- Added the admin-only dashboard page under `Nabíječky`, including explicit
+  confirmation, two-second active polling, safe import result counts, and the
+  existing aggregate database/weekly-report health summary.
+- Removed SmartFuelPass portal synchronization from `daily_job` and removed
+  its generic scheduler manual-run entry.
+- The scheduled `smartfuelpass_weekly_report_job` remains unchanged and reads
+  only `monitoring.smartfuelpass_relace`.
+- System health now evaluates the explicit interactive import state instead
+  of expecting the retired daily headless sync.
+- Added DEC-076 and the corresponding persistent AGENTS operating rules.
+
+Windows task state:
+
+- Dedicated task `Monitoring_SmartFuelPass_Interactive_Import` was registered
+  after explicit approval.
+- Read-only verification: state `Ready`, interactive logon, highest run level,
+  no periodic trigger, one fixed action, correct project working directory,
+  30-minute execution limit, and `IgnoreNew` multiple-instance policy.
+- The task has not been started. Current sanitized workflow state is `idle`;
+  the task and an active interactive Windows session are detectable.
+
+Verification:
+
+- Focused SmartFuelPass, scheduler, system-health, navigation, API
+  authorization, service, route, dashboard-helper, API-client, and task
+  definition matrix: 341 passed, followed by the dedicated interactive set:
+  10 passed.
+- Complete project suite after final code changes:
+  `1052 passed in 27.32s`.
+- Python compilation and FastAPI route registration checks passed.
+- PowerShell registrar syntax and in-memory scheduled-task definition checks
+  passed.
+- `git diff --check` passed; existing line-ending warnings only.
+
+Changed/uncommitted state:
+
+- The working tree remains intentionally dirty with all previously reviewed
+  gas pipeline, water follow-up, SmartFuelPass retry, dashboard/API/report,
+  tests, plans, decisions, and runbook changes listed by
+  `git status --short`.
+- This implementation additionally changes `.env.example`, `AGENTS.md`,
+  `DECISIONS.md`, `SESSION_NOTES.md`, `core/scheduler/job_schedule.py`,
+  `core/scheduler/scheduler.py`, `moduly/apps/dashboard/api_client.py`,
+  `moduly/apps/dashboard/navigation_config.py`,
+  `services/api/main.py`, `services/api/schemas/admin.py`,
+  `services/api/services/system_health.py`,
+  `tests/test_api_authorization_regression.py`,
+  `tests/test_dashboard_navigation_config.py`, `tests/test_scheduler.py`,
+  and `tests/test_system_health.py`.
+- New files are `SMARTFUELPASS_INTERACTIVE_LOGIN_PLAN.md`,
+  `moduly/apps/dashboard/pages/39_smartfuelpass_prihlaseni.py`,
+  `moduly/apps/dashboard/smartfuelpass_interactive_view.py`,
+  `moduly/apps/smartfuelpass/interactive_import.py`,
+  `scripts/register_smartfuelpass_interactive_import_task.ps1`,
+  `scripts/smartfuelpass_interactive_import.py`,
+  `services/api/routes/smartfuelpass_interactive.py`,
+  `services/api/services/smartfuelpass_interactive.py`, and
+  `tests/test_smartfuelpass_interactive.py`.
+- Do not reset, checkout, clean, delete, commit, or create a code-integrity
+  baseline during restart handling.
+
+Deployment and safety:
+
+- Current production API, Streamlit, and scheduler processes do not contain
+  these changes.
+- Do not start the interactive task before the supported full-workstation
+  restart and post-restart runtime/API/dashboard checks.
+- Do not run the old SmartFuelPass sync, a scheduler manual import, or any
+  portal login during immediate post-boot verification.
+- Do not print or modify credentials, cookies, browser state, ProgramData
+  status contents beyond the sanitized contract, recipients, or raw portal
+  rows.
+
+Expected post-restart runtime:
+
+- Scheduler process from `main.py`.
+- FastAPI/Uvicorn on `127.0.0.1:8000`.
+- Streamlit on `127.0.0.1:8001`.
+- Caddy on ports 80 and 443, with admin API on `127.0.0.1:2019`.
+- Temporary listeners 8010 and 8011 absent.
+- Interactive SmartFuelPass task remains `Ready` and is never scheduled
+  automatically.
+
+Exact post-restart verification:
+
+1. Confirm boot time is later than this handoff and startup task
+   `API_dashboard_caddy` ran after boot with result 0.
+2. Confirm expected processes/listeners, absence of 8010/8011, local API
+   live/ready, Streamlit health, and Caddy admin HTTP 200.
+3. Confirm scheduler heartbeat is newer than boot and observe one successful
+   `quarter_hour_job`.
+4. Verify local Caddy TLS/SNI routing, protected API 401, blocked documentation
+   paths, security headers, and HTTP-to-HTTPS redirect.
+5. Confirm `daily_job` and its manual registry no longer contain the
+   SmartFuelPass portal sync; confirm the weekly database report remains.
+6. Confirm the dedicated interactive task is `Ready`, has no automatic
+   trigger, and the new admin status endpoint reports `idle`, task registered,
+   and an interactive session available.
+7. Log in to the dashboard as admin and verify
+   `Nabíječky / Přihlášení SmartFuelPass` renders safe database/report state.
+8. Only after checks 1-7 pass, click `Přihlásit` once from the unlocked
+   production desktop, complete Cloudflare and portal login manually, and
+   observe `starting`, `waiting_for_login`, `importing`, then `success`.
+9. Require aggregate-only result counts, table presence, unchanged UTC
+   completeness, and idempotent upsert behavior. Do not print raw rows.
+10. Confirm the browser closes, the task returns to `Ready`, the temporary
+    lock is absent, and no persistent cookie/profile/session artifact exists.
+11. Confirm no alert, report, or email was sent by the import.
+12. Stop and diagnose on any task, session, browser, login, table, database,
+    scheduler, readiness, routing, status, or cleanup mismatch. Do not retry a
+    database-writing import without reviewing the first result.
+
+### 2026-07-29 - SmartFuelPass work paused after manual Cloudflare failure
+
+- The post-restart runtime, scheduler, listener, health, Caddy routing, and
+  interactive-task checks passed.
+- The dedicated SmartFuelPass task remained `Ready`, without an automatic
+  trigger, and the sanitized workflow state was `idle`.
+- The user reported that the Cloudflare challenge could not be completed even
+  manually from the production workstation. An IP reputation or blocking
+  issue is possible but was not independently confirmed.
+- The user explicitly decided that Cloudflare will not be bypassed.
+- SmartFuelPass is temporarily closed as active work, with an explicit open
+  follow-up to return only through a supported path such as portal-operator
+  assistance or an official API/export.
+- Do not run further portal login/import attempts, change network identity to
+  evade the restriction, restore persistent sessions, or add unattended
+  synchronization.
+- The interactive task remains installed but idle. The weekly report remains
+  database-backed and continues from the last successfully imported data.
+- No SmartFuelPass import, database write, alert, report, or email was
+  triggered during this closure.
+
+### 2026-07-29 - Kalorimetry full prediction pipeline opened
+
+- SmartFuelPass is no longer the active workstream. The new active workstream
+  is the complete kalorimetry data and prediction lifecycle.
+- Added `KALORIMETRY_PREDICTION_PIPELINE_PLAN.md` with 28 independently
+  verifiable checklist items covering the existing MSSQL-to-PostgreSQL
+  import, observation contracts, profiles, candidates, per-identifier
+  selection, historical backfill, scoring/events, API, dashboards, consumers,
+  scheduler integration, and rollout.
+- Initial code inventory confirms that kalorimetry currently have normalized
+  15-minute PostgreSQL measurements, Prague/UTC time semantics, cumulative
+  energy and volume, energy deltas, reset/gap/synthetic/validity flags,
+  outlier review, three dashboard pages, and admin outlier APIs.
+- Kalorimetry currently have no prediction adapter, candidate/profile
+  lifecycle, snapshot backfill, prediction scoring/events, device-scoped
+  prediction API, or dashboard prediction series.
+- The prediction quantity is normalized non-negative energy `delta`.
+  Cumulative `spotreba_energie` remains meter state and `objem` remains a
+  separate diagnostic quantity.
+- The forecast-period contract is the shared half-open Prague calendar week.
+- A weather-aware candidate is not assumed merely because gas uses one. Its
+  heat-specific benefit, data source, missing-input behavior, and
+  leakage-safe historical availability must be established from evidence.
+- Active checklist item: step 1, freeze and measure the current kalorimetry
+  baseline. No production write, rebuild, backfill, score/event change,
+  report, alert, or email is authorized by opening the plan.
+- Step 1 completed on 2026-07-29. The existing kalorimetry/import/time/API/UI
+  baseline passed with `238 passed`; the scheduler/import/time subset after
+  the scheduler change passed with `66 passed`.
+- Aggregate-only PostgreSQL baseline: 782,092 rows, 14 identifiers, 15-minute
+  cadence, range 2024-03-15 through 2026-05-18, 746,482 valid rows, 18,668
+  synthetic rows, 17,459 reset rows, 4,173 gap rows, 735,165 rows with delta,
+  and zero negative persisted deltas.
+- Aggregate-only MSSQL baseline is current through 2026-07-29. The
+  PostgreSQL lag is caused by the kalorimetry import being absent from the
+  production scheduler.
+- Added `kalorimetry_db_import` to `quarter_hour_job`, its central schedule
+  description, and the locked internal manual-run registry. The running
+  production process does not contain this change until a supported restart.
+- No backlog import was executed. Such an import writes normalized
+  measurements and may create outlier-review records, so it requires a
+  separate reviewed execution/rollout decision.
+- Active checklist item is now step 2: define and test row eligibility for
+  training, backtests, profiles, scoring, and display.
+- Kalorimetry checklist step 2 completed on 2026-07-29. Added the pure
+  purpose-specific eligibility contract in
+  `moduly/mereni/kalorimetry/observation_quality.py`; focused quality,
+  import, and time tests passed with `34 passed`.
+- Model/scoring rows require valid, non-reset, finite non-negative energy
+  deltas and exclude both synthetic and terminal gap-affected rows.
+  Consumption display may retain valid gap continuity; meter-state display
+  retains finite cumulative states independently of delta usability.
+- Aggregate-only quality audit: 735,164 consumption-display-eligible rows,
+  712,323 model/scoring-eligible rows, 35,610 invalid rows, 17,459 reset rows,
+  18,668 synthetic rows, 4,173 non-synthetic gap-affected rows, 46,927
+  delta-missing rows, and 531,517 zero-delta rows.
+- All 18,668 persisted synthetic rows currently have `gap_detected=false`;
+  the two exclusion flags are therefore intentionally checked independently.
+- The outlier-review table currently has no rows. Existing invalid history
+  remains governed by persisted validity/delta flags.
+- Added DEC-078. Active checklist item is now step 3: bind and test the shared
+  Prague calendar-week contract for kalorimetry.
+- Kalorimetry checklist step 3 completed on 2026-07-29. Added
+  `moduly/mereni/kalorimetry/kalorimetry_prediction.py` with the stable medium
+  key, one-week forecast definition, Prague timezone normalization, and direct
+  delegation to the shared calendar-week builder.
+- Period regressions cover normal weeks, the exact Sunday/Monday boundary,
+  timezone-aware UTC input, spring and autumn DST transitions, and the
+  default Prague clock. The combined kalorimetry/shared/vodomery/plynomery
+  period matrix passed with `84 passed`.
+- Active checklist item is now step 4: implement the kalorimetry shared-media
+  adapter and prove its SQL loader matches DEC-078.
+- Kalorimetry checklist step 4 completed on 2026-07-29. Added the shared
+  media adapter with normalized observation loading, optional identifier
+  filtering, active-model and selection metadata hooks, profile replacement
+  and count hooks, and prediction observation serialization.
+- The SQL loader prefilters valid, non-reset, non-synthetic, non-gap,
+  non-negative delta rows. The serialization boundary applies the pure
+  DEC-078 classifier again to reject non-finite or inconsistent values.
+- Added ORM contracts for `monitoring.kalorimetry_anomaly_profiles` and
+  `monitoring.kalorimetry_model_selection_runs`. No database table creation,
+  migration, profile write, or selection write occurred.
+- Adapter, quality, period, import, and shared prediction regressions passed
+  with `93 passed`; Python compilation and `git diff --check` passed.
+- Active checklist item is now step 5: implement the first deployable
+  15-minute calendar baseline candidate and its safe table bootstrap.
+- Kalorimetry checklist step 5 completed on 2026-07-29. Added calendar
+  baseline model 1 with a 12-month training window, exact weekday/15-minute
+  slots, and a minimum of eight eligible samples for each of 672 points.
+- A single missing or under-covered slot makes the identifier
+  `insufficient_history`; no partial profile is published. Zero observations
+  remain valid and expected energy statistics are non-negative.
+- Added an idempotent check-first bootstrap for only the reviewed profile and
+  selection-run tables. No production bootstrap or profile write was run.
+- Targeted candidate, adapter, quality, period, import, pipeline, and storage
+  regressions passed with `101 passed`; compilation and `git diff --check`
+  passed.
+- Aggregate-only dry-run for the current 12-month training window found all
+  14 identifiers eligible with all 672 slots covered at the eight-sample
+  threshold. This did not construct or persist profiles.
+- Added DEC-079. Active checklist item is now step 6: evaluate whether a
+  leakage-safe weather/heating candidate materially improves the calendar
+  baseline and define its input contract only if supported by evidence.
+- Kalorimetry step 6 evidence gate was evaluated read-only on 2026-07-29.
+  Historical `monitoring.meteo_hourly` covers 2023-01-01 through 2026-07-25,
+  has no missing temperature/HDD rows, and joins all 712,323 currently
+  model-eligible kalorimetry measurements.
+- The forecast table has 65 stored runs, but its latest available horizon
+  currently ends before the full active Monday-to-Monday week. A weather
+  candidate must therefore remain unavailable for any deploy period without
+  complete required weather; it must not use training HDD mean or zero.
+- The leakage-safe experiment used 31 weekly validation folds sampled every
+  two weeks from 2025-03-24 through 2026-05-18. Weather beat baseline in 24
+  folds and lost in 7, with median relative fold WAPE improvement of 7.01%.
+- Per-identifier benefit was heterogeneous: median identifier/fold
+  improvement was 0.13%; 138 of 266 comparisons improved. This supports
+  implementing weather as candidate model 2 only, followed by per-identifier
+  rolling selection. It does not support global replacement of baseline.
+- Kalorimetry checklist step 6 completed on 2026-07-29. Implemented weather
+  model 2 as a per-identifier challenger with exact weekday/15-minute fits,
+  non-negative HDD slopes, trailing 24-hour historical HDD, residual profile
+  statistics, a dedicated ORM persistence contract, and adapter
+  load/replace hooks.
+- Weather model 2 uses the same complete 672-point/eight-sample threshold as
+  baseline. Low HDD variance gives a zero slope rather than an invented
+  relationship.
+- Deploy construction validates weather for every UTC hour mapped from the
+  complete Prague week. One missing or non-finite hour returns no profiles and
+  `missing_forecast_weather`; no training-mean, zero, historical, stale, or
+  disguised baseline fallback exists.
+- The focused matrix passed with `114 passed`; compilation and
+  `git diff --check` passed. No production prediction/weather table or profile
+  was created and neither candidate was activated.
+- Added DEC-080. Active checklist item is now step 7: produce leakage-safe
+  rolling per-identifier metrics for both candidates and persist WAPE, MAE,
+  RMSE, bias, coverage, and fold count.
+- Kalorimetry checklist step 7 completed on 2026-07-29. Added a shared
+  kalorimetry rolling runner for model 1 and model 2 using the production
+  Prague calendar-week fold shape and a preceding 12-month training window.
+- Results include global and per-identifier validation/matched counts,
+  coverage, MAE, RMSE, bias, WAPE, observed fold count, and matched fold
+  count. Missing weather lowers model 2 coverage because validation actuals
+  are loaded independently from the HDD join.
+- Added validation-run and per-identifier metric ORM/bootstrap contracts and
+  transaction-scoped persistence. No production table, rolling run, or metric
+  write was performed.
+- The targeted kalorimetry/shared matrix passed with `131 passed`;
+  compilation and `git diff --check` passed.
+- Added DEC-081. Active checklist item is now step 8: build and verify the
+  deployable candidate profile catalog for both models, including complete
+  weather input and non-negative expected energy.
+- Kalorimetry checklist step 8 completed on 2026-07-29. Added one unified
+  deployable catalog entry per candidate/identifier pair.
+- Available entries require exactly 672 unique 15-minute week slots with one
+  identifier/model identity, finite non-negative expected statistics, ordered
+  quantiles, positive sample sizes, and complete week coverage.
+- Unavailable entries carry no profile and record
+  `insufficient_history`, `missing_forecast_weather`,
+  `incomplete_profile`, or `invalid_profile`. Missing weather makes only
+  model 2 unavailable and never copies or relabels baseline.
+- The targeted matrix passed with `137 passed`; compilation and
+  `git diff --check` passed. No production catalog, profile, table, metric, or
+  selection write occurred.
+- Added DEC-082. Active checklist item is now step 9: implement
+  per-identifier candidate selection in dry-run mode using rolling eligibility
+  and deployable catalog availability.
+- Kalorimetry checklist step 9 completed on 2026-07-29. Added the pure
+  per-identifier dry-run selector in
+  `moduly/mereni/kalorimetry/selection.py`.
+- A candidate requires finite WAPE, MAE, RMSE, and bias, at least 85-percent
+  coverage, at least eight matched folds, and an available deployable profile.
+  Ranking is deterministic by WAPE, MAE, RMSE, absolute bias, descending
+  matched observations, and model version.
+- The decision retains a per-candidate audit. A metric winner without a
+  deployable profile is skipped in favor of the next eligible candidate while
+  its explicit profile-unavailability reason remains the fallback reason.
+  Identifiers without an eligible candidate remain explicitly unavailable.
+- The focused selection/catalog/backtest matrix passed with `20 passed`; the
+  broader kalorimetry/shared prediction matrix passed with `125 passed`.
+  No production table, metric, profile, selection, snapshot, score, or alert
+  write occurred.
+- Added DEC-083. Active checklist item is now step 10: persist the selected
+  model decision and its exact period-valid profile snapshot atomically,
+  failing before commit if an available selection has no profile.
+- Kalorimetry checklist step 10 completed on 2026-07-29. Added
+  `moduly/mereni/kalorimetry/snapshot_persistence.py`.
+- The helper materializes and validates the complete batch before SQL
+  execution. Each available decision must match one available catalog entry
+  by identifier, model version, model key, and forecast period and must carry
+  all 672 validated 15-minute profile points.
+- Available decisions and profiles map to the shared
+  `prediction_selected_model_snapshots` and
+  `prediction_profile_snapshots` contracts under
+  `medium_key='kalorimetry'`. Detailed selection audit and the original
+  availability/fallback reason are retained in metadata.
+- Explicitly unavailable identifiers are reported but are not persisted as a
+  selected model. Decision and profile inserts run in one nested transaction;
+  the helper flushes but never commits the caller-owned rebuild transaction.
+- The focused snapshot/selection/shared-storage matrix passed with
+  `40 passed`; the broader kalorimetry/shared prediction matrix passed with
+  `133 passed`. Python compilation and focused `git diff --check` passed. No
+  production table bootstrap, selection, profile, or snapshot write occurred.
+- Added DEC-084. Active checklist item is now step 11: expose kalorimetry
+  candidate rankings, winner counts, fallback reasons, coverage, and worst
+  identifiers through the prediction performance API/dashboard and rebuild
+  report without raw operational rows.
+- Kalorimetry checklist step 11 completed on 2026-07-29.
+- Registered kalorimetry and its two weekly candidate specs in the shared
+  admin-only prediction performance service. The common dashboard page now
+  renders kalorimetry automatically. Missing tables or a missing first run
+  produce `not_run` without failing the other media.
+- Persisted candidate reporting selects the latest validation run for each
+  model available before the selection deploy start. Shared snapshot queries
+  provide model winner counts, fallback distribution, coverage, and the
+  bounded worst-identifier view.
+- Added
+  `moduly/mereni/kalorimetry/reporting/model_rebuild_report.py` with a pure
+  aggregate report builder and escaped HTML renderer. It includes candidate
+  rankings, winner/fallback counts, availability totals, and at most ten worst
+  identifiers by WAPE. It includes no raw measurements and performs no email
+  delivery.
+- Focused performance/report/period tests passed with `14 passed`; the broader
+  kalorimetry, shared prediction, performance API, authorization, and
+  dashboard navigation matrix passed with `358 passed`.
+- No production table creation, snapshot persistence, report delivery, email,
+  scoring, or alerting occurred.
+- Added DEC-085. Active checklist item is now step 12: run and review a
+  production dry-run rebuild using aggregate-only output with no scoring,
+  alerting, report delivery, or active snapshot consumption.
+- Kalorimetry checklist step 12 completed read-only on 2026-07-29.
+- Added `moduly/mereni/kalorimetry/production_dry_run.py`. It preloads the
+  eligible observation range once, runs both eight-fold candidates through an
+  in-memory adapter, loads one coherent forecast run, builds deployable
+  profiles and selection decisions, and returns aggregate-only output. It has
+  no table bootstrap, persistence, commit, scoring, alerting, email, or report
+  delivery path.
+- Production dry-run period: 2026-07-27 00:00 through 2026-08-03 00:00 Prague.
+  It read 461,045 eligible observations and the same number of
+  weather-feature observations from 2025-06-01 through the available data.
+  The latest observation was 2026-05-18 07:45:13.
+- Both candidate rankings had zero validation rows and zero coverage because
+  the eight current folds occur after the PostgreSQL data endpoint. All 14
+  identifiers remained unavailable with `no_identifier_metrics`; no winner
+  was selected.
+- Baseline deploy profiles were available for all 14 identifiers. Weather
+  profiles were unavailable for all 14. Forecast run
+  2026-07-26 22:17:28.907616 provided 145 of 168 required coherent
+  trailing-24-hour HDD values.
+- No production write or external action occurred. This result is not
+  activation approval. A separately reviewed measurement backlog import and
+  weather forecast horizon correction are required before repeating an
+  activation-eligible current-period dry-run.
+- Focused dry-run/selection/report tests passed with `15 passed`; the broader
+  kalorimetry, shared prediction, performance API, authorization, and
+  dashboard navigation matrix passed with `360 passed`.
+- Added DEC-086. Active checklist item is now step 13: implement
+  leakage-safe weekly historical snapshot backfill. Its implementation may
+  proceed, but production apply must remain separately approved and must not
+  hide the stale current import or incomplete forecast horizon.
+- Kalorimetry checklist step 13 completed on 2026-07-29 in
+  `moduly/mereni/kalorimetry/prediction_backfill.py`.
+- Added a stable Monday-to-Monday identifier/week planner with archive
+  versioning and existing-identity skips. The pure week calculator filters all
+  measurement and weather observations at the forecast-period start before
+  running either candidate.
+- Every evaluated week recomputes both eight-fold candidates and prepares
+  candidate audit rows, per-identifier selection decisions, and the exact
+  selected 672-point profile snapshot. Historical snapshots use
+  `selection_mode='active'`, `archive_source='historical_backfill'`, and
+  `selection_run_id=NULL`, preserving the current runtime selection identity.
+- Historical weather profiles require explicit forecast provenance issued
+  strictly before the forecast week. Missing provenance or issuance at/after
+  Monday is rejected; absent/incomplete eligible forecasts leave model 2
+  unavailable rather than using later weather.
+- Regression coverage proves that adding extreme measurement and weather
+  observations at or after the historical week start does not change metrics,
+  decisions, or profile snapshot rows.
+- Focused backfill/snapshot/selection tests passed with `23 passed`; the
+  broader kalorimetry, shared prediction, performance API, authorization, and
+  dashboard navigation matrix passed with `365 passed`.
+- No production backfill plan/calculation, bootstrap, snapshot, metric,
+  selection, profile, scoring, alert, report delivery, or email action
+  occurred.
+- Added DEC-087. Active checklist item is now step 14: add explicit dry-run,
+  apply, resume, conflict, and verification contracts. Production apply
+  remains separately approval-gated.
+- Kalorimetry checklist step 14 completed on 2026-07-29 in
+  `moduly/mereni/kalorimetry/prediction_backfill_workflow.py`.
+- Added separate read-only dry-run/verify and explicitly confirmed apply
+  workflows. Apply requires `confirm_apply=True`, refuses missing shared
+  tables, and does not create or migrate tables.
+- Each planned weekly batch is classified `absent`, `complete`, or
+  `conflict`. Resume skips only exact complete state. Partial data, wrong
+  archive/source or selection-run identity, different models, different
+  metrics, missing/extra points, or otherwise changed content stop as a
+  conflict.
+- Exact verification compares deterministic SHA-256 content fingerprints for
+  decisions, candidate metrics/eligibility/ranking, and all selected profile
+  points in addition to expected model and row counts.
+- An absent week inserts decisions, candidate metrics, and profile points in
+  one savepoint and requires exact expected insert counts before flush and
+  weekly commit. A mismatch or exception rolls back the week.
+- Focused backfill workflow/storage tests passed with `35 passed`; the broader
+  kalorimetry, shared prediction, performance API, authorization, and
+  dashboard navigation matrix passed with `374 passed`.
+- No production dry-run, apply, resume, shared-table bootstrap, metric,
+  decision, profile, scoring, alert, report, or email action occurred.
+- Added DEC-088. Active checklist item is now step 15: run the separately
+  reviewed production historical backfill, stopping on any identity, profile,
+  history, forecast, or conflict mismatch. This is a production write and
+  still requires explicit execution approval.
+
+### 2026-07-29 - Kalorimetry pipeline step 15
+
+- The user explicitly approved the controlled production historical backfill.
+  Added `moduly/mereni/kalorimetry/production_backfill.py` and
+  `scripts/kalorimetry_controlled_backfill.py`.
+- Controlled range was `[2025-07-28, 2026-05-18)`: 42 complete Prague weeks,
+  14 identifiers, and 588 identifier-weeks.
+- The first attempt stopped and rolled back before commit on PostgreSQL's
+  parameter limit. Shared profile persistence now inserts bounded batches.
+  The second attempt also stopped and rolled back because driver rowcount is
+  not reliable for the bulk insert. Post-insert verification now reloads the
+  uncommitted weekly state inside the savepoint and compares its exact content
+  fingerprint.
+- A one-week pilot then verified complete, and the full resume skipped that
+  exact identity and completed the remaining weeks.
+- Final independently audited shared state: 430 decisions across 13
+  identifiers and 42 weeks; 1,176 candidate metrics across all 14 identifiers
+  and 42 weeks; 288,960 profile points; exactly 672 points for every one of
+  the 430 selected identifier/week profiles; zero conflicts.
+- All 430 selections use baseline model 1. No week had a complete coherent
+  pre-week weather forecast, so model 2 remained explicitly unavailable.
+- All historical decisions and profiles retain `selection_run_id=NULL`.
+  Current kalorimetry selection-run, active-profile, weather-profile, and
+  validation tables do not exist in production; scoring, events, alerts, and
+  report delivery were not run.
+- Focused workflow/storage/backfill tests passed with `39 passed`; the broader
+  kalorimetry/shared prediction/performance/authorization/navigation matrix
+  passed with `383 passed`.
+- Added DEC-089. Step 15 is complete. Active checklist item is now step 16:
+  implement deterministic period-valid per-identifier active profile lookup,
+  with no active score for unavailable selections.
+
+### 2026-07-29 - Kalorimetry pipeline step 16
+
+- Added `moduly/mereni/kalorimetry/active_profile.py` with a batched,
+  read-only period-valid lookup for selected decisions and exact 15-minute
+  profile slots.
+- Decision overlap precedence is latest forecast-period start, newest creation
+  time, and highest row id. Exact profile precedence is highest archive
+  version, newest creation time, and highest row id.
+- Lookup uses half-open period validity and Prague wall-time weekday/slot
+  semantics. It accepts only the selected decision's exact identifier, period,
+  model, interval, weekday, and slot.
+- `no_selection_snapshot`, `insufficient_history`, and `missing_profile`
+  remain explicitly unavailable. There is no global, current, stale, zero, or
+  other-model fallback.
+- A sanitized read-only production smoke test resolved one historical
+  baseline profile point without printing its identifier or operational
+  values.
+- The focused active-profile tests passed with `9 passed`; the broader
+  kalorimetry/shared prediction/performance/authorization/navigation matrix
+  passed with `392 passed`. Python compilation passed.
+- Added DEC-090. Step 16 is complete. Active checklist item is now step 17:
+  implement kalorimetry anomaly scoring and checkpoints while producing no
+  score for explicitly unavailable observations.
+
+### 2026-07-29 - Kalorimetry pipeline step 17
+
+- Added `KalorimetryAnomalyScore` and `KalorimetryScoringState` ORM contracts
+  plus `moduly/mereni/kalorimetry/kalorimetry_anomaly.py`.
+- The active-selection scoring stream uses stable output `model_version=1`.
+  Each score separately records selected candidate model version, decision
+  snapshot id, and exact profile snapshot id.
+- Scoring applies the step 2 `SCORING` eligibility contract before the step 16
+  lookup. Invalid, reset, negative, synthetic, gap-affected,
+  `no_selection_snapshot`, and `insufficient_history` rows receive no score
+  while the checkpoint advances.
+- `missing_profile` on an available decision raises before any score or
+  checkpoint commit. Available rows use a positive standard-deviation floor,
+  the established prediction-interval/z-score anomaly rule, and established
+  MEDIUM/HIGH/CRITICAL z-score severity thresholds.
+- Score insertion is conflict-safe on measurement/scoring identity and shares
+  one transaction with checkpoint advancement.
+- Shared snapshot references are mandatory indexed audit ids rather than ORM
+  foreign keys because the shared prediction tables belong to separate
+  SQLAlchemy metadata; lookup validation supplies the runtime integrity check.
+- A sanitized read-only production smoke test built one finite historical
+  score and verified both selected identity and snapshot audit references.
+  No production table creation, score insertion, checkpoint, event, alert, or
+  report action occurred.
+- Focused quality/lookup/scoring tests passed with `39 passed`; the broader
+  kalorimetry/shared/anomaly/performance/authorization/navigation matrix
+  passed with `413 passed`. Python compilation passed.
+- Added DEC-091. Step 17 is complete. Active checklist item is now step 18:
+  integrate anomaly events, alerting, and outlier-review repair, with active
+  repair bound to period-valid selected profiles.
+
+### 2026-07-29 - Kalorimetry pipeline step 18
+
+- Added `moduly/mereni/kalorimetry/events.py` and kalorimetry anomaly-event,
+  per-event-state, and event-engine-checkpoint ORM contracts.
+- Heat event taxonomy is deliberately limited to `SPIKE` (z-score above 5)
+  and `SUSTAINED_HIGH_USAGE` (eight consecutive z-scores above 3). Night-use
+  and expected-zero semantics were not copied from gas/water.
+- The deterministic state machine emits `CREATED` and `RESOLVED` transitions.
+  Its persistence path commits event state, event changes, processed-score
+  flags, and event checkpoint together.
+- Alert integration currently builds only a transition plan with
+  `delivery_enabled=False`. No recipients, deliveries, email, API mutation, or
+  scheduler step were added.
+- Extended kalorimetry outlier-review apply so an activated active score table
+  is rebuilt from the affected timestamp through the step 16 period-valid
+  lookup. It deletes/rebuilds only stable active stream scores, does not move
+  the global scoring checkpoint, and leaves non-active candidates untouched.
+  Before scoring-table activation the repair path is explicitly a no-op.
+- Focused event/scoring/repair tests passed with `13 passed`; the broader
+  kalorimetry/shared/anomaly/performance/authorization/navigation matrix
+  passed with `420 passed`.
+- No production table creation, score/event/checkpoint write, alert delivery,
+  email, API mutation, or scheduler activation occurred.
+- Added DEC-092. Step 18 is complete. Active checklist item is now step 19:
+  reconcile historical active scores and events in aggregate dry-run mode
+  before any apply.
+
+### 2026-07-29 - Kalorimetry pipeline step 19
+
+- Added `moduly/mereni/kalorimetry/reconciliation.py` and
+  `scripts/kalorimetry_reconciliation_dry_run.py`.
+- Reconciliation uses an explicit PostgreSQL read-only transaction, bounded
+  measurement batches, the step 2 quality contract, step 16 lookup, step 17
+  score builder, and step 18 pure event state machine. Missing score/event
+  tables are treated as empty state and are never created.
+- The initial full dry-run exceeded two minutes because the batch lookup
+  repeatedly scanned every loaded profile row. The transaction was terminated
+  and rolled back. `active_profile.py` now indexes decisions by identifier and
+  profile rows by exact period/model/slot in memory; lookup semantics and SQL
+  scope are unchanged.
+- The optimized full read-only dry-run completed in about 25 seconds for
+  `[2025-07-28, 2026-05-18)`.
+- Aggregate result: 401,363 measurements; 395,149 scoring-eligible; 6,214
+  ineligible; 285,766 expected scores; 109,383 eligible observations without
+  an available selection; 115,597 intentionally unscored total.
+- Expected event stream: 3,456 created and 3,456 resolved episodes.
+- Production score and event tables do not exist. Persisted score/event counts
+  are zero, so 285,766 expected scores and 3,456 created event episodes are
+  missing. Unexpected score/event, mismatched score/event, anomaly flag change,
+  and severity change counts are zero because there is no overlapping
+  persisted state.
+- Focused reconciliation/lookup tests passed with `13 passed`; the broader
+  kalorimetry/shared/anomaly/performance/authorization/navigation matrix
+  passed with `424 passed`. No DDL or production write occurred.
+- Added DEC-093. Step 19 is complete. Active checklist item is now step 20:
+  add authenticated, device-scoped kalorimetry measurement/profile API
+  endpoints with explicit current and historical availability.
+
+### 2026-07-29 - Kalorimetry pipeline step 20
+
+- Added `get_current_kalorimetry_user`,
+  `services/api/services/kalorimetry.py`, measurement/profile response schemas,
+  and GET routes `/api/v1/kalorimetry/measurement-series` and
+  `/api/v1/kalorimetry/prediction-profiles`.
+- Both routes require the kalorimetry section dependency. Service functions
+  repeat section and requested-device authorization before PostgreSQL access.
+  The security regression inventory now explicitly owns both operations and
+  both device-scoped service paths.
+- Measurement ranges use shared Prague-local date to half-open UTC conversion
+  and return source timestamp/time-basis metadata.
+- Current profiles use only a covering active snapshot. Historical requests
+  require both dates, return overlapping active periods with per-period
+  availability, and resolve exact profile slots by highest archive version,
+  newest creation time, and highest row id.
+- Explicit unavailable reasons are `no_selection_snapshot`,
+  `insufficient_history`, and `missing_profile`; no global/current/stale/zero
+  fallback exists.
+- The first sanitized smoke attempts waited behind a transient PostgreSQL
+  relation lock and timed out without writes. After the unrelated lock cleared,
+  the read-only service smoke completed in about one second: one historical
+  week returned one available period and 672 profile rows; current returned
+  `no_selection_snapshot`; one historical day returned 96 measurement rows.
+  No identifier or operational value was printed.
+- Focused service/authorization tests passed with `212 passed`; the broader
+  kalorimetry/shared/anomaly/performance/authorization/navigation matrix
+  passed with `441 passed`. Python compilation passed.
+- Added DEC-094. Step 20 is complete. Active checklist item is now step 21:
+  add the shared kalorimetry hourly/daily/monthly prediction-series service and
+  authenticated endpoint.
+
+### 2026-07-30 - Post-restart verification and kalorimetry pipeline step 21
+
+- Windows boot time was 2026-07-29 16:32:17. Startup task
+  `API_dashboard_caddy` ran at 16:32:27 with result 0.
+- Caddy listened on 80/443/2019, FastAPI on 8000, and Streamlit on 8001.
+  Local `/health/ready` and Streamlit returned HTTP 200. The public hostname
+  timed out from the agent environment, so the external route was not
+  independently confirmed.
+- Scheduler metrics reported `scheduler_running=true` with a fresh heartbeat.
+  The quarter-hour job and kalorimetry import were successful after restart;
+  the latest reviewed import completed in about 0.42 seconds.
+- Added `moduly/mereni/kalorimetry/prediction_series.py`, response schemas,
+  service orchestration, and authenticated
+  `/api/v1/kalorimetry/prediction-series`.
+- Hourly, daily, and monthly output uses period-valid snapshot rows only,
+  clamps negative expected intervals to zero, reports completeness, and
+  derives one continuous expected cumulative series across weekly boundaries.
+- Focused series/service/authorization tests passed with `222 passed`; the
+  broader kalorimetry/shared/API/navigation matrix passed with `423 passed`.
+  No production write, process restart, scoring, event, alert, or email action
+  occurred.
+- Added DEC-095. Step 21 is complete. Active checklist item is now step 22:
+  integrate the shared prediction series into `Kalorimetry / Přehled`.
+
+### 2026-07-30 - Kalorimetry pipeline step 22
+
+- Added the kalorimetry prediction-series API client and cached dashboard
+  loader. The loader parses and sorts timestamps, clamps negative expected
+  intervals to zero, and rebuilds expected cumulative consumption across the
+  complete requested range.
+- `Kalorimetry / Přehled` now shows actual, expected, absolute-deviation, and
+  percentage-deviation metrics. Explicit unavailable values render as
+  `Nedostupné`; insufficient history and partial coverage remain visible.
+- Interval and cumulative charts overlay the light-gray expected series below
+  the actual energy series and render a shared legend. A prediction may still
+  be shown when the requested range has no actual measurements.
+- Focused dashboard/API tests passed with `235 passed`; the broader
+  kalorimetry/dashboard/shared/API matrix passed with `585 passed`. Python
+  compilation and focused diff checks passed.
+- No production write, process restart, scoring, event, alert, report, or
+  email action occurred.
+- Added DEC-096. Step 22 is complete. Active checklist item is now step 23:
+  integrate the same device-scoped prediction-series contract into
+  `Kalorimetry / Detail`.
+
+### 2026-07-30 - Kalorimetry pipeline step 23
+
+- `Kalorimetry / Detail` now requests daily prediction series for the last
+  31 days and monthly prediction series for the displayed 24-month history
+  through the shared authenticated dashboard loader.
+- The seven-day and 31-day charts align expected rows to their displayed
+  calendar days. The historical chart aligns expected rows to existing month
+  categories. Light-gray expected lines are layered below actual energy bars.
+- Added an explicit prediction-status panel. Unavailable and
+  `insufficient_history` states display `Nedostupné`; partial coverage remains
+  visibly warned.
+- Existing device metadata, photograph, measurement history, reset/change
+  history, and responsive columns were retained.
+- Focused detail/dashboard/API tests passed with `259 passed`; the broader
+  kalorimetry/dashboard/shared/API matrix passed with `589 passed`. Python
+  compilation passed.
+- No production write, process restart, scoring, event, alert, report, or
+  email action occurred.
+- Added DEC-097. Step 23 is complete. Active checklist item is now step 24:
+  inventory and classify every kalorimetry downstream consumer before
+  converting any additional prediction-bearing output.
+
+### 2026-07-30 - Kalorimetry pipeline step 24
+
+- Added `KALORIMETRY_CONSUMER_INVENTORY.md` covering user-facing outputs,
+  exports, device/health views, direct profile/snapshot consumers, anomaly and
+  repair paths, model rebuild/backfill/audit paths, reports, and scheduler
+  operations.
+- Confirmed that `Kalorimetry / Přehled` and `Kalorimetry / Detail` are the
+  only current prediction-bearing user outputs and already use the approved
+  authenticated device-scoped series API.
+- Classified the overview export, measurement/metadata/reset views, global
+  health overview, and device list as intentionally actual-only.
+- Found and reviewed the scheduled JORDAN monthly report. Its kalorimetr
+  `Gmt2` row is actual-only consumption derived from two valid cumulative
+  `spotreba_energie` states. No prediction or delivery change was made.
+- Confirmed candidate-table reads are confined to adapter/rebuild code; no
+  user-facing dashboard, prediction series, or consumption report reads the
+  candidate tables directly.
+- Focused inventory/report/dashboard/API tests passed with `229 passed`; the
+  broader kalorimetry/dashboard/report/scheduler matrix passed with
+  `654 passed`.
+- Added DEC-098. Step 24 is complete. Active checklist item is now step 25:
+  add the separately approved scheduler integration for import, weekly
+  rebuild, scoring, and any approved reports while retaining delivery safety.
+
+### 2026-07-30 - Kalorimetry measurement backlog verification
+
+- Investigation found that the post-restart quarter-hour import had already
+  caught up the production measurement backlog. The longer first post-restart
+  run performed the catch-up; subsequent runs continued with 14 current source
+  rows per interval.
+- Aggregate source/target audit found matching current maximum source recid and
+  timestamp. PostgreSQL contained current eligible observations for all 14
+  identifiers after 2026-06-01.
+- Eighty-eight historical MSSQL rows were not present as source rows in
+  PostgreSQL. Their timestamps were confined to the ambiguous autumn DST hours
+  in 2024 and 2025; they are fail-closed time-semantics exclusions, not a
+  current backlog.
+- A new read-only production dry-run used 553,340 eligible observations through
+  2026-07-26 23:45:13. Both candidates evaluated 75,190 validation rows across
+  all eight folds with 100 percent aggregate coverage.
+- The current period is still not activation-eligible. The latest forecast run
+  supplied only 95 required trailing-24-hour HDD values, leaving weather
+  profiles unavailable for all 14 identifiers. Seven identifiers selected the
+  baseline fallback and seven remained unavailable with no eligible identifier
+  metrics.
+- No import-state edit, data rewrite, snapshot persistence, scoring/event table
+  creation, alert, report, or email action occurred. Step 25 remains pending
+  until the forecast-horizon issue and the unavailable-identifier selection
+  result are reviewed.
+
+### 2026-07-30 - Forecast horizon and provenance repair
+
+- Root cause: meteo synchronization requested seven days and keyed forecast
+  storage only by target hour. Each daily run overwrote older issuance
+  provenance, and no run could provide both the pre-week trailing HDD window
+  and the full following Prague week.
+- Increased the Open-Meteo forecast horizon to nine days and migrated
+  `monitoring.meteo_forecast_hourly` to composite primary identity
+  `(forecast_run_at, datetime_hour)`.
+- Forecast upsert now conflicts only within the same issuance/hour. Existing
+  gas consumers explicitly resolve the latest issuance per target hour.
+- Current kalorimetry dry-run selection now accepts only a coherent run issued
+  strictly before the Prague forecast-period start, matching historical
+  backfill provenance rules.
+- Ran the production meteo synchronization after the migration. The new run
+  stored 216 hourly rows from 2026-07-30 00:00 through 2026-08-07 23:00;
+  archived storage exposed 67 issuance values after migration.
+- The new run was issued after the current week started and is intentionally
+  not eligible to reconstruct that week. The scheduled Sunday 2026-08-02
+  00:15 run is expected to be the first nine-day issuance eligible for the
+  week beginning 2026-08-03; it still requires aggregate verification before
+  snapshot/scoring activation.
+- Focused forecast/dry-run/gas tests passed with `58 passed`; the broader
+  weather/kalorimetry/plynomery/scheduler matrix passed with `327 passed`.
+- Added DEC-099. Step 25 remains pending; no prediction snapshot, score,
+  event, alert, report, or email action occurred.
+
+### 2026-07-30 - Mandatory Monday kalorimetry handoff
+
+- Added `KALORIMETRY_ACTIVATION_RUNBOOK.md` for the Monday 2026-08-03 morning
+  continuation.
+- First verify the scheduled Sunday 2026-08-02 00:15 nine-day forecast. The
+  target Prague week is `[2026-08-03 00:00, 2026-08-10 00:00)`.
+- Require one coherent run issued strictly before the target week and all 168
+  trailing-24-hour HDD features. A Monday-issued manual run cannot repair the
+  target-week provenance.
+- Repeat the aggregate-only production dry-run and review current observations,
+  eight-fold metrics, coverage, winner/fallback distributions, unavailable
+  reasons, and exact 672-point profile completeness.
+- Obtain explicit approval before the atomic current-snapshot write. Verify
+  that write independently before requesting separate scoring/event approval.
+- Decide explicitly whether scoring bootstraps to the latest checkpoint or
+  applies historical state; do not infer this from the earlier reconciliation.
+- Keep alert delivery disabled and add no kalorimetry report/email without
+  separate recipient and delivery approval.
+- After verified pilots, finish steps 25-28: scheduler integration, targeted
+  matrix, full suite/read-only audits, approved whole-stack restart, and
+  post-restart reconciliation.
+- `AGENTS.md` and the active kalorimetry plan link to the runbook so the
+  continuation is part of mandatory session context.
+
+### 2026-07-30 - Pre-restart baseline for controlled workstation restart
+
+- Baseline recorded at `2026-07-30 08:33:07 +02:00`. The workstation boot
+  time was `2026-07-29 16:32:17 +02:00`.
+- A complete supported workstation restart is required to load the current
+  FastAPI route set. The pre-restart API process on `127.0.0.1:8000` was PID
+  6124 and still returned HTTP 404 for
+  `/api/v1/kalorimetry/prediction-series`, although the route is present in
+  the current source and its authorization/service tests pass.
+- The attempted isolated API stop was refused by Windows with `Access
+  denied`; the old process remained running. Do not infer that an API restart
+  occurred. Use the normal full-workstation restart and allow startup task
+  `API_dashboard_caddy` to start the supported process set.
+- Before restart, startup task `API_dashboard_caddy` was `Ready`; its last run
+  was `2026-07-29 16:32:27 +02:00` with result 0.
+- Expected listeners were present: Caddy on 80/443 and
+  `127.0.0.1:2019`, FastAPI on `127.0.0.1:8000`, and Streamlit on
+  `127.0.0.1:8001`. Temporary listeners 8010/8011 were absent.
+- Local FastAPI liveness/readiness, Streamlit health, and Caddy admin health
+  returned HTTP 200. The kalorimetry prediction-series route alone returned
+  the expected pre-restart HTTP 404 from the stale API process.
+- Scheduler metrics reported `scheduler_running=true` with heartbeat
+  `2026-07-30 08:27:42 +02:00`. The latest quarter-hour job and kalorimetry
+  import completed successfully at about `08:16`; the kalorimetry import took
+  0.40 seconds. The latest meteo sync completed successfully at `00:15`.
+- Historical `weekly_job` and `monthly_job` status values remained `error`
+  from `2026-07-27` and `2026-07-01` respectively; these are part of the
+  pre-restart baseline and are not evidence of a restart failure by
+  themselves. Review new post-boot executions separately.
+- The shared outlier-review crash was repaired by making the kalorimetry API
+  client return row lists consistently. The kalorimetry overview now also
+  treats a missing prediction route as explicit temporary unavailability
+  instead of crashing; this fallback does not replace the required API
+  restart.
+- The focused outlier/dashboard checks passed (`5 passed`, then `6 passed`);
+  the current in-process API authorization and kalorimetry service checks
+  passed with `216 passed`. Production Python compilation passed.
+- The working tree is intentionally dirty and contains the complete
+  uncommitted prediction, kalorimetry, dashboard, scheduler, meteo, and
+  SmartFuelPass work. Do not reset, checkout, clean, recreate an integrity
+  baseline, or discard any changes during restart handling.
+- No kalorimetry current snapshot, scoring/event activation, alert delivery,
+  report delivery, or email action was approved or performed. The Monday
+  activation gate in `KALORIMETRY_ACTIVATION_RUNBOOK.md` remains unchanged.
+
+Post-boot acceptance checks:
+
+1. Confirm Windows boot time is newer than
+   `2026-07-30 08:33:07 +02:00`.
+2. Confirm `API_dashboard_caddy` ran after the new boot with result 0.
+3. Confirm listeners 80, 443, 2019, 8000, and 8001 are present and 8010/8011
+   are absent.
+4. Confirm local FastAPI `/health/live` and `/health/ready`, Streamlit
+   `/_stcore/health`, and Caddy admin `/config/` return HTTP 200.
+5. Request `/api/v1/kalorimetry/prediction-series` without a bearer token and
+   require an authentication response rather than HTTP 404. Then verify
+   `Kalorimetry / Prehled` and `Kalorimetry / Detail` through an authenticated
+   dashboard session.
+6. Confirm `Review outlieru` loads the combined vodomery, plynomery, and
+   kalorimetry queue without the former dictionary conversion error.
+7. Confirm scheduler heartbeat and the next quarter-hour execution are newer
+   than boot; verify the kalorimetry import aggregate status without printing
+   raw measurements.
+8. Re-run the established public routing/security checks. Do not expose
+   tokens, cookies, credentials, raw measurements, identifiers, or Caddy
+   configuration content.
+9. Stop and diagnose if any local process, listener, readiness check, startup
+   task, scheduler heartbeat, or newly loaded API route fails. Do not proceed
+   to kalorimetry activation as part of restart verification.

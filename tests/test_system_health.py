@@ -445,6 +445,18 @@ def _fake_smartfuelpass_metrics(reference_time: datetime):
     return FakeMetricsStore()
 
 
+def _patch_successful_interactive_import(monkeypatch, reference_time: datetime):
+    monkeypatch.setattr(
+        system_health,
+        "read_interactive_import_status",
+        lambda: SimpleNamespace(
+            state="success",
+            started_at=(reference_time - timedelta(minutes=5)).isoformat(),
+            finished_at=reference_time.isoformat(),
+        ),
+    )
+
+
 def test_collect_system_smartfuelpass_health_reports_ok(monkeypatch):
     reference_time = datetime.now()
     session = _FakeSmartFuelPassSession(
@@ -457,6 +469,7 @@ def test_collect_system_smartfuelpass_health_reports_ok(monkeypatch):
         "get_metrics_store",
         lambda *args, **kwargs: _fake_smartfuelpass_metrics(reference_time),
     )
+    _patch_successful_interactive_import(monkeypatch, reference_time)
 
     response = system_health.collect_system_smartfuelpass_health()
 
@@ -492,6 +505,7 @@ def test_collect_system_smartfuelpass_health_accepts_recent_sync_without_new_ses
         "get_metrics_store",
         lambda *args, **kwargs: _fake_smartfuelpass_metrics(reference_time),
     )
+    _patch_successful_interactive_import(monkeypatch, reference_time)
 
     response = system_health.collect_system_smartfuelpass_health()
 

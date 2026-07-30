@@ -12,7 +12,8 @@ future monitoring agents.
 - `inventories/`: reviewed consumer, security, and system inventories.
 - `security/`: active security remediation and verification documents.
 - `decisions/`: durable architectural, product, and workflow decisions.
-- `history/`: session history and handoff records.
+- `history/`: short current handoff, templates, and immutable monthly session
+  archives.
 
 Plans keep stable paths throughout their lifecycle. Their current state belongs
 in the files under `work/`; completed plans are not moved merely to express a

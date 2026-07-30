@@ -21,8 +21,9 @@ These files are part of the daily workflow:
 
 - `AGENTS.md`: operating rules, project map, and practices for future agents.
 - `agents/decisions/DECISIONS.md`: durable architectural, product, and workflow decisions.
-- `agents/history/SESSION_NOTES.md`: current baseline, session history, open
-  questions, and handoff notes.
+- `agents/history/SESSION_NOTES.md`: short current baseline, handoff, and
+  archive index. Detailed immutable session history lives under
+  `agents/history/archive/`.
 - `agents/work/`: concise active, backlog, blocked, and completed work indexes.
 
 At the end of every substantive session:
@@ -232,8 +233,8 @@ Known hygiene topics to handle only after explicit approval:
 - Shared behavior should live in modules/services, not in duplicated page logic.
 - Prediction model work should proceed toward the shared core described in
   `agents/decisions/DECISIONS.md`,
-  `agents/plans/prediction/PREDICTION_PIPELINE_PLAN.md`, and the active
-  checklist in `agents/history/SESSION_NOTES.md`: shared contracts,
+  `agents/plans/prediction/PREDICTION_PIPELINE_PLAN.md`, and the active work
+  index in `agents/work/ACTIVE.md`: shared contracts,
   media-specific adapters, candidate
   model plugins, configurable forecast periods, rolling backtests, and
   per-identifier model selection. Implement one checklist step at a time and

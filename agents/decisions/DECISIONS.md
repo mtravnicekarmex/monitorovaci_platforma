@@ -2802,3 +2802,37 @@ Consequences:
   `agents/` paths.
 - Active, blocked, queued, and completed work have concise dedicated indexes
   without duplicating detailed plans or session history.
+
+## DEC-101: Session history is archived in immutable monthly files
+
+Date: 2026-07-30
+
+Status: Accepted
+
+Supersedes the monolithic-log parts of DEC-006 and DEC-046.
+
+Decision:
+
+- Keep `agents/history/SESSION_NOTES.md` short. It contains only the current
+  baseline, active handoff, latest relevant verification, and archive index.
+- Store completed dated session entries in immutable monthly files under
+  `agents/history/archive/`.
+- Track current lifecycle state in `agents/work/` and durable behavior in this
+  decisions file. Do not duplicate those records into a growing session
+  journal.
+- Use `agents/history/templates/SESSION_ENTRY.md` for general entries and
+  `agents/history/templates/RESTART_HANDOFF.md` for mandatory restart
+  handoffs.
+- Archive extraction must verify that every dated entry block is represented
+  exactly once using count and SHA-256 fingerprint equality.
+- Historical archive corrections require a new explicit correction record;
+  never silently rewrite an archive.
+
+Consequences:
+
+- Routine session startup reads a small current file rather than the complete
+  operational history.
+- Detailed evidence remains searchable by month without consuming normal
+  working context.
+- The legacy preamble is preserved separately for audit but is no longer
+  treated as the current project baseline.

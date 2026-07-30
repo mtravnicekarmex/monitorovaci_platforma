@@ -17240,3 +17240,77 @@ Post-boot acceptance checks:
 9. Stop and diagnose if any local process, listener, readiness check, startup
    task, scheduler heartbeat, or newly loaded API route fails. Do not proceed
    to kalorimetry activation as part of restart verification.
+
+### 2026-07-30 13:08 +02:00 - Pre-restart handoff: prediction candidate medium filter and complete device list
+
+Reason for restart:
+
+- The user confirmed that the post-08:35 dashboard was functioning correctly
+  and that `Predikce modelu` correctly showed vodomery, plynomery, and
+  kalorimetry.
+- `Predikce modelu / Kandidati` now has a medium selector for all media or one
+  selected medium.
+- The device-selection table was previously bounded to 25 worst identifiers.
+  That silently omitted part of the current 58-device vodomery snapshot even
+  though the summary count was correct. The bounded admin API limit is now
+  500, which exposes the complete current inventory while retaining a finite
+  response bound.
+- A supported restart is required for the running FastAPI process to load the
+  new identifier limit. Streamlit may reload its page source independently,
+  but this does not replace the API restart.
+
+Verification before restart:
+
+- Focused prediction-performance and navigation tests passed with `27 passed`.
+- Python compilation passed for the prediction-performance dashboard page and
+  API service. `git diff --check` reported no content errors; existing
+  LF-to-CRLF working-copy warnings remain informational.
+- A regression assertion verifies that every persisted supported medium query
+  uses the new bounded limit of 500.
+- No database write, snapshot change, prediction activation, score/event
+  action, alert, report, email, process stop, or restart occurred.
+
+Pre-restart runtime baseline:
+
+- Baseline recorded at `2026-07-30 13:08:19 +02:00`; current Windows boot time
+  was `2026-07-30 08:35:49 +02:00`.
+- Startup task `API_dashboard_caddy` was `Ready`; its last run was
+  `2026-07-30 08:35:59 +02:00` with result 0.
+- Expected listeners were present: Caddy on 80/443 and
+  `127.0.0.1:2019`, FastAPI on `127.0.0.1:8000`, and Streamlit on
+  `127.0.0.1:8001`. Temporary listeners 8010/8011 were absent.
+- Local FastAPI liveness/readiness, Streamlit health, and Caddy admin health
+  returned HTTP 200.
+- Scheduler reported `scheduler_running=true` with heartbeat
+  `2026-07-30 13:06:08 +02:00`. The quarter-hour job, database availability
+  check, and kalorimetry import all completed successfully at about 13:05
+  with zero failures in the preceding 24 hours.
+- The working tree remains intentionally dirty and contains the complete
+  uncommitted project work plus this focused dashboard/API correction. Do not
+  reset, checkout, clean, recreate an integrity baseline, or discard changes
+  during restart handling.
+
+Exact post-restart verification:
+
+1. Confirm Windows boot time is newer than
+   `2026-07-30 13:08:19 +02:00`.
+2. Confirm `API_dashboard_caddy` ran after the new boot with result 0.
+3. Confirm listeners 80, 443, 2019, 8000, and 8001 are present and 8010/8011
+   are absent.
+4. Confirm local FastAPI `/health/live` and `/health/ready`, Streamlit
+   `/_stcore/health`, and Caddy admin `/config/` return HTTP 200.
+5. Confirm scheduler heartbeat and the next quarter-hour execution are newer
+   than boot; verify database availability and kalorimetry import aggregate
+   status without printing raw operational data.
+6. In an authenticated admin dashboard session, open
+   `Predikce modelu / Kandidati`; verify the selector offers all media plus
+   Vodomery, Plynomery, and Kalorimetry and that selecting one medium leaves
+   only that medium's candidate rows.
+7. Open `Predikce modelu / Vybery zarizeni`; verify all 58 current vodomery
+   snapshot rows are present rather than the previous 25-row subset. Confirm
+   plynomery and kalorimetry remain present and correctly scoped.
+8. Reconfirm the other dashboard pages previously accepted by the user still
+   load normally. Stop and diagnose any health, scheduler, candidate-filter,
+   device-count, or cross-medium regression.
+9. Do not perform kalorimetry snapshot/scoring activation, alert delivery, or
+   unrelated production writes as part of this restart verification.

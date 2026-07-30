@@ -2836,3 +2836,42 @@ Consequences:
   working context.
 - The legacy preamble is preserved separately for audit but is no longer
   treated as the current project baseline.
+
+## DEC-102: The first monitoring agent is an independent read-only supervisor
+
+Date: 2026-07-30
+
+Status: Accepted
+
+Decision:
+
+- Build the first monitoring agent as a runtime independent from `main.py`.
+  It consumes the existing authenticated scheduler and system health
+  endpoints instead of duplicating their collectors or querying operational
+  databases directly.
+- Begin in test mode. The agent may persist only its own bounded incident
+  state, audit data, and local reports. It may not change application state,
+  run jobs, control processes, send external messages, or replace current
+  scheduler alerts.
+- Use deterministic, versioned rules for health classification, confirmation,
+  recovery, severity, correlation, and incident lifecycle. Agentic
+  interpretation may explain safe facts and prepare programmer task drafts,
+  but it may not invent root causes or override deterministic state.
+- Group repeated observations into stable incidents and produce reports rather
+  than blindly sending one email per failing poll.
+- Keep current scheduler alerts authoritative during a reviewed parallel
+  pilot. Replacing alert delivery for Scheduler Health or System Health
+  requires separate evidence, rollout and rollback plans, independent
+  self-monitoring, and explicit approval.
+
+Consequences:
+
+- Scheduler Health remains the source of current scheduler facts; the agent
+  adds temporal supervision, correlation, recovery tracking, reporting, and
+  actionable diagnostic preparation.
+- A scheduler-process failure can remain observable because the agent does not
+  share the `main.py` runtime.
+- Least-privilege authentication, agent-owned storage, thresholds, hosting,
+  delivery, and pilot duration remain explicit design and approval gates.
+- The implementation checklist lives in
+  `agents/plans/monitoring/SCHEDULER_MONITORING_AGENT_PLAN.md`.

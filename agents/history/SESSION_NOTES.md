@@ -80,3 +80,121 @@ For substantive sessions:
 
 Restart handoffs must follow `templates/RESTART_HANDOFF.md`.
 General session entries may use `templates/SESSION_ENTRY.md`.
+
+## Pending restart handoff
+
+### 2026-07-30 14:07 +02:00 - Pre-restart handoff
+
+Reason for restart:
+
+- User-requested controlled Windows workstation restart after completion and
+  commit of the repository documentation cleanup.
+
+Current task and conversation state:
+
+- Completed: repository-root documentation cleanup, thematic `agents/`
+  structure, monthly session-history archive split, and the read-only
+  pre-restart runtime baseline.
+- Pending: restart Windows and perform the complete post-restart verification.
+- First action after restart: read `AGENTS.md`,
+  `agents/decisions/DECISIONS.md`, and this handoff; run
+  `git status --short`; confirm the new boot and startup task before checking
+  services.
+
+Working tree and deployment:
+
+- `git status --short` was clean before this handoff was appended.
+- This handoff intentionally modifies only
+  `agents/history/SESSION_NOTES.md`.
+- Tracked and deployed Caddyfile SHA-256 hashes matched before restart.
+- No application code, configuration, runtime deployment, database data, or
+  scheduler state was changed as part of restart preparation.
+
+Sensitive and runtime artifacts:
+
+- Do not print, change, delete, or commit `.env`, credentials, tokens, cookies,
+  browser sessions, ProgramData proxy credentials, raw meter data, scheduler
+  locks, or operational database contents.
+
+Expected processes after restart:
+
+- FastAPI/Uvicorn: one runtime on `127.0.0.1:8000`.
+- Streamlit: one runtime on `127.0.0.1:8001`.
+- Scheduler: one `main.py` runtime holding the scheduler process lock.
+- Caddy: one runtime owning TCP 80/443 and `127.0.0.1:2019`.
+
+Expected application state:
+
+- Baseline Windows boot time was `2026-07-30 13:10:04 +02:00`; the new boot
+  must be later than this handoff.
+- Startup task `API_dashboard_caddy` was `Ready`; its last run was
+  `2026-07-30 13:10:14 +02:00` with result 0. It must run again after the new
+  boot with result 0.
+- Expected listeners before restart were 80, 443, 2019, 8000, and 8001;
+  temporary listeners 8010/8011 were absent.
+- Local FastAPI live/ready, Streamlit health, and Caddy admin returned HTTP
+  200.
+- Scheduler reported `scheduler_running=true` with heartbeat
+  `2026-07-30 14:05:24 +02:00`.
+- The quarter-hour job, database-availability check, and kalorimetry import
+  succeeded at approximately 14:05 with zero failures in the preceding 24
+  hours.
+- Protected kalorimetry prediction API access without a bearer token returned
+  the expected HTTP 401.
+- HTTP should redirect to HTTPS and the public dashboard should retain its
+  existing authentication behavior.
+
+Required post-restart checks:
+
+1. Confirm the new Windows boot time is later than
+   `2026-07-30 14:07 +02:00`.
+2. Confirm `API_dashboard_caddy` ran after boot with result 0.
+3. Confirm exactly the expected listeners 80, 443, 2019, 8000, and 8001 are
+   present and temporary listeners 8010/8011 are absent.
+4. Confirm local FastAPI `/health/live` and `/health/ready`, Streamlit
+   `/_stcore/health`, and Caddy admin `/config/` return HTTP 200.
+5. Confirm the scheduler heartbeat is newer than boot.
+6. Wait for and confirm one post-boot quarter-hour job, database-availability
+   check, and kalorimetry import with successful aggregate status.
+7. Confirm the protected kalorimetry prediction route still returns HTTP 401
+   without credentials.
+8. Confirm tracked and deployed Caddyfile hashes still match.
+9. Attempt the public HTTPS dashboard and users-exist route from the available
+   environment; record a timeout as unverified rather than treating it as
+   application failure when all local checks remain healthy.
+10. Append the exact post-restart result here and stop to diagnose any
+    listener, readiness, scheduler, import, hash, or authentication regression.
+
+Known risks or accepted gaps:
+
+- The public hostname previously timed out from the agent environment even
+  while local Caddy and application health were good; external routing may
+  require independent browser/network confirmation.
+- Do not perform kalorimetry snapshot/scoring activation, scheduler feature
+  activation, alert delivery, report delivery, or unrelated production writes
+  during post-restart verification.
+
+### 2026-07-30 14:20 +02:00 - Post-restart verification
+
+- Windows booted at `2026-07-30 14:11:16 +02:00`, after the pre-restart
+  handoff.
+- Startup task `API_dashboard_caddy` ran at
+  `2026-07-30 14:11:26 +02:00`, returned result 0, and was `Ready`.
+- Expected listeners 80, 443, 2019, 8000, and 8001 were present under Caddy
+  and the two Python application runtimes. Temporary listeners 8010/8011 were
+  absent.
+- Local FastAPI live/ready, Streamlit health, and Caddy admin returned HTTP
+  200. The protected kalorimetry prediction route returned the expected HTTP
+  401 without credentials.
+- Scheduler heartbeat `2026-07-30 14:16:34 +02:00` was newer than boot.
+  The first post-boot quarter-hour job completed successfully at 14:16, with
+  successful database-availability check and kalorimetry import and zero
+  failures for those checks in the preceding 24 hours.
+- Tracked and deployed Caddyfile SHA-256 hashes matched.
+- Public HTTPS dashboard, users-exist, protected API, blocked documentation
+  routes, and HTTP redirect were unverified from the agent environment
+  because every public-host request ended in `WebException`. This matches the
+  known workstation reachability gap and is not classified as a local
+  application regression.
+- No application code, runtime configuration, production data, activation,
+  alert delivery, report delivery, or manual scheduler job was changed.

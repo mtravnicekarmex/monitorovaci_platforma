@@ -147,6 +147,10 @@ At the end of every substantive session:
 - `agents/runbooks/KALORIMETRY_ACTIVATION_RUNBOOK.md`: mandatory Monday 2026-08-03 forecast
   preflight, approval, current-snapshot activation, scoring/event pilot,
   scheduler, regression, restart, and post-rollout checklist.
+- `agents/plans/monitoring/SCHEDULER_MONITORING_AGENT_PLAN.md`: approved
+  step-by-step design for the first independent read-only monitoring agent,
+  its deterministic incident lifecycle, test-mode reporting, and the
+  separately gated path toward eventual alert-layer replacement.
 - `agents/inventories/SECURITY_SECRET_INVENTORY.md`: non-secret inventory of production secret,
   credential, session, and sensitive runtime artifact locations.
 - `requirements-production.in`: reviewed direct production dependency pins.

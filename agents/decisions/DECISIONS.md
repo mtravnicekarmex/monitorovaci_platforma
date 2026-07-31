@@ -2875,3 +2875,74 @@ Consequences:
   delivery, and pilot duration remain explicit design and approval gates.
 - The implementation checklist lives in
   `agents/plans/monitoring/SCHEDULER_MONITORING_AGENT_PLAN.md`.
+
+## DEC-103: The monitoring agent runs on a different network workstation
+
+Date: 2026-07-31
+
+Status: Accepted
+
+Decision:
+
+- Run the first monitoring agent on a different workstation from `main.py`,
+  FastAPI, Streamlit, Caddy, and the operational databases. The remote station
+  owns the agent lifecycle, state, reports, logs, and credentials.
+- Keep FastAPI bound to loopback. Do not expose the existing admin
+  `/health/*` routes directly to the LAN or public internet.
+- Add a future private, authenticated, GET-only monitoring API facade that
+  reuses existing Health collectors and returns only the reviewed field
+  allowlist. Logs, process command lines, raw data, business totals, manual
+  jobs, and mutations remain excluded.
+- Carry monitoring traffic over an approved encrypted private or overlay
+  network with device/source restrictions and a dedicated least-privilege
+  application identity.
+- Treat loss of the target network path as `unknown/unreachable`, not as proof
+  that the scheduler failed.
+- Keep current alerts authoritative until the remote pilot and separately
+  approved replacement gates pass.
+
+Consequences:
+
+- Restart, power loss, network loss, or process failure on the monitored
+  workstation does not stop the agent.
+- The remote agent can observe machine-level unavailability but requires its
+  own self-heartbeat and a later decision about who monitors the monitoring
+  workstation.
+- The earlier same-host Scheduled Task proposal is superseded before
+  implementation or registration.
+- Network listener, firewall, proxy, authentication, credential, service, and
+  deployment changes remain separately reviewed implementation steps.
+
+## DEC-104: The remote workstation is a minimal agentic supervision center
+
+Date: 2026-07-31
+
+Status: Accepted
+
+Decision:
+
+- Designate the clean remote Windows workstation as the agentic supervision
+  center. The scheduler observer is its first workload.
+- Do not clone or transfer the complete `monitorovaci_platforma` repository to
+  the center. Distribute only a reviewed, manifest-verified supervision bundle
+  built from an explicit allowlist.
+- Keep future agents that require raw measurements or application-local logic
+  on the monitored workstation. Expose only their versioned, sanitized
+  heartbeat and aggregate report projections through the private monitoring
+  facade.
+- Use Tailscale as the location-independent private transport, while retaining
+  dedicated application authentication and GET-only authorization.
+- The center correlates incidents and prepares reports/programmer tasks but
+  cannot command local agents, access operational data, run jobs, or change
+  application state.
+
+Consequences:
+
+- The center can move to another approved tailnet-connected workstation
+  without moving the monitored application or its data.
+- Packaging, manifest verification, upgrade, rollback, and center
+  self-monitoring become explicit platform responsibilities.
+- Every future local agent requires its own safe response inventory,
+  authorization tests, shadow pilot, and registration.
+- Repository access, remote shell, database access, external delivery, and
+  remediation remain outside the test-mode center boundary.

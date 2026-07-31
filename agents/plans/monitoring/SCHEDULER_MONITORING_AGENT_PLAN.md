@@ -2,7 +2,7 @@
 
 Prepared: 2026-07-30
 
-Status: design approved; implementation not started
+Status: design approved; unregistered synthetic test implementation started
 
 Work item: `OPS-002`
 
@@ -25,6 +25,9 @@ health boundary:
 
 - `/health/system/scheduler`: scheduler heartbeat, aggregate status, scheduled
   job status, last/next run, duration, and 24-hour success/failure counts;
+- `/health/scheduler`: detailed scheduled and internal-step metrics plus the
+  expected 24-hour schedule; scheduler log and manual-run subroutes remain
+  excluded;
 - `/health/system/runtime`: Windows boot, startup task, required listeners,
   and temporary listener checks;
 - `/health/system/database`: PostgreSQL availability, safe metadata, and
@@ -49,9 +52,9 @@ The existing layers retain these responsibilities:
 - the monitoring agent: repeated observation, temporal rules, correlation,
   incident lifecycle, recovery tracking, reports, and programmer task drafts.
 
-The agent must run outside the `main.py` scheduler process. The exact
-production host mechanism is deliberately undecided until the test-mode
-implementation and failure-isolation review are complete.
+The agent must run on a different workstation from the `main.py` scheduler.
+The remote runtime and private monitoring API boundary are defined in
+`SCHEDULER_MONITORING_AGENT_REMOTE_RUNTIME_DESIGN.md`.
 
 ## Permission model
 
@@ -152,13 +155,21 @@ availability.
 
 Complete one verified step at a time:
 
-- [ ] 1. Inventory the exact response contracts of all approved health
+- [x] 1. Inventory the exact response contracts of all approved health
   endpoints and classify every field as retained, transient, sensitive, or
-  unnecessary.
+  unnecessary. Reviewed in
+  `../../inventories/MONITORING_AGENT_HEALTH_ENDPOINT_INVENTORY.md`.
 - [ ] 2. Define the independent runtime boundary and prove that stopping
-  `main.py` does not stop the agent.
+  `main.py` or the complete monitored workstation does not stop the agent.
+  The selected remote runtime and proof contract are documented in
+  `SCHEDULER_MONITORING_AGENT_REMOTE_RUNTIME_DESIGN.md`; keep this item open
+  until the executable non-production proof passes.
 - [ ] 3. Design a dedicated least-privilege authentication identity and
   credential rotation path without exposing secrets in agent state or logs.
+  The status-first authorization and strict setup patterns reviewed in
+  `../../inventories/BOD_NULA_AGENT_LOGIN_SETUP_REVIEW.md` are accepted as
+  design input; keep this item open until the facade service identity and
+  rotation mechanism are selected and tested.
 - [ ] 4. Define polling intervals, request timeouts, jitter, bounded retries,
   and self-health behavior. Treat transport failure separately from an
   unhealthy scheduler response.
@@ -172,7 +183,10 @@ Complete one verified step at a time:
 - [ ] 8. Select bounded agent-owned persistence for observations, incidents,
   reports, and rule versions. No production database writes are allowed.
 - [ ] 9. Implement a safe endpoint client and normalized observation
-  contracts. Reject unexpected schemas fail-closed.
+  contracts. Reject unexpected schemas fail-closed. A minimal unauthenticated
+  synthetic skeleton now covers liveness, readiness, and system-scheduler
+  contracts; keep this item open until the private facade, service identity,
+  complete approved endpoint set, retries, and remote HTTPS tests pass.
 - [ ] 10. Implement and unit-test the deterministic evaluation engine without
   an LLM dependency.
 - [ ] 11. Implement incident state transitions and recovery detection with
@@ -187,8 +201,8 @@ Complete one verified step at a time:
 - [ ] 15. Test healthy operation, scheduler death, API death, database
   degradation, stale metrics, one-off transport failures, restart recovery,
   repeated errors, and agent restart/resume.
-- [ ] 16. Run the independent agent in an approved local test instance while
-  current alerts remain authoritative.
+- [ ] 16. Run the independent agent on an approved remote test workstation
+  while current alerts remain authoritative.
 - [ ] 17. Review pilot evidence for false positives, missed incidents,
   duplicate suppression, recovery behavior, report usefulness, secret
   hygiene, and resource usage.
@@ -218,7 +232,7 @@ Test-mode implementation is acceptable only when:
 
 The following require later explicit choices:
 
-- independent runtime technology and host registration;
+- remote workstation service-manager registration;
 - polling and severity thresholds;
 - agent-owned state format and retention;
 - model/provider and data-processing boundary;

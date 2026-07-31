@@ -37,6 +37,10 @@ At the end of every substantive session:
 ## Project Map
 
 - `main.py`: scheduler entry point. Imports and runs the main scheduler.
+- `monitoring_agent/`: unregistered standard-library test skeleton for the
+  independent remote read-only scheduler observer and its loopback-only
+  synthetic Health server. It has no production registration, authentication,
+  external delivery, or mutation capability.
 - `core/db/connect.py`: SQLAlchemy database connections for PostgreSQL and MSSQL, configured through `python-decouple`.
 - `core/scheduler/job_schedule.py`: single source of truth for APScheduler cron schedules.
 - `core/scheduler/scheduler.py`: scheduler execution, locks, metrics, manual run specs, and alert emails.
@@ -151,6 +155,22 @@ At the end of every substantive session:
   step-by-step design for the first independent read-only monitoring agent,
   its deterministic incident lifecycle, test-mode reporting, and the
   separately gated path toward eventual alert-layer replacement.
+- `agents/plans/monitoring/SCHEDULER_MONITORING_AGENT_REMOTE_RUNTIME_DESIGN.md`:
+  selected cross-workstation boundary, private monitoring API facade,
+  network/authentication constraints, known blind spots, and the required
+  remote failure-isolation proof.
+- `agents/plans/monitoring/AGENTIC_SUPERVISION_CENTER_ARCHITECTURE.md`:
+  hub-and-spoke boundary for the clean remote supervision center, minimal
+  distribution bundle, local data-bearing agents, Tailscale facade, packaging,
+  installation, self-monitoring, and future-agent onboarding.
+- `agents/inventories/MONITORING_AGENT_HEALTH_ENDPOINT_INVENTORY.md`: reviewed
+  allowlist and retention classification for every Health API field available
+  to the first monitoring agent, including explicitly excluded log and
+  manual-run surfaces.
+- `agents/inventories/MONITORING_AGENT_REMOTE_WORKSTATION_INVENTORY.md`:
+  non-secret Windows 11/Python 3.14 remote-station baseline, selected Tailscale
+  pilot direction, remaining ownership questions, and staged verification
+  sequence.
 - `agents/inventories/SECURITY_SECRET_INVENTORY.md`: non-secret inventory of production secret,
   credential, session, and sensitive runtime artifact locations.
 - `requirements-production.in`: reviewed direct production dependency pins.
@@ -181,6 +201,8 @@ At the end of every substantive session:
 - `scripts/run_with_rotating_log.py`: captures API, Streamlit, and Caddy
   stdout/stderr into size-rotated ProgramData logs.
 - `tests/`: pytest suite for scheduler, imports, dashboards, reports, auth/navigation, anomaly handling, and supporting services.
+- `tests/test_monitoring_agent.py`: focused safety and synthetic-contract tests
+  for the unregistered remote observer skeleton.
 
 ## Runtime Surfaces
 

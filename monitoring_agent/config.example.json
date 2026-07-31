@@ -1,0 +1,14 @@
+{
+  "config_version": 1,
+  "mode": "test",
+  "instance_id": "supervision-center-test-01",
+  "base_url": "http://127.0.0.1:8020",
+  "state_dir": ".local-state",
+  "timeout_seconds": 3.0,
+  "poll_interval_seconds": 60.0,
+  "endpoint_keys": [
+    "live",
+    "ready",
+    "system_scheduler"
+  ]
+}

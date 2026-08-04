@@ -2946,3 +2946,65 @@ Consequences:
   authorization tests, shadow pilot, and registration.
 - Repository access, remote shell, database access, external delivery, and
   remediation remain outside the test-mode center boundary.
+
+## DEC-105: Kalorimetry uses forecast-gated weekly snapshots and active-only scoring
+
+Date: 2026-08-03
+
+Status: Accepted
+
+Decision:
+
+- Rebuild current kalorimetry snapshots in the Monday weekly scheduler only
+  after the complete coherent pre-week forecast, observation freshness, model
+  policy, and 672-slot profile gates pass.
+- Treat an exact already persisted week as a verified idempotent no-op. Reject
+  incomplete or conflicting decisions, profiles, model identities, or
+  selection-run links without overwrite or fallback.
+- After each kalorimetry import, score only through the exact period-valid
+  active selection/profile snapshot using stable output model version 1, then
+  process only `SPIKE` and `SUSTAINED_HIGH_USAGE` events.
+- Keep kalorimetry alert delivery and new report/email delivery disabled until
+  separately designed and approved.
+
+Consequences:
+
+- Six identifiers that currently lack eligible selection metrics remain
+  explicitly unavailable and advance the scoring checkpoint without scores.
+- Scheduler restarts and manual reruns cannot duplicate or silently replace a
+  weekly active snapshot.
+- Historical score/event reconciliation remains read-only and is not inferred
+  from current-period scheduler activation.
+
+## DEC-106: The supervision-center test runtime uses one local dotenv contract
+
+Date: 2026-08-04
+
+Status: Accepted
+
+Decision:
+
+- Package the monitoring observer as a small standalone PyCharm project with
+  one operator entry point, `run_monitoring_agent.py`.
+- Store all remote runtime settings, including the private HTTPS base URL and
+  bearer credential, in one ACL-restricted `.env` file local to the
+  supervision center. Read it directly rather than requiring persistent or
+  session-level process environment variables.
+- Include only `.env.example` and a `.gitignore` rule in the reviewed bundle.
+  Never bundle, commit, print, transmit, or record the real `.env`.
+- Keep agent state outside the code/config directory. The strict parser
+  rejects missing, duplicate, unexpected, placeholder, malformed, or unsafe
+  values and never renders the credential in summaries or dataclass repr.
+- Use the same Python entry point for PyCharm foreground testing and any later
+  separately approved Windows automatic-start registration.
+
+Consequences:
+
+- The earlier split between JSON configuration and a standalone credential
+  file is superseded for new supervision-center bundles. Existing 0.2/0.3
+  artifacts remain immutable rollback/test evidence but are not extended.
+- Credential rotation updates the local `.env` atomically while the server
+  retains the two-digest overlap contract. Rotation proof remains open.
+- Windows ACL setup, Scheduled Task registration, restart policy, rollback,
+  and background operation remain separate gates after foreground behavior
+  and failure isolation pass.

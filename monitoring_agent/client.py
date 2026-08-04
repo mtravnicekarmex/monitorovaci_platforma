@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
 import socket
+import time
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
@@ -19,6 +20,7 @@ class EndpointSpec:
     key: str
     path: str
     normalizer: Callable[[object], dict[str, object]]
+    accepted_http_statuses: tuple[int, ...] = (200,)
 
 
 @dataclass(frozen=True)
@@ -250,11 +252,20 @@ def _normalize_system_scheduler(value: object) -> dict[str, object]:
 
 
 APPROVED_ENDPOINTS: dict[str, EndpointSpec] = {
-    "live": EndpointSpec("live", "/health/live", _normalize_live),
-    "ready": EndpointSpec("ready", "/health/ready", _normalize_ready),
+    "live": EndpointSpec(
+        "live",
+        "/api/v1/monitoring/health/live",
+        _normalize_live,
+    ),
+    "ready": EndpointSpec(
+        "ready",
+        "/api/v1/monitoring/health/ready",
+        _normalize_ready,
+        (200, 503),
+    ),
     "system_scheduler": EndpointSpec(
         "system_scheduler",
-        "/health/system/scheduler",
+        "/api/v1/monitoring/health/system/scheduler",
         _normalize_system_scheduler,
     ),
 }
@@ -282,14 +293,35 @@ class HealthClient:
         base_url: str,
         observer_instance_id: str,
         timeout_seconds: float = 3.0,
+        max_attempts: int = 3,
+        retry_backoff_seconds: float = 0.5,
+        bearer_credential: str | None = None,
+        sleep_fn: Callable[[float], None] = time.sleep,
     ) -> None:
         if not observer_instance_id.strip():
             raise ValueError("observer_instance_id is required")
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
+        if isinstance(max_attempts, bool) or not isinstance(max_attempts, int):
+            raise ValueError("max_attempts must be an integer")
+        if max_attempts < 1 or max_attempts > 5:
+            raise ValueError("max_attempts must be between 1 and 5")
+        if retry_backoff_seconds < 0:
+            raise ValueError("retry_backoff_seconds must not be negative")
         self._base_url = validate_base_url(base_url)
+        if self._base_url.startswith("https://") and not bearer_credential:
+            raise ValueError("remote HTTPS monitoring requires a bearer credential")
+        if bearer_credential is not None and (
+            not bearer_credential
+            or any(character.isspace() for character in bearer_credential)
+        ):
+            raise ValueError("bearer credential has an invalid format")
         self._observer_instance_id = observer_instance_id.strip()
         self._timeout_seconds = float(timeout_seconds)
+        self._max_attempts = max_attempts
+        self._retry_backoff_seconds = float(retry_backoff_seconds)
+        self._bearer_credential = bearer_credential
+        self._sleep_fn = sleep_fn
         self._opener = build_opener(ProxyHandler({}))
 
     def poll(self, endpoint_key: str) -> Observation:
@@ -299,47 +331,74 @@ class HealthClient:
             raise ValueError(f"endpoint is not approved: {endpoint_key}") from exc
 
         started_at = _utc_now()
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "monitoring-agent-test/1",
+        }
+        if self._bearer_credential:
+            headers["Authorization"] = f"Bearer {self._bearer_credential}"
+        attempt_count = 0
         http_status: int | None = None
-        transport_status = "success"
+        transport_status = "connection_error"
         payload: dict[str, object] = {}
         source_checked_at: str | None = None
-        request = Request(
-            urljoin(self._base_url, spec.path.lstrip("/")),
-            method="GET",
-            headers={
-                "Accept": "application/json",
-                "User-Agent": "monitoring-agent-test/1",
-            },
-        )
-
-        try:
-            try:
-                response = self._opener.open(request, timeout=self._timeout_seconds)
-            except HTTPError as exc:
-                response = exc
-            with response:
-                http_status = int(response.status)
-                raw_body = response.read()
-            decoded = json.loads(raw_body.decode("utf-8"))
-            payload = spec.normalizer(decoded)
-            checked_at = payload.get("checked_at")
-            source_checked_at = checked_at if isinstance(checked_at, str) else None
-        except ContractError:
-            transport_status = "schema_error"
-            payload = {}
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            transport_status = "schema_error"
-            payload = {}
-        except TimeoutError:
-            transport_status = "timeout"
-        except URLError as exc:
-            transport_status = (
-                "timeout"
-                if isinstance(exc.reason, (TimeoutError, socket.timeout))
-                else "connection_error"
+        for attempt_count in range(1, self._max_attempts + 1):
+            request = Request(
+                urljoin(self._base_url, spec.path.lstrip("/")),
+                method="GET",
+                headers=headers,
             )
-        except OSError:
-            transport_status = "connection_error"
+            try:
+                try:
+                    response = self._opener.open(
+                        request,
+                        timeout=self._timeout_seconds,
+                    )
+                except HTTPError as exc:
+                    response = exc
+                with response:
+                    http_status = int(response.status)
+                    raw_body = response.read()
+                if http_status not in spec.accepted_http_statuses:
+                    transport_status = "http_error"
+                    payload = {}
+                else:
+                    decoded = json.loads(raw_body.decode("utf-8"))
+                    payload = spec.normalizer(decoded)
+                    checked_at = payload.get("checked_at")
+                    source_checked_at = (
+                        checked_at if isinstance(checked_at, str) else None
+                    )
+                    transport_status = "success"
+            except ContractError:
+                transport_status = "schema_error"
+                payload = {}
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                transport_status = "schema_error"
+                payload = {}
+            except (TimeoutError, socket.timeout):
+                transport_status = "timeout"
+                http_status = None
+                payload = {}
+            except URLError as exc:
+                transport_status = (
+                    "timeout"
+                    if isinstance(exc.reason, (TimeoutError, socket.timeout))
+                    else "connection_error"
+                )
+                http_status = None
+                payload = {}
+            except OSError:
+                transport_status = "connection_error"
+                http_status = None
+                payload = {}
+
+            if transport_status not in {"connection_error", "timeout"}:
+                break
+            if attempt_count < self._max_attempts:
+                self._sleep_fn(
+                    self._retry_backoff_seconds * (2 ** (attempt_count - 1))
+                )
 
         finished_at = _utc_now()
         return Observation(
@@ -350,7 +409,7 @@ class HealthClient:
             poll_finished_at=_format_datetime(finished_at),
             http_status=http_status,
             transport_status=transport_status,
-            attempt_count=1,
+            attempt_count=attempt_count,
             contract_version=CONTRACT_VERSION,
             source_checked_at=source_checked_at,
             payload=payload,

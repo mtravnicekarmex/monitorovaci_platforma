@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+.idea/
+__pycache__/
+*.py[cod]
+monitoring-agent-state/
+.state/

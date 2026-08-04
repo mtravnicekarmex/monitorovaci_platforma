@@ -108,26 +108,23 @@ The center is not trusted merely because it is connected to the tailnet.
 ## Minimal distribution bundle
 
 ```text
-supervision-center\
-|-- app\
-|   `-- monitoring_agent\
-|-- config\
-|   `-- config.example.json
-|-- scripts\
-|   |-- install_test_runtime.ps1
-|   |-- run_self_test.ps1
-|   |-- start_observer.ps1
-|   `-- disable_observer.ps1
-|-- docs\
-|   |-- INSTALL.md
-|   |-- SECURITY_BOUNDARY.md
-|   `-- ROLLBACK.md
+monitoring-agent\
+|-- .env.example
+|-- .gitignore
+|-- run_monitoring_agent.py
+|-- monitoring_agent\
+|   |-- client.py
+|   |-- observer.py
+|   |-- settings.py
+|   `-- store.py
 |-- manifest.json
 `-- manifest.sha256
 ```
 
-The bundle contains no live credential. Credentials are provisioned
-separately into an ACL-restricted center location.
+The bundle contains no live credential. The operator creates one ignored,
+ACL-restricted `.env` locally from `.env.example`; the same Python entry point
+is used in PyCharm foreground testing and any later approved Windows
+automatic-start registration.
 
 ## Packaging contract
 

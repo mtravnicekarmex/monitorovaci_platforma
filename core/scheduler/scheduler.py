@@ -47,6 +47,15 @@ from moduly.mereni.vodomery.database.vodomery_db_vse import vodomery_db_import
 from moduly.mereni.elektromery.database.elektromery_db_vse import elektromery_db_import
 from moduly.mereni.manometry.database.manometry_db_vse import manometry_db_import
 from moduly.mereni.kalorimetry.database.kalorimetry_db_vse import kalorimetry_db_import
+from moduly.mereni.kalorimetry.current_snapshot_activation import (
+    rebuild_current_kalorimetry_snapshots,
+)
+from moduly.mereni.kalorimetry.kalorimetry_anomaly import (
+    score_new_measurements as score_new_kalorimetry_measurements,
+)
+from moduly.mereni.kalorimetry.events import (
+    detect_events_from_scores as detect_kalorimetry_events_from_scores,
+)
 from moduly.mereni.vodomery.vodomery_prediction import (
     get_candidate_model_versions,
     get_runtime_model_version,
@@ -1144,26 +1153,38 @@ def daily_web_monitor_job():
 
 
 
-def safe_call(fn, *args, **kwargs):
+def safe_call(fn, *args, step_id: str | None = None, **kwargs):
+    resolved_step_id = fn.__name__ if step_id is None else str(step_id).strip()
+    if not resolved_step_id:
+        raise ValueError("Scheduler step_id must not be empty")
     start = time.time()
     try:
-        logger.info("START %s", fn.__name__)
+        logger.info("START %s", resolved_step_id)
         result = fn(*args, **kwargs)
-        get_metrics_store().record_job_success(fn.__name__, round(time.time() - start, 2))
+        get_metrics_store().record_job_success(
+            resolved_step_id,
+            round(time.time() - start, 2),
+        )
         return result
     except SchedulerContextError:
-        get_metrics_store().record_job_error(fn.__name__, round(time.time() - start, 2))
+        get_metrics_store().record_job_error(
+            resolved_step_id,
+            round(time.time() - start, 2),
+        )
         raise
     except Exception as exc:
-        get_metrics_store().record_job_error(fn.__name__, round(time.time() - start, 2))
+        get_metrics_store().record_job_error(
+            resolved_step_id,
+            round(time.time() - start, 2),
+        )
         raise SchedulerContextError(
-            f"Selhal krok '{fn.__name__}'",
-            alert_targets=(fn.__name__,),
+            f"Selhal krok '{resolved_step_id}'",
+            alert_targets=(resolved_step_id,),
             alert_reason=_format_scheduler_reason(exc),
         ) from exc
     finally:
         duration = round(time.time() - start, 2)
-        logger.info("DONE %s | duration=%ss", fn.__name__, duration)
+        logger.info("DONE %s | duration=%ss", resolved_step_id, duration)
 
 
 
@@ -1367,7 +1388,10 @@ def quarter_hour_job():
         resolved_event_ids=active_event_result.get("resolved_event_ids", []),
     )
     safe_call(plynomery_db_import)
-    active_plynomery_model_version = safe_call(get_plynomery_runtime_model_version)
+    active_plynomery_model_version = safe_call(
+        get_plynomery_runtime_model_version,
+        step_id="get_plynomery_runtime_model_version",
+    )
     active_plynomery_event_result = {
         "active_event_ids": [],
         "resolved_event_ids": [],
@@ -1381,11 +1405,13 @@ def quarter_hour_job():
                 model_version == active_plynomery_model_version
             ),
             selection_mode=SELECTION_MODE_ACTIVE,
+            step_id="score_new_plynomery_measurements",
         )
         plynomery_event_result = safe_call(
             detect_plynomery_events_from_scores,
             model_version=model_version,
             bootstrap_to_latest_if_missing=True,
+            step_id="detect_plynomery_events_from_scores",
         )
         if model_version == active_plynomery_model_version:
             active_plynomery_event_result = plynomery_event_result
@@ -1395,6 +1421,18 @@ def quarter_hour_job():
         resolved_event_ids=active_plynomery_event_result.get("resolved_event_ids", []),
     )
     safe_call(kalorimetry_db_import)
+    safe_call(
+        score_new_kalorimetry_measurements,
+        bootstrap_to_latest_if_missing=True,
+        selection_mode=SELECTION_MODE_ACTIVE,
+        step_id="score_new_kalorimetry_measurements",
+    )
+    safe_call(
+        detect_kalorimetry_events_from_scores,
+        model_version=1,
+        bootstrap_to_latest_if_missing=True,
+        step_id="detect_kalorimetry_events_from_scores",
+    )
     safe_call(manometry_db_import)
 
 
@@ -1449,7 +1487,11 @@ def weekly_job():
         return preflight_result
 
     rebuild_result = safe_call(rebuild_profiles)
-    plynomery_rebuild_result = safe_call(rebuild_plynomery_profiles)
+    plynomery_rebuild_result = safe_call(
+        rebuild_plynomery_profiles,
+        step_id="rebuild_plynomery_profiles",
+    )
+    safe_call(rebuild_current_kalorimetry_snapshots)
     safe_call(send_vodomery_model_rebuild_report, rebuild_result)
     safe_call(send_plynomery_model_rebuild_report, plynomery_rebuild_result)
     safe_call(send_weekly_vodomery_branch_report)
@@ -1581,6 +1623,20 @@ def _run_plynomery_alerting_step() -> None:
     process_plynomery_alerts(
         active_event_ids=event_result.get("active_event_ids", []),
         resolved_event_ids=event_result.get("resolved_event_ids", []),
+    )
+
+
+def _run_kalorimetry_scoring_step() -> None:
+    score_new_kalorimetry_measurements(
+        bootstrap_to_latest_if_missing=True,
+        selection_mode=SELECTION_MODE_ACTIVE,
+    )
+
+
+def _run_kalorimetry_event_detection_step() -> None:
+    detect_kalorimetry_events_from_scores(
+        model_version=1,
+        bootstrap_to_latest_if_missing=True,
     )
 
 
@@ -1729,6 +1785,24 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             label="Import kalorimetru",
             description="Import aktualnich kalorimetrickych mereni z MSSQL do monitoring.Mereni_kalorimetry_vse.",
             run_fn=kalorimetry_db_import,
+            lock_names=("quarter_hour_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="score_new_kalorimetry_measurements",
+            label="Scoring kalorimetru",
+            description="Scoring novych kalorimetrickych mereni pres aktivni periodicke snapshoty.",
+            run_fn=_run_kalorimetry_scoring_step,
+            lock_names=("quarter_hour_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="detect_kalorimetry_events_from_scores",
+            label="Detekce eventu kalorimetru",
+            description="Detekce kalorimetrickych SPIKE a SUSTAINED_HIGH_USAGE eventu bez alert delivery.",
+            run_fn=_run_kalorimetry_event_detection_step,
             lock_names=("quarter_hour_job",),
             is_scheduled=False,
             kind="internal_step",
@@ -1919,6 +1993,15 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             description="Odeslani mesicniho reportu spotreby objektu B1.",
             run_fn=send_monthly_b1_consumption_report,
             lock_names=("monthly_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="rebuild_current_kalorimetry_snapshots",
+            label="Rebuild modelu kalorimetru",
+            description="Tydenni idempotentni rebuild aktivnich kalorimetrickych snapshotu po forecast preflightu.",
+            run_fn=rebuild_current_kalorimetry_snapshots,
+            lock_names=("weekly_job",),
             is_scheduled=False,
             kind="internal_step",
         ),

@@ -7,7 +7,7 @@ from pathlib import Path
 from .client import APPROVED_ENDPOINTS, validate_base_url
 
 
-CONFIG_VERSION = 1
+CONFIG_VERSION = 2
 CONFIG_KEYS = {
     "config_version",
     "mode",
@@ -15,7 +15,10 @@ CONFIG_KEYS = {
     "base_url",
     "state_dir",
     "timeout_seconds",
+    "max_attempts",
+    "retry_backoff_seconds",
     "poll_interval_seconds",
+    "poll_jitter_seconds",
     "endpoint_keys",
 }
 
@@ -28,7 +31,10 @@ class AgentConfig:
     base_url: str
     state_dir: Path
     timeout_seconds: float
+    max_attempts: int
+    retry_backoff_seconds: float
     poll_interval_seconds: float
+    poll_jitter_seconds: float
     endpoint_keys: tuple[str, ...]
 
     @classmethod
@@ -79,10 +85,27 @@ class AgentConfig:
             decoded["timeout_seconds"],
             name="timeout_seconds",
         )
+        max_attempts = decoded["max_attempts"]
+        if isinstance(max_attempts, bool) or not isinstance(max_attempts, int):
+            raise ValueError("max_attempts must be an integer")
+        if max_attempts < 1 or max_attempts > 5:
+            raise ValueError("max_attempts must be between 1 and 5")
+        retry_backoff_seconds = _non_negative_number(
+            decoded["retry_backoff_seconds"],
+            name="retry_backoff_seconds",
+        )
         poll_interval_seconds = _positive_number(
             decoded["poll_interval_seconds"],
             name="poll_interval_seconds",
         )
+        poll_jitter_seconds = _non_negative_number(
+            decoded["poll_jitter_seconds"],
+            name="poll_jitter_seconds",
+        )
+        if poll_jitter_seconds > poll_interval_seconds:
+            raise ValueError(
+                "poll_jitter_seconds must not exceed poll_interval_seconds"
+            )
 
         raw_endpoint_keys = decoded["endpoint_keys"]
         if not isinstance(raw_endpoint_keys, list) or not raw_endpoint_keys:
@@ -103,7 +126,10 @@ class AgentConfig:
             base_url=validated_base_url,
             state_dir=state_dir.resolve(),
             timeout_seconds=timeout_seconds,
+            max_attempts=max_attempts,
+            retry_backoff_seconds=retry_backoff_seconds,
             poll_interval_seconds=poll_interval_seconds,
+            poll_jitter_seconds=poll_jitter_seconds,
             endpoint_keys=endpoint_keys,
         )
 
@@ -114,4 +140,13 @@ def _positive_number(value: object, *, name: str) -> float:
     resolved = float(value)
     if resolved <= 0:
         raise ValueError(f"{name} must be positive")
+    return resolved
+
+
+def _non_negative_number(value: object, *, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be numeric")
+    resolved = float(value)
+    if resolved < 0:
+        raise ValueError(f"{name} must not be negative")
     return resolved

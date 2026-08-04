@@ -18,6 +18,7 @@ from services.api.core.dependencies import (
     get_current_vodomery_user,
     get_current_web_search_user,
 )
+from services.api.core.monitoring_auth import require_monitoring_agent
 from services.api.main import app
 from services.api.routes import manometry as manometry_routes
 from services.api.routes import kalorimetry as kalorimetry_routes
@@ -606,6 +607,7 @@ def test_every_protected_api_operation_rejects_missing_authentication(method, pa
         get_current_user,
         get_current_browser_session_user,
         get_current_map_image_session_user,
+        require_monitoring_agent,
     }
     assert _request_status(method, path) == 401
 

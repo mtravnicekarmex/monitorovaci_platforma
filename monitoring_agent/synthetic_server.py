@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Any
 
 
-SCENARIOS = {"healthy", "scheduler_stopped", "readiness_unavailable"}
+SCENARIOS = {
+    "healthy",
+    "invalid_schema",
+    "readiness_unavailable",
+    "scheduler_stopped",
+    "unauthorized",
+}
 
 
 def _now() -> datetime:
@@ -60,17 +66,27 @@ class SyntheticHealthHandler(BaseHTTPRequestHandler):
     server: SyntheticHealthServer
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler contract
-        if self.path == "/health/live":
-            self._send(200, {"status": "ok"})
+        if self.server.scenario == "unauthorized":
+            self._send(401, {"status": "unauthorized"})
             return
-        if self.path == "/health/ready":
+        if self.path == "/api/v1/monitoring/health/live":
+            self._send(
+                200,
+                (
+                    {"status": "ok", "unexpected": True}
+                    if self.server.scenario == "invalid_schema"
+                    else {"status": "ok"}
+                ),
+            )
+            return
+        if self.path == "/api/v1/monitoring/health/ready":
             unavailable = self.server.scenario == "readiness_unavailable"
             self._send(
                 503 if unavailable else 200,
                 {"status": "unavailable" if unavailable else "ready"},
             )
             return
-        if self.path == "/health/system/scheduler":
+        if self.path == "/api/v1/monitoring/health/system/scheduler":
             self._send(200, _system_scheduler_payload(self.server.scenario))
             return
         self._send(404, {"status": "not_found"})

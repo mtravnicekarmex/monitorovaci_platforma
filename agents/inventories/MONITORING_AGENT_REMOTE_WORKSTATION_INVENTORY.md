@@ -2,8 +2,8 @@
 
 Reviewed: 2026-07-31
 
-Status: skeleton bundle extracted and local synthetic proof passed; remote
-network proof pending
+Status: authenticated remote HTTPS observation passed; failure-isolation and
+service-registration proofs pending
 
 Runtime design:
 `../plans/monitoring/SCHEDULER_MONITORING_AGENT_REMOTE_RUNTIME_DESIGN.md`
@@ -183,3 +183,65 @@ No task, persistent listener, firewall rule, credential, facade, tailnet
 policy, external delivery, or monitored-application state was created or
 changed. Tailscale installation and interactive tailnet login were performed
 directly by the user on the remote station.
+
+## 2026-08-03 remote HTTPS result
+
+- The monitored workstation retained its existing Tailscale Serve HTTPS
+  handler on port 443 and added a persistent tailnet-only HTTPS handler on
+  reserved port `9443`, proxying to loopback FastAPI. No broad LAN listener on
+  9443 was present.
+- The reviewed `0.2.0-test` bundle transferred to the center with ZIP SHA-256
+  `3E4C8CEBF5B8B61610373E45003742943F1625D9E494C769B09571AD2BE1838E`.
+  Its manifest and all ten declared files verified exactly.
+- The center used its separately stored bearer credential and CPython 3.14 to
+  complete one foreground cycle over Tailscale HTTPS. Liveness, readiness,
+  and system-scheduler observations were HTTP 200, schema-valid, and stored
+  with `transport_status=success`; the center also wrote its own heartbeat.
+- An unauthenticated remote request was HTTP 401. The monitoring credential
+  was HTTP 401 on the human-admin scheduler Health route, an unknown
+  monitoring route was HTTP 404, and POST on monitoring liveness was HTTP 405.
+- No token value, raw response body, device DNS name, address, or operational
+  identifier was recorded in the repository.
+
+This proves the first real cross-workstation transport and authorization
+boundary. It does not yet prove credential rotation, target shutdown
+isolation, recovery after a new boot, long-running polling, center restart,
+retention, or Scheduled Task operation.
+
+## 2026-08-04 polling bundle ready
+
+- The reproducible explicit-allowlist builder created `0.3.0-test` with the
+  same ten runtime files plus `manifest.json` and `manifest.sha256`.
+- ZIP SHA-256:
+  `872F2277B5A03AA00807846E1EFA08F4F792AD29F8F7F65A4A93C745E9F3D57E`.
+- Config contract version 2 adds bounded transport-only retries, exponential
+  backoff, cycle jitter, and agent-owned `polling`/`healthy`/`degraded`
+  heartbeat states. HTTP and schema failures are not retried, and unhealthy
+  target evidence does not by itself degrade observer self-health.
+- The monitoring/facade/authorization matrix passed with `254 passed`; the
+  focused monitoring-agent file passed with `32 passed`. Python compile and
+  `git diff --check` passed.
+- The bundle has not been transferred or executed on the supervision center.
+  Next use the side-by-side, foreground-only procedure in
+  `../runbooks/MONITORING_AGENT_FAILURE_ISOLATION_TEST.md`. A target restart,
+  credential rotation, and Scheduled Task registration remain separate
+  approval gates.
+
+## 2026-08-04 clean PyCharm runtime supersedes 0.3 setup
+
+- At the user's direction, the incomplete 0.3 remote setup is not continued.
+  New bundles use one local ignored `.env` rather than session variables, JSON
+  configuration, and a separate credential file.
+- `0.4.0-test` is a standalone minimal PyCharm project with one operator entry
+  point, `run_monitoring_agent.py`. The same entry point is reserved for a
+  later separately approved Windows automatic-start mechanism.
+- The archive contains exactly 11 allowlisted project/runtime files plus both
+  manifests and no real `.env`, credential, state, logs, PyCharm workspace, or
+  repository metadata.
+- ZIP SHA-256:
+  `A6C9DCF82137D252519A05E705CF05D6B1252A4DCA74974037602231088FC767`.
+- The focused monitoring-agent suite passed with `44 passed`; the combined
+  monitoring/facade/authorization matrix passed with `267 passed`. Python
+  compile and `git diff --check` passed.
+- Transfer, remote `.env` creation/ACL verification, foreground execution,
+  failure isolation, rotation, and automatic startup are not yet complete.

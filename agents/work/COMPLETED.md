@@ -26,3 +26,18 @@ in the relevant plan, decision record, inventory, or session history.
 - Verification: archival dry-run and post-write counts passed, focused tests
   passed (`10 passed`), full regression passed (`1240 passed`), and
   `git diff --check` passed.
+
+## KAL-025 - Kalorimetry scheduler integration and activation rollout
+
+- Status: done
+- Completed: 2026-08-04
+- Result: current-week active snapshots, latest-only anomaly scoring, the two
+  approved event types, quarter-hour processing, and forecast-gated weekly
+  rebuild are active without kalorimetry alert or report delivery.
+- Verification: the final whole-stack restart loaded the distinct scheduler
+  metric identities; runtime, authorization, snapshots, exact profile groups,
+  score links, checkpoints, event state, and read-only historical
+  reconciliation passed with zero production mismatches or 24-hour failures.
+- Evidence: exact regression counts and production aggregates remain in
+  `../plans/kalorimetry/KALORIMETRY_PREDICTION_PIPELINE_PLAN.md` and
+  `../history/SESSION_NOTES.md`.

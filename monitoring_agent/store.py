@@ -35,12 +35,30 @@ class ObserverStore:
             handle.write(serialized)
             handle.write("\n")
 
-    def write_heartbeat(self, *, observer_instance_id: str) -> None:
+    def write_heartbeat(
+        self,
+        *,
+        observer_instance_id: str,
+        status: str,
+        cycle_id: str,
+        cycle_started_at: str,
+        cycle_finished_at: str | None = None,
+        observation_count: int = 0,
+        transport_failure_count: int = 0,
+    ) -> None:
+        if status not in {"polling", "healthy", "degraded"}:
+            raise ValueError("invalid observer heartbeat status")
         self._state_dir.mkdir(parents=True, exist_ok=True)
         payload = {
             "observer_instance_id": observer_instance_id,
             "recorded_at": datetime.now(timezone.utc).isoformat(),
             "process_id": os.getpid(),
+            "status": status,
+            "cycle_id": cycle_id,
+            "cycle_started_at": cycle_started_at,
+            "cycle_finished_at": cycle_finished_at,
+            "observation_count": observation_count,
+            "transport_failure_count": transport_failure_count,
         }
         file_descriptor, temporary_name = tempfile.mkstemp(
             prefix="observer-heartbeat-",

@@ -206,6 +206,11 @@ itself failed. Correlation and recovery rules must preserve that distinction.
 
 Parent-plan checklist step 2 remains open until executable proof passes.
 
+The executable procedure is prepared in
+`../../runbooks/MONITORING_AGENT_FAILURE_ISOLATION_TEST.md`. It does not by
+itself authorize a target restart, network change, or remote task
+registration.
+
 ### Static proof
 
 - no agent entry exists in `main.py`, APScheduler job specs, application

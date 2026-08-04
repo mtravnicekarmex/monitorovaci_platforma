@@ -588,7 +588,7 @@ Kalorimetry do not yet have:
     the broader kalorimetry/dashboard/report/scheduler matrix passed with
     `654 passed`. No consumer was converted in this inventory step.
 
-- [ ] 25. Add scheduler integration for import, weekly rebuild, scoring, and
+- [x] 25. Add scheduler integration for import, weekly rebuild, scoring, and
   any approved reports.
   - Keep cron definitions in `core/scheduler/job_schedule.py`.
   - Preserve manual-run compatibility, locks, metrics, preflight behavior,
@@ -601,19 +601,73 @@ Kalorimetry do not yet have:
     snapshot write, and obtain separate scoring/event activation approval.
   - Alert delivery and new report/email delivery remain out of scope without
     separate approval.
+  - Completed on 2026-08-03 after all activation-runbook gates through the
+    scoring/event pilot passed. `quarter_hour_job` now runs calorimetry import,
+    active-selection scoring with stable output model 1, and the two approved
+    event types under the shared preflight, lock, `safe_call`, metrics, and
+    manual-run contracts. It has no kalorimetry alert-delivery call.
+  - `weekly_job` now runs the current-period kalorimetry rebuild before report
+    delivery. The rebuild repeats forecast/observation/policy preflight,
+    creates a missing period atomically, verifies an exact existing period as
+    an idempotent no-op, and rejects incomplete or conflicting state.
+  - Production verification for the already activated target week returned
+    `verified_existing`: 8 decisions, 5,376 profile points, 6 unavailable
+    identifiers, and zero writes. The active scoring/event paths processed
+    newly imported rows and an immediate repeat processed zero; alert plans
+    and enabled deliveries were both zero.
 
-- [ ] 26. Run the complete targeted regression matrix.
+- [x] 26. Run the complete targeted regression matrix.
   - Cover import, time semantics, prediction core, adapter, candidates,
     backfill, storage, scoring, events, outliers, API authorization,
     dashboards, consumers, and scheduler.
+  - Completed on 2026-08-03 with `454 passed`.
 
-- [ ] 27. Run the complete project suite and read-only production audits.
+- [x] 27. Run the complete project suite and read-only production audits.
   - Record exact results and reviewed aggregate invariants.
+  - Completed on 2026-08-03 with `1278 passed` and `git diff --check` clean.
+  - Read-only production verification found 8 exact active decisions, 5,376
+    weekly profile points in 8 complete 672-slot groups, zero incomplete
+    profiles, zero score/snapshot link mismatches, zero unprocessed scores,
+    matching scoring/event checkpoints after the controlled catch-up, 16
+    valid event-state rows, zero events, and zero invalid event types.
+  - Local API live/ready, Streamlit health, and Caddy admin returned HTTP 200;
+    the protected prediction-series route returned HTTP 401 without a token.
 
-- [ ] 28. Prepare the mandatory rollout/restart handoff and verify production.
+- [x] 28. Prepare the mandatory rollout/restart handoff and verify production.
   - Do not stop or recreate individual runtime processes.
   - After restart, verify runtime, scheduler, routing, active snapshots,
     dashboards, and aggregate score/event consistency.
+  - The approved 2026-08-03 restart passed its runtime, routing, snapshot,
+    checkpoint, event, Caddy, API, and historical read-only reconciliation
+    checks. The scheduled scoring and event functions also ran successfully,
+    but their metrics exposed a pre-existing alias collision because
+    `safe_call` used the imported function's unchanged `__name__`.
+  - The collision is corrected locally with explicit scheduler `step_id`
+    values for plynomery runtime-model lookup, plynomery and kalorimetry
+    scoring/event steps, and the plynomery rebuild. Vodomery metric identities
+    remain backward-compatible. The scheduler/health/monitoring regression
+    matrix passed with `122 passed`, the complete suite passed with
+    `1279 passed`, and `git diff --check` passed.
+  - Completed on 2026-08-04 after the separately approved whole-stack restart
+    loaded the correction. Boot, startup task, expected local and tailnet-only
+    listeners, API/Streamlit/Caddy health, protected-route authorization, and
+    tracked/deployed Caddy hashes all verified without regression.
+  - Repeated post-boot scheduled runs recorded distinct successful
+    `get_plynomery_runtime_model_version`,
+    `score_new_plynomery_measurements`,
+    `detect_plynomery_events_from_scores`,
+    `score_new_kalorimetry_measurements`, and
+    `detect_kalorimetry_events_from_scores` metrics with zero 24-hour
+    failures; legacy vodomery identities remained present.
+  - Production aggregates remained exact: 8 active decisions, 5,376 profile
+    points in 8 complete groups, zero score/snapshot link mismatches, aligned
+    measurement/scoring/event checkpoints, zero unprocessed scores, 16 valid
+    event-state rows, zero events, and delivery disabled. Historical
+    reconciliation remained read-only with zero mismatched or unexpected
+    persisted scores/events and zero anomaly-flag or severity changes.
+  - Public-host requests remained unverified with `WebException` from the
+    agent environment, matching the documented reachability gap while all
+    local application and routing checks remained healthy.
 
 ## Required Weather Forecast Follow-up
 

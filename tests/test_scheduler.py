@@ -135,6 +135,39 @@ def test_safe_call_records_success_metrics(monkeypatch, fake_metrics_store):
     assert [job_id for job_id, _ in fake_metrics_store.success_calls] == ["ok"]
 
 
+def test_safe_call_uses_explicit_step_id_for_metrics_logs_and_errors(
+    monkeypatch,
+    fake_metrics_store,
+):
+    fake_logger = FakeLogger()
+    monkeypatch.setattr(scheduler, "logger", fake_logger)
+
+    def ok():
+        return "done"
+
+    assert scheduler.safe_call(ok, step_id="medium_specific_step") == "done"
+    assert [job_id for job_id, _ in fake_metrics_store.success_calls] == [
+        "medium_specific_step"
+    ]
+    assert ("info", "START medium_specific_step") in fake_logger.records
+    assert any(
+        level == "info" and message.startswith("DONE medium_specific_step |")
+        for level, message in fake_logger.records
+    )
+
+    def boom():
+        raise ValueError("db timeout")
+
+    with pytest.raises(scheduler.SchedulerContextError) as exc_info:
+        scheduler.safe_call(boom, step_id="failing_medium_step")
+
+    assert exc_info.value.alert_targets == ("failing_medium_step",)
+    assert "failing_medium_step" in str(exc_info.value)
+    assert [job_id for job_id, _ in fake_metrics_store.error_calls] == [
+        "failing_medium_step"
+    ]
+
+
 def test_alert_technical_text_redacts_common_secret_forms():
     source = (
         "postgresql://user:password@server/db "
@@ -1161,8 +1194,8 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
     alert_payloads = []
     plynomery_alert_payloads = []
 
-    def fake_safe_call(fn, *args, **kwargs):
-        calls.append((fn.__name__, args, kwargs))
+    def fake_safe_call(fn, *args, step_id=None, **kwargs):
+        calls.append((fn.__name__, args, kwargs, step_id))
         return fn(*args, **kwargs)
 
     def fake_check_database_availability():
@@ -1234,6 +1267,19 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
     def fake_kalorimetry_import():
         return None
 
+    def fake_score_new_kalorimetry_measurements(
+        *, bootstrap_to_latest_if_missing=False, selection_mode=None
+    ):
+        assert bootstrap_to_latest_if_missing is True
+        assert selection_mode == scheduler.SELECTION_MODE_ACTIVE
+
+    def fake_detect_kalorimetry_events_from_scores(
+        *, model_version, bootstrap_to_latest_if_missing=False
+    ):
+        assert model_version == 1
+        assert bootstrap_to_latest_if_missing is True
+        return {"alert_transitions": []}
+
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "check_database_availability", fake_check_database_availability)
     monkeypatch.setattr(
@@ -1254,11 +1300,21 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
     monkeypatch.setattr(scheduler, "detect_plynomery_events_from_scores", fake_detect_plynomery_events_from_scores)
     monkeypatch.setattr(scheduler, "process_plynomery_alerts", fake_process_plynomery_alerts)
     monkeypatch.setattr(scheduler, "kalorimetry_db_import", fake_kalorimetry_import)
+    monkeypatch.setattr(
+        scheduler,
+        "score_new_kalorimetry_measurements",
+        fake_score_new_kalorimetry_measurements,
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "detect_kalorimetry_events_from_scores",
+        fake_detect_kalorimetry_events_from_scores,
+    )
     monkeypatch.setattr(scheduler, "manometry_db_import", fake_manometry_import)
 
     scheduler.quarter_hour_job.__scheduler_unlocked_fn__()
 
-    assert [name for name, _, _ in calls] == [
+    assert [name for name, _, _, _ in calls] == [
         "fake_check_database_availability",
         "fake_import",
         "fake_get_runtime_model_version",
@@ -1275,7 +1331,18 @@ def test_quarter_hour_job_scores_all_candidate_models_and_alerts_active_only(mon
         "fake_detect_plynomery_events_from_scores",
         "fake_process_plynomery_alerts",
         "fake_kalorimetry_import",
+        "fake_score_new_kalorimetry_measurements",
+        "fake_detect_kalorimetry_events_from_scores",
         "fake_manometry_import",
+    ]
+    assert [step_id for _, _, _, step_id in calls if step_id is not None] == [
+        "get_plynomery_runtime_model_version",
+        "score_new_plynomery_measurements",
+        "detect_plynomery_events_from_scores",
+        "score_new_plynomery_measurements",
+        "detect_plynomery_events_from_scores",
+        "score_new_kalorimetry_measurements",
+        "detect_kalorimetry_events_from_scores",
     ]
     assert alert_payloads == [([2], [20])]
     assert plynomery_alert_payloads == [([101], [202])]
@@ -1528,8 +1595,8 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
         "candidates": [],
     }
 
-    def fake_safe_call(fn, *args, **kwargs):
-        calls.append((fn.__name__, args, kwargs))
+    def fake_safe_call(fn, *args, step_id=None, **kwargs):
+        calls.append((fn.__name__, args, kwargs, step_id))
         return fn(*args, **kwargs)
 
     def fake_rebuild_profiles():
@@ -1541,6 +1608,9 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
             "active_model_name": "Model 1 - exact/fallback baseline",
             "candidates": [],
         }
+
+    def fake_rebuild_current_kalorimetry_snapshots():
+        return {"action": "verified_existing", "verified": True}
 
     def fake_send_vodomery_model_rebuild_report(result):
         assert result is rebuild_result
@@ -1570,6 +1640,11 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "rebuild_profiles", fake_rebuild_profiles)
     monkeypatch.setattr(scheduler, "rebuild_plynomery_profiles", fake_rebuild_plynomery_profiles)
+    monkeypatch.setattr(
+        scheduler,
+        "rebuild_current_kalorimetry_snapshots",
+        fake_rebuild_current_kalorimetry_snapshots,
+    )
     monkeypatch.setattr(scheduler, "send_vodomery_model_rebuild_report", fake_send_vodomery_model_rebuild_report)
     monkeypatch.setattr(scheduler, "send_plynomery_model_rebuild_report", fake_send_plynomery_model_rebuild_report)
     monkeypatch.setattr(scheduler, "send_weekly_vodomery_branch_report", fake_send_weekly_vodomery_branch_report)
@@ -1583,15 +1658,19 @@ def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
 
     scheduler.weekly_job()
 
-    assert [name for name, _, _ in calls] == [
+    assert [name for name, _, _, _ in calls] == [
         "fake_rebuild_profiles",
         "fake_rebuild_plynomery_profiles",
+        "fake_rebuild_current_kalorimetry_snapshots",
         "fake_send_vodomery_model_rebuild_report",
         "fake_send_plynomery_model_rebuild_report",
         "fake_send_weekly_vodomery_branch_report",
         "fake_send_weekly_vodomery_billing_summary_report",
         "fake_send_weekly_elektromery_branch_report",
         "fake_send_weekly_new_elektromery_report",
+    ]
+    assert [step_id for _, _, _, step_id in calls if step_id is not None] == [
+        "rebuild_plynomery_profiles"
     ]
 
 
@@ -1683,6 +1762,12 @@ def test_quarter_hour_schedule_and_manual_specs_include_kalorimetry_and_manometr
     assert "kalorimetru" in quarter_hour_spec.description
     assert manual_specs["kalorimetry_db_import"].run_fn is scheduler.kalorimetry_db_import
     assert manual_specs["kalorimetry_db_import"].lock_names == ("quarter_hour_job",)
+    assert manual_specs["score_new_kalorimetry_measurements"].run_fn is scheduler._run_kalorimetry_scoring_step
+    assert manual_specs["score_new_kalorimetry_measurements"].lock_names == ("quarter_hour_job",)
+    assert manual_specs["detect_kalorimetry_events_from_scores"].run_fn is scheduler._run_kalorimetry_event_detection_step
+    assert manual_specs["detect_kalorimetry_events_from_scores"].lock_names == ("quarter_hour_job",)
+    assert manual_specs["rebuild_current_kalorimetry_snapshots"].run_fn is scheduler.rebuild_current_kalorimetry_snapshots
+    assert manual_specs["rebuild_current_kalorimetry_snapshots"].lock_names == ("weekly_job",)
     assert "manometru" in quarter_hour_spec.description
     assert manual_specs["manometry_db_import"].run_fn is scheduler.manometry_db_import
     assert manual_specs["manometry_db_import"].lock_names == ("quarter_hour_job",)

@@ -170,9 +170,24 @@ Complete one verified step at a time:
   `../../inventories/BOD_NULA_AGENT_LOGIN_SETUP_REVIEW.md` are accepted as
   design input; keep this item open until the facade service identity and
   rotation mechanism are selected and tested.
-- [ ] 4. Define polling intervals, request timeouts, jitter, bounded retries,
+  The selected digest-only bearer design and two-slot rotation contract are
+  documented in `MONITORING_AGENT_AUTHENTICATION_DESIGN.md`; keep this item
+  open until provisioning, rejection, rotation, and remote HTTPS tests pass.
+  Credential provisioning, unauthenticated rejection, monitoring/admin
+  identity separation, and the first authenticated remote HTTPS observation
+  passed on 2026-08-03. Rotation remains unproved, so this item stays open.
+- [x] 4. Define polling intervals, request timeouts, jitter, bounded retries,
   and self-health behavior. Treat transport failure separately from an
   unhealthy scheduler response.
+  Completed locally on 2026-08-04 with dotenv contract version 1: 60-second
+  start-to-start cycles plus 0-5 seconds jitter, three-second request timeout,
+  at most three attempts, and exponential 0.5/1.0-second backoff only for
+  timeout or connection failure. HTTP/schema failures are not retried.
+  Agent heartbeat records `polling`, `healthy`, or `degraded` independently
+  from target application health. The monitoring/facade/authorization matrix
+  passed with `253 passed`; remote HTTPS retry and recovery evidence remains
+  part of steps 2, 9, and 15. The complete monitoring/facade/authorization
+  matrix passed with `254 passed` after adding the reproducible bundle proof.
 - [ ] 5. Define versioned deterministic rules for heartbeat staleness, missed
   critical runs, repeated job failures, database/readiness degradation,
   restart recovery, and partial public-route verification.
@@ -187,6 +202,14 @@ Complete one verified step at a time:
   synthetic skeleton now covers liveness, readiness, and system-scheduler
   contracts; keep this item open until the private facade, service identity,
   complete approved endpoint set, retries, and remote HTTPS tests pass.
+  The implemented three-route facade and `0.2.0-test` client completed one
+  authenticated cross-workstation HTTPS cycle on 2026-08-03 with three
+  schema-valid successful observations and an agent-owned heartbeat. Complete
+  endpoint coverage and retry behavior remain open.
+  Local retry, HTTP/schema fail-closed behavior, serialized cycle timing, and
+  self-health are implemented in the clean PyCharm-oriented `0.4.0-test`
+  bundle; keep this step open until that bundle passes the remote HTTPS
+  loss-and-recovery proof.
 - [ ] 10. Implement and unit-test the deterministic evaluation engine without
   an LLM dependency.
 - [ ] 11. Implement incident state transitions and recovery detection with

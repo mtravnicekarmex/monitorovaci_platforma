@@ -2,7 +2,9 @@
 
 Prepared: 2026-07-30
 
-Status: design approved; unregistered synthetic test implementation started
+Status: remote scheduled 0.7 writer has a diagnosed safe-runtime schema
+incompatibility; local 0.8.1 two-phase recovery and complete Health observation
+candidate awaiting remote proof
 
 Work item: `OPS-002`
 
@@ -159,11 +161,19 @@ Complete one verified step at a time:
   endpoints and classify every field as retained, transient, sensitive, or
   unnecessary. Reviewed in
   `../../inventories/MONITORING_AGENT_HEALTH_ENDPOINT_INVENTORY.md`.
-- [ ] 2. Define the independent runtime boundary and prove that stopping
+- [x] 2. Define the independent runtime boundary and prove that stopping
   `main.py` or the complete monitored workstation does not stop the agent.
   The selected remote runtime and proof contract are documented in
-  `SCHEDULER_MONITORING_AGENT_REMOTE_RUNTIME_DESIGN.md`; keep this item open
-  until the executable non-production proof passes.
+  `SCHEDULER_MONITORING_AGENT_REMOTE_RUNTIME_DESIGN.md`. The 2026-08-05
+  foreground proof showed the remote observer remaining alive through complete
+  monitored-workstation loss and recovery. Audit contracts 2-5 localized a
+  separate blind interval to a supervision-center restart, corrected cross-run
+  cadence, and verified current writer exclusivity. On 2026-08-06 the new
+  `MonitoringAgentTest` Scheduled Task survived an actual supervision-center
+  reboot, resumed four-endpoint observations as one logical `SYSTEM` process
+  tree, and recovered to healthy without new overlap, unclean, or abandoned-run
+  evidence. The independent runtime boundary is therefore proved for the test
+  pilot.
 - [ ] 3. Design a dedicated least-privilege authentication identity and
   credential rotation path without exposing secrets in agent state or logs.
   The status-first authorization and strict setup patterns reviewed in
@@ -184,10 +194,10 @@ Complete one verified step at a time:
   at most three attempts, and exponential 0.5/1.0-second backoff only for
   timeout or connection failure. HTTP/schema failures are not retried.
   Agent heartbeat records `polling`, `healthy`, or `degraded` independently
-  from target application health. The monitoring/facade/authorization matrix
-  passed with `253 passed`; remote HTTPS retry and recovery evidence remains
-  part of steps 2, 9, and 15. The complete monitoring/facade/authorization
-  matrix passed with `254 passed` after adding the reproducible bundle proof.
+  from target application health. The remote foreground process observed
+  target timeouts and automatic recovery on 2026-08-05; retained safe audit
+  evidence remains part of steps 2, 9, 14, and 15. The latest complete local
+  monitoring/facade/authorization matrix passed with `267 passed`.
 - [ ] 5. Define versioned deterministic rules for heartbeat staleness, missed
   critical runs, repeated job failures, database/readiness degradation,
   restart recovery, and partial public-route verification.
@@ -208,8 +218,37 @@ Complete one verified step at a time:
   endpoint coverage and retry behavior remain open.
   Local retry, HTTP/schema fail-closed behavior, serialized cycle timing, and
   self-health are implemented in the clean PyCharm-oriented `0.4.0-test`
-  bundle; keep this step open until that bundle passes the remote HTTPS
-  loss-and-recovery proof.
+  bundle. Remote HTTPS loss and recovery were functionally observed on
+  2026-08-05. Keep this step open for complete approved endpoint coverage and
+  retained audit evidence. Remote `0.4.1-test` integrity is verified. Audit v1
+  confirmed bounded retries and recovery. Audit v2 proved the 4,545.121-second
+  gap occurred after a short healthy cycle, and Windows events identified a
+  supervision-station shutdown/restart. Remote `0.6.0-test` validated
+  prospective process/cycle lifecycle evidence but counted a 46.83-second
+  process transition as an early scheduled start. Remote `0.6.1-test` audit v4
+  corrected same-run cadence and exposed historical `A-B-A-C` writer
+  interleaving. Remote `0.6.2-test` verified fail-closed second-writer rejection
+  with no lifecycle/observation writes and successful lock release after
+  Ctrl+C. Audit v5 concurrent-start/run-reentry facts and the 281-test local
+  matrix passed. `0.7.0-test` adds the approved System Runtime facade
+  and strict client projection as endpoint set 2. Observation contract 3 and
+  audit v6 preserve retained contract-2/set-1 cycles without rewriting them;
+  62 focused, 286 combined, and 306 extended System Health tests passed. The
+  monitored workstation activated the facade through its supported full
+  restart, and the remote 0.7 bundle now runs four endpoints from the retained
+  state. Config, one-cycle, mixed-history audit, continuous polling, task
+  registration, and supervision restart/resume checks passed on 2026-08-06.
+  Local `0.8.1-test` supersedes the undeployed 0.8.0 bundle and adds strict
+  safe projections for detailed Scheduler
+  Health, System Database, Proxy, and SmartFuelPass, plus a direct external
+  public-page probe. Observation contract 4 / endpoint set 3 contains nine
+  ordered observations, environment contract 2 adds the external root URL,
+  and audit v7 preserves exact set-1/set-2 compatibility. It also supports the
+  exact env-v1/four-key bridge required by the observed 0.7 Runtime schema
+  incompatibility and reports current-run retry evidence separately from
+  historical findings. The focused matrix passed with 192 tests. Keep this
+  checklist item open until the remote bridge recovery and nine-observation
+  cycle plus mixed/current-run audit pass.
 - [ ] 10. Implement and unit-test the deterministic evaluation engine without
   an LLM dependency.
 - [ ] 11. Implement incident state transitions and recovery detection with
@@ -220,12 +259,30 @@ Complete one verified step at a time:
   modules, reproduction/read-only checks, test targets, acceptance criteria,
   and prohibited actions.
 - [ ] 14. Add test-mode audit output and comparison against existing scheduler
-  alerts. No external delivery is enabled.
+  alerts. No external delivery is enabled. Remote audit v1 retained aggregate
+  retry, cycle, recovery, timing, and latest-heartbeat evidence with explicit
+  history gaps and no raw output. Remote audit v2 localized the blind interval
+  to a supervision-host restart. Remote audit v3 added prospective
+  clean/unclean process restart and incomplete-cycle evidence; remote audit v4
+  corrected scheduled timing and identified process interleaving. Remote audit
+  v5 distinguishes concurrent starts/run reentry from an unclean restart, and
+  remote single-writer rejection/release passed. Keep this step open for
+  incident audit and comparison with existing alerts.
 - [ ] 15. Test healthy operation, scheduler death, API death, database
   degradation, stale metrics, one-off transport failures, restart recovery,
-  repeated errors, and agent restart/resume.
-- [ ] 16. Run the independent agent on an approved remote test workstation
-  while current alerts remain authoritative.
+  repeated errors, and agent restart/resume. Healthy remote polling,
+  sustained target timeouts, partial-cycle recovery, stable recovery,
+  controlled restart lock release, and duplicate-writer rejection passed in
+  foreground on 2026-08-05. Scheduled automatic agent restart/resume, one
+  logical `SYSTEM` writer after center reboot, continued observations, and
+  recovery from transient postboot transport failures passed on 2026-08-06.
+  Scheduler-process-only death, database degradation, stale metrics, and
+  repeated deterministic incident behavior remain open.
+- [x] 16. Run the independent agent on an approved remote test workstation
+  while current alerts remain authoritative. The remote `0.7.0-test` observer
+  now runs continuously through `MonitoringAgentTest` on the separate
+  supervision center. Its restart/resume proof passed on 2026-08-06, and
+  current alerts remain unchanged and authoritative.
 - [ ] 17. Review pilot evidence for false positives, missed incidents,
   duplicate suppression, recovery behavior, report usefulness, secret
   hygiene, and resource usage.
@@ -236,6 +293,30 @@ Complete one verified step at a time:
 - [ ] 20. Consider replacing legacy alert delivery only after a defined
   parallel-run period, reviewed equivalence evidence, independent agent
   self-monitoring, and explicit approval.
+
+## Reporting-layer handoff
+
+The verified deployment, local 0.8 candidate, and safe input boundary are
+detailed in `MONITORING_AGENT_REPORTING_LAYER_HANDOFF.md`. First complete
+roadmap item 1 by activating and remotely proving endpoint set 3. The following
+implementation sequence is then steps 5-8 and 10-12:
+
+1. version deterministic rules and confirmation/recovery thresholds over the
+   normalized nine-endpoint observations;
+2. define stable incident identities, transition semantics, deduplication,
+   reopening, and bounded agent-owned persistence;
+3. implement the deterministic evaluator with synthetic clock-controlled
+   tests;
+4. define a pure local report contract and renderer with facts, hypotheses,
+   confidence, evidence gaps, diagnostics, and prohibited actions separated;
+5. compare test reports with current legacy alerts before adding any
+   interpretation provider or external delivery.
+
+The current audit is a sanitized aggregate diagnostic, not an incident store.
+The retained raw state must stay on the supervision center and outside Git.
+Repository development uses synthetic fixtures. While the Scheduled Task is
+running, do not invoke foreground continuous mode or `--once`; only
+`--check-config` and `--audit-state` are safe concurrent operator commands.
 
 ## Verification gates
 
@@ -255,7 +336,6 @@ Test-mode implementation is acceptable only when:
 
 The following require later explicit choices:
 
-- remote workstation service-manager registration;
 - polling and severity thresholds;
 - agent-owned state format and retention;
 - model/provider and data-processing boundary;
@@ -264,5 +344,6 @@ The following require later explicit choices:
 - duration and success criteria of the parallel pilot;
 - rollback and minimum fallback alerts after legacy alert replacement.
 
-Registration, production deployment, external delivery, and replacement of
-existing alerts are not authorized by this plan.
+Production promotion, reporting delivery, and replacement of existing alerts
+are not authorized by this plan. The only registered runtime is the verified
+remote test-pilot task described above.

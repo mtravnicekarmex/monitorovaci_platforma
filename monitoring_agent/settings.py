@@ -4,11 +4,17 @@ from dataclasses import dataclass, field
 import re
 from pathlib import Path
 
-from .client import APPROVED_ENDPOINTS, validate_base_url
+from .client import (
+    CONTRACT_ENDPOINT_SET_VERSIONS,
+    ENDPOINT_SETS,
+    validate_base_url,
+    validate_external_web_url,
+)
 
 
-ENV_CONTRACT_VERSION = 1
-ENV_KEYS = {
+ENV_CONTRACT_VERSION = 2
+LEGACY_ENV_CONTRACT_VERSION = 1
+COMMON_ENV_KEYS = {
     "MONITORING_AGENT_ENV_VERSION",
     "MONITORING_AGENT_MODE",
     "MONITORING_AGENT_INSTANCE_ID",
@@ -22,6 +28,19 @@ ENV_KEYS = {
     "MONITORING_AGENT_ENDPOINT_KEYS",
     "MONITORING_AGENT_BEARER_TOKEN",
 }
+ENV_KEYS_BY_VERSION = {
+    LEGACY_ENV_CONTRACT_VERSION: COMMON_ENV_KEYS,
+    ENV_CONTRACT_VERSION: COMMON_ENV_KEYS | {"MONITORING_AGENT_EXTERNAL_WEB_URL"},
+}
+ENV_KEYS = ENV_KEYS_BY_VERSION[ENV_CONTRACT_VERSION]
+ENV_ENDPOINT_SET_VERSIONS = {
+    LEGACY_ENV_CONTRACT_VERSION: 2,
+    ENV_CONTRACT_VERSION: 3,
+}
+ENDPOINT_SET_CONTRACT_VERSIONS = {
+    endpoint_set_version: contract_version
+    for contract_version, endpoint_set_version in CONTRACT_ENDPOINT_SET_VERSIONS.items()
+}
 ENV_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
@@ -31,6 +50,7 @@ class RuntimeSettings:
     mode: str
     instance_id: str
     base_url: str
+    external_web_url: str | None
     state_dir: Path
     timeout_seconds: float
     max_attempts: int
@@ -38,26 +58,34 @@ class RuntimeSettings:
     poll_interval_seconds: float
     poll_jitter_seconds: float
     endpoint_keys: tuple[str, ...]
+    endpoint_set_version: int
+    observation_contract_version: int
     bearer_credential: str = field(repr=False)
 
     @classmethod
     def load(cls, path: Path) -> RuntimeSettings:
         env_path = path.resolve()
         values = _read_strict_env(env_path)
-        actual_keys = set(values)
-        if actual_keys != ENV_KEYS:
+        if "MONITORING_AGENT_ENV_VERSION" not in values:
             raise ValueError(
                 "environment schema mismatch: "
-                f"missing={sorted(ENV_KEYS - actual_keys)!r}, "
-                f"unexpected={sorted(actual_keys - ENV_KEYS)!r}"
+                "missing=['MONITORING_AGENT_ENV_VERSION'], unexpected=[]"
             )
-
         env_version = _integer(
             values["MONITORING_AGENT_ENV_VERSION"],
             name="MONITORING_AGENT_ENV_VERSION",
         )
-        if env_version != ENV_CONTRACT_VERSION:
+        if env_version not in ENV_KEYS_BY_VERSION:
             raise ValueError(f"unsupported environment contract: {env_version!r}")
+        expected_env_keys = ENV_KEYS_BY_VERSION[env_version]
+        actual_keys = set(values)
+        if actual_keys != expected_env_keys:
+            raise ValueError(
+                "environment schema mismatch: "
+                f"missing={sorted(expected_env_keys - actual_keys)!r}, "
+                f"unexpected={sorted(actual_keys - expected_env_keys)!r}"
+            )
+
         if values["MONITORING_AGENT_MODE"] != "test":
             raise ValueError("the observer supports only test mode")
 
@@ -68,6 +96,16 @@ class RuntimeSettings:
         base_url = validate_base_url(values["MONITORING_AGENT_BASE_URL"])
         if base_url.startswith("https://example.invalid"):
             raise ValueError("MONITORING_AGENT_BASE_URL still contains a placeholder")
+
+        external_web_url: str | None = None
+        if env_version == ENV_CONTRACT_VERSION:
+            external_web_url = validate_external_web_url(
+                values["MONITORING_AGENT_EXTERNAL_WEB_URL"]
+            )
+            if external_web_url.startswith("https://example.invalid"):
+                raise ValueError(
+                    "MONITORING_AGENT_EXTERNAL_WEB_URL still contains a placeholder"
+                )
 
         raw_state_dir = values["MONITORING_AGENT_STATE_DIR"].strip()
         if not raw_state_dir:
@@ -117,11 +155,12 @@ class RuntimeSettings:
             raise ValueError("MONITORING_AGENT_ENDPOINT_KEYS must not be empty")
         if len(endpoint_keys) != len(set(endpoint_keys)):
             raise ValueError("MONITORING_AGENT_ENDPOINT_KEYS contains duplicates")
-        unknown_endpoints = set(endpoint_keys) - set(APPROVED_ENDPOINTS)
-        if unknown_endpoints:
+        endpoint_set_version = ENV_ENDPOINT_SET_VERSIONS[env_version]
+        expected_endpoint_keys = ENDPOINT_SETS[endpoint_set_version]
+        if endpoint_keys != expected_endpoint_keys:
             raise ValueError(
-                "MONITORING_AGENT_ENDPOINT_KEYS contains unapproved values: "
-                f"{sorted(unknown_endpoints)!r}"
+                "MONITORING_AGENT_ENDPOINT_KEYS contains an unapproved or outdated "
+                "endpoint set for the selected environment contract"
             )
 
         bearer_credential = values["MONITORING_AGENT_BEARER_TOKEN"]
@@ -133,10 +172,11 @@ class RuntimeSettings:
             raise ValueError("MONITORING_AGENT_BEARER_TOKEN has an invalid format")
 
         return cls(
-            env_contract_version=ENV_CONTRACT_VERSION,
+            env_contract_version=env_version,
             mode="test",
             instance_id=instance_id,
             base_url=base_url,
+            external_web_url=external_web_url,
             state_dir=state_dir,
             timeout_seconds=timeout_seconds,
             max_attempts=max_attempts,
@@ -144,6 +184,10 @@ class RuntimeSettings:
             poll_interval_seconds=poll_interval_seconds,
             poll_jitter_seconds=poll_jitter_seconds,
             endpoint_keys=endpoint_keys,
+            endpoint_set_version=endpoint_set_version,
+            observation_contract_version=(
+                ENDPOINT_SET_CONTRACT_VERSIONS[endpoint_set_version]
+            ),
             bearer_credential=bearer_credential,
         )
 

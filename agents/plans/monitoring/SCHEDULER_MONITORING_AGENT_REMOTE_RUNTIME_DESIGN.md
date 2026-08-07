@@ -2,7 +2,7 @@
 
 Prepared: 2026-07-31
 
-Status: remote boundary selected; network and executable proof pending
+Status: remote boundary and scheduled restart/resume proof accepted for test pilot
 
 Parent plan:
 `SCHEDULER_MONITORING_AGENT_PLAN.md`
@@ -172,6 +172,15 @@ The final mechanism depends on the remote workstation inventory. It must:
 - start even when the monitored workstation is unreachable;
 - provide a safe disable and rollback path.
 
+The Windows pilot now uses Scheduled Task `MonitoringAgentTest` with one
+`AtStartup` trigger, `SYSTEM` service-account identity, highest run level,
+`StartWhenAvailable`, `IgnoreNew`, a one-minute failure restart interval, and
+the exact project-local virtual-environment interpreter and working directory.
+Its command line contains only the runner path and no secret, URL, or `.env`
+value. A 2026-08-06 supervision-center reboot proved automatic resume as one
+logical writer. Detailed evidence and operator constraints are in
+`MONITORING_AGENT_REPORTING_LAYER_HANDOFF.md`.
+
 ### Environment and storage
 
 Use a separately locked agent environment on the remote workstation. Keep
@@ -204,7 +213,8 @@ itself failed. Correlation and recovery rules must preserve that distinction.
 
 ## Remote failure-isolation proof
 
-Parent-plan checklist step 2 remains open until executable proof passes.
+Parent-plan checklist step 2 remains open until the observed executable proof
+has a retained sanitized evidence summary.
 
 The executable procedure is prepared in
 `../../runbooks/MONITORING_AGENT_FAILURE_ISOLATION_TEST.md`. It does not by
@@ -265,12 +275,30 @@ production-boundary evidence:
 
 This restart is not authorized by this design alone.
 
+On 2026-08-05 a real monitored-workstation outage and recovery were observed
+while the remote observer continued on the separate center. It recorded
+sustained target timeouts, a mixed serial-poll recovery cycle, and stable
+success without an observer restart. Audit v2 localized the separate
+4,545.121-second blind interval to a supervision-center shutdown/restart rather
+than a target request. Audit v4 corrected cross-run timing, and the 0.6.2 OS
+lock proof rejected a second writer before state or network activity.
+
+The monitored workstation later completed the supported restart required to
+activate the fourth System Runtime facade. Remote 0.7 config, one-cycle,
+mixed-history, and continuous polling checks passed. On 2026-08-06 the
+supervision center itself restarted: the Scheduled Task resumed one logical
+`SYSTEM` observer, state advanced by 126 complete four-endpoint cycles from the
+pre-reboot checkpoint, and the latest heartbeat recovered to healthy. No new
+concurrent start, process-run reentry, unclean restart, or abandoned run was
+introduced. The controlled restart proofs are complete for the current test
+boundary.
+
 ## Availability and blind spots
 
-Moving the agent off-host closes the largest same-host blind spot, but the
-pilot still needs:
+Moving the agent off-host and registering its startup task closes the largest
+same-host and manual-resume blind spots, but the pilot still needs:
 
-- a self-heartbeat for the remote agent;
+- an independent observer of remote-agent heartbeat loss;
 - monitoring of the private network path;
 - clock synchronization on both stations;
 - bounded local retention during link failure;
@@ -280,21 +308,21 @@ pilot still needs:
 The first pilot may store reports locally on the remote station. External
 email, chat, ticket, or pull-request delivery remains disabled.
 
-## Information required before implementation
+## Remaining operational evidence
 
-Inventory the remote workstation without collecting secret values:
+The Windows runtime, Scheduled Task manager, Python 3.14 environment, shared
+encrypted overlay, dedicated application identity, project/config/state ACLs,
+and agent heartbeat are verified for the test pilot. Continue inventorying
+without collecting secret values:
 
-- operating system and supported service manager;
-- stable private/overlay network identity;
-- whether both stations already share an approved encrypted network;
-- firewall ownership and change procedure;
-- certificate or device-identity mechanism;
-- Python/runtime availability;
-- storage location, ACLs, backup, and retention;
-- clock synchronization;
-- how the remote agent itself will expose a safe heartbeat.
+- tailnet/firewall ownership and change procedure;
+- storage retention, backup, and pressure behavior;
+- clock synchronization and drift thresholds;
+- credential rotation and rollback execution;
+- an independent observer for supervision-center heartbeat loss;
+- report ownership, review workflow, and eventual delivery boundary.
 
-The initial inventory is recorded in
+The detailed inventory is recorded in
 `../../inventories/MONITORING_AGENT_REMOTE_WORKSTATION_INVENTORY.md`.
 
 ## Acceptance criteria
@@ -313,16 +341,46 @@ The remote boundary is accepted when:
 
 ## Current result and next action
 
-The remote runtime boundary is selected. The previous same-host Scheduled Task
-proposal is superseded.
+The remote boundary is operational for the test pilot. A private tailnet-only
+HTTPS facade and dedicated monitoring identity expose four strict GET-only
+projections: liveness, readiness, system scheduler, and System Runtime. The
+monitored workstation activated the fourth route through its supported full
+restart. Remote schema and aggregate runtime checks passed without exposing
+raw responses or credentials.
 
-Next:
+The supervision center runs verified bundle `0.7.0-test` through
+`MonitoringAgentTest`. Its ZIP SHA-256 is
+`0BA56B60FD8F5A229346D565FEA33F58F57F9239FE541F216C07E79E56D7BF20`;
+manifest SHA-256 is
+`39C06473793C92FB281D509C3468493E9562CF9CDB74F27DBEA4D249C4676ACB`.
+The existing external state and credential were retained, and only the ordered
+endpoint set changed. Audit v6 safely combines legacy contract-2/set-1 records
+with current contract-3/set-2 records.
 
-1. confirm tailnet ownership, device approval, and policy-change authority;
-2. design the dedicated monitoring identity and facade authorization;
-3. define the private Tailscale listener and network-grant contract;
-4. implement a minimal safe facade and remote observer skeleton;
-5. execute the non-production isolation and authorization proof.
+The 2026-08-06 reboot proof ended with task state `Running`, one logical
+`SYSTEM` agent, nine lifecycle starts/eight stops/one current run, zero
+unclean or abandoned runs, and a healthy four-observation heartbeat. The
+append-only history still reports one pre-lock concurrent start and one run
+reentry; those counts did not increment. Two Python processes are the one venv
+launcher/interpreter parent-child tree and must not be treated as two writers.
+The first fresh lifecycle write arrived roughly 110 seconds after task launch,
+so postboot checks require fresh state and a bounded startup allowance.
 
-No network, proxy, firewall, credential, task, service, or runtime change has
-been authorized or performed.
+Local `0.8.1-test` supersedes the undeployed 0.8.0 bundle. It prepares eight
+strict private-facade projections and one credential-free direct external-web
+probe as observation contract 4 / endpoint set 3, while supporting the exact
+env-v1/contract-3/set-2 bridge needed to recover from the observed 0.7 Runtime
+schema incompatibility without restoring excluded server fields. Its ZIP
+SHA-256 is
+`D17A88A10814D4CC645AD731B5C2B56B3B662E0662547ED9FCEA3443EF876884` and
+manifest SHA-256 is
+`18A3E477E724EEA61F3EFDCBE303BEBE4DC298A4D646D37FE643D6CD9C49CBB1`.
+This is a local candidate, not a deployed result.
+
+The next action is the separately controlled 0.8.1 unchanged-env-v1 bridge,
+then the remote env-v2 configuration migration and one complete
+nine-observation cycle plus audit-v7 mixed/current-run proof. Only then begin the
+deterministic incident and reporting foundation. Retention, credential
+rotation, independent observation of the center, interpretation providers,
+external delivery, and legacy-alert replacement remain open. No
+monitored-application mutation is authorized.

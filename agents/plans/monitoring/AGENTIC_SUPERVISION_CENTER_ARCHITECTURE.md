@@ -2,7 +2,7 @@
 
 Prepared: 2026-07-31
 
-Status: target architecture approved; packaging and installation pending
+Status: first scheduled workload installed and restart-verified; reporting pending
 
 The first-login and setup design is informed by the bounded review in
 `../../inventories/BOD_NULA_AGENT_LOGIN_SETUP_REVIEW.md`. The center adopts
@@ -43,7 +43,8 @@ Monitored workstation
 
 The remote center must not receive:
 
-- the complete Git repository or `.git` metadata;
+- the complete `monitorovaci_platforma` Git repository or its `.git`
+  metadata;
 - `.env`, credentials, cookies, browser sessions, DSNs, or application
   secrets;
 - operational database drivers or connection strings;
@@ -112,19 +113,25 @@ monitoring-agent\
 |-- .env.example
 |-- .gitignore
 |-- run_monitoring_agent.py
+|-- register_monitoring_agent_task.ps1
+|-- README.md
 |-- monitoring_agent\
+|   |-- __init__.py
+|   |-- __main__.py
+|   |-- audit.py
 |   |-- client.py
 |   |-- observer.py
 |   |-- settings.py
-|   `-- store.py
+|   |-- store.py
+|   `-- synthetic_server.py
 |-- manifest.json
 `-- manifest.sha256
 ```
 
 The bundle contains no live credential. The operator creates one ignored,
 ACL-restricted `.env` locally from `.env.example`; the same Python entry point
-is used in PyCharm foreground testing and any later approved Windows
-automatic-start registration.
+is used in PyCharm foreground testing and the approved Windows test-pilot
+Scheduled Task. Any future task or service change requires separate review.
 
 ## Packaging contract
 
@@ -155,7 +162,11 @@ On the clean Windows 11 Pro center:
 - register a non-interactive task only after dry-run review;
 - retain the previous verified bundle for rollback.
 
-Installation must not clone the repository.
+Installation must not clone the complete `monitorovaci_platforma` repository.
+A separately reviewed minimal agent repository is permitted only when its
+tracked runtime files match the approved manifest and it excludes live
+configuration, credentials, state, virtual environments, and IDE workspace
+data.
 
 Installation, non-secret configuration, facade authorization, optional
 interpretation-provider authorization, diagnostics, and foreground test
@@ -195,5 +206,54 @@ The second workstation is designated as the agentic supervision center.
 Windows 11 Pro, Python 3.14, Tailscale installation, shared-tailnet membership,
 and peer connectivity are confirmed.
 
-No repository clone, bundle transfer, task registration, facade, credential,
-Grant, Serve listener, or agent installation has been performed.
+The private GET-only monitoring facade, digest-verified service identity, and
+tailnet-only HTTPS listener on reserved port 9443 are operational. The current
+`0.7.0-test` observer is installed with a local ignored `.env`, an isolated
+Python 3.14 virtual environment, and agent-owned state outside the code
+directory. Its four endpoint projections are liveness, readiness, system
+scheduler, and System Runtime.
+
+The minimal remote project is tracked separately in public repository
+`mtravnicekarmex/monitoring_agent_0.4.0`. Current `master` commit
+`3c171cf49615cf792211f3c992320dade539ccc4` matches the verified
+`0.4.1-test` manifest and contains no live `.env`, credential, state, virtual
+environment, or IDE workspace. Remote audit v2 and local Windows events
+attribute the 4,545.121-second observation gap to supervision-station
+shutdown/restart, not a blocked target request. Remote `0.6.0-test` validated
+prospective process lifecycle/restart evidence. Remote `0.6.1-test` audit
+contract 4 prevented cross-run intervals from
+becoming scheduled-cadence findings and exposed historical writer
+interleaving. Remote `0.6.2-test` verified state-scoped OS writer exclusivity,
+lock release, and audit-v5 concurrent-start/run-reentry evidence.
+
+The monitored workstation completed the supported full restart needed to
+activate the System Runtime facade, after which the center migrated to 0.7
+without changing the credential or state path. The 0.7 ZIP and manifest,
+four-endpoint config, one controlled cycle, mixed-history audit, and continuous
+polling passed. The complete platform repository remains absent from the
+center; the separately verified public minimal repository remains at its older
+0.4.1 baseline.
+
+`MonitoringAgentTest` now owns the observer lifecycle as a Windows Scheduled
+Task under `SYSTEM`. A 2026-08-06 center reboot proved automatic resume, one
+logical venv launcher/interpreter process tree, continued state updates, and a
+healthy current heartbeat. Lifecycle contained nine starts, eight stops, one
+active run, and no unclean or abandoned run. Historical pre-lock overlap facts
+remain visible but did not increment. The roughly 110-second cold-start delay
+requires postboot checks to wait for fresh lifecycle/observation evidence
+rather than trusting task state alone.
+
+Local `0.8.1-test` supersedes the undeployed 0.8.0 bundle and prepares the
+complete approved observation expansion: eight strict private-facade
+projections plus a direct credential-free external-web probe, with observation
+contract 4 / endpoint set 3 and audit contract 7. It also provides the exact
+env-v1/contract-3/set-2 bridge required to recover from the observed 0.7
+Runtime schema transition without weakening the safe target projection. It is
+not deployed. The next gate is the controlled bridge recovery followed by the
+env-v2 remote migration and a verified nine-observation mixed/current-run
+cycle. Only then does the next layer become deterministic incident evaluation
+and local reporting using `MONITORING_AGENT_REPORTING_LAYER_HANDOFF.md`.
+Bounded retention, credential rotation, independent observation of center
+loss, interpretation-provider authorization, external delivery, and
+future-agent onboarding remain open or separately gated. Current scheduler
+alerts remain authoritative.

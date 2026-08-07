@@ -6,3 +6,4 @@ __pycache__/
 *.py[cod]
 monitoring-agent-state/
 .state/
+.venv/

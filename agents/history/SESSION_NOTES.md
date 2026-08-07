@@ -6,7 +6,7 @@ Purpose: short current project baseline and handoff for
 
 ## Current baseline
 
-Date: 2026-07-30
+Date: 2026-08-06
 
 - Production surfaces are the scheduler from `main.py`, FastAPI from
   `services/api/main.py`, Streamlit from `moduly/apps/dashboard/login.py`, and
@@ -22,36 +22,86 @@ Date: 2026-07-30
 
 ## Active handoff
 
-- Active product work: `KAL-025`, the separately approval-gated kalorimetry
-  scheduler integration.
-- Required procedure:
-  `../runbooks/KALORIMETRY_ACTIVATION_RUNBOOK.md`.
-- Activation remains subject to the runbook's forecast, snapshot, scoring,
-  event, scheduler, regression, restart, and post-rollout gates.
-- Do not infer approval for production snapshots, scoring/event tables,
-  scheduler writes, alert delivery, reports, or email from implementation
-  readiness alone.
-- The historical session split (`DOC-002`) was completed on 2026-07-30 with
-  271 entries preserved: 98 in the June archive and 173 in the July archive.
-- Archive preservation checks, focused tests (`10 passed`), the complete
-  regression suite (`1240 passed`), and `git diff --check` all passed.
+- Active product work: `OPS-002`, the independent read-only scheduler
+  monitoring agent.
+- Remote `0.7.0-test` is deployed on the separate supervision center and runs
+  through the restart-verified Windows Scheduled Task `MonitoringAgentTest`.
+  The task owns the only continuous writer, runs as `SYSTEM`, and uses the
+  project-local Python 3.14 virtual environment. Legacy alerts remain
+  authoritative.
+- The deployed 13-file ZIP SHA-256 is
+  `0BA56B60FD8F5A229346D565FEA33F58F57F9239FE541F216C07E79E56D7BF20`;
+  manifest SHA-256 is
+  `39C06473793C92FB281D509C3468493E9562CF9CDB74F27DBEA4D249C4676ACB`.
+  Corrected archive/extraction verification passed with no path, content, or
+  allowlist mismatches and no real `.env` in the bundle.
+- The state-preserving configuration migration retained the credential, state
+  path, key set, and every non-endpoint value. The current exact endpoint set
+  is `live`, `ready`, `system_scheduler`, and `system_runtime`. The monitored
+  facade now returns the stricter safe Runtime schema. Deployed 0.7 still
+  expects the former full response, so its HTTP-200 call currently becomes a
+  client schema error; local 0.8.1 contains the reviewed recovery bridge.
+- Audit v6 preserves legacy observation-contract-2/set-1 records and evaluates
+  new four-endpoint observations as contract 3/set 2. The latest retained
+  aggregate reached 1,389 complete cycles: 1,313 healthy, 71 partial failure,
+  and 5 unreachable. The latest heartbeat is degraded with two failures; 68
+  retained schema errors have the diagnosed rolling-upgrade cause above.
+- Lifecycle is nine starts, eight stops, and one current open run, with zero
+  unclean and zero abandoned runs. The retained historical
+  `concurrent_start_count=1` and `process_run_reentry_count=1` are immutable
+  pre-lock evidence and did not increment during deployment or reboot.
+- Windows exposes the one scheduled venv invocation as a two-process
+  launcher/interpreter parent-child tree. Sanitized ownership and ancestry
+  checks proved one logical `SYSTEM` agent. Do not use raw Python process count
+  as writer identity.
+- The first postboot lifecycle write followed task launch by approximately 110
+  seconds. Require a fresh lifecycle or observation record in postboot checks;
+  task state `Running` alone is not sufficient.
+- Local `0.8.1-test` supersedes the undeployed 0.8.0 bundle and prepares eight safe facade projections and one direct
+  credential-free external-web probe as observation contract 4 / endpoint set
+  3. The monitored workstation activated the routes. A remote 0.7 audit then
+  exposed its exact-schema incompatibility with the safer Runtime projection;
+  the local 0.8.1 env-v1 bridge correction passed 192 focused tests and
+  deterministic bundle checks but is not deployed. Roadmap item 1 remains open
+  until the center proves bridge recovery and one complete nine-observation
+  cycle plus audit-v7 mixed-history/current-run compatibility.
+- After that activation proof, implement deterministic rules, thresholds,
+  incident lifecycle, bounded agent-owned report persistence, and a pure local
+  renderer before interpretation or delivery. Credential rotation,
+  independent center observation, retention, external delivery, and
+  legacy-alert replacement remain separate gates.
+- While the Scheduled Task is running, do not start foreground continuous mode
+  or `--once` against the same state. `--check-config` and `--audit-state`
+  remain safe concurrent commands.
 
 ## Latest runtime verification
 
-The read-only check immediately after the 2026-07-30 13:10:04 restart found:
+The read-only check after the 2026-08-05 restart found:
 
-- startup task `API_dashboard_caddy` completed with result 0;
-- expected listeners 80, 443, 2019, 8000, and 8001 were present;
+- Windows booted at `2026-08-05 08:13:22 +02:00` and startup task
+  `API_dashboard_caddy` ran at `08:13:32` with result 0;
+- listeners 80, 443, 2019, 8000, 8001, and tailnet-only 9443 were present;
+  temporary listeners 8010/8011 were absent;
 - local FastAPI live/ready, Streamlit health, and Caddy admin returned HTTP
-  200;
-- scheduler heartbeat was fresh and the protected kalorimetry prediction route
-  returned the expected HTTP 401 without credentials;
-- the public hostname timed out from the agent environment and was not
-  independently verified there;
-- the check occurred before the first scheduled quarter-hour execution after
-  that restart, so that execution was not confirmed by this check.
+  200, while the unauthenticated monitoring facade returned HTTP 401;
+- tracked and deployed Caddyfile hashes matched;
+- scheduler heartbeat was current and the 08:35 quarter-hour, database,
+  import, plynomery, and kalorimetry steps were successful with zero failures
+  in the preceding 24 hours.
 
-Treat this as a dated observation, not a guarantee of current runtime health.
+The supervision-center verification completed on 2026-08-06:
+
+- `MonitoringAgentTest` started automatically after boot and remained
+  `Running` as one logical `SYSTEM` agent;
+- the task definition, interpreter, working directory, startup trigger,
+  duplicate suppression, and restart settings matched the reviewed contract;
+- postboot state advanced from 1,036 to 1,162 complete cycles and recovered
+  from transient connection errors/timeouts to a healthy four-observation
+  heartbeat;
+- audit sequence, endpoint order, retry bounds, lifecycle consistency, and
+  latest-heartbeat consistency passed.
+
+Treat these as dated observations, not guarantees of current runtime health.
 
 ## History index
 
@@ -543,3 +593,934 @@ Known risks or accepted gaps:
 - The new archive has not been transferred. Remote `.env` provisioning,
   foreground HTTPS verification, failure isolation, credential rotation, and
   Windows automatic startup remain separate next gates.
+
+### 2026-08-05 - Monitoring-agent foreground loss and recovery observed
+
+- The `0.4.0-test` project is provisioned and running from an isolated Python
+  environment on the separate supervision center. Its real local `.env` and
+  agent-owned state remain outside GitHub output and were not displayed.
+- The standalone public repository
+  `mtravnicekarmex/monitoring_agent_0.4.0` has one `master` commit,
+  `88158812000c9a91b9a7da1c61045737549a3363`. Its 11 runtime files match the
+  reviewed `0.4.0-test` manifest, `.env` is absent, and `.gitignore` excludes
+  live configuration, IDE state, Python caches, and local agent state. The
+  repository does not track the local virtual environment, but `.venv/` is not
+  yet explicitly ignored and must be added before the next commit.
+- One uninterrupted foreground output sequence showed healthy cycles,
+  sustained three-endpoint `timeout` cycles during target loss, one mixed
+  `success`/`timeout` cycle while the target returned, and stable successful
+  cycles afterward. The mixed cycle is expected because endpoints are polled
+  serially and recovery occurred during the cycle.
+- This functionally proves remote target-loss detection and recovery without
+  restarting the observer. Formal retained evidence is still required for
+  bounded attempt counts, the `degraded` to `healthy` heartbeat transition,
+  unchanged process identity, and serialized start-to-start timing.
+- Current legacy alerts remain authoritative. No credential rotation,
+  Windows automatic-start registration, external delivery, application or
+  database mutation, manual job, or alert replacement was performed.
+
+### 2026-08-05 - Monitoring-agent 0.4.1 integrity repair prepared
+
+- Remote `master` commit `08362ec3ff504986109180bb9d1c89ea096ae19b`
+  changed only `.gitignore` by adding `.venv/`. No real `.env`, virtual
+  environment, state, PR, or issue was added.
+- Repository preflight found the expected integrity failure: `manifest.json`
+  still declared the preceding 88-byte `.gitignore`, while the hardened file
+  is 95 bytes with SHA-256
+  `E4924A6E050E0769863BAB798E453493383CEEB636727CA2210CF24D70C45470`.
+- Local packaging source, README, and bundle regression coverage now include
+  `.venv/`. Reproducible bundle `0.4.1-test` contains 11 declared runtime
+  files, no real `.env`, no unexpected entries, zero file-hash mismatches, and
+  a valid manifest digest.
+- `0.4.1-test` ZIP SHA-256 is
+  `1EEBB2E946A87E5300A72126AF9A3E358DC6EA121384D2BC8BBA568E3F5DB49B`;
+  manifest SHA-256 is
+  `3705F5458D2D9D4E8A8EDB556A34993FED17B4646CF61DBC1AF9AEBC2D68E437`.
+- The bundle-builder regression passed and the complete
+  monitoring-agent/facade/authorization matrix passed with `267 passed`.
+  The new bundle has not yet been synchronized to the standalone repository
+  or run on the center.
+
+### 2026-08-05 - Remote 0.4.1 verified and local 0.5 audit ready
+
+- Standalone repository `master` commit
+  `3c171cf49615cf792211f3c992320dade539ccc4` synchronized the expected README,
+  `manifest.json`, and `manifest.sha256` after the preceding `.gitignore`
+  hardening. The resulting `0.4.1-test` manifest digest is exact and `.env`
+  remains absent.
+- New read-only CLI mode `--audit-state` validates the exact observation and
+  heartbeat schemas, configured endpoint sequence, attempt bounds, retry
+  exhaustion, inferred cycle health/recovery transitions, timing, overlap,
+  and latest heartbeat consistency.
+- Audit output excludes state paths, `.env`, bearer, instance/PID values,
+  UUIDs, timestamps, endpoint keys, payloads, and raw records. It reports only
+  PID presence and aggregate facts. Invalid JSON/schema fails closed without
+  echoing raw content.
+- The current atomic heartbeat records only the latest state. The audit
+  therefore declares `heartbeat_transition_history_not_persisted` and
+  `process_identity_history_not_persisted` instead of claiming those proofs.
+- Reproducible `0.5.0-test` contains 12 declared files, no real `.env`, no
+  unexpected entries, zero hash mismatches, and a valid manifest digest. ZIP
+  SHA-256 is
+  `739B6C57BE2BAF24CA2F4219F7FBF358859DE53D8AC5BAC07A5B6E4F420DB748`;
+  manifest SHA-256 is
+  `E94580B4EEBD74FCF653F2FC699CE7EA521012C68F824261304AAFF4E2B9269A`.
+- Focused monitoring-agent tests passed with `48 passed`; the combined
+  monitoring-agent/facade/API-authorization matrix passed with `270 passed`;
+  Python compile and `git diff --check` passed. `0.5.0-test` has not yet been
+  synchronized to or executed on the center.
+
+### 2026-08-05 - Remote audit v1 found a target-loss timing blind interval
+
+- Remote `0.5.0-test` audit v1 read the retained agent-owned state without
+  network access or writes. It reported 405 observations in 135 complete
+  three-endpoint cycles, with no trailing observations or endpoint-order
+  mismatches.
+- Outcomes were 90 healthy, 44 fully unreachable, and one partial-failure
+  cycle. The 45 degraded cycles formed two closed episodes of one and 44
+  cycles. Attempt bounds and retry exhaustion passed; 133 timeout observations
+  exhausted three attempts and one success completed after retry.
+- The latest heartbeat was healthy, matched the last complete cycle, and used
+  the same configured observer instance as all observations. Historical
+  heartbeat transitions and process identity remain explicitly unpersisted.
+- Timing had no overlaps or early starts, but two intervals exceeded jitter.
+  The maximum start-to-start interval was 4,545.121 seconds. The user confirmed
+  that the monitored station, not the supervision center, was unavailable
+  during this interval. This blocks formal failure-isolation closure because
+  ordinary bounded target timeouts must not suspend observer cadence that long.
+- Local `0.5.1-test` audit contract v2 now reports safe configured timeout
+  budget, cycle-duration aggregates, the longest cycle, longest interval, and
+  largest late interval. It can distinguish time accumulated inside the
+  previous cycle from a between-cycle or wall-clock discontinuity without raw
+  timestamps or identifiers and without repeating the outage.
+- Reproducible `0.5.1-test` contains 12 declared files, no real `.env`, no
+  unexpected entries, zero hash mismatches, and a valid manifest digest. ZIP
+  SHA-256 is
+  `85FFDEC8E807068DFF82AEE56422B2D0FB05C57D9C6D8F6902377519B24FBBE8`;
+  manifest SHA-256 is
+  `7B64B7579AB93B0A2A3BF82DB9473020FD3216ED3CB8E54BF8B97ABEFBDC78E3`.
+- Focused tests passed with `50 passed`; the combined monitoring-agent,
+  facade, and API-authorization matrix passed with `272 passed`.
+- Next synchronize and verify `0.5.1-test`, then run `--audit-state` against
+  the same retained state. Do not repeat the target outage before reviewing
+  `longest_cycle`, `longest_interval`, and `largest_late_interval`.
+
+### 2026-08-05 - Supervision restart identified and 0.6 lifecycle candidate prepared
+
+- Remote audit contract v2 processed 549 observations in 183 complete cycles.
+  Its longest request cycle was 31.816 seconds against a 31.5-second configured
+  all-timeout budget and remained within the two-second audit tolerance.
+- The 4,545.121-second interval ended at cycle 134 after a healthy 0.071-second
+  cycle, exceeded the allowed 67 seconds by 4,478.121 seconds, and was
+  classified `unexplained_between_cycles_or_clock_discontinuity`. Windows
+  System event times matched a supervision-station shutdown/restart. The gap
+  was not caused by a blocked target HTTP request.
+- Local `0.6.0-test` assigns a new random run ID per process and persists it
+  with cycle ID/sequence in observation contract 2 and the latest heartbeat.
+  Append-only lifecycle contract 1 records process starts and controlled stops
+  with local PID evidence.
+- Audit contract 3 groups observations by run/cycle identity, retains partial
+  cycles across abrupt restarts, and reports only aggregate process starts,
+  clean/unclean restart counts, abandoned runs, stop reasons, sequence checks,
+  and lifecycle consistency. Run IDs, PID values, timestamps, paths, and raw
+  records remain excluded.
+- `register_monitoring_agent_task.ps1` is included as an idempotent,
+  `SupportsShouldProcess`-gated helper with `-WhatIf`. Its reviewed default is
+  `SYSTEM` plus `AtStartup`, `StartWhenAvailable`, one-minute failure restarts,
+  `IgnoreNew`, unlimited execution, and exact interpreter/working directory.
+  It contains no secret command-line value and was parsed but not executed.
+- A new empty state directory is mandatory; retained v0.5 state remains
+  immutable evidence and cannot acquire retrospective process identity.
+- Reproducible `0.6.0-test` contains 13 declared files, no real `.env`, no
+  unexpected entries, zero hash mismatches, and a valid manifest digest. ZIP
+  SHA-256 is
+  `41636BDD70612F0A89471CC102B5640C59AADE9DCC63E5426789F39DD77481B3`;
+  manifest SHA-256 is
+  `F7361A19051145A6E7C03A30AC1BEAFC762026D12FD819FDA00EDC7A84E760F1`.
+- Focused monitoring-agent tests passed with `55 passed`; the combined
+  monitoring-agent/facade/API-authorization matrix passed with `277 passed`;
+  Python compile, PowerShell parse, manifest/no-secret verification, and
+  `git diff --check` passed.
+- Next synchronize and re-verify `0.6.0-test`, provision a new empty remote
+  state directory, and complete foreground lifecycle/audit checks. Preview
+  startup registration only with `-WhatIf`; actual registration, task start,
+  reboot proof, and rollback require separate approval.
+
+### 2026-08-05 - Remote 0.6 lifecycle passed and cross-run timing corrected
+
+- After switching away from incompatible v0.5 state, remote audit contract 3
+  accepted observation contract 2 and lifecycle contract 1. It reported two
+  healthy complete cycles from two process runs, valid endpoint/cycle order,
+  a matching latest heartbeat, one abandoned unclosed run, and one controlled
+  `once_completed` stop.
+- The 46.83-second interval between those runs was incorrectly counted as
+  `early_start_count=1` and classified `scheduled_interval`. This was limited
+  to aggregate audit interpretation; polling, retries, lifecycle persistence,
+  and target-health recognition remained valid.
+- Local `0.6.1-test` raises the audit contract to 4. Scheduled interval,
+  overlap, early/late, longest-interval, and largest-late findings now compare
+  only consecutive cycles sharing one `run_id`. Cross-run timing is retained
+  separately through safe `cross_run_*` aggregates and
+  `process_run_transition` classification.
+- Observation contract 2 and lifecycle contract 1 are unchanged, so the
+  current remote 0.6 state must be reused. A new empty state remains mandatory
+  only when migrating from pre-0.6.
+- Reproducible `0.6.1-test` contains 13 declared files and no real `.env`.
+  ZIP SHA-256 is
+  `18B3A8784D37737365FF276CC4BE9D21E4A4CB844A31642D03642E36392D1EE0`;
+  manifest SHA-256 is
+  `E1F06F2363DEC0732F8BC7C27A9669DB119788EB590BB1B364392255CF274C38`.
+  Manifest digest, declared content hashes/sizes, and exact allowlist passed.
+- Focused monitoring-agent tests passed with `56 passed`; the combined
+  monitoring-agent/facade/API-authorization matrix passed with `278 passed`.
+  Scheduled Task registration, task start, supervision reboot proof, and
+  rollback remain separate approval gates.
+
+### 2026-08-05 - Remote overlap identified and 0.6.2 single-writer lock prepared
+
+- Remote `0.6.1-test` audit v4 processed 72 successful observations in 24
+  healthy cycles. The 20 same-run intervals averaged 62.268 seconds, ranged
+  from 60.111 to 64.858 seconds, and had zero early, late, or overlap findings.
+  Cross-run timing no longer contaminated scheduled cadence.
+- Three distinct runs generated three run transitions. Lifecycle contained a
+  later `keyboard_interrupt` stop for the earlier foreground run plus one
+  `once_completed` stop, proving historical process interleaving even though
+  individual HTTP cycles did not overlap.
+- Local `0.6.2-test` holds a non-blocking OS file lock scoped to the state
+  directory before lifecycle, heartbeat, observation, or HTTP activity. A
+  multiprocess regression proved that a second writer exits with a sanitized
+  error and creates no runtime file; forced process termination released the
+  OS lock without deleting the persistent one-byte lock file.
+- Audit contract 5 adds safe run-reentry and concurrent-start facts. The
+  retained remote pattern is classified as one historical reentry and one
+  concurrent start, not as an unclean restart. Observation contract 2 and
+  lifecycle contract 1 remain unchanged and compatible.
+- Reproducible `0.6.2-test` contains 13 declared files and no real `.env`.
+  ZIP SHA-256 is
+  `C14A694F650BED6948450BEFA3704BF62B29359537ADE51B67B25DC9A8DC8C5D`;
+  manifest SHA-256 is
+  `24CD22C4F41ED9A29FB74886EBF73ED8A1539917D34A96628CDE3BAEC99CB1D4`.
+  Manifest digest, archive allowlist/content, and workspace-source equality
+  passed with zero mismatches.
+- Focused monitoring-agent tests passed with `59 passed`; the combined
+  monitoring-agent/facade/API-authorization matrix passed with `281 passed`.
+- Before remote 0.6.2 startup, stop every pre-lock 0.6.0/0.6.1 polling process.
+  Then retain the existing state and verify rejection/release with two
+  foreground consoles. Scheduled Task registration, task start, reboot proof,
+  and rollback remain separate approval gates.
+
+### 2026-08-05 - Remote 0.6.2 single-writer proof passed
+
+- Audit v5 before contention contained four process runs, seven lifecycle
+  events, one historical run reentry, one historical concurrent start, and no
+  unclean restart. The active 0.6.2 foreground run was healthy.
+- A concurrent `--once` exited with the sanitized expected error
+  `agent startup error: state writer lock is unavailable`. While the rejected
+  invocation was attempted, the first writer added four healthy cycles, but
+  process-run, transition, lifecycle-event, start, and stop counts remained
+  unchanged. The rejected process therefore made no runtime-state write.
+- After the first writer stopped with Ctrl+C, a controlled `--once` acquired
+  the released lock and completed successfully. Final audit v5 reported 47
+  healthy cycles, 141 successful observations, five starts, five controlled
+  stops, ten lifecycle events, zero unclosed/abandoned runs, and a matching
+  healthy heartbeat.
+- Historical `process_run_reentry_count=1` and `concurrent_start_count=1`
+  remained unchanged, while `unclean_restart_count=0`. No new writer overlap
+  was introduced by 0.6.2. The foreground single-writer rejection and release
+  proof is complete.
+- At this 2026-08-05 checkpoint Scheduled Task registration remained
+  unexecuted and separately gated. The later 2026-08-06 entry records the
+  approved registration and reboot proof.
+
+### 2026-08-05 - Local 0.7 System Runtime endpoint prepared
+
+- The private monitoring facade now reuses the existing safe System Runtime
+  collector at authenticated GET-only
+  `/api/v1/monitoring/health/system/runtime`.
+- The client validates the complete source schema but retains only approved
+  boot, startup-task, and listener facts. Free text, labels, local addresses,
+  process IDs, and next-run data are discarded; schema mismatches fail closed
+  without retry.
+- Observation contract 3 records endpoint set 2 (`live`, `ready`,
+  `system_scheduler`, `system_runtime`). Audit contract 6 supports both legacy
+  contract-2/set-1 and current contract-3/set-2 cycles in the existing 0.6
+  append-only state, with per-set ordering, heartbeat count, and timeout
+  budgets.
+- Focused monitoring-agent tests passed with `62 passed`; the combined
+  monitoring-agent/facade/API-authorization matrix passed with `286 passed`,
+  and the extended matrix including System Health collectors passed with
+  `306 passed`.
+  The reproducible 13-file ZIP SHA-256 is
+  `0BA56B60FD8F5A229346D565FEA33F58F57F9239FE541F216C07E79E56D7BF20`;
+  manifest SHA-256 is
+  `39C06473793C92FB281D509C3468493E9562CF9CDB74F27DBEA4D249C4676ACB`.
+- No API restart, remote synchronization, Scheduled Task registration, or
+  external delivery was performed.
+
+### 2026-08-05 - Pre-restart handoff for facade activation
+
+- The operator confirmed that the monitored workstation's FastAPI/Caddy
+  process tree is established by the Windows startup process. Loading the new
+  System Runtime facade therefore requires a full restart of the monitored
+  workstation; there is no supported independent API restart in the current
+  workflow.
+- The read-only pre-restart baseline on 2026-08-05 found Windows boot time
+  `08:13:22 +02:00`; startup task `API_dashboard_caddy` last ran at
+  `08:13:32 +02:00`, returned result `0`, and is currently `Ready`. Expected
+  listeners are present on ports 80, 443, 2019, 8000, 8001, and tailnet-only
+  9443; temporary ports 8010/8011 are absent. Local API liveness, readiness,
+  and Streamlit health each returned HTTP 200.
+- At this checkpoint the source contained the new route and local 0.7 agent,
+  but the running production API still had the previous facade. The route was
+  therefore undeployed on 2026-08-05; the later 2026-08-06 entry records its
+  activation and verification.
+- Leave the independent remote `0.6.2-test` foreground observer running through
+  the monitored-station restart. It should record bounded target timeouts and
+  then recovery while retaining the same observer process. Do not restart the
+  supervision workstation for this step.
+- After boot, verify aggregate-only facts: the startup task completed
+  successfully, required API/proxy/private-facade listeners returned, existing
+  facade liveness/readiness/scheduler routes recovered, and authenticated
+  `/api/v1/monitoring/health/system/runtime` returns HTTP 200 with the expected
+  safe schema. Do not print the bearer or raw operational response.
+- If the new route is absent, unauthorized, or schema-invalid, keep the 0.7
+  remote upgrade blocked. Preserve the current remote state and continue from
+  the 0.6.2 baseline until the monitored facade is corrected and activated.
+- Once the route passes, allow the old agent to record at least one healthy
+  recovery cycle, stop it with Ctrl+C, and confirm no other writer remains.
+  Transfer and integrity-check the 0.7 ZIP, reuse the same state directory and
+  secret values, and change only `MONITORING_AGENT_ENDPOINT_KEYS` to
+  `live,ready,system_scheduler,system_runtime`.
+- Run `--check-config` first and require `endpoint_count=4`; then run one
+  `--once` cycle and require four successful observations. Finally run
+  `--audit-state` and require audit contract 6, valid cycle/endpoint ordering,
+  retry invariants, a matching healthy heartbeat, legacy contract-2/set-1
+  counts, and four new contract-3/set-2 observations. Historical
+  single-writer validity may remain false because the old overlap evidence is
+  immutable; no new reentry/concurrent-start finding may be introduced.
+- Continuous 0.7 polling, `-WhatIf` startup review, actual task registration,
+  supervision reboot, incident delivery, and remaining detailed
+  Scheduler/Database endpoint extensions are later gates.
+- The workspace remains intentionally non-clean with the cumulative monitoring
+  source, documentation, scripts, tests, and versioned ZIP artifacts. No commit
+  or push was performed in this handoff. The user-created
+  `data/smartfuelpass/vypisy/` directory was not inspected or changed.
+
+### 2026-08-06 - Remote 0.7 deployment, task registration, and reboot proof
+
+- The monitored workstation completed its supported full restart. The existing
+  local startup task and required runtime surfaces recovered, and the new
+  authenticated monitoring System Runtime route returned HTTP 200 with the
+  reviewed schema, `runtime_status=ok`, five expected listeners, zero non-OK
+  expected listeners, and no temporary listener.
+- The remote `0.6.2-test` writer was stopped cleanly after recording target
+  recovery. Its audit had six starts and six stops, zero open/unclean runs, and
+  the historical concurrent-start/run-reentry findings unchanged at one.
+- The transferred `0.7.0-test` ZIP matched SHA-256
+  `0BA56B60FD8F5A229346D565FEA33F58F57F9239FE541F216C07E79E56D7BF20`.
+  The manifest matched SHA-256
+  `39C06473793C92FB281D509C3468493E9562CF9CDB74F27DBEA4D249C4676ACB`.
+  Corrected extracted verification found 13 declared files, 15 extracted
+  entries including manifests, zero invalid relative paths, zero content or
+  allowlist mismatches, and no real `.env`.
+- An earlier archive verifier falsely reported path escapes because its Windows
+  path containment test was incorrect; hash and manifest checks had already
+  passed. The corrected verifier supersedes that tooling failure.
+- The first configuration migration attempt tried to copy protected ACL
+  metadata and failed with `PrivilegeNotHeldException`; rollback removed the
+  incomplete target `.env`. The corrected migration recreated the file,
+  preserved its full key set, credential, state path, and all other values,
+  changed only the endpoint count from three to four, and applied restricted
+  current-identity plus `SYSTEM` ACLs.
+- `--check-config` returned environment contract 1, test mode, and four
+  endpoints. A controlled `--once` produced four successes. Audit v6 then
+  proved endpoint set 2, observation contract 3, a matching healthy
+  four-observation heartbeat, valid order/retry/timing, and compatible retained
+  contract-2/set-1 history. The first audit after promotion showed seven
+  starts/seven stops and no open, unclean, or abandoned run.
+- Continuous foreground 0.7 polling then produced three verified healthy
+  cycles. Concurrent audit showed one current open writer, valid latest
+  heartbeat, and no increment to the retained historical overlap counters.
+- The 0.7 project received its own CPython 3.14 `.venv`. Static access checks
+  proved `SYSTEM` read/execute access to project and interpreter and read access
+  to `.env`. State Modify access initially failed; explicit inherited
+  `SYSTEM:(OI)(CI)M` access was then applied and verified on five existing state
+  objects. No secret or path was retained in the evidence.
+- The checked-in task helper could not execute because effective PowerShell
+  policy was `Restricted` and the script was unsigned. No policy scope was
+  changed and no bypass was used. A first equivalent inline registration ran
+  without elevation, failed `PermissionDenied`, and left the task absent. The
+  same reviewed contract then ran in an elevated PowerShell and registered
+  `MonitoringAgentTest` successfully in `Ready` state without starting it.
+- The task contract uses `SYSTEM`, service-account logon, highest run level,
+  one `AtStartup` trigger, the exact project `.venv` interpreter, only the
+  quoted runner path as argument, the explicit project working directory,
+  `StartWhenAvailable`, `IgnoreNew`, one-minute restart interval with count
+  999, no execution time limit, and battery-safe settings. Its command line
+  contains no bearer, credential, URL, token, or `.env` value.
+- Before reboot, Ctrl+C produced the eighth controlled process stop. Audit
+  showed eight starts/eight stops, zero open/unclean/abandoned runs, a healthy
+  four-observation heartbeat, and no new historical writer finding. The task
+  was `Ready`, the scheduler service was running, and no foreground agent
+  process remained.
+- The supervision center booted at `08:11:42 +02:00`; the task launched at
+  `08:12:12`. Its venv launcher and interpreter appeared as two Python
+  processes but one parent-child logical agent, both owned by `SYSTEM` and in
+  continuous mode. The first lifecycle state change occurred at approximately
+  `08:14:02`, about 110 seconds after task launch, so the initial 75-second
+  postboot audit still showed the prior closed run.
+- Later state metadata and audit proved continued Scheduled Task operation. The
+  final aggregate contained 1,162 complete cycles: 1,155 healthy, 3 partial
+  failure, and 4 unreachable; transport totals were 3,634 success, 12
+  connection error, and 6 timeout. The latest degraded snapshot recovered on
+  a subsequent complete cycle to a healthy four-observation heartbeat with
+  zero transport failures.
+- Final lifecycle was nine starts, eight stops, one current open run, zero
+  unclean restarts, and zero abandoned runs. Historical
+  `concurrent_start_count=1` and `process_run_reentry_count=1` remained
+  unchanged. The supervision automatic-start and restart/resume proof is
+  complete for the test pilot.
+- Detailed next-phase boundaries are recorded in
+  `../plans/monitoring/MONITORING_AGENT_REPORTING_LAYER_HANDOFF.md`. Reporting
+  must begin with deterministic rules, thresholds, incident identity/state,
+  bounded local persistence, and a pure renderer over normalized facts. No
+  external delivery, interpretation-provider use, application mutation, or
+  legacy-alert replacement is authorized.
+
+### 2026-08-06 - Repository-root cleanup and hygiene contract
+
+- The repository root was reviewed without reading secret values. The
+  established production paths `main.py`, `Caddyfile`, and
+  `start_api_dashboard.bat` remain in place; the ignored live `.env` remains a
+  documented compatibility exception.
+- The monitoring bundle runner source moved to
+  `monitoring_agent/bundle_root/run_monitoring_agent.py` while preserving
+  `run_monitoring_agent.py` as the ZIP-root destination. The dashboard
+  compatibility launcher moved to `scripts/start_api_dashboard_compat.bat`,
+  development notes moved from `run.txt` to
+  `agents/runbooks/LOCAL_DEVELOPMENT_COMMANDS.md`, and the Windows shortcut
+  moved under `scripts/shortcuts/` without changing its target.
+- Three ignored monitoring credential-rotation backup files were retained
+  without content inspection and moved from the repository root to protected
+  external configuration storage.
+- `AGENTS.md` and DEC-117 now require narrow subdirectory placement by default.
+  `tests/test_repository_hygiene.py` enforces the explicit root-file allowlist.
+- The user-approved monitoring implementation order is now maintained as a
+  nine-item live checklist in
+  `../plans/monitoring/MONITORING_AGENT_IMPLEMENTATION_ROADMAP.md`. No item is
+  checked yet. Work starts with safe observation-contract expansion and the
+  external public-web probe; the orchestrator remains deferred until two or
+  three independently operable agents provide evidence of shared needs.
+
+### 2026-08-06 - Local monitoring-agent 0.8 observation expansion
+
+- Roadmap item 1 is locally implemented but remains unchecked pending runtime
+  proof. Eight authenticated GET-only facade projections cover liveness,
+  readiness, system scheduler, detailed scheduler, system runtime, database,
+  proxy, and SmartFuelPass health. Dedicated safe response models exclude
+  transient, identifying, sensitive, and capability-bearing fields before
+  network serialization while reusing the existing collectors.
+- A ninth `external_web` observation is performed directly from the
+  supervision center. It requires a configured public HTTPS root outside
+  loopback tests, sends no monitoring bearer, follows no redirect, reads no
+  response body, expects HTTP 200 with HTML content type, and persists neither
+  URL nor headers. TLS, redirect, HTTP, content-type, JSON, and schema failures
+  fail closed; only connection errors and timeouts receive bounded retries.
+- Environment contract 2 adds `MONITORING_AGENT_EXTERNAL_WEB_URL`.
+  Observation contract 4 / endpoint set 3 uses the exact nine-key order and
+  adds bounded absolute clock skew where source time exists. Audit contract 7
+  enforces the exact contract-to-set mapping while preserving retained
+  contract-2/set-1 and contract-3/set-2 append-only history.
+- With nine serialized endpoints and the retained timeout/retry settings, the
+  configured worst-case cycle budget is 94.5 seconds. A complete outage may
+  extend the nominal 60-second cadence, but cycles remain bounded,
+  non-overlapping, and protected by the existing single-writer lock.
+- The targeted monitoring/facade/system-health/scheduler/root-hygiene matrix
+  passed with 186 tests, and modified Python modules compiled successfully.
+  The local `0.8.0-test` bundle contains 13 declared runtime files and 15 ZIP
+  entries.
+  ZIP SHA-256 is
+  `29BEE64FEE267F1E74BE1AA89CA621E2930262E16C0C662580DA5D2B7EBF8EF0`;
+  manifest SHA-256 is
+  `282DFDDA162B4D4CB2C3CE656066D47E2B03504F1434277659E20CBCBB173ADF`.
+  No real `.env` is present.
+- No monitored-workstation restart, remote configuration change, task change,
+  external delivery, or alert replacement was performed. The deployed
+  supervision runtime remains `0.7.0-test`. Next activate and verify all eight
+  facade routes through the supported monitored-workstation restart, then
+  perform the controlled remote 0.8 migration and require a complete
+  nine-observation cycle plus audit-v7 mixed-history proof before checking
+  roadmap item 1 or starting item 2.
+
+### 2026-08-06 13:35 +02:00 - Monitoring-agent 0.8 facade pre-restart handoff
+
+Reason for restart:
+
+- Load the locally reviewed 0.8 monitoring-facade expansion into the running
+  FastAPI process. The established production FastAPI, Streamlit, scheduler,
+  and Caddy process tree is created only by the Windows startup task, so a
+  controlled full restart of the monitored main workstation is the supported
+  activation path. Do not substitute an ad-hoc API-only restart.
+- This restart activates only the target-side safe GET routes. It does not
+  authorize stopping, restarting, upgrading, or reconfiguring the separate
+  supervision workstation or its running `0.7.0-test` Scheduled Task.
+
+Current task and conversation state:
+
+- Completed: local `0.8.0-test` implementation of eight authenticated safe
+  facade projections and one direct external-web probe; environment contract
+  2; observation contract 4 / endpoint set 3; audit contract 7; synthetic and
+  compatibility tests; documentation; deterministic bundle build.
+- Completed verification: 186 targeted tests including repository-root
+  hygiene passed, modified modules compiled, `git diff --check` passed, and a
+  second bundle build reproduced the exact ZIP digest.
+- Pending: restart only the monitored main workstation; prove normal runtime
+  recovery and activation of all eight private facade routes; confirm the
+  still-running remote 0.7 observer records target recovery. A controlled
+  supervision-center migration to 0.8 remains a later, separate gate.
+- Roadmap item 1 remains unchecked until the later remote 0.8 configuration
+  check, complete nine-observation cycle, matching heartbeat, and audit-v7
+  mixed-history proof all pass.
+- First action after restart: read `AGENTS.md`,
+  `agents/decisions/DECISIONS.md`, and this handoff; run
+  `git status --short`; then confirm a Windows boot later than
+  `2026-08-06 13:35 +02:00` and a successful postboot
+  `API_dashboard_caddy` task run before testing application routes.
+
+Working tree and deployment:
+
+- The working tree is intentionally non-clean. Do not reset, checkout, clean,
+  delete, overwrite, commit, push, or create a code-integrity baseline during
+  restart handling.
+- Monitoring implementation/documentation changes include `AGENTS.md`,
+  `agents/decisions/DECISIONS.md`, `agents/history/SESSION_NOTES.md`,
+  `agents/work/ACTIVE.md`, the monitoring plans/inventories/runbook,
+  `monitoring_agent/`, `services/api/routes/monitoring.py`,
+  `services/api/routes/scheduler_health.py`, the new
+  `services/api/schemas/monitoring.py`, the new
+  `services/api/services/monitoring_facade.py`, the new
+  `services/api/services/scheduler_health.py`, the monitoring tests, the new
+  repository-hygiene test, and versioned ZIPs under
+  `artifacts/monitoring_agent/`.
+- Root-hygiene work also leaves the intentional tracked moves/deletions of
+  `run.txt`, root `run_monitoring_agent.py`, the duplicate dashboard launcher,
+  and the shortcut, with replacements under `agents/runbooks/`,
+  `monitoring_agent/bundle_root/`, and `scripts/`. Preserve these changes.
+- Other already-present changed files include `.gitignore`,
+  `agents/security/DASHBOARD_SECURITY_CHECKLIST.md`,
+  `scripts/secret_hygiene_scan.py`, `tests/test_dashboard_security_config.py`,
+  and `tests/test_production_runtime.py`. Do not infer that they belong to the
+  restart or revert them.
+- The user-owned untracked `data/smartfuelpass/vypisy/` directory was not
+  inspected or modified and must remain untouched.
+- The workspace bundle `monitoring-agent-0.8.0-test.zip` contains 13 declared
+  runtime files and 15 entries, no real `.env`, and has SHA-256
+  `29BEE64FEE267F1E74BE1AA89CA621E2930262E16C0C662580DA5D2B7EBF8EF0`;
+  manifest SHA-256 is
+  `282DFDDA162B4D4CB2C3CE656066D47E2B03504F1434277659E20CBCBB173ADF`.
+- The separate supervision center remains deployed on `0.7.0-test`; its
+  previously verified ZIP SHA-256 is
+  `0BA56B60FD8F5A229346D565FEA33F58F57F9239FE541F216C07E79E56D7BF20`.
+  Source presence or the local 0.8 ZIP does not prove remote deployment.
+- The running main-workstation API still has the four-route 0.7 facade. Before
+  restart, unauthenticated liveness, readiness, system-scheduler, and runtime
+  routes returned 401, while the new detailed-scheduler, database, proxy, and
+  SmartFuelPass routes returned 404. This is the expected pre-activation
+  baseline; after restart all eight registered routes must return 401 without
+  the monitoring identity.
+
+Sensitive and runtime artifacts:
+
+- Do not print, copy, replace, delete, commit, or expose the root `.env`, the
+  protected monitoring-auth environment, dashboard proxy credentials, either
+  station's bearer value, or the remote agent's ignored `.env`.
+- Do not inspect, copy into Git, truncate, rewrite, or delete the remote
+  observation JSONL, lifecycle JSONL, heartbeat, writer-lock file, or external
+  state directory. Do not use lock-file modification time or a raw two-Python
+  process count as writer identity.
+- Do not retain raw authenticated Health responses, URLs, headers, process
+  command lines, identifiers, or transient PIDs in the handoff. Record only
+  the reviewed aggregate/schema facts.
+
+Read-only pre-restart baseline:
+
+- Captured at approximately `2026-08-06 13:28-13:35 +02:00`. Current Windows
+  boot time is `2026-08-05 14:51:02 +02:00`.
+- Startup task `API_dashboard_caddy` is `Ready`, last ran at
+  `2026-08-05 14:51:12 +02:00`, and returned result 0.
+- Exactly one `main.py` scheduler match, one Uvicorn/FastAPI match, one
+  Streamlit match, and one Caddy process were found. Tailscale owns the private
+  tailnet listeners.
+- Expected listeners are present on TCP 80, 443, loopback 2019, loopback 8000,
+  loopback 8001, and tailnet-only 9443. Temporary listeners 8010 and 8011 are
+  absent.
+- Local FastAPI `/health/live` and `/health/ready`, Streamlit
+  `/_stcore/health`, and Caddy admin `/config/` each returned HTTP 200.
+- Scheduler aggregate status is `ok`; the scheduler is running, its heartbeat
+  is present and within TTL, all nine jobs are OK, and the aggregate has zero
+  failures in the preceding 24 hours.
+- Tracked and deployed Caddyfiles both have SHA-256
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+
+Expected processes and listeners after restart:
+
+- One FastAPI/Uvicorn runtime on `127.0.0.1:8000`.
+- One Streamlit runtime on `127.0.0.1:8001`.
+- One scheduler `main.py` runtime holding the scheduler process lock.
+- One Caddy runtime owning TCP 80/443 and `127.0.0.1:2019`.
+- Tailscale retains the existing tailnet-only 9443 facade listener and its
+  existing tailnet 443 surface. Do not change Tailscale Serve configuration.
+- TCP 8010/8011 remain absent.
+
+Expected application state:
+
+- FastAPI live/ready, Streamlit health, and Caddy admin return HTTP 200 after
+  bounded startup convergence. A transient readiness 503 during startup is
+  not itself a failed restart; wait for the established readiness contract.
+- Scheduler reports `status=ok`, is running, has a fresh heartbeat within TTL,
+  nine expected jobs, no non-OK job, and no new restart-related scheduler
+  failure.
+- Tracked and deployed Caddyfile hashes remain equal to the pre-restart hash.
+- Public HTTP retains its HTTPS redirect. Public HTTPS retains the dashboard's
+  existing authentication behavior. Main-workstation public-hostname hairpin
+  failure is not sufficient to classify the public site unavailable; external
+  reachability must be checked from the supervision center.
+- Protected application APIs return HTTP 401 JSON without a bearer token.
+- All eight `/api/v1/monitoring/health` facade routes return HTTP 401 without
+  the dedicated monitoring identity. With that identity, each returns HTTP
+  200 and only its reviewed safe schema. Do not print the identity or raw
+  response.
+- Existing external alerts remain authoritative. No email, outbox, agentic
+  interpretation, remediation, manual job, data write, or alert replacement
+  becomes enabled by this restart.
+
+Required post-restart checks:
+
+1. Confirm the boot is later than `2026-08-06 13:35 +02:00` and
+   `API_dashboard_caddy` ran after that boot with result 0.
+2. Confirm one expected FastAPI, Streamlit, scheduler, and Caddy runtime;
+   listeners 80/443/2019/8000/8001 and tailnet-only 9443; and no 8010/8011
+   listener. Do not use transient PIDs as durable evidence.
+3. Require HTTP 200 from local FastAPI live/ready, Streamlit health, and Caddy
+   admin. Stop and diagnose if readiness does not converge within its bounded
+   startup allowance.
+4. Verify the aggregate scheduler state: running, fresh heartbeat within TTL,
+   nine expected jobs, no non-OK job, and no new 24-hour failure attributable
+   to restart.
+5. Recompute the tracked and deployed Caddyfile hashes and require equality.
+   Check HTTP-to-HTTPS routing and public authentication without changing
+   Caddy or Tailscale configuration.
+6. Call all eight monitoring facade paths without credentials. Require 401 for
+   every path; any remaining 404 means the new route set was not activated and
+   blocks the 0.8 migration.
+7. Using the existing dedicated monitoring identity without displaying it,
+   require HTTP 200 and schema validity from liveness, readiness, system
+   scheduler, detailed scheduler, system runtime, system database, system
+   proxy, and system SmartFuelPass. Retain only aggregate pass/fail facts.
+8. On the supervision center, leave `MonitoringAgentTest` running and use only
+   the safe concurrent `--audit-state` diagnostic. Require fresh postboot
+   four-endpoint cycles and a recovered healthy four-observation heartbeat;
+   confirm no new concurrent-start, run-reentry, unclean, or abandoned-run
+   evidence. Do not launch foreground continuous mode or `--once` beside the
+   Scheduled Task.
+9. If any target-side route, schema, listener, scheduler, Caddy, or recovery
+   check fails, preserve the running remote 0.7 task and all state, block the
+   0.8 migration, and diagnose the monitored runtime first.
+10. Append the exact aggregate post-restart result to this file. Only after all
+    target-side and 0.7 recovery checks pass may a separate handoff authorize
+    stopping/updating the supervision task, migrating its protected
+    environment to nine keys, or executing 0.8.
+
+Known risks or accepted gaps:
+
+- The working tree and deployment source are intentionally uncommitted. A
+  restart loads this reviewed local source but does not make it committed or
+  update the standalone public monitoring repository.
+- The current 0.7 observer may record expected bounded target unreachability
+  or partial failure during the main-workstation reboot. Require subsequent
+  healthy recovery rather than treating the reboot samples as a new agent
+  defect.
+- New database, proxy, and SmartFuelPass collectors may expose a real degraded
+  Health status while still returning a valid safe HTTP 200 schema. Record
+  transport/schema success separately from payload health; do not suppress or
+  rewrite a genuine degraded result.
+- Public reachability from the main workstation remains an invalid substitute
+  for the external supervision-station probe.
+- No remote 0.8 deployment, incident persistence, reporting, email delivery,
+  agentic interpretation, orchestration, remediation, or legacy-alert change
+  is authorized by this handoff.
+
+### 2026-08-06 14:18 +02:00 - Monitoring 0.8 target activation verified
+
+- The monitored workstation booted at `13:40:32 +02:00` after the approved
+  0.8-facade activation restart. `API_dashboard_caddy` ran at
+  `13:40:43 +02:00` with result 0.
+- FastAPI live/ready, Streamlit health, and Caddy admin returned HTTP 200.
+  Expected listeners 80/443/2019/8000/8001 and tailnet-only 9443 were present;
+  8010/8011 were absent. Runtime, database, and proxy safe projections were
+  `ok`.
+- Scheduler status was `ok`, its heartbeat was fresh within the 300-second
+  TTL, all nine scheduled jobs were OK, and the 24-hour aggregate had zero
+  failures. The first postboot `quarter_hour_job` succeeded at
+  `13:47:13 +02:00`.
+- Tracked and deployed Caddyfile hashes remained equal at
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+  Local hostname/SNI returned dashboard HTTP 200 and HTTP redirect 308.
+- All eight monitoring facade paths returned JSON HTTP 401 without the
+  dedicated identity; the four new routes no longer returned 404. The API log
+  contained at least 16 complete ordered four-endpoint remote 0.7 cycles with
+  HTTP 200 after boot, proving target/private-path recovery without an observer
+  restart.
+- SmartFuelPass returned a schema-valid `error` payload because its import has
+  been knowingly paused since the 2026-07-29 Cloudflare failure. The user
+  confirmed this is not a restart incident. The later replacement will rename
+  `Přihlášení SmartFuelPass` to `Import` and ingest an administrator-selected
+  Excel file through a parser/database workflow, but all SmartFuelPass changes
+  are deferred until the monitoring agent is finished.
+- Roadmap item 1 remains open only for the supervision-center pre-migration
+  audit, controlled 0.8 bundle/environment migration, one complete
+  nine-observation cycle, and audit-v7 mixed-history proof. No remote task,
+  agent state, credential, SmartFuelPass code/data, alert, or delivery setting
+  was changed during this verification.
+
+### 2026-08-06 - Monitoring 0.8.1 rolling-upgrade correction
+
+- The supervision-center env-v1 configuration check passed with four
+  endpoints. Audit v6 contained 1,389 complete cycles: 1,313 healthy, 71
+  partial failure, and 5 unreachable. Its latest heartbeat was degraded with
+  two failures; transport history included 68 schema errors and the global
+  retry flag was false.
+- Lifecycle remained valid with nine starts/eight stops/one current open run,
+  zero unclean and abandoned runs, and unchanged historical concurrent-start
+  and process-run-reentry counts of one.
+- Exact inspection of the deployed 0.7 ZIP proved the failure boundary. Its
+  `system_runtime` normalizer requires the former full nested response while
+  the activated target correctly emits the strict server-side projection
+  without transient details, labels, local addresses, next-run time, or PIDs.
+- Local `0.8.1-test` now supports the exact env-v1/four-key configuration as
+  observation contract 3/set 2 and the exact env-v2/nine-key configuration as
+  contract 4/set 3. It rejects hybrids, keeps the safe target response, and
+  adds current-run retry evidence to audit v7 without rewriting history.
+- The focused monitoring/facade/system-health/scheduler/runtime/hygiene matrix
+  passed 192 tests; modified Python modules compiled. The reproducible
+  13-file/15-entry ZIP SHA-256 is
+  `D17A88A10814D4CC645AD731B5C2B56B3B662E0662547ED9FCEA3443EF876884`;
+  manifest SHA-256 is
+  `18A3E477E724EEA61F3EFDCBE303BEBE4DC298A4D646D37FE643D6CD9C49CBB1`.
+  Declared file hashes and the archive allowlist passed; no real `.env` is
+  present.
+- The remote 0.7 task and state remain unchanged and running. Do not deploy
+  0.8.0. Transfer and SHA-256 verification of 0.8.1 may proceed while it runs.
+  The stop mechanism is a separate lifecycle gate: `Stop-ScheduledTask` may
+  terminate the process without the controlled lifecycle stop event, so it is
+  not yet authorized as a clean stop. After a lifecycle-safe stop method or an
+  explicitly qualified planned termination is approved, first prove a healthy
+  unchanged-env-v1 bridge and audit-v7 current run, then migrate to env v2/nine
+  keys and prove the final cycle/audit before restoring continuous Scheduled
+  Task operation.
+
+### 2026-08-07 - Monitoring 0.8.1 hash report and station correction
+
+- A reported copy of `monitoring-agent-0.8.1-test.zip` matched the reviewed
+  SHA-256 exactly:
+  `D17A88A10814D4CC645AD731B5C2B56B3B662E0662547ED9FCEA3443EF876884`.
+- A subsequent exact task lookup and broad Monitor/Agent task listing in the
+  same console found no `MonitoringAgentTest`. The hash therefore does not
+  prove transfer to the actual supervision center; the earlier provisional
+  transfer conclusion is withdrawn.
+- Repeat the hash and task-identity checks together on the station that
+  produced audit v6. Before any stop, replacement, or restart, read that task's
+  effective stop settings and separately approve a lifecycle-safe stop method
+  or an explicitly qualified planned termination.
+- The user then confirmed that this is the supervision station, that seamless
+  observation continuity is not required during the test phase, and that the
+  0.7 process may be terminated and `.env` transferred manually. The exact
+  process tree must still be identified first; preserve state, do not display
+  `.env`, and treat any new abandoned/unclean 0.7 run as explicitly planned
+  migration evidence.
+- The transferred 0.8.1 ZIP was located on that station and its reviewed hash
+  was revalidated. The only two Python processes formed the known Session-0
+  launcher/interpreter tree. An elevated fail-closed stop validated the old
+  env file, ZIP, process identities, and parent/child relationship first.
+  Afterward both targets and all Python processes were absent; env v1 remained
+  present. This is the explicitly approved planned test migration stop. No
+  Scheduled Task was created and no append-only state was altered.
+
+### 2026-08-07 08:17 +02:00 - Monitoring 0.8.1 scheduler-detail timezone pre-restart handoff
+
+Reason for restart:
+
+- Activate a narrow target-side FastAPI fix required by remote
+  `0.8.1-test`: `/api/v1/monitoring/health/scheduler` returned HTTP 200 but
+  the remote client rejected it because `checked_at` was serialized without a
+  timezone. The fix changes `collect_scheduler_health()` to use a
+  timezone-aware `checked_at`. Under the current operating contract, the
+  monitored workstation's FastAPI process is refreshed through the full
+  Windows startup sequence, not an API-only restart.
+
+Current task and conversation state:
+
+- Completed: the supervision station intentionally started a new clean
+  `monitoring-agent-state-ops002` state baseline for `0.8.1-test`.
+  Env-v1 `--check-config`, `--once`, and `--audit-state` passed with one
+  healthy four-endpoint bridge cycle and clean lifecycle.
+- Completed: env-v2 `--check-config` passed. The nine-endpoint `--once`
+  produced eight successes and one `schema_error` on `scheduler_detail`; a
+  bounded diagnostic proved the schema error is
+  `detailed scheduler payload.checked_at must include a timezone`.
+  `external_web` succeeded and `system_smartfuelpass` remained a schema-valid
+  known paused-import `error` payload.
+- Completed locally: `services/api/services/scheduler_health.py` now writes
+  timezone-aware `checked_at`; the targeted local matrix
+  `tests/test_scheduler_metrics.py`, `tests/test_monitoring_facade.py`, and
+  `tests/test_monitoring_agent.py` passed with 102 tests, and the modified
+  service compiled.
+- Pending: restart only the monitored main workstation to activate the
+  target-side FastAPI fix. After it recovers, rerun the remote env-v2
+  `--once` and `--audit-state` against the same clean state directory. Do not
+  start continuous mode or register/return a Scheduled Task until the
+  nine-endpoint proof is healthy.
+- First action after restart: read `AGENTS.md`,
+  `agents/decisions/DECISIONS.md`, and this handoff; run
+  `git status --short`; then confirm a Windows boot later than
+  `2026-08-07 08:17 +02:00` and a successful postboot
+  `API_dashboard_caddy` task run before testing application routes.
+
+Working tree and deployment:
+
+- The working tree is intentionally non-clean from the monitoring-agent work.
+  Do not reset, checkout, clean, delete, overwrite, commit, push, or create a
+  code-integrity baseline during restart handling.
+- Relevant new change for this restart:
+  `services/api/services/scheduler_health.py` changed
+  `checked_at=datetime.now()` to `checked_at=datetime.now().astimezone()`;
+  `tests/test_scheduler_metrics.py` now asserts the scheduler-health
+  `checked_at` has timezone information.
+- Existing monitoring implementation, documentation, bundle artifacts, root
+  hygiene changes, and unrelated previously changed files remain present and
+  must not be reverted during this restart.
+- No remote `.env`, bearer value, agent state file, credential, production
+  database data, SmartFuelPass data, alert setting, or Scheduled Task was
+  changed by the local code fix.
+
+Sensitive and runtime artifacts:
+
+- Do not print, copy, replace, delete, commit, or expose `.env`, the
+  monitoring bearer, credential hashes, dashboard proxy credentials, raw
+  authenticated Health responses, raw agent JSONL state, heartbeat/lifecycle
+  identifiers, URLs from the private facade, process command lines, database
+  rows, or SmartFuelPass/session data.
+- The supervision station's clean state directory is now the intended
+  `0.8.1` baseline and must not be deleted or rewritten. The earlier
+  mistyped/pre-0.6 state remains historical/local evidence only.
+
+Expected processes after restart:
+
+- FastAPI/Uvicorn: one runtime on `127.0.0.1:8000`.
+- Streamlit: one runtime on `127.0.0.1:8001`.
+- Scheduler: one `main.py` runtime holding the scheduler process lock.
+- Caddy: one runtime owning TCP 80/443 and `127.0.0.1:2019`.
+- Tailscale retains the existing tailnet-only monitoring facade listener.
+  Do not change Tailscale Serve configuration.
+
+Expected application state:
+
+- FastAPI live/ready: HTTP 200.
+- Streamlit health: HTTP 200.
+- Caddy admin: HTTP 200.
+- Scheduler status: running, fresh heartbeat within TTL, expected jobs, and
+  no new restart-related failures.
+- Monitoring facade: all eight private facade paths return HTTP 401 without
+  the dedicated monitoring identity. With that identity, the detailed
+  scheduler route must return HTTP 200 with timezone-aware `checked_at` and
+  validate under the 0.8.1 client.
+- Public HTTP keeps HTTPS redirect behavior; public HTTPS dashboard keeps the
+  existing authentication behavior. The monitored workstation's known
+  public-hostname hairpin gap remains non-authoritative.
+
+Required post-restart checks:
+
+1. Confirm the boot is later than `2026-08-07 08:17 +02:00` and
+   `API_dashboard_caddy` ran after that boot with result 0.
+2. Confirm one expected FastAPI, Streamlit, scheduler, and Caddy runtime;
+   listeners 80/443/2019/8000/8001 and the tailnet-only facade listener; and
+   no temporary 8010/8011 listener.
+3. Require HTTP 200 from local FastAPI live/ready, Streamlit health, and Caddy
+   admin.
+4. Verify scheduler aggregate health and a fresh heartbeat.
+5. Verify the detailed monitoring scheduler facade no longer serializes naive
+   `checked_at` and is accepted by the remote 0.8.1 client.
+6. On the supervision station, keep using the same `.env` and
+   `monitoring-agent-state-ops002`; run only env-v2 `--once` and
+   `--audit-state`. Require nine successes, latest heartbeat healthy, clean
+   lifecycle, endpoint order valid, and current-run retry/attempt facts valid.
+7. Only after the nine-endpoint proof passes may a separate step restore
+   continuous Scheduled Task operation. External delivery, incident/report
+   layers, and legacy-alert replacement remain disabled.
+
+Known risks or accepted gaps:
+
+- This restart activates only the scheduler-detail timezone fix. It does not
+  authorize remote task registration, email delivery, incident persistence,
+  SmartFuelPass changes, manual scheduler jobs, database writes, or alert
+  replacement.
+- `system_smartfuelpass` may continue to report payload status `error` because
+  the import is knowingly paused; this is not a transport/schema failure and
+  must be qualified later by deterministic incident rules.
+
+### 2026-08-07 - Monitoring 0.8.1 nine-endpoint proof and task-restore pause
+
+- Post-restart local verification after the scheduler-detail timezone fix
+  passed. The monitored workstation booted at `2026-08-07 08:20:55 +02:00`;
+  `API_dashboard_caddy` ran at `08:21:05 +02:00` with result 0. FastAPI
+  live/ready, Streamlit health, and Caddy admin returned HTTP 200. Expected
+  listeners 80/443/2019/8000/8001 and tailnet-only 9443 were present, 8010
+  and 8011 were absent, tracked and deployed Caddyfile hashes matched, local
+  SNI HTTPS returned 200, and HTTP redirected to HTTPS with 308.
+- All eight unauthenticated monitoring facade routes returned HTTP 401 on
+  their correct `/api/v1/monitoring/health/system/...` paths. Earlier 404
+  results were caused by using incorrect dashed paths, not by missing routes.
+- The first postboot scheduler cycle succeeded at `08:35 +02:00`, including
+  `check_database_availability`, `kalorimetry_db_import`,
+  `score_new_kalorimetry_measurements`, `detect_kalorimetry_events_from_scores`,
+  and `quarter_hour_job`. Scheduler heartbeat was fresh at
+  `08:41:10 +02:00`; there were zero failure keys.
+- On the supervision station, remote `0.8.1-test` env-v2 `--once` completed
+  one nine-observation cycle with transport status `success`. Audit v7 then
+  showed endpoint set 3, 27 contract-4 observations, three complete cycles,
+  latest heartbeat `healthy`, nine latest observations, zero latest transport
+  failures, valid endpoint/cycle order, valid retry contract, valid attempt
+  bounds, clean lifecycle with three starts and three stops, and no
+  concurrent-start, run-reentry, unclean, abandoned, incomplete, or writer
+  evidence in the new clean state. The two earlier schema errors remain
+  retained pre-fix env-v2 history; recovery is now proved.
+- The standalone GitHub repository for the agent is
+  `https://github.com/mtravnicekarmex/monitoring-agent-0.8.1.git`.
+  PyCharm MCP was tested twice, but the available MCP backend remained bound
+  to the main `monitorovaci_platforma` project and did not expose the remote
+  `monitoring-agent-0.8.1-test` project or the user's test chat messages.
+  Continue agent work through Git/repository evidence and explicit remote
+  command output rather than MCP.
+- The next approved step was to restore continuous operation through the
+  reviewed `MonitoringAgentTest` Scheduled Task in
+  `C:\Users\tra\PycharmProjects\monitoring-agent-0.8.1-test`.
+  `.\register_monitoring_agent_task.ps1 -WhatIf` passed and reported the
+  intended registration/update action. Running the registration from a
+  non-elevated PowerShell failed with `Přístup byl odepřen` /
+  `HRESULT 0x80070005`; no fallback user task was created.
+- The supervision station entered maintenance and is unavailable until
+  2026-08-08. Resume from this exact point: open elevated PowerShell on the
+  supervision station, run
+  `Set-Location C:\Users\tra\PycharmProjects\monitoring-agent-0.8.1-test`,
+  then `.\register_monitoring_agent_task.ps1 -Confirm:$false`,
+  `Start-ScheduledTask -TaskName MonitoringAgentTest`, wait 90-120 seconds,
+  and run only read-only verification:
+  `Get-ScheduledTask -TaskName MonitoringAgentTest | Select-Object TaskName,State,TaskPath`,
+  `Get-ScheduledTask -TaskName MonitoringAgentTest | Get-ScheduledTaskInfo | Select-Object LastRunTime,LastTaskResult,NextRunTime`,
+  and `py -3.14 run_monitoring_agent.py --audit-state`.
+- Expected resume result: task `Running`, running task result such as
+  `267009` / `0x41301`, audit v7 latest heartbeat healthy with nine
+  observations, current continuous lifecycle unclosed, and no new
+  concurrent-start, process-run-reentry, unclean, or abandoned evidence.
+  Do not run foreground continuous mode or `--once` once the task is running;
+  `--check-config` and `--audit-state` remain safe concurrent commands.

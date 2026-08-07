@@ -5,11 +5,13 @@ import json
 from pathlib import Path
 import random
 import time
+from uuid import uuid4
 
+from .audit import StateAuditError, build_state_audit
 from .client import HealthClient
 from .observer import run_observation_cycle
 from .settings import RuntimeSettings
-from .store import ObserverStore
+from .store import ObserverStore, StateWriterLockError
 
 
 def calculate_next_cycle_delay(
@@ -35,13 +37,83 @@ def _build_parser(*, default_env_file: Path | None = None) -> argparse.ArgumentP
         required=default_env_file is None,
         help="ACL-restricted local .env file; defaults beside the runner script.",
     )
-    parser.add_argument("--once", action="store_true")
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--once", action="store_true")
+    mode.add_argument(
         "--check-config",
         action="store_true",
         help="Validate configuration and exit without network or state writes.",
     )
+    mode.add_argument(
+        "--audit-state",
+        action="store_true",
+        help="Print a sanitized read-only aggregate of agent-owned state.",
+    )
     return parser
+
+
+def _run_polling_process(
+    *,
+    args: argparse.Namespace,
+    settings: RuntimeSettings,
+    client: HealthClient,
+    store: ObserverStore,
+    run_id: str,
+) -> int:
+    store.append_lifecycle(
+        observer_instance_id=settings.instance_id,
+        run_id=run_id,
+        event="process_started",
+        reason="observer_started",
+    )
+    exit_reason = "observer_error"
+    cycle_sequence = 0
+    try:
+        while True:
+            cycle_sequence += 1
+            cycle_started = time.monotonic()
+            observations = run_observation_cycle(
+                client=client,
+                store=store,
+                observer_instance_id=settings.instance_id,
+                run_id=run_id,
+                cycle_sequence=cycle_sequence,
+                endpoint_keys=settings.endpoint_keys,
+            )
+            print(
+                json.dumps(
+                    {
+                        "event": "observation_cycle",
+                        "observation_count": len(observations),
+                        "transport_statuses": sorted(
+                            {item.transport_status for item in observations}
+                        ),
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+            if args.once:
+                exit_reason = "once_completed"
+                return 0
+            time.sleep(
+                calculate_next_cycle_delay(
+                    poll_interval_seconds=settings.poll_interval_seconds,
+                    cycle_elapsed_seconds=time.monotonic() - cycle_started,
+                    poll_jitter_seconds=settings.poll_jitter_seconds,
+                )
+            )
+    except KeyboardInterrupt:
+        exit_reason = "keyboard_interrupt"
+        return 130
+    finally:
+        store.append_lifecycle(
+            observer_instance_id=settings.instance_id,
+            run_id=run_id,
+            event="process_stopped",
+            reason=exit_reason,
+        )
 
 
 def main(*, default_env_file: Path | None = None) -> int:
@@ -64,10 +136,23 @@ def main(*, default_env_file: Path | None = None) -> int:
         )
         return 0
 
+    if args.audit_state:
+        try:
+            audit = build_state_audit(settings)
+        except StateAuditError as exc:
+            raise SystemExit(f"state audit error: {exc}") from exc
+        print(json.dumps(audit, separators=(",", ":"), sort_keys=True))
+        return 0
+
+    run_id = str(uuid4())
     try:
         client = HealthClient(
             base_url=settings.base_url,
+            external_web_url=settings.external_web_url,
             observer_instance_id=settings.instance_id,
+            run_id=run_id,
+            observation_contract_version=settings.observation_contract_version,
+            endpoint_set_version=settings.endpoint_set_version,
             timeout_seconds=settings.timeout_seconds,
             max_attempts=settings.max_attempts,
             retry_backoff_seconds=settings.retry_backoff_seconds,
@@ -76,38 +161,17 @@ def main(*, default_env_file: Path | None = None) -> int:
     except ValueError as exc:
         raise SystemExit(f"client setup error: {exc}") from exc
     store = ObserverStore(settings.state_dir)
-
-    while True:
-        cycle_started = time.monotonic()
-        observations = run_observation_cycle(
-            client=client,
-            store=store,
-            observer_instance_id=settings.instance_id,
-            endpoint_keys=settings.endpoint_keys,
-        )
-        print(
-            json.dumps(
-                {
-                    "event": "observation_cycle",
-                    "observation_count": len(observations),
-                    "transport_statuses": sorted(
-                        {item.transport_status for item in observations}
-                    ),
-                },
-                separators=(",", ":"),
-                sort_keys=True,
-            ),
-            flush=True,
-        )
-        if args.once:
-            return 0
-        time.sleep(
-            calculate_next_cycle_delay(
-                poll_interval_seconds=settings.poll_interval_seconds,
-                cycle_elapsed_seconds=time.monotonic() - cycle_started,
-                poll_jitter_seconds=settings.poll_jitter_seconds,
+    try:
+        with store.writer_lock():
+            return _run_polling_process(
+                args=args,
+                settings=settings,
+                client=client,
+                store=store,
+                run_id=run_id,
             )
-        )
+    except StateWriterLockError as exc:
+        raise SystemExit(f"agent startup error: {exc}") from exc
 
 
 if __name__ == "__main__":

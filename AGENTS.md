@@ -15,6 +15,27 @@ Purpose: persistent operating context for future agent-assisted sessions. Read t
 6. Keep secrets and runtime data private. Do not print cookie values, tokens, credentials, or raw operational data unless the user explicitly asks and the security impact is clear.
 7. Prefer read-only inspection until the user asks for implementation or explicitly approves file writes.
 
+## Repository Root Hygiene
+
+- Keep the repository root clean. Put every new source, document, generated
+  artifact, shortcut, backup, and runtime file in the narrowest appropriate
+  subdirectory whenever the required tool or runtime permits it.
+- The approved root-file allowlist is enforced by
+  `tests/test_repository_hygiene.py`. It is limited to conventional repository
+  metadata and configuration, dependency manifests, the local `.env` contract,
+  and the established root runtime entry points `main.py`, `Caddyfile`, and
+  `start_api_dashboard.bat`.
+- A new root file is allowed only when an external tool or an existing runtime
+  contract requires that exact location. Document the reason and update the
+  allowlist in the same reviewed change; convenience alone is not sufficient.
+- Store generated output under `artifacts/`, operational data under `data/`,
+  operator documentation under `agents/`, reusable commands under `scripts/`,
+  and component-owned files inside the component directory. Do not use the
+  repository root as temporary storage.
+- Keep live secrets out of tracked subdirectories. The currently established
+  ignored root `.env` remains an explicit compatibility exception; additional
+  secret backups belong in a protected external configuration directory.
+
 ## Documentation Contract
 
 These files are part of the daily workflow:
@@ -37,10 +58,73 @@ At the end of every substantive session:
 ## Project Map
 
 - `main.py`: scheduler entry point. Imports and runs the main scheduler.
-- `monitoring_agent/`: unregistered standard-library test skeleton for the
+- `monitoring_agent/`: reviewed local source and test package for the
   independent remote read-only scheduler observer and its loopback-only
-  synthetic Health server. It has no production registration, authentication,
-  external delivery, or mutation capability.
+  synthetic Health server. Remote audit v2 proved that the
+  4,545.121-second gap was between healthy cycles rather than inside an HTTP
+  request; local Windows event correlation identified a supervision-station
+  shutdown/restart. Remote `0.6.0-test` then verified prospective lifecycle
+  evidence but exposed a false early-start finding across two process runs.
+  Remote `0.6.1-test` verified the corrected cross-run timing and exposed
+  historical process interleaving (`A-B-A-C`). Locally reviewed `0.6.2-test`
+  acquires a non-blocking OS writer lock before lifecycle, heartbeat,
+  observation, or HTTP activity and audit contract 5 distinguishes concurrent
+  starts/run reentry from unclean restart evidence. Remote foreground proof
+  verified fail-closed second-writer rejection with zero state writes and
+  successful lock release after Ctrl+C. `0.7.0-test` adds the approved
+  authenticated System Runtime facade/client projection, observation contract
+  3 endpoint-set identity, and audit contract 6 compatibility with retained
+  three-endpoint 0.6 history. On 2026-08-06 the new facade and remote 0.7
+  bundle were verified, the existing state and credential were retained, and
+  the endpoint set was migrated to `live`, `ready`, `system_scheduler`, and
+  `system_runtime`. The agent now runs as the `MonitoringAgentTest` Windows
+  Scheduled Task under `SYSTEM` on the separate supervision center. A real
+  center reboot proved one logical startup writer, continued observations,
+  healthy recovery, and zero new concurrent-start, run-reentry, unclean, or
+  abandoned-run evidence. Windows exposes the one venv invocation as a
+  two-process launcher/interpreter tree; do not mistake raw process count two
+  for two writers. While the task is running, only `--check-config` and
+  `--audit-state` are safe concurrent commands. The agent remains test-mode,
+  with no external delivery or application mutation capability. Local
+  `0.8.1-test` now supersedes the undeployed `0.8.0-test` candidate. It retains
+  observation contract 4 / endpoint set 3 and audit contract 7, adding strict
+  safe projections for detailed Scheduler Health, System Database, Proxy, and
+  SmartFuelPass plus a credential-free direct public-page probe from the
+  supervision center, for nine observations per cycle. The 2026-08-06
+  monitored-workstation restart activated all eight safe facade routes, but
+  exposed a rolling-upgrade incompatibility: deployed 0.7 expects the former
+  full System Runtime response while the new server projection correctly drops
+  transient details, addresses, and PIDs. Remote audit v6 consequently retains
+  new System Runtime schema failures and a degraded latest heartbeat; do not
+  stop or directly promote that writer as though recovery passed. `0.8.1-test`
+  adds a strict env-v1/contract-3/set-2 compatibility bridge so the new client
+  can first recover against the safe target without changing `.env`, then move
+  to env v2 / nine endpoints. A matching 0.8.1 ZIP hash was reported on
+  2026-08-07, but the same console could not find `MonitoringAgentTest`; remote
+  transfer identity therefore remains unproved until the check is repeated on
+  the actual supervision center. The user then confirmed the console is the
+  supervision station and explicitly accepted a one-time test-stage hard stop
+  plus manual `.env` transfer. Identify only the exact 0.7 process tree,
+  preserve append-only state, and qualify any resulting unclean/abandoned run
+  as planned migration evidence. The exact two-process Session-0 Python tree
+  was then validated and hard stopped; no Python process remained, env v1 was
+  preserved, and the remote 0.8.1 ZIP matched the reviewed hash. Roadmap item
+  1 remains open until side-by-side extraction, both controlled phases, and
+  the audit-v7 mixed-history/current-run proof pass. Continue from
+  `agents/plans/monitoring/MONITORING_AGENT_IMPLEMENTATION_ROADMAP.md`.
+- `https://github.com/mtravnicekarmex/monitoring_agent_0.4.0`: standalone
+  public repository for the minimal remote test project. Verified `master`
+  commit `3c171cf49615cf792211f3c992320dade539ccc4` matches the complete
+  `0.4.1-test` manifest, contains no real `.env` or agent state, and is not a
+  clone of the complete platform repository. `0.6.2-test` is remotely verified
+  against the existing contract-v2 0.6 state for foreground single-writer
+  rejection and lock release. The supervision center's deployed
+  `0.7.0-test` came from the separately verified ZIP; this does not imply that
+  the public repository advanced beyond its verified 0.4.1 commit. The
+  included unsigned startup helper was not executed because the center uses
+  `Restricted` PowerShell policy; an elevated, semantically equivalent
+  registration created and restart-verified the test task without changing or
+  bypassing that policy.
 - `core/db/connect.py`: SQLAlchemy database connections for PostgreSQL and MSSQL, configured through `python-decouple`.
 - `core/scheduler/job_schedule.py`: single source of truth for APScheduler cron schedules.
 - `core/scheduler/scheduler.py`: scheduler execution, locks, metrics, manual run specs, and alert emails.
@@ -99,6 +183,15 @@ At the end of every substantive session:
   for safe post-restart/runtime checks.
 - `services/api/services/system_health.py`: sanitized Windows runtime probes
   for boot time, startup task, expected listeners, and temporary listeners.
+- `services/api/routes/monitoring.py`: dedicated authenticated, GET-only
+  monitoring facade with eight strict safe projections for the remote agent.
+- `services/api/schemas/monitoring.py`: allowlisted response contracts for the
+  monitoring facade; unsafe/transient Health fields are excluded before
+  network serialization.
+- `services/api/services/monitoring_facade.py`: explicit projectors from the
+  existing Health collectors into the safe monitoring response contracts.
+- `services/api/services/scheduler_health.py`: shared detailed Scheduler Health
+  collector reused by the administrator route and safe monitoring facade.
 - `services/api/routes/map.py`: general map API for layer catalog, features, filter options, and authorized device images.
 - `services/api/services/map_layers.py`: map-layer metadata, access checks, filtering, distinct filter options, and image proxy orchestration.
 - `services/api/services/device_map.py`: GeoJSON map feature loading, device detail enrichment, and map image file resolution.
@@ -155,6 +248,10 @@ At the end of every substantive session:
   step-by-step design for the first independent read-only monitoring agent,
   its deterministic incident lifecycle, test-mode reporting, and the
   separately gated path toward eventual alert-layer replacement.
+- `agents/plans/monitoring/MONITORING_AGENT_IMPLEMENTATION_ROADMAP.md`:
+  approved nine-step live checklist from safe observation expansion through
+  incident/report/delivery/interpretation work, shadow validation, local
+  agents, and the later evidence-driven orchestrator design.
 - `agents/plans/monitoring/SCHEDULER_MONITORING_AGENT_REMOTE_RUNTIME_DESIGN.md`:
   selected cross-workstation boundary, private monitoring API facade,
   network/authentication constraints, known blind spots, and the required
@@ -163,6 +260,10 @@ At the end of every substantive session:
   hub-and-spoke boundary for the clean remote supervision center, minimal
   distribution bundle, local data-bearing agents, Tailscale facade, packaging,
   installation, self-monitoring, and future-agent onboarding.
+- `agents/plans/monitoring/MONITORING_AGENT_REPORTING_LAYER_HANDOFF.md`:
+  verified deployed 0.7 task/restart baseline, local 0.8 observation-contract
+  candidate, audit interpretation rules, safe reporting inputs, and known
+  activation gaps before deterministic reporting work.
 - `agents/inventories/MONITORING_AGENT_HEALTH_ENDPOINT_INVENTORY.md`: reviewed
   allowlist and retention classification for every Health API field available
   to the first monitoring agent, including explicitly excluded log and
@@ -559,6 +660,15 @@ Known hygiene topics to handle only after explicit approval:
   browser storage, raw rows, or Cloudflare clearance values.
 - The database-backed SmartFuelPass weekly report remains scheduled and must
   not open the portal.
+- SmartFuelPass portal import remains knowingly paused. Do not retry, replace,
+  or otherwise modify the current interactive workflow while the monitoring
+  agent is unfinished. After that work completes, create a separately reviewed
+  replacement that renames `Přihlášení SmartFuelPass` to `Import`, accepts an
+  administrator-selected Excel file, parses it, and persists the resulting
+  records through the authenticated FastAPI/database boundary. Until then,
+  preserve the real SmartFuelPass Health error as a known planned condition;
+  do not rewrite it to `ok`, and qualify it in later incident rules rather
+  than treating it as an unexpected new outage.
 - `Mapove podklady` uses general FastAPI map endpoints and admin-configured metadata in `dashboard.Map_Layers`.
 - Map feature images must be resolved server-side from `layer_id` and device identifier; do not expose an endpoint that serves arbitrary client-supplied file paths.
 - Browser map image loading must use same-origin `/api/v1/map/images` through Caddy, which routes `/api/*` to FastAPI and other requests to Streamlit.

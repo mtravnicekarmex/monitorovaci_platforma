@@ -31,5 +31,4 @@ moduly/mereni/elektromery/data/**/*.ts
 moduly/mereni/elektromery/data/**/*.xlsx
 frontend_next/tsconfig.tsbuildinfo
 
-run.txt
 .local-monitoring-agent-state/

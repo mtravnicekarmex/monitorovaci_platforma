@@ -13,6 +13,8 @@ def run_observation_cycle(
     client: HealthClient,
     store: ObserverStore,
     observer_instance_id: str,
+    run_id: str,
+    cycle_sequence: int,
     endpoint_keys: Iterable[str] | None = None,
 ) -> tuple[Observation, ...]:
     resolved_keys = tuple(endpoint_keys or APPROVED_ENDPOINTS)
@@ -20,13 +22,18 @@ def run_observation_cycle(
     cycle_started_at = datetime.now(timezone.utc).isoformat()
     store.write_heartbeat(
         observer_instance_id=observer_instance_id,
+        run_id=run_id,
         status="polling",
         cycle_id=cycle_id,
         cycle_started_at=cycle_started_at,
     )
     observations: list[Observation] = []
     for endpoint_key in resolved_keys:
-        observation = client.poll(endpoint_key)
+        observation = client.poll(
+            endpoint_key,
+            cycle_id=cycle_id,
+            cycle_sequence=cycle_sequence,
+        )
         store.append(observation)
         observations.append(observation)
     transport_failure_count = sum(
@@ -34,6 +41,7 @@ def run_observation_cycle(
     )
     store.write_heartbeat(
         observer_instance_id=observer_instance_id,
+        run_id=run_id,
         status="healthy" if transport_failure_count == 0 else "degraded",
         cycle_id=cycle_id,
         cycle_started_at=cycle_started_at,

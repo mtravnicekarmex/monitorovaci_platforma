@@ -3008,3 +3008,574 @@ Consequences:
 - Windows ACL setup, Scheduled Task registration, restart policy, rollback,
   and background operation remain separate gates after foreground behavior
   and failure isolation pass.
+
+## DEC-107: The remote test project may use a standalone minimal repository
+
+Date: 2026-08-05
+
+Status: Accepted
+
+Decision:
+
+- Track the supervision-center `0.4.0-test` project in the standalone public
+  repository `mtravnicekarmex/monitoring_agent_0.4.0`. The reviewed baseline
+  is `master` commit `88158812000c9a91b9a7da1c61045737549a3363`.
+- Permit repository metadata only for this minimal agent project. The complete
+  `monitorovaci_platforma` repository, unrelated application source, runtime
+  data, and operational tooling remain forbidden on the center.
+- Keep the real `.env`, bearer credential, agent-owned state, virtual
+  environment, IDE workspace, logs, and reports outside version control. The
+  tracked file set must remain bounded by the reviewed runtime manifest.
+- Validate future runtime changes against the main repository's tests and the
+  explicit bundle manifest before updating or running them on the center.
+
+Consequences:
+
+- The remote test project gains ordinary version history and a precise commit
+  identity without distributing the full monitored application.
+- Public repository visibility does not permit secrets, machine identifiers,
+  operational payloads, or local state to be committed.
+- Pulling or running a newer remote commit is an explicit reviewed upgrade,
+  not an automatic deployment or approval for background registration.
+
+## DEC-108: Every tracked remote-project change requires a new verified bundle
+
+Date: 2026-08-05
+
+Status: Accepted
+
+Decision:
+
+- Treat changes to any manifest-declared file, including non-runtime hygiene
+  files such as `.gitignore`, as a new supervision bundle revision.
+- Do not repair a changed `0.4.0-test` file by silently rewriting its existing
+  manifest. Build `0.4.1-test` from the synchronized allowlist source and
+  regenerate `manifest.json`, `manifest.sha256`, and the ZIP together.
+- Require the remote repository commit to match every declared file size and
+  SHA-256 before it becomes the new integrity baseline or before retained
+  state audit evidence is accepted.
+
+Consequences:
+
+- The original `0.4.0-test` ZIP and hash remain immutable evidence.
+- Remote commit `08362ec3ff504986109180bb9d1c89ea096ae19b` is safe source
+  hygiene but not an approved integrity baseline because it retains the old
+  manifest.
+- Locally verified `0.4.1-test` is the next synchronization candidate. Its ZIP
+  SHA-256 is
+  `1EEBB2E946A87E5300A72126AF9A3E358DC6EA121384D2BC8BBA568E3F5DB49B`.
+
+## DEC-109: Remote state audit output is aggregate, read-only, and explicit about gaps
+
+Date: 2026-08-05
+
+Status: Accepted
+
+Decision:
+
+- Add a `--audit-state` test-mode command that reads only the configured
+  agent-owned observation and heartbeat files. It performs no network request
+  and makes no state write.
+- Validate observation and heartbeat schemas fail-closed, then emit only
+  versioned aggregate retry, cycle, transition, timing, and latest-heartbeat
+  facts.
+- Never render the `.env`, state path, bearer, observer instance, PID value,
+  UUID, timestamp, endpoint key, normalized payload, or raw JSONL record in
+  audit output or validation errors.
+- Report process ID only as a presence boolean. Because the current atomic
+  heartbeat persists only its latest snapshot, explicitly report that
+  heartbeat-transition and process-identity history are unavailable.
+
+Consequences:
+
+- The failure-isolation evidence can be reviewed without copying operational
+  records or machine identifiers from the supervision center.
+- Cycle health transitions derived from immutable observations are labelled
+  as inferred; they do not masquerade as persisted heartbeat history.
+- Proving unchanged PID and actual heartbeat state at every historical cycle
+  requires a separately designed bounded history format and remains open.
+- The first implementation is packaged as local `0.5.0-test`, whose ZIP
+  SHA-256 is
+  `739B6C57BE2BAF24CA2F4219F7FBF358859DE53D8AC5BAC07A5B6E4F420DB748`.
+
+## DEC-110: Timing audit distinguishes long cycles from between-cycle gaps
+
+Date: 2026-08-05
+
+Status: Accepted
+
+Decision:
+
+- Treat the remote audit-v1 maximum start-to-start interval of 4,545.121
+  seconds as an unresolved monitoring blind interval, not as the duration of
+  monitored-target unavailability. The user confirmed that the monitored
+  station, not the supervision center, was unavailable.
+- Extend `--audit-state` contract version 2 with non-secret request timeout,
+  retry-backoff, and configured all-timeout cycle-budget facts; aggregate
+  cycle-duration statistics; and sanitized diagnostics for the longest cycle,
+  longest interval, and largest late interval.
+- Report only safe cycle indexes, durations, outcome classes, expected/allowed
+  bounds, and excess durations. Continue to exclude timestamps, endpoint keys,
+  identifiers, paths, and raw state.
+- Classify an interval within the previous cycle's recorded runtime as
+  `long_running_previous_cycle`. Classify excess time outside the previous
+  cycle, configured polling interval, jitter, and tolerance as
+  `unexplained_between_cycles_or_clock_discontinuity`.
+
+Consequences:
+
+- The retained audit-v1 state can identify whether the blind interval arose
+  inside a request cycle or between cycles without repeating the target
+  outage or exporting raw operational data.
+- A long-running cycle routes diagnosis toward request, DNS, TLS, socket, or
+  wall-clock behavior during a request. An unexplained between-cycle gap
+  routes diagnosis toward process pause/restart, scheduling, supervision-host
+  availability, or wall-clock continuity.
+- Neither classification proves historical process identity; the explicit
+  heartbeat/PID history gaps from DEC-109 remain.
+- The implementation is packaged as local `0.5.1-test`, whose ZIP SHA-256 is
+  `85FFDEC8E807068DFF82AEE56422B2D0FB05C57D9C6D8F6902377519B24FBBE8`.
+
+## DEC-111: Process lifecycle evidence is prospective and startup registration stays gated
+
+Date: 2026-08-05
+
+Status: Accepted
+
+Decision:
+
+- Supersede DEC-110's provisional causal association between the blind
+  interval and monitored-target loss. Remote audit v2 proved that the
+  4,545.121-second interval followed a 0.071-second healthy cycle and occurred
+  outside request runtime. Local Windows System event times matched a
+  supervision-station shutdown/restart.
+- Introduce observation contract version 2 with a fresh random `run_id` for
+  every process, an explicit cycle ID, and a per-run cycle sequence. Use a new
+  empty state directory; never mix observation contracts in one JSONL file.
+- Add append-only lifecycle contract version 1 with process-start and
+  controlled process-stop records. Persist run ID and PID locally, but expose
+  only aggregate clean/unclean restart, abandoned-run, lifecycle consistency,
+  and incomplete-cycle facts through audit contract version 3.
+- Keep the atomic latest heartbeat. Add run identity to it, but retain
+  `heartbeat_transition_history_not_persisted` as an explicit gap.
+- Include an idempotent PowerShell Scheduled Task registration helper using
+  the exact project interpreter and working directory, `SYSTEM`, `AtStartup`,
+  `StartWhenAvailable`, one-minute failure restart, and `IgnoreNew`. Require
+  `SupportsShouldProcess`/`-WhatIf`; do not register the task as part of bundle
+  creation, extraction, foreground tests, or this decision.
+
+Consequences:
+
+- Future power-loss and restart tests can distinguish a controlled process
+  stop from a new start following an abandoned run, without rendering the
+  actual run ID, PID, timestamp, state path, or raw record.
+- A process killed after writing only part of a cycle no longer corrupts later
+  cycle grouping; the audit counts the incomplete cycle and resumes grouping
+  by run/cycle identity.
+- Historical v0.5 process identity cannot be reconstructed and remains an
+  accepted evidence gap. New lifecycle evidence begins only in a fresh 0.6
+  state directory.
+- The helper itself has no bearer, URL, password, or `.env` value on its task
+  command line. Actual registration and reboot verification remain separate
+  privileged approval gates.
+- The implementation is packaged as local `0.6.0-test`. Its 13-file ZIP
+  SHA-256 is
+  `41636BDD70612F0A89471CC102B5640C59AADE9DCC63E5426789F39DD77481B3`.
+
+## DEC-112: Scheduled timing is scoped to one process run
+
+Date: 2026-08-05
+
+Status: Accepted
+
+Decision:
+
+- Treat start-to-start cadence, overlap, early-start, late-start, longest
+  interval, and largest-late findings as scheduled timing only when two
+  consecutive complete cycles share the same `run_id`.
+- Preserve intervals across a `run_id` boundary as separate sanitized
+  `cross_run_*` aggregates and a `process_run_transition` diagnostic. Do not
+  compare them with the polling interval or jitter and do not expose run IDs,
+  timestamps, or raw lifecycle records.
+- Raise the aggregate audit contract to version 4. Keep observation contract
+  2 and lifecycle contract 1 unchanged so existing 0.6 state remains
+  compatible and retains continuity evidence.
+
+Consequences:
+
+- The remote v3 result whose two process runs began 46.83 seconds apart no
+  longer creates a false early scheduled start. The duration remains visible
+  as cross-run evidence, while lifecycle aggregates separately identify clean
+  or unclean process transitions.
+- Upgrading from `0.6.0-test` to `0.6.1-test` must reuse the current 0.6 state;
+  a fresh state is required only for migration from pre-0.6 contracts.
+- The reproducible 13-file `0.6.1-test` ZIP SHA-256 is
+  `18B3A8784D37737365FF276CC4BE9D21E4A4CB844A31642D03642E36392D1EE0`;
+  its manifest SHA-256 is
+  `E1F06F2363DEC0732F8BC7C27A9669DB119788EB590BB1B364392255CF274C38`.
+  Scheduled Task registration and reboot proof remain separately gated.
+
+## DEC-113: Agent state has one OS-enforced polling writer
+
+Date: 2026-08-05
+
+Status: Accepted
+
+Decision:
+
+- Acquire a non-blocking operating-system file lock scoped to the configured
+  state directory before writing process lifecycle, heartbeat, observations,
+  or making an HTTP request. Hold it for the entire polling process.
+- Reject a second `--once` or continuous writer with a sanitized startup error
+  and no lifecycle, heartbeat, observation, or network activity. Keep
+  `--check-config` and `--audit-state` read-only and outside the writer lock.
+- Use a one-byte lock file with an OS-held lock rather than PID/stale-file
+  ownership. The file may persist, but normal exit, forced termination, or OS
+  process cleanup releases the actual lock.
+- Raise the audit contract to version 5. Report process-run reentry and
+  lifecycle concurrent starts separately from an unclean restart. Do not
+  expose run IDs, PIDs, timestamps, lock paths, or raw lifecycle records.
+
+Consequences:
+
+- The remote 0.6.1 history with three distinct runs and three transitions is
+  retained as one run reentry and one concurrent start. Its historical
+  single-writer validity remains false; this does not imply a new 0.6.2 lock
+  failure.
+- Every pre-lock 0.6.0/0.6.1 writer must be stopped before starting 0.6.2,
+  because an older process does not participate in the new lock.
+- Observation contract 2 and lifecycle contract 1 remain compatible; the
+  existing state is reused.
+- The reproducible 13-file `0.6.2-test` ZIP SHA-256 is
+  `C14A694F650BED6948450BEFA3704BF62B29359537ADE51B67B25DC9A8DC8C5D`;
+  its manifest SHA-256 is
+  `24CD22C4F41ED9A29FB74886EBF73ED8A1539917D34A96628CDE3BAEC99CB1D4`.
+  Scheduled Task registration and reboot proof remain separately gated.
+
+## DEC-114: Endpoint-set evolution preserves versioned observation history
+
+Date: 2026-08-05
+
+Status: Accepted
+
+Decision:
+
+- Extend the private GET-only monitoring facade and remote client with the
+  approved System Runtime projection. Retain only aggregate status/source
+  time, boot status/time, startup-task identity/status/last-run/result, and
+  listener identity/status/expected/present/port. Validate but discard free
+  text, labels, local addresses, process IDs, and startup-task next-run data.
+- Define ordered endpoint set 1 as the legacy `live`, `ready`, and
+  `system_scheduler` cycle. Define set 2 as those three plus
+  `system_runtime`. Runtime configuration must exactly match current set 2.
+- Raise the observation contract to 3 and persist `endpoint_set_version=2` on
+  every new observation. Raise the aggregate audit contract to 6 and evaluate
+  each cycle against the endpoint order and timeout budget declared by its
+  observation contract/set.
+- Permit audit v6 to read legacy contract-2/set-1 observations and current
+  contract-3/set-2 observations in the same append-only 0.6 state. This
+  narrowly supersedes DEC-111's prohibition on mixed observation contracts;
+  unsupported contracts, unknown endpoint sets, or endpoint-set changes
+  inside one cycle remain fail-closed. Pre-0.6 state still requires a new
+  directory.
+
+Consequences:
+
+- The 0.6 history is retained without rewriting records. Audit output exposes
+  only aggregate contract/set counts and continues to suppress raw IDs,
+  timestamps, paths, payloads, and process data.
+- The monitored workstation must deploy the matching authenticated System
+  Runtime facade before remote 0.7 polling begins. A missing route is a
+  non-retryable HTTP failure, not silently omitted from the cycle.
+- Detailed Scheduler Health and System Database remain approved future client
+  extensions; incident rules, external delivery, and Scheduled Task
+  registration remain separate gates.
+- The reproducible 13-file local `0.7.0-test` ZIP SHA-256 is
+  `0BA56B60FD8F5A229346D565FEA33F58F57F9239FE541F216C07E79E56D7BF20`;
+  its manifest SHA-256 is
+  `39C06473793C92FB281D509C3468493E9562CF9CDB74F27DBEA4D249C4676ACB`.
+
+## DEC-115: Monitoring facade changes activate through a monitored-station restart
+
+Date: 2026-08-05
+
+Status: Accepted
+
+Decision:
+
+- Treat the monitored workstation's FastAPI/Caddy runtime as boot-created by
+  the existing Windows startup process. Under the current supported operating
+  workflow, a changed monitoring facade is activated by restarting the whole
+  monitored workstation, not by an independent API-only restart.
+- Keep the separate supervision workstation and its current `0.6.2-test`
+  foreground observer running during that restart. The resulting target
+  transport loss and recovery are expected observation evidence, not a reason
+  to restart the observer.
+- After the monitored workstation returns, verify its startup task, required
+  listeners, established facade routes, and the new authenticated System
+  Runtime route before changing the remote observer.
+- Stop the 0.6.2 writer before starting 0.7, retain the existing 0.6 state,
+  update only the exact endpoint-key configuration, and then execute
+  `--check-config`, `--once`, and `--audit-state`. Do not start continuous 0.7
+  polling if the new route or mixed-history audit is invalid.
+
+Consequences:
+
+- A source-code change alone does not mean the new route is live. Before the
+  monitored workstation restart, the production runtime still serves the old
+  facade even though local 0.7 source and its bundle are prepared.
+- The monitored-station restart and the remote-agent upgrade are distinct
+  checkpoints. Failure of the new route keeps the remote upgrade blocked and
+  leaves the existing 0.6.2 observer/state as the operational test baseline.
+- This decision does not authorize a restart. Automatic startup registration
+  for the remote agent, a supervision-workstation restart, external delivery,
+  and remaining endpoint extensions stay separately gated.
+
+## DEC-116: The supervision-center pilot uses one audited startup task
+
+Date: 2026-08-06
+
+Status: Accepted
+
+Decision:
+
+- Accept the restart-verified Windows Scheduled Task `MonitoringAgentTest` as
+  the lifecycle owner for the remote `0.7.0-test` pilot. It runs as `SYSTEM`
+  with an `AtStartup` trigger, `StartWhenAvailable`, `IgnoreNew`, one-minute
+  bounded failure restarts, no execution time limit, the exact project-local
+  virtual-environment interpreter and working directory, and no secret or URL
+  on its command line.
+- Keep the Scheduled Task as the only continuous polling invocation. While it
+  is running, operators and later reporting tools may use read-only
+  `--check-config` and `--audit-state`, but must not launch another continuous
+  process or `--once` against the same state.
+- Interpret the two Windows Python processes created by one virtual-environment
+  invocation as one logical runtime only when sanitized evidence confirms one
+  parent-child process tree, one task instance, the `SYSTEM` owner, continuous
+  mode, one open lifecycle run, and no increment in concurrent-start or
+  process-run-reentry counts. Raw process count alone is not writer identity.
+- Preserve the existing external agent state and its historical audit facts.
+  The retained pre-lock concurrent-start and run-reentry counts remain
+  historical qualifications; they do not describe the current task unless
+  they increment.
+- Treat a fresh postboot lifecycle record or observation as the startup proof.
+  Task state `Running` alone is insufficient because the first verified cold
+  start took approximately 110 seconds before the lifecycle file changed.
+
+Consequences:
+
+- The remote observer now resumes independently after a supervision-center
+  reboot. The 2026-08-06 proof produced one active logical `SYSTEM` writer,
+  continued four-endpoint cycles, healthy recovery, and zero unclean or
+  abandoned runs.
+- The checked-in unsigned helper remains useful as the reviewed semantic
+  definition, but it was not executed under the center's `Restricted`
+  PowerShell policy. Equivalent elevated registration was used without
+  changing or bypassing policy.
+- `single_writer_observation_history_valid=false` and
+  `single_writer_history_valid=false` remain expected for the append-only
+  historical state. Reporting must label them as historical evidence gaps and
+  must also show current task/lifecycle facts before asserting a live writer
+  conflict.
+- This decision authorizes neither report delivery nor incident remediation.
+  Deterministic incident rules, bounded incident/report storage,
+  interpretation, delivery channels, credential rotation, and replacement of
+  legacy alerts remain separate work and approval gates.
+
+## DEC-117: The repository root uses an explicit minimal allowlist
+
+Date: 2026-08-06
+
+Status: Accepted
+
+Decision:
+
+- Keep new source, documentation, generated artifacts, shortcuts, backups, and
+  runtime files in the narrowest appropriate subdirectory instead of the
+  repository root whenever tooling and runtime contracts permit it.
+- Enforce the approved root-file set with a regression test. Root placement
+  outside that set requires a concrete external-tool or runtime-path reason,
+  corresponding documentation, and an allowlist update in the same review.
+- Retain `main.py`, `Caddyfile`, and `start_api_dashboard.bat` as established
+  runtime-path exceptions. Retain the ignored root `.env` only as the current
+  local configuration compatibility contract; additional secret backups must
+  use protected storage outside the repository.
+- Keep the monitoring distribution's root runner as an archive path, but store
+  its source template under `monitoring_agent/bundle_root/`. Keep the legacy
+  dashboard compatibility launcher under `scripts/`, local development notes
+  under `agents/runbooks/`, and the Windows convenience shortcut under
+  `scripts/shortcuts/`.
+
+Consequences:
+
+- Accidental root files fail `tests/test_repository_hygiene.py` instead of
+  silently becoming a new convention.
+- Existing integrations that require an approved root path remain unchanged.
+  The monitoring bundle still extracts `run_monitoring_agent.py` at its own
+  project root, and the production dashboard task still targets the existing
+  root launcher.
+- Root-level monitoring credential-rotation backups found during this cleanup
+  are retained without reading their values and moved to protected external
+  storage rather than into a tracked repository subdirectory.
+
+## DEC-118: Monitoring endpoint set 3 covers both Health pages and external reachability
+
+Date: 2026-08-06
+
+Status: Accepted
+
+Decision:
+
+- Define observation contract 4 and ordered endpoint set 3 as `live`, `ready`,
+  `system_scheduler`, `scheduler_detail`, `system_runtime`, `system_database`,
+  `system_proxy`, `system_smartfuelpass`, and `external_web`.
+- Expose the eight monitored-host observations through dedicated monitoring
+  response models that remove transient, unnecessary, sensitive, and
+  capability-bearing fields before network serialization. Reuse the existing
+  collectors; do not create parallel metric or database collectors.
+- Execute `external_web` directly from the supervision workstation against one
+  configured credential-free public HTTPS root. Send no monitoring bearer,
+  follow no redirect, read no body, require HTTP 200 plus HTML content type,
+  and retain neither URL nor headers.
+- Raise the environment contract to 2 by adding the external public-page URL.
+  Raise the aggregate audit to contract 7 and bind observation contracts 2,
+  3, and 4 exactly to endpoint sets 1, 2, and 3 respectively. Preserve the
+  append-only state rather than rewriting the deployed 0.6/0.7 history.
+- Add a bounded absolute clock-skew diagnostic to contract 4. Derive it from
+  the endpoint source time and request midpoint, cap it at 86,400 seconds, and
+  use null when the endpoint has no source timestamp.
+
+Consequences:
+
+- Detailed scheduler data cannot expose manual-run capability, descriptions,
+  or labels. Runtime cannot expose process IDs or binding addresses. Database
+  cannot expose server inventory. Proxy cannot expose configured host/path or
+  response location. SmartFuelPass cannot expose monetary, period, session,
+  location, or connector aggregates.
+- With the retained three-second timeout, three attempts, and 0.5/1.0-second
+  backoff, the serialized nine-endpoint worst-case timeout budget is 94.5
+  seconds. A complete outage can therefore lengthen the nominal 60-second
+  start-to-start cadence, but cycles remain serialized and bounded; they never
+  overlap or start a second writer.
+- HTTP, TLS, redirect, JSON/content-type, and schema failures are fail-closed
+  and non-retryable. Only connection failures and timeouts use bounded retry.
+- The monitored workstation still runs the four-endpoint 0.7 facade and the
+  supervision center still runs `0.7.0-test` until a separately approved main
+  workstation restart, remote configuration migration, and 0.8 runtime proof
+  are completed. Roadmap item 1 remains unchecked until that proof passes.
+- The deterministic local `0.8.0-test` bundle contains 13 declared runtime
+  files and 15 ZIP entries. Its ZIP SHA-256 is
+  `29BEE64FEE267F1E74BE1AA89CA621E2930262E16C0C662580DA5D2B7EBF8EF0`;
+  manifest SHA-256 is
+  `282DFDDA162B4D4CB2C3CE656066D47E2B03504F1434277659E20CBCBB173ADF`.
+  Neither identity is deployment evidence by itself.
+
+## DEC-119: SmartFuelPass portal import stays paused until an Excel replacement is reviewed
+
+Date: 2026-08-06
+
+Status: Accepted
+
+Decision:
+
+- Keep the current SmartFuelPass interactive portal-import workflow unchanged
+  and paused while the monitoring agent remains unfinished. Do not retry the
+  Cloudflare flow or alter its page, task, parser, state, or database behavior
+  during the monitoring-agent workstream.
+- After the monitoring-agent work reaches a separate reviewed handoff, replace
+  the page `Přihlášení SmartFuelPass` with `Import`. The future page will accept
+  an administrator-selected Excel file, parse its supported contract, and
+  persist the resulting records through the authenticated FastAPI/database
+  boundary.
+- Define the workbook schema, validation and rejection behavior, idempotent row
+  identity, preview/confirmation flow, aggregate result evidence, and
+  reconciliation/rollback boundary before implementing the replacement.
+- Preserve the database-backed weekly report and the existing data while the
+  import path is paused.
+- Monitoring must retain the current SmartFuelPass Health payload as truthful
+  evidence. The known planned error is an incident-rule qualification, not a
+  reason to alter the collector or serialize a false `ok` status.
+
+Consequences:
+
+- No SmartFuelPass source, page, Windows task, production data, or runtime
+  configuration changes are part of the current monitoring-agent work.
+- Roadmap item 1 may pass with a transport/schema-healthy nine-observation
+  cycle even when the SmartFuelPass application payload remains `error`;
+  observer self-health and target application health stay separate.
+- Deterministic incident rules in roadmap item 2 must represent this planned
+  condition explicitly so it does not become an unexpected incident while
+  still preserving the underlying observation.
+
+## DEC-120: Monitoring 0.8 uses a strict two-phase rolling upgrade
+
+Date: 2026-08-06
+
+Status: Accepted
+
+Decision:
+
+- Do not restore transient System Runtime details, labels, local addresses,
+  next-run time, or process IDs to the network facade merely to satisfy the
+  deployed 0.7 exact-schema client. Preserve the new server-side safe
+  projection as the target contract.
+- Supersede the undeployed 0.8.0 bundle with `0.8.1-test`. The new code accepts
+  both exact environment contracts: env v1 means the original four ordered
+  keys and observation contract 3/set 2; env v2 means the exact nine ordered
+  keys and observation contract 4/set 3. No hybrid key set is accepted.
+- Upgrade in two phases against the same retained state. First install 0.8.1
+  with the existing env-v1 file unchanged and require a healthy four-endpoint
+  bridge cycle. Then add only the reviewed env-v2 external URL/key changes and
+  require a healthy nine-endpoint cycle.
+- Keep global append-only audit findings unchanged. Audit v7 additionally
+  reports retry/attempt evidence for the heartbeat's current run, so a new
+  runtime can prove valid behavior without relabeling historical schema
+  transition records.
+
+Consequences:
+
+- The 68 schema errors already written by 0.7 remain historical evidence; they
+  are not deleted, rewritten, or reclassified. Global retry history may remain
+  false because final schema errors can follow earlier retryable attempts.
+- Both upgrade phases require `--check-config`, one writer-exclusive `--once`,
+  and `--audit-state` while the Scheduled Task is stopped. The task must not be
+  returned to continuous operation until the nine-endpoint phase passes.
+- This decision does not authorize a particular stop command. In particular,
+  `Stop-ScheduledTask` must not be assumed to produce the observer's controlled
+  lifecycle stop event; the initial 0.7 stop remains a separately reviewed
+  migration gate.
+- The `0.8.1-test` ZIP SHA-256 is
+  `D17A88A10814D4CC645AD731B5C2B56B3B662E0662547ED9FCEA3443EF876884`;
+  manifest SHA-256 is
+  `18A3E477E724EEA61F3EFDCBE303BEBE4DC298A4D646D37FE643D6CD9C49CBB1`.
+  These identities are local build evidence, not remote deployment proof.
+
+## DEC-121: The test-stage 0.7 to 0.8.1 cutover may use one planned hard stop
+
+Date: 2026-08-07
+
+Status: Accepted
+
+Decision:
+
+- The user explicitly accepts an observation discontinuity during this test
+  migration. If the 0.7 process has no attached console for a clean Ctrl+C,
+  it may be terminated after its exact process tree is identified.
+- Preserve the append-only state. A resulting abandoned/unclean 0.7 run is
+  qualified as expected migration evidence, not deleted or rewritten and not
+  treated as proof of a spontaneous observer failure.
+- Manual `.env` transfer is allowed without displaying its contents. The first
+  0.8.1 proof must use the copied env-v1 file unchanged; env v2/nine endpoints
+  remains a second phase after the bridge passes.
+- Do not infer a running Scheduled Task where none is listed, do not create a
+  replacement task before the writer-exclusive bridge/final proofs pass, and
+  never start a second writer while an identified 0.7 process remains alive.
+
+Consequences:
+
+- This decision supersedes only DEC-120's still-open authorization gate for
+  the initial 0.7 stop. The strict two-phase configuration, preserved safe API
+  schema, retained state, and audit-v7 proof requirements remain unchanged.
+- Process termination remains limited to the exact monitoring-agent process
+  tree on the supervision center. It does not authorize stopping application
+  services, the monitored workstation, or unrelated Python processes.

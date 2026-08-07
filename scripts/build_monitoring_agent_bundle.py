@@ -11,9 +11,17 @@ import zipfile
 BUNDLE_FILE_SOURCES = (
     (".env.example", "monitoring_agent/.env.example"),
     (".gitignore", "monitoring_agent/project.gitignore"),
-    ("run_monitoring_agent.py", "run_monitoring_agent.py"),
+    (
+        "run_monitoring_agent.py",
+        "monitoring_agent/bundle_root/run_monitoring_agent.py",
+    ),
+    (
+        "register_monitoring_agent_task.ps1",
+        "monitoring_agent/register_monitoring_agent_task.ps1",
+    ),
     "monitoring_agent/__init__.py",
     "monitoring_agent/__main__.py",
+    "monitoring_agent/audit.py",
     "monitoring_agent/client.py",
     "monitoring_agent/observer.py",
     "monitoring_agent/README.md",

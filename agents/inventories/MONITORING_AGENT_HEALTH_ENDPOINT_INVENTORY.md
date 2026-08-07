@@ -1,11 +1,24 @@
 # Monitoring Agent Health Endpoint Inventory
 
-Reviewed: 2026-07-30
+Reviewed: 2026-08-06
 
 Status: approved input inventory for `OPS-002` test-mode implementation
 
 Plan:
 `../plans/monitoring/SCHEDULER_MONITORING_AGENT_PLAN.md`
+
+Implementation status on 2026-08-06: the authenticated private facade and
+remote `0.7.0-test` strict client remain deployed for `live`, `ready`,
+`system_scheduler`, and `system_runtime`. The monitored target now serves the
+strict safe runtime projection; this correctly exposed a rolling incompatibility
+with the former full-schema 0.7 client. Local `0.8.1-test` source now adds
+network-side safe projections for detailed Scheduler Health, System Database,
+System Proxy, and System SmartFuelPass plus a direct external public-web probe.
+Observation contract 4 / endpoint set 3 and audit contract 7 preserve retained
+contract-2/set-1 and contract-3/set-2 history. Local synthetic/schema tests
+pass. Monitored-workstation activation is complete; a four-endpoint env-v1
+bridge recovery, remote configuration migration, and verified
+nine-observation cycle remain required before roadmap item 1 closes.
 
 ## Scope and classification
 
@@ -36,8 +49,9 @@ contracts and discard everything else.
 | `GET /health/scheduler` | admin bearer | yes | Internal steps and expected 24-hour schedule |
 | `GET /health/system/runtime` | admin bearer | yes | Restart and listener correlation |
 | `GET /health/system/database` | admin bearer | yes | Database dependency correlation |
-| `GET /health/system/proxy` | admin bearer | later pilot | Proxy/public-path correlation |
-| `GET /health/system/smartfuelpass` | admin bearer | later pilot | Only safe job-health projection is relevant |
+| `GET /health/system/proxy` | admin bearer | yes | Local proxy/public-path correlation |
+| `GET /health/system/smartfuelpass` | admin bearer | yes | Strict safe job/table projection only |
+| external public page root | public HTTPS | yes | Direct supervision-station probe; not a facade route |
 | `GET /health/scheduler/log` | admin bearer | no | Raw log content and local path are outside scope |
 | `POST /health/scheduler/jobs/{job_id}/run` | admin bearer | forbidden | Mutating manual-run endpoint |
 
@@ -257,8 +271,8 @@ Each `expected_schemas[]` item:
 
 ### `GET /health/system/proxy`
 
-Response model: `SystemProxyHealthResponse`. This endpoint is approved for a
-later pilot extension, not required by the first scheduler-only rule set.
+Response model: `SystemProxyHealthResponse`. The 0.8 facade projects its safe
+route and header results for correlation with the independent external probe.
 
 Top-level:
 
@@ -304,12 +318,32 @@ Public-route failure must be correlated with local liveness, readiness, and
 runtime state. A workstation-specific external request failure is not by
 itself proof of an application outage.
 
+## External public-web probe
+
+The `external_web` endpoint key is executed directly by the remote observer;
+it is not fetched through the monitored workstation's private facade. The
+configuration accepts only a credential-free root URL, requires HTTPS outside
+loopback synthetic tests, and rejects query strings, fragments, and non-root
+paths.
+
+The probe:
+
+- sends no monitoring bearer or other credential;
+- disables redirects so a redirect cannot conceal a routing change;
+- requires HTTP 200 and `text/html` content type;
+- does not read or retain the response body;
+- does not persist the configured URL or response headers;
+- retains only the normal observation transport/HTTP metadata and payload
+  `status=ok`, `content_type_valid=true` after validation;
+- treats timeouts and connection failures as bounded retryable transport
+  failures, while HTTP, TLS, and content-type/schema failures are not retried.
+
 ## SmartFuelPass projection
 
 ### `GET /health/system/smartfuelpass`
 
-Response model: `SystemSmartFuelPassHealthResponse`. This is deferred until the
-agent expands beyond scheduler supervision.
+Response model: `SystemSmartFuelPassHealthResponse`. The 0.8 facade exposes
+only the previously approved safe job and table-health subset.
 
 Retain only:
 
@@ -354,11 +388,12 @@ Every endpoint poll should produce this agent-owned metadata:
 | `endpoint_key` | Stable allowlisted endpoint identity, not a free URL |
 | `poll_started_at` / `poll_finished_at` | Agent clock evidence |
 | `http_status` | Distinguish application state from transport failure |
-| `transport_status` | `success/timeout/connection_error/tls_error/schema_error` |
+| `transport_status` | `success/timeout/connection_error/tls_error/http_error/schema_error` |
 | `attempt_count` | Bounded retry evidence |
 | `contract_version` | Normalized schema version |
+| `endpoint_set_version` | Exact ordered endpoint set used by the cycle |
 | `source_checked_at` | Endpoint timestamp where available |
-| `clock_skew_seconds` | Derived, bounded diagnostic value |
+| `clock_skew_seconds` | Absolute source-versus-request-midpoint skew, capped at 86,400 seconds; null without source time |
 | `payload` | Only the endpoint-specific retained projection |
 
 Do not persist bearer tokens, cookies, authorization headers, full request
@@ -369,20 +404,27 @@ details, or fields not allowlisted above.
 
 1. The scheduler page and System Health page expose complementary contracts;
    neither alone covers the intended first agent.
-2. Liveness and readiness are public, but every detailed health endpoint
-   currently requires a full administrator bearer token.
-3. The current API has no dedicated monitoring role or service identity.
+2. The original local Health routes retain their existing public/admin
+   authorization, while the remote agent uses a separate private facade and
+   dedicated digest-backed monitoring service identity.
+3. The deployed 0.7 facade exposes four strict GET projections. Local 0.8
+   expands this to eight authenticated GET-only facade routes plus one direct
+   external-web observation. It does not grant the monitoring identity access
+   to human-admin Health, scheduler-log, or manual-run routes.
 4. The scheduler log and manual-run routes share the `/health/scheduler`
    namespace but are explicitly outside the agent boundary.
-5. Current Pydantic models validate response production, but the future agent
-   still needs its own strict normalized input models and must reject
-   unexpected schemas fail-closed.
+5. Dedicated 0.8 facade response models remove transient, unnecessary, and
+   sensitive fields before network serialization. The client independently
+   validates exact schemas, rejects oversized/invalid JSON, and fails closed.
 6. Existing endpoints contain enough safe facts for the first deterministic
    scheduler rules; no new metric collector or database query is required for
    the initial implementation.
 
-## Step 1 result
+## Current result
 
-Checklist step 1 is complete at the design/inventory level. The next step is
-to define the independent runtime boundary and a failure-isolation proof. The
-least-privilege authorization gap remains assigned to checklist step 3.
+The original endpoint-inventory checklist is complete. Roadmap item 1 now has
+a locally implemented nine-endpoint contract, but remains unchecked until the
+new facade is activated on the monitored workstation and the remote 0.8 client
+proves one schema-valid cycle, retained-history audit compatibility, and
+bounded external probing. The reporting layer may consume a new endpoint only
+after that runtime proof.

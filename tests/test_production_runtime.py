@@ -72,7 +72,7 @@ def test_development_reload_is_confined_to_explicit_dev_launchers():
 
 def test_legacy_launcher_copy_only_delegates_to_production_launcher():
     source = (
-        PROJECT_ROOT / "start_api_dashboard - kopie.bat"
+        PROJECT_ROOT / "scripts" / "start_api_dashboard_compat.bat"
     ).read_text(encoding="utf-8")
 
     assert "start_api_dashboard.bat" in source

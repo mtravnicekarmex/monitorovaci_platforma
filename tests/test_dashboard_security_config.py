@@ -12,9 +12,9 @@ from services.api.core import config as api_config
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_LAUNCHERS = (
     PROJECT_ROOT / "start_api_dashboard.bat",
-    PROJECT_ROOT / "start_api_dashboard - kopie.bat",
+    PROJECT_ROOT / "scripts" / "start_api_dashboard_compat.bat",
     PROJECT_ROOT / "scripts" / "start_all_services.ps1",
-    PROJECT_ROOT / "run.txt",
+    PROJECT_ROOT / "agents" / "runbooks" / "LOCAL_DEVELOPMENT_COMMANDS.md",
 )
 COMPROMISED_DEVELOPMENT_SECRET = b"monitoring-platforma-" + b"local-dev-secret"
 DASHBOARD_SOURCE_ROOT = PROJECT_ROOT / "moduly" / "apps" / "dashboard"

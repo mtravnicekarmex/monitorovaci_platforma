@@ -43,7 +43,6 @@ TEXT_SOURCE_NAMES = {
     ".gitattributes",
     ".gitignore",
     "Caddyfile",
-    "run.txt",
 }
 CODE_SUFFIXES = {".js", ".py", ".ts", ".tsx"}
 

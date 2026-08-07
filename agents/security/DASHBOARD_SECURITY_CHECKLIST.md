@@ -19,9 +19,9 @@ Status values:
 - [x] Store the secret outside Git, for example in the local `.env` or a protected service environment.
 - [x] Remove the fixed secret from:
   - `start_api_dashboard.bat`
-  - `start_api_dashboard - kopie.bat`
+  - `scripts/start_api_dashboard_compat.bat`
   - `scripts/start_all_services.ps1`
-  - `run.txt`
+  - `agents/runbooks/LOCAL_DEVELOPMENT_COMMANDS.md`
 - [x] Make startup fail clearly when the production secret is missing.
 - [x] Restart FastAPI so tokens signed with the old secret stop working.
 - [x] Verify that a newly issued token works and an old token returns HTTP 401.
@@ -725,9 +725,12 @@ Partial completion on 2026-06-18:
   secret, credential, session, and sensitive runtime artifact locations and
   access expectations.
 - Confirmed `.env`, `.env.*`, SmartFuelPass session JSON files, SOFTLINK auth
-  JSON, scheduler locks, frontend build info, nested electric-meter source
-  data, and `run.txt` are ignored for future additions. Some of those files
-  remain tracked and require explicit cleanup.
+  JSON, scheduler locks, frontend build info, and nested electric-meter source
+  data are ignored for future additions. On 2026-08-06, the tracked root
+  `run.txt` was replaced by
+  `agents/runbooks/LOCAL_DEVELOPMENT_COMMANDS.md`; its obsolete ignore entry
+  was removed. Some of the other listed runtime artifacts remain tracked and
+  require explicit cleanup.
 - Redacted scan on 2026-06-18 reported current tracked critical paths:
   `data/smartfuelpass/session_cookies.json` and
   `data/smartfuelpass/auto_login_session.json`.

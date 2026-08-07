@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from core.scheduler.job_schedule import build_schedule_runs
 from core.scheduler.metrics import JobMetrics, SchedulerMetricsStore
 from services.api.routes import scheduler_health
+from services.api.services import scheduler_health as scheduler_health_service
 
 
 def test_scheduler_metrics_store_persists_and_reloads(tmp_path):
@@ -92,22 +93,22 @@ def test_scheduler_health_route_returns_degraded_status(monkeypatch):
         )
     ]
     monkeypatch.setattr(
-        scheduler_health,
+        scheduler_health_service,
         "get_metrics_store",
         lambda *args, **kwargs: fake_store,
     )
     monkeypatch.setattr(
-        scheduler_health,
+        scheduler_health_service,
         "build_schedule_runs",
         lambda *args, **kwargs: fake_schedule,
     )
 
-    response = scheduler_health.get_scheduler_health(
-        current_user=SimpleNamespace(is_admin=True)
-    )
+    response = scheduler_health_service.collect_scheduler_health()
 
     assert response.status == "degraded"
     assert response.scheduler_running is True
+    assert response.checked_at.tzinfo is not None
+    assert response.checked_at.utcoffset() is not None
     job_by_id = {job.id: job for job in response.jobs}
     assert {"daily_job", "quarter_hour_job"}.issubset(job_by_id)
     assert job_by_id["daily_job"].last_status == "error"

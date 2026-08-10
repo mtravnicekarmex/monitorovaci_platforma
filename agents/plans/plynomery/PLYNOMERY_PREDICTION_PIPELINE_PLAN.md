@@ -217,8 +217,11 @@ in `agents/decisions/DECISIONS.md`:
   - Document intentionally actual-only outputs.
   - The reviewed inventory is maintained in
     `agents/inventories/PLYNOMERY_REPORT_CONSUMER_INVENTORY.md`.
-  - No plynomery consumption PDF or scheduled daily/weekly/monthly consumption
-    report exists. The only gas report email is model-rebuild reporting.
+  - There is no prediction-bearing plynomery consumption PDF and no scheduled
+    daily/weekly/monthly consumption report. The 2026-08-10 manual
+    `Fakturacni odecty` billing PDF is actual/billing-only and explicitly
+    outside scheduler/email automation. The only gas report email is
+    model-rebuild reporting.
   - The overview Excel export, device inventory, measurement/detail tables,
     and alert/outlier/event outputs are intentionally not prediction-bearing.
 
@@ -230,9 +233,11 @@ in `agents/decisions/DECISIONS.md`:
     substitute zero or a stale profile.
   - Do not add recipients or send production email during tests.
   - Confirmed as a no-op on 2026-07-27: no plynomery consumption PDF/report
-    exists yet, and the user intends to add these reports in the future.
-  - Regression coverage fixes the current reporting surface at the single
-    model rebuild report, so a future report addition requires an intentional
+    existed then, and the user intended to add these reports in the future.
+    On 2026-08-10 the added `Fakturacni odecty` billing PDF was accepted as a
+    manual actual/billing-only workflow, so it still requires no prediction
+    conversion and no scheduler registration.
+  - Future prediction-bearing report additions require an intentional
     inventory and contract update.
 
 - [x] 20. Remove or explicitly retain every remaining global-profile read.

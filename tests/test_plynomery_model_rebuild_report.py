@@ -3,6 +3,7 @@ import datetime
 from pathlib import Path
 
 from moduly.mereni.plynomery import reporting
+from moduly.mereni.plynomery.reporting import monthly_billing_report
 from moduly.mereni.plynomery.reporting.model_rebuild_report import _build_email_body
 
 
@@ -59,7 +60,7 @@ def _selection_result():
     }
 
 
-def test_plynomery_reporting_surface_has_only_model_rebuild_report():
+def test_plynomery_reporting_surface_exports_only_model_rebuild_delivery_report():
     assert reporting.__all__ == ["send_plynomery_model_rebuild_report"]
 
     reporting_directory = Path(reporting.__file__).resolve().parent
@@ -68,7 +69,14 @@ def test_plynomery_reporting_surface_has_only_model_rebuild_report():
         for path in reporting_directory.glob("*.py")
         if path.name != "__init__.py"
     )
-    assert report_modules == ["model_rebuild_report.py"]
+    assert report_modules == ["model_rebuild_report.py", "monthly_billing_report.py"]
+
+    monthly_exported_send_functions = [
+        name
+        for name in dir(monthly_billing_report)
+        if name.startswith("send_")
+    ]
+    assert monthly_exported_send_functions == []
 
 
 def test_plynomery_rebuild_report_contains_selection_aggregates_and_rolling_metrics():

@@ -130,6 +130,51 @@ class Mereni_plynomery(Base):
     reset_detected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
+class PlynomeryFakturacniOdecet(Base):
+    __tablename__ = "plynomery_fakturacni_odecty"
+    __table_args__ = (
+        CheckConstraint(
+            "period_end > period_start",
+            name="ck_plynomery_fakturacni_odecty_period_order",
+        ),
+        CheckConstraint(
+            "objem >= 0",
+            name="ck_plynomery_fakturacni_odecty_objem_non_negative",
+        ),
+        Index(
+            "ix_plynomery_fakturacni_odecty_ident_period_end",
+            "identifikace",
+            "period_end",
+        ),
+        {"schema": "monitoring"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    identifikace: Mapped[str] = mapped_column(String(250), nullable=False)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    reading_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    objem: Mapped[float] = mapped_column(Float, nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(40),
+        server_default=text("'manual'"),
+        nullable=False,
+    )
+    entered_by: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
 class PlynomeryProfilesAnomaly(Base):
     __tablename__ = "plynomery_anomaly_profiles"
     __table_args__ = (

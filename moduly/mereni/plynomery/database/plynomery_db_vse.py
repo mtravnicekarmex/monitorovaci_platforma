@@ -14,6 +14,7 @@ from moduly.mereni.time_semantics import build_time_columns
 from moduly.mereni.plynomery.alerting.outlier_notifications import process_new_outlier_review_notifications
 from moduly.mereni.plynomery.database.models import (
     Mereni_plynomery,
+    PlynomeryFakturacniOdecet,
     Plynomer_areal_Mereni,
     Plynomer_areal_Zarizeni,
 )
@@ -129,6 +130,45 @@ def ensure_destination_table() -> None:
                 """
             )
         )
+
+    ensure_billing_readings_table()
+
+
+def ensure_billing_readings_table() -> None:
+    with engine.begin() as conn:
+        conn.execute(text("CREATE SCHEMA IF NOT EXISTS monitoring"))
+
+    inspector = inspect(engine)
+    monitoring_tables = inspector.get_table_names(schema="monitoring")
+    expected_table = PlynomeryFakturacniOdecet.__tablename__
+
+    case_mismatch = next(
+        (
+            table_name
+            for table_name in monitoring_tables
+            if table_name.lower() == expected_table.lower() and table_name != expected_table
+        ),
+        None,
+    )
+    if case_mismatch:
+        raise RuntimeError(
+            f"Case mismatch in monitoring schema: model expects '{expected_table}', "
+            f"but database has '{case_mismatch}'. Unify table naming first."
+        )
+
+    if expected_table not in monitoring_tables:
+        PlynomeryFakturacniOdecet.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created missing table monitoring.%s", expected_table)
+    else:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE monitoring.plynomery_fakturacni_odecty
+                    DROP CONSTRAINT IF EXISTS uq_plynomery_fakturacni_odecty_period
+                    """
+                )
+            )
 
 
 def get_last_imported_recid(session: Session, source_name: str) -> int | None:

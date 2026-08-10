@@ -134,6 +134,10 @@ At the end of every substantive session:
 - `moduly/mereni/prediction/storage.py`: shared prediction selected-model
   snapshot ORM/storage for per-medium, per-identifier, per-forecast-period
   model selection.
+- `moduly/mereni/plynomery/branches.py`: gas branch and billing-meter
+  configuration used by the manual billing-reading report workflow.
+- `moduly/mereni/plynomery/reporting/monthly_billing_report.py`: manual
+  plynomery billing PDF/HTML renderer for `Fakturacni odecty`.
 - `moduly/mereni/kalorimetry/reporting/model_rebuild_report.py`: pure
   aggregate kalorimetry candidate/selection rebuild report and escaped HTML
   rendering without delivery side effects.
@@ -175,6 +179,8 @@ At the end of every substantive session:
 - `services/api/services/prediction_performance.py`: read-only cross-media
   prediction performance aggregation for candidate runs, selected-model
   snapshots, and candidate catalogs.
+- `services/api/services/plynomery_billing.py`: dashboard-facing service for
+  append-only gas billing readings and monthly billing report input assembly.
 - `services/api/routes/kalorimetry.py`: admin outlier-review routes plus
   authenticated kalorimetry measurement and period-valid profile reads.
 - `services/api/services/kalorimetry.py`: section/device-scoped kalorimetry
@@ -207,6 +213,8 @@ At the end of every substantive session:
 - `moduly/apps/dashboard/pages/38_prediction_performance.py`: Streamlit
   admin page for cross-media prediction candidate performance and
   per-identifier selected-model snapshots.
+- `moduly/apps/dashboard/pages/34_plynomery_fakturacni_odecty.py`: Streamlit
+  admin page for manual plynomery billing readings and manual PDF creation.
 - `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`: Streamlit admin page for map layer configuration.
 - `moduly/apps/dashboard/pages/36_mapove_podklady.py`: Streamlit `Mapove podklady / Mapa` page.
 - `moduly/apps/smartfuelpass/service.py`: SmartFuelPass portal access,
@@ -610,10 +618,15 @@ Known hygiene topics to handle only after explicit approval:
   Its 7-day and 31-day charts use daily predictions and its 24-month history
   uses monthly predictions. Historical gaps remain gaps, and
   `insufficient_history` is displayed as `Nedostupné`.
-- Plynomery currently have no consumption PDF reports. When one is added, it
-  must use the shared period-valid prediction-series contract for every report
-  timestamp, display `Nedostupné` for unavailable periods, and must not
-  substitute zero, the current profile, or a stale/global profile.
+- `Plynomery / Fakturacni odecty` is a completed admin-only manual
+  billing-reading workflow. Operators manually save monthly readings and
+  manually create/download the PDF. It is not registered in the scheduler, has
+  no automatic recipient/email delivery, and remains actual/billing-only
+  rather than prediction-bearing.
+- Future prediction-bearing plynomery consumption PDFs/reports remain separate
+  work. They must use the shared period-valid prediction-series contract for
+  every report timestamp, display `Nedostupné` for unavailable periods, and
+  must not substitute zero, the current profile, or a stale/global profile.
 - Plynomery outlier-review repair rebuilds the globally active score identity
   through period-valid active per-identifier selection. Non-active model
   versions remain pure candidate rebuilds from their candidate profile tables.
@@ -893,7 +906,7 @@ Known job families:
 ## Measurement Domains
 
 - `vodomery`: water meters, AREAL/SCVK sources, anomaly models, events, alerting, outlier review, reports, billing logic.
-- `plynomery`: gas meters, baseline and weather-adjusted models, expected-zero/outlier/alerting behavior.
+- `plynomery`: gas meters, baseline and weather-adjusted models, expected-zero/outlier/alerting behavior, and manual billing-reading PDF workflow.
 - `elektromery`: electricity meters, SOFTLINK and binary imports, OTE reporting, new device discovery.
 - `kalorimetry`: heat meter imports, normalization, and outlier review.
 - `manometry`: pressure measurements, imports, dashboard/API surfaces.

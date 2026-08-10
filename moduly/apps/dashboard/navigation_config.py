@@ -148,6 +148,14 @@ PAGES: tuple[DashboardPage, ...] = (
         configurable=True,
     ),
     DashboardPage(
+        key="plynomery_billing_readings",
+        path="pages/34_plynomery_fakturacni_odecty.py",
+        title="Fakturacni odecty",
+        icon="🧾",
+        section_key="plynomery",
+        admin_only=True,
+    ),
+    DashboardPage(
         key="plynomery_anomalie_eventy",
         path="pages/21_plynomery_anomalie_eventy.py",
         title="Anomalie a eventy",

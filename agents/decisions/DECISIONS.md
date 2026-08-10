@@ -1642,6 +1642,8 @@ Date: 2026-07-27
 
 Status: Accepted
 
+Clarifies: DEC-068, DEC-069
+
 Decision:
 
 - One shared plynomery helper constructs hourly, daily, and monthly prediction
@@ -3579,3 +3581,65 @@ Consequences:
 - Process termination remains limited to the exact monitoring-agent process
   tree on the supervision center. It does not authorize stopping application
   services, the monitored workstation, or unrelated Python processes.
+
+## DEC-122: Plynomery monthly billing readings are append-only and time-bound
+
+Date: 2026-08-07
+
+Status: Accepted
+
+Decision:
+
+- Store manual plynomery billing readings as append-only rows in
+  `monitoring.plynomery_fakturacni_odecty`; do not overwrite a prior row for
+  the same `identifikace` and billing month.
+- Treat the latest saved row per `(identifikace, period_start, period_end)` as
+  the current effective reading for page prefill and report selection, while
+  preserving older rows as operational history.
+- Use each billing meter's actual previous/current `reading_at` interval when
+  loading submeter snapshots for monthly comparison. Do not use calendar-month
+  boundaries for submeter consumption when manual reading timestamps are
+  available.
+- Reject report creation when a current or previous billing reading is
+  missing, the current reading time is not after the previous reading time, or
+  the current cumulative state is lower than the previous state.
+
+Consequences:
+
+- The old unique DB constraint `uq_plynomery_fakturacni_odecty_period` must be
+  removed only with the new append-only code loaded. Dropping it while old
+  `ON CONFLICT ON CONSTRAINT` code is still running would break saving.
+- Existing single overwritten rows remain valid as the initial effective
+  history; future corrections are new rows.
+- The active dashboard/Streamlit process may need a whole-stack restart to
+  load the new service module and run the migration.
+
+## DEC-123: Plynomery billing PDF remains a manual dashboard workflow
+
+Date: 2026-08-10
+
+Status: Accepted
+
+Decision:
+
+- Treat the `Plynomery / Fakturacni odecty` PDF as complete and accepted in
+  its current manual form.
+- Operators create and download the report from the admin dashboard after
+  entering or checking billing readings. Do not add this PDF to the scheduler,
+  scheduler manual-run registry, automatic email delivery, or recipient
+  configuration.
+- Keep the report actual/billing-only. It uses manual billing readings and
+  submeter snapshots from the applicable reading interval; it is not a
+  prediction-bearing gas consumption report.
+
+Consequences:
+
+- No cron entry, scheduled job, report email, automatic delivery path, or
+  startup/runtime change is required for this completed feature.
+- Future automation of this report would be a separate product decision and
+  must receive explicit approval before scheduler or delivery code changes.
+- The completed manual billing PDF is the intentional later report addition
+  anticipated by DEC-069, but because it is actual/billing-only and manual, it
+  does not trigger prediction conversion or scheduler registration.
+- DEC-122 remains in force for append-only reading storage and time-bound
+  report input validation.

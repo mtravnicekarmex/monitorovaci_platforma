@@ -41,3 +41,19 @@ in the relevant plan, decision record, inventory, or session history.
 - Evidence: exact regression counts and production aggregates remain in
   `../plans/kalorimetry/KALORIMETRY_PREDICTION_PIPELINE_PLAN.md` and
   `../history/SESSION_NOTES.md`.
+
+## PLY-001 - Plynomery fakturacni odecty
+
+- Status: done
+- Completed: 2026-08-10
+- Result: admin-only manual Streamlit workflow for append-only monthly gas
+  billing readings and manual PDF creation/download. The user accepted the
+  final PDF result.
+- Operating boundary: the PDF remains manual, actual/billing-only, and outside
+  scheduler automation, scheduler manual runs, automatic email delivery, and
+  report recipient configuration.
+- Verification: post-restart stack checks passed; July 2026 read-only billing
+  validation returned seven current readings, seven previous readings, seven
+  branches, and zero input issues; in-memory HTML/PDF rendering passed;
+  focused billing regression passed with `13 passed`; user acceptance closed
+  the remaining page/PDF verification gap.

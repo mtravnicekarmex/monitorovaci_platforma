@@ -202,15 +202,21 @@ def test_vodomery_reports_page_is_after_billing():
     assert main_page_keys.index("vodomery_reports") < main_page_keys.index("vodomery_anomalie_eventy")
 
 
-def test_plynomery_anomalie_eventy_page_is_between_overview_and_detail():
+def test_plynomery_billing_readings_page_is_after_list_before_anomalies():
     main_page_keys = [page.key for page in get_dashboard_pages("main")]
+    page = get_page_definition("plynomery_billing_readings")
 
     assert "plynomery_overview" in main_page_keys
     assert "plynomery_list" in main_page_keys
+    assert "plynomery_billing_readings" in main_page_keys
     assert "plynomery_anomalie_eventy" in main_page_keys
     assert "plynomery_detail" in main_page_keys
+    assert page is not None
+    assert page.section_key == "plynomery"
+    assert page.admin_only is True
     assert main_page_keys.index("plynomery_overview") < main_page_keys.index("plynomery_list")
-    assert main_page_keys.index("plynomery_list") < main_page_keys.index("plynomery_anomalie_eventy")
+    assert main_page_keys.index("plynomery_list") < main_page_keys.index("plynomery_billing_readings")
+    assert main_page_keys.index("plynomery_billing_readings") < main_page_keys.index("plynomery_anomalie_eventy")
     assert main_page_keys.index("plynomery_anomalie_eventy") < main_page_keys.index("plynomery_detail")
 
 

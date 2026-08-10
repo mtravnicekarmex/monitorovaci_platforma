@@ -29,6 +29,7 @@ Classifications:
 | `moduly/apps/dashboard/pages/9_plynomery.py` | Boundary, reset/change, measurement, and actual-consumption tables | actual-only | Measurement rows | Intentionally actual-only |
 | `moduly/apps/dashboard/pages/10_plynomery_detail.py` | Device metadata, latest reading, averages, recent measurements, resets | actual-only subviews | Measurement/device metadata rows | Intentionally actual-only; prediction remains a separate layer |
 | `moduly/apps/dashboard/pages/31_plynomery_seznam.py` and `device_list_shared.py` | Device inventory/list | actual-only | Device evidence/metadata | Intentionally actual-only |
+| `moduly/apps/dashboard/pages/34_plynomery_fakturacni_odecty.py` and `moduly/mereni/plynomery/reporting/monthly_billing_report.py` | `Plynomery / Fakturacni odecty` manual monthly billing PDF | actual-only | Manual billing readings plus submeter snapshots from the previous/current billing-reading interval; no prediction profile | Completed after step 19; keep manual, actual/billing-only, and outside scheduler automation |
 | `moduly/apps/dashboard/pages/21_plynomery_anomalie_eventy.py` | Open/resolved event dashboard | anomaly/event | Stored active-model events through FastAPI | Not a consumption prediction |
 | `moduly/apps/dashboard/pages/22_plynomery_outlier_review.py` | Outlier review dashboard | anomaly/event | Stored outlier-review candidates | Not a consumption prediction |
 | `moduly/apps/dashboard/pages/20_plynomery_alerting.py` | Expected-zero and alert-rule administration | anomaly/event | Rules/state only | Not a consumption prediction |
@@ -61,16 +62,22 @@ Classifications:
 - Manual scheduler operations expose gas import, model lookup, scoring, event
   detection, alerting, rebuild, and rebuild-report operations.
 - There is no scheduled daily, weekly, or monthly plynomery consumption PDF,
-  branch report, billing report, or consumption email.
+  branch report, billing report, or consumption email. The completed
+  `Plynomery / Fakturacni odecty` PDF exists only as manual dashboard
+  creation/download and is not scheduler-owned.
 
 ## Approved step 19 report scope
 
-No existing plynomery PDF or periodic consumption report is prediction-bearing.
-Therefore step 19 has no legacy gas report path to convert. Its required work
-is a regression-backed no-op confirmation:
+No existing scheduled plynomery PDF or periodic consumption report is
+prediction-bearing. The completed manual `Plynomery / Fakturacni odecty`
+billing PDF is actual/billing-only and outside scheduler automation. Therefore
+step 19 has no legacy gas report path to convert. Its required work is a
+regression-backed no-op confirmation:
 
 - keep the model rebuild email classified as model-rebuild reporting;
 - keep the overview Excel export actual-only;
+- keep the manual billing PDF classified as actual/billing-only and outside
+  scheduler/report email delivery;
 - do not add a recipient, scheduler job, PDF, or new report merely to satisfy
   the pipeline checklist;
 - if a gas consumption report is added later, it must use the shared
@@ -79,16 +86,24 @@ is a regression-backed no-op confirmation:
 
 Step 19 result on 2026-07-27:
 
-- The user confirmed that plynomery do not have PDF reports yet and that these
-  will be added in the future.
+- At that time, the user confirmed that plynomery did not have PDF reports yet
+  and that these would be added in the future.
 - No production reporting code was converted because there is no qualifying
   path.
-- Regression coverage asserts that the current plynomery reporting package
-  exposes only `send_plynomery_model_rebuild_report` and contains only the
-  model rebuild report module.
+- The 2026-07-27 regression coverage asserted that the then-current plynomery
+  reporting package exposed only `send_plynomery_model_rebuild_report` and
+  contained only the model rebuild report module.
 - Adding a future gas report intentionally requires updating this inventory,
   its classification, scheduler/report tests, and the period-valid prediction
   contract.
+
+Update on 2026-08-10:
+
+- `Plynomery / Fakturacni odecty` now exists as a manual monthly billing PDF.
+  It uses append-only manual billing readings and interval-bound submeter
+  snapshots, remains actual/billing-only, and is not scheduler-owned.
+- The user accepted the final PDF and confirmed no scheduler integration is
+  needed. This does not create a step 19 prediction conversion target.
 
 ## Step 20 review queue
 

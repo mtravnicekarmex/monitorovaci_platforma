@@ -1524,3 +1524,443 @@ Known risks or accepted gaps:
   concurrent-start, process-run-reentry, unclean, or abandoned evidence.
   Do not run foreground continuous mode or `--once` once the task is running;
   `--check-config` and `--audit-state` remain safe concurrent commands.
+
+### 2026-08-07 14:11 +02:00 - Plynomery billing append-only pre-restart handoff
+
+Reason for restart:
+
+- Activate source changes for the admin-only `Plynomery / Fakturacni odecty`
+  page after discovering that live entry overwrote rows instead of creating
+  new records. The running Streamlit process may hold old imports and the
+  database still has the old unique constraint; activation requires loading
+  the new code and running the coordinated constraint drop under that code.
+
+Current task and conversation state:
+
+- Completed: repaired `.venv-production` after post-restart contamination; the
+  dashboard stack and scheduler recovered.
+- Completed in source: admin page for monthly plynomery billing readings;
+  branch configuration; append-only billing table/model/service/report;
+  report/submeter comparison uses branch-specific
+  `previous_reading.reading_at` to `current_reading.reading_at` cutoffs;
+  validation blocks missing readings, non-forward reading time, decreased
+  cumulative state, and non-finite values; the latest saved row per
+  meter/period is the effective current row.
+- Pending: restart the workstation to load code and let the new
+  `ensure_billing_readings_table()` remove
+  `uq_plynomery_fakturacni_odecty_period`; then verify append-only behavior
+  without overwriting existing rows.
+- First action after restart: read `AGENTS.md`,
+  `agents/decisions/DECISIONS.md`, this handoff, run `git status --short`,
+  confirm boot after `2026-08-07 14:11 +02:00`, and confirm
+  `API_dashboard_caddy` result 0 after boot.
+
+Working tree and deployment:
+
+- `git status --short` before this handoff:
+  - `M moduly/apps/dashboard/navigation_config.py`
+  - `M moduly/mereni/plynomery/database/models.py`
+  - `M moduly/mereni/plynomery/database/plynomery_db_vse.py`
+  - `M tests/test_dashboard_navigation_config.py`
+  - `M tests/test_plynomery_model_rebuild_report.py`
+  - `?? moduly/apps/dashboard/pages/34_plynomery_fakturacni_odecty.py`
+  - `?? moduly/mereni/plynomery/branches.py`
+  - `?? moduly/mereni/plynomery/reporting/monthly_billing_report.py`
+  - `?? services/api/services/plynomery_billing.py`
+  - `?? tests/test_plynomery_billing.py`
+- Additional handoff files changed immediately before restart:
+  `agents/decisions/DECISIONS.md`, `agents/work/ACTIVE.md`, and
+  `agents/history/SESSION_NOTES.md`.
+- Source changes are uncommitted and intentional. Do not reset, checkout,
+  clean, or commit unless the user asks.
+- Pre-restart runtime was healthy at `2026-08-07 14:11 +02:00`: Windows boot
+  `2026-08-07 12:59:43 +02:00`; startup task `API_dashboard_caddy` last run
+  `2026-08-07 13:08:42`, result 0; API live/ready 200; Streamlit 200; Caddy
+  admin 200; protected `/api/v1/auth/me` without bearer 401; scheduler running
+  with heartbeat `2026-08-07T14:08:44.956054`, quarter-hour job
+  `2026-08-07T14:05:14.503530`, and zero failure keys.
+- Tracked and deployed Caddyfile hashes both matched:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Production virtual-environment lock verification passed after repair.
+
+Sensitive/runtime artifacts:
+
+- Do not print, change, delete, or commit `.env`, database credentials, bearer
+  tokens, cookies, ProgramData proxy credentials, raw authenticated Health
+  responses, raw operational database rows, or SmartFuelPass/session data.
+- Do not manually drop DB constraints while old code is still running.
+
+Expected processes/listeners after restart:
+
+- FastAPI/Uvicorn on `127.0.0.1:8000`.
+- Streamlit on `127.0.0.1:8001`.
+- Scheduler `main.py` holding the scheduler process lock.
+- Caddy on TCP 80/443 and admin `127.0.0.1:2019`.
+- Tailscale tailnet listeners 443 and 9443 retained; 8010/8011 absent.
+
+Expected application state:
+
+- API live/ready 200.
+- Streamlit health 200.
+- Caddy admin 200.
+- Protected `/api/v1/auth/me` without bearer 401.
+- Scheduler running, heartbeat fresh within 300 seconds, post-boot
+  `quarter_hour_job` successful, and failure keys 0.
+- Tracked/deployed Caddyfile hash remains equal to
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Local Caddy/SNI HTTPS 200 and HTTP redirect 308; direct public hostname from
+  this host may time out because of the known hairpin gap.
+- The `Fakturacni odecty` page loads for an admin. New code removes the old
+  unique constraint and subsequent saves append new rows; report creation
+  remains blocked until valid current/previous reading pairs exist.
+
+Required post-restart checks:
+
+1. Confirm boot time is after `2026-08-07 14:11 +02:00` and
+   `API_dashboard_caddy` ran after boot with result 0.
+2. Confirm expected listeners 80/443/2019/8000/8001 plus tailnet 9443, with
+   no 8010/8011.
+3. Confirm local API live/ready, Streamlit, Caddy admin, and protected auth
+   401 without bearer.
+4. Confirm scheduler heartbeat is fresh and the first post-boot
+   `quarter_hour_job`/database/import/scoring checks are successful with no
+   new failure keys.
+5. Verify the production virtual-environment lock still matches.
+6. Verify tracked/deployed Caddyfile hashes match.
+7. Trigger a read-only admin load of `Fakturacni odecty`; confirm the page
+   renders fields and does not error.
+8. Verify `ensure_billing_readings_table()` removed
+   `uq_plynomery_fakturacni_odecty_period` after new code loaded. Use
+   aggregate/schema evidence only; do not print raw rows.
+9. Perform an explicit user-approved test save only if needed: save a harmless
+   test/correction reading and verify row count increases rather than
+   overwriting, then identify cleanup/rollback expectations before any test
+   write. If not approved, stop after schema/source verification.
+10. Re-run focused tests if appropriate from `.venv`, not `.venv-production`.
+
+Known risks/gaps:
+
+- Current changes are uncommitted.
+- A manual test database write is not included in restart authorization.
+- Browser/API boundary for this new Streamlit admin write remains a later
+  hardening item; current source preserves the existing direct service pattern
+  during this operational completion.
+- Supervision-center monitoring task restoration remains a separate OPS-002
+  gate and is not part of this restart.
+
+### 2026-08-07 14:43 +02:00 - Plynomery billing report pre-restart handoff
+
+Reason for restart:
+
+- Activate the follow-up source fix for `Plynomery / Fakturacni odecty`.
+  Saving is already append-only, but the running dashboard still shows
+  `Report zatim nelze vytvorit` after the database corrections because the
+  Streamlit process likely still has the old billing service import loaded.
+- The source fix changes report input lookup from insertion/period-end
+  ordering to actual `reading_at` semantics. For the July 2026 report,
+  readings on `2026-07-01` are treated as the previous/start reading and
+  readings on `2026-08-01` as the current/end reading.
+
+Current task and conversation state:
+
+- Completed: direct aggregate validation through the current source and
+  production database returned `current_meter_count=7`,
+  `previous_meter_count=7`, and `issue_count=0` for `[2026-07-01,
+  2026-08-01)`.
+- Completed: focused billing tests passed with `12 passed`, and
+  `services/api/services/plynomery_billing.py` plus
+  `tests/test_plynomery_billing.py` compiled.
+- Pending: restart the monitored workstation through the existing whole-stack
+  startup procedure so Streamlit loads the fixed billing service module.
+- First action after restart: read `AGENTS.md`,
+  `agents/decisions/DECISIONS.md`, and this handoff; run
+  `git status --short`; confirm boot after `2026-08-07 14:43 +02:00` and
+  confirm `API_dashboard_caddy` result 0 after boot.
+
+Working tree and deployment:
+
+- The working tree is intentionally non-clean from the plynomery billing work.
+  Do not reset, checkout, clean, delete, overwrite, commit, push, or create a
+  code-integrity baseline during restart handling.
+- Relevant follow-up source changes:
+  `services/api/services/plynomery_billing.py` now selects latest effective
+  billing rows by `reading_at`, treats start-day readings as previous
+  readings, and filters current lookup to configured billing meters.
+  `tests/test_plynomery_billing.py` covers these cases.
+- Current `git status --short` before this handoff:
+  - `M agents/decisions/DECISIONS.md`
+  - `M agents/history/SESSION_NOTES.md`
+  - `M agents/work/ACTIVE.md`
+  - `M moduly/apps/dashboard/navigation_config.py`
+  - `M moduly/mereni/plynomery/database/models.py`
+  - `M moduly/mereni/plynomery/database/plynomery_db_vse.py`
+  - `M tests/test_dashboard_navigation_config.py`
+  - `M tests/test_plynomery_model_rebuild_report.py`
+  - `?? moduly/apps/dashboard/pages/34_plynomery_fakturacni_odecty.py`
+  - `?? moduly/mereni/plynomery/branches.py`
+  - `?? moduly/mereni/plynomery/reporting/monthly_billing_report.py`
+  - `?? services/api/services/plynomery_billing.py`
+  - `?? tests/test_plynomery_billing.py`
+- Pre-restart runtime was healthy at `2026-08-07 14:43 +02:00`: Windows boot
+  `2026-08-07 14:15:43 +02:00`; startup task `API_dashboard_caddy` last ran
+  `2026-08-07 14:15:53` with result 0; API live/ready 200; Streamlit 200;
+  Caddy admin 200; protected `/api/v1/auth/me` without bearer 401; scheduler
+  running with heartbeat `2026-08-07T14:40:59.935885`, latest quarter-hour
+  success `2026-08-07T14:35:13.650416`, latest database check success
+  `2026-08-07T14:35:05.268077`, and zero failure keys.
+- Tracked and deployed Caddyfile SHA-256 hashes both matched:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+
+Sensitive/runtime artifacts:
+
+- Do not print, change, delete, or commit `.env`, database credentials, bearer
+  tokens, cookies, ProgramData proxy credentials, raw authenticated Health
+  responses, raw operational database rows, or SmartFuelPass/session data.
+- The user corrected the E/F billing rows in the database; do not rewrite
+  those values or perform additional test saves during restart verification
+  unless explicitly approved.
+
+Expected processes/listeners after restart:
+
+- FastAPI/Uvicorn on `127.0.0.1:8000`.
+- Streamlit on `127.0.0.1:8001`.
+- Scheduler `main.py` holding the scheduler process lock.
+- Caddy on TCP 80/443 and admin `127.0.0.1:2019`.
+- Tailscale tailnet listeners 443 and 9443 retained; 8010/8011 absent.
+
+Expected application state:
+
+- API live/ready 200.
+- Streamlit health 200.
+- Caddy admin 200.
+- Protected `/api/v1/auth/me` without bearer 401.
+- Scheduler running, heartbeat fresh within 300 seconds, post-boot
+  `quarter_hour_job` successful, and failure keys 0.
+- Direct aggregate validation of the July 2026 plynomery billing report
+  returns `current_meter_count=7`, `previous_meter_count=7`, and
+  `issue_count=0`.
+- The dashboard `Fakturacni odecty` page no longer shows
+  `Report zatim nelze vytvorit` for the corrected July 2026 data and enables
+  report creation.
+
+Required post-restart checks:
+
+1. Confirm boot time is after `2026-08-07 14:43 +02:00` and
+   `API_dashboard_caddy` ran after boot with result 0.
+2. Confirm expected listeners 80/443/2019/8000/8001 plus tailnet 9443, with
+   no 8010/8011.
+3. Confirm local API live/ready, Streamlit, Caddy admin, and protected auth
+   401 without bearer.
+4. Confirm scheduler heartbeat is fresh and the first post-boot
+   `quarter_hour_job`/database/import/scoring checks are successful with no
+   new failure keys.
+5. Verify production virtual-environment lock still matches.
+6. Verify tracked/deployed Caddyfile hashes match.
+7. Re-run the aggregate July 2026 plynomery billing validation and require
+   `issue_count=0`.
+8. Load the admin `Fakturacni odecty` page and verify that report creation is
+   available for the corrected July 2026 data. Do not perform a test database
+   save during this check.
+
+Known risks/gaps:
+
+- Meter replacement/reset support for billing readings remains explicitly
+  postponed; the current contract still rejects genuinely decreased
+  cumulative states.
+- Supervision-center monitoring task restoration remains a separate OPS-002
+  gate and is not part of this restart.
+
+### 2026-08-07 15:20 +02:00 - Plynomery billing PDF style pre-restart handoff
+
+Reason for restart:
+
+- Activate the follow-up PDF/HTML styling change for
+  `Plynomery / Fakturacni odecty`. The report now creates successfully and the
+  user confirmed the calculations are correct, but the running Streamlit
+  process may still hold the previous report renderer import.
+- The source renderer was changed to match the vodomery PDF report style:
+  compact A4 layout, blue `#0f4c81` header line, centered ARMEX logo,
+  right-side metadata, primary metric cards, and `branch-table` tables with
+  blue headers.
+
+Current task and conversation state:
+
+- Completed: append-only billing-readings behavior, July 2026 current/previous
+  reading lookup, report input validation, PDF generation, and calculation
+  correctness were verified.
+- Completed after the previous restart: table
+  `monitoring.plynomery_fakturacni_odecty` existed, old unique constraint
+  `uq_plynomery_fakturacni_odecty_period` was absent, July 2026 aggregate
+  validation returned seven current readings, seven previous readings, and
+  zero input issues.
+- Completed in source: report presentation now reuses the vodomery visual
+  structure and tests assert the key style classes.
+- Pending: restart the monitored workstation through the existing whole-stack
+  startup procedure so Streamlit loads the fixed report renderer.
+- First action after restart: read `AGENTS.md`,
+  `agents/decisions/DECISIONS.md`, and this handoff; run
+  `git status --short`; confirm boot after `2026-08-07 15:20 +02:00` and
+  confirm `API_dashboard_caddy` result 0 after boot.
+
+Working tree and deployment:
+
+- The working tree remains intentionally non-clean from the plynomery billing
+  work. Do not reset, checkout, clean, delete, overwrite, commit, push, or
+  create a code-integrity baseline during restart handling.
+- Current `git status --short` before this handoff:
+  - `M agents/decisions/DECISIONS.md`
+  - `M agents/history/SESSION_NOTES.md`
+  - `M agents/work/ACTIVE.md`
+  - `M moduly/apps/dashboard/navigation_config.py`
+  - `M moduly/mereni/plynomery/database/models.py`
+  - `M moduly/mereni/plynomery/database/plynomery_db_vse.py`
+  - `M tests/test_dashboard_navigation_config.py`
+  - `M tests/test_plynomery_model_rebuild_report.py`
+  - `?? moduly/apps/dashboard/pages/34_plynomery_fakturacni_odecty.py`
+  - `?? moduly/mereni/plynomery/branches.py`
+  - `?? moduly/mereni/plynomery/reporting/monthly_billing_report.py`
+  - `?? services/api/services/plynomery_billing.py`
+  - `?? tests/test_plynomery_billing.py`
+- Relevant latest source changes:
+  `moduly/mereni/plynomery/reporting/monthly_billing_report.py` was restyled;
+  `tests/test_plynomery_billing.py` now asserts the report contains
+  `page-header`, `page-logo`, `metric-card-primary`, `branch-table`, and the
+  vodomery blue `#0f4c81`.
+- Verification before restart: focused billing tests passed with `12 passed`;
+  `monthly_billing_report.py` and `tests/test_plynomery_billing.py` compiled;
+  a synthetic report HTML build produced the expected style classes.
+- No production database row, billing reading, credential, Caddy runtime file,
+  scheduler job, SmartFuelPass state, monitoring-agent state, or alert setting
+  was changed by the styling fix.
+
+Sensitive/runtime artifacts:
+
+- Do not print, change, delete, or commit `.env`, database credentials, bearer
+  tokens, cookies, ProgramData proxy credentials, raw authenticated Health
+  responses, raw operational database rows, SmartFuelPass/session data, or
+  monitoring-agent credentials/state.
+- Do not perform a test database save during post-restart verification unless
+  explicitly approved in a new instruction. It is not needed for this restart.
+
+Expected processes/listeners after restart:
+
+- FastAPI/Uvicorn on `127.0.0.1:8000`.
+- Streamlit on `127.0.0.1:8001`.
+- Scheduler `main.py` holding the scheduler process lock.
+- Caddy on TCP 80/443 and admin `127.0.0.1:2019`.
+- Tailscale tailnet listeners 443 and 9443 retained; 8010/8011 absent.
+
+Expected application state:
+
+- API live/ready 200.
+- Streamlit health 200.
+- Caddy admin 200.
+- Protected `/api/v1/auth/me` without bearer 401.
+- Scheduler running, heartbeat fresh within 300 seconds, post-boot
+  `quarter_hour_job` successful, and failure keys 0.
+- Production virtual-environment lock still matches
+  `requirements-production.lock.txt`.
+- Tracked/deployed Caddyfile hashes remain equal to
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Direct aggregate validation of the July 2026 plynomery billing report
+  returns `current_meter_count=7`, `previous_meter_count=7`, and
+  `issue_count=0`.
+- The dashboard `Fakturacni odecty` page can create/download the July 2026 PDF
+  report and the PDF uses the vodomery-style visual treatment.
+
+Pre-restart runtime status at `2026-08-07 15:20 +02:00`:
+
+- Windows boot: `2026-08-07 14:45:47 +02:00`.
+- Startup task `API_dashboard_caddy`: last run `2026-08-07 14:45:57 +02:00`,
+  result 0.
+- API live 200, API ready 200, Streamlit health 200, Caddy admin 200, and
+  protected `/api/v1/auth/me` without bearer 401.
+- Listeners 80/443/2019/8000/8001 were present; tailnet listeners 443 and
+  9443 were present; temporary 8010/8011 were absent.
+- Scheduler heartbeat `2026-08-07T15:16:05.060920`, `scheduler_running=True`,
+  and failure key count 0.
+- Latest relevant scheduler successes:
+  `check_database_availability=2026-08-07T15:16:05.082137`,
+  `kalorimetry_db_import=2026-08-07T15:16:13.450217`,
+  `score_new_kalorimetry_measurements=2026-08-07T15:16:13.586755`,
+  `detect_kalorimetry_events_from_scores=2026-08-07T15:16:13.613301`,
+  and `quarter_hour_job=2026-08-07T15:16:13.653971`.
+- Production virtual-environment verification returned
+  `Production Python environment matches requirements-production.lock.txt.`
+- Local Caddy/SNI HTTPS returned 200. Local HTTP returned 308 redirecting to
+  `https://monitoring.armexholding.cz/`.
+
+Required post-restart checks:
+
+1. Confirm boot time is after `2026-08-07 15:20 +02:00` and
+   `API_dashboard_caddy` ran after boot with result 0.
+2. Confirm expected listeners 80/443/2019/8000/8001 plus tailnet 9443, with
+   no 8010/8011.
+3. Confirm local API live/ready, Streamlit health, Caddy admin, and protected
+   auth 401 without bearer.
+4. Confirm scheduler heartbeat is fresh and the first post-boot
+   `quarter_hour_job`/database/import/scoring checks are successful with no
+   new failure keys.
+5. Verify production virtual-environment lock still matches.
+6. Verify tracked/deployed Caddyfile hashes match.
+7. Re-run aggregate July 2026 plynomery billing validation and require
+   `current_meter_count=7`, `previous_meter_count=7`, and `issue_count=0`.
+8. Load the admin `Fakturacni odecty` page, create/download the July 2026 PDF
+   report, and verify the vodomery-style graphics are live. Do not perform a
+   test database save.
+
+Known risks/gaps:
+
+- This restart is only for loading the report renderer styling into the live
+  Streamlit process. It does not authorize database corrections, meter-reset
+  billing support, alert/report delivery changes, Caddy changes, monitoring
+  task restoration, or unrelated production writes.
+- Supervision-center monitoring task restoration remains a separate OPS-002
+  gate and is not part of this restart.
+
+### 2026-08-10 07:37 +02:00 - Plynomery billing PDF style post-restart verification
+
+- Windows booted at `2026-08-10 07:03:46 +02:00`, after the
+  `2026-08-07 15:20 +02:00` pre-restart handoff. Startup task
+  `API_dashboard_caddy` ran at `2026-08-10 07:03:56 +02:00` with result 0.
+- Expected listeners 80, 443, 2019, 8000, 8001, and tailnet 9443 were
+  present; temporary listeners 8010/8011 were absent. Sanitized port ownership
+  showed Caddy on 80/2019, Caddy plus Tailscale on 443, Python on 8000/8001,
+  and Tailscale on 9443.
+- Local API live/ready, Streamlit health, and Caddy admin returned HTTP 200.
+  Protected `/api/v1/auth/me` without a bearer token returned HTTP 401.
+- Scheduler was running with fresh heartbeat `2026-08-10T07:29:02.429543`.
+  The post-boot `quarter_hour_job`, database availability check, kalorimetry
+  import, kalorimetry scoring, and kalorimetry event detection were successful
+  at approximately 07:16 with zero 24-hour failure counts.
+- Production virtual-environment verification returned
+  `Production Python environment matches requirements-production.lock.txt.`
+- Tracked and deployed Caddyfile SHA-256 hashes matched:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+  Local Caddy/SNI HTTPS returned 200 HTML, and local HTTP returned 308 to
+  `https://monitoring.armexholding.cz/`.
+- Read-only July 2026 plynomery billing validation returned
+  `current_meter_count=7`, `previous_meter_count=7`, `branch_count=7`, and
+  `issue_count=0`. The in-memory report HTML contained the reviewed style
+  markers, and the in-memory PDF render produced valid PDF bytes.
+- Focused billing regression passed: `13 passed` for
+  `tests/test_plynomery_billing.py`.
+- Authenticated browser loading/clicking of the Streamlit admin page was not
+  performed from the agent environment because no admin browser session or
+  credential was available. No test save, database write, runtime config
+  change, secret readout, monitoring-agent state change, or unrelated
+  production mutation was performed.
+
+### 2026-08-10 - Plynomery billing PDF accepted as complete
+
+- User confirmed the `Plynomery / Fakturacni odecty` PDF work is complete and
+  satisfactory.
+- Report creation remains a manual admin-dashboard action. No scheduler
+  integration, scheduler manual-run entry, automatic email delivery, or report
+  recipient configuration is needed.
+- The report remains actual/billing-only, using manual billing readings and
+  interval-bound submeter snapshots rather than prediction-profile data.
+- `PLY-001` was moved from active work to completed work in the documentation.
+  This documentation update changed no application code, production database
+  row, runtime configuration, scheduler state, credential, or monitoring-agent
+  state.

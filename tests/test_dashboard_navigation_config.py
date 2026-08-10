@@ -254,6 +254,7 @@ def test_smartfuelpass_interactive_login_is_admin_only_charger_page():
 
     assert page is not None
     assert page.section_key == "nabijecky"
+    assert page.title == "Import"
     assert page.admin_only is True
     assert page.path.endswith("39_smartfuelpass_prihlaseni.py")
 

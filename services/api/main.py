@@ -22,6 +22,7 @@ from services.api.routes.monitoring import router as monitoring_router
 from services.api.routes.prediction import router as prediction_router
 from services.api.routes.plynomery import router as plynomery_router
 from services.api.routes.scheduler_health import router as scheduler_health_router
+from services.api.routes.smartfuelpass_excel_import import router as smartfuelpass_excel_import_router
 from services.api.routes.smartfuelpass_interactive import router as smartfuelpass_interactive_router
 from services.api.routes.system_health import router as system_health_router
 from services.api.routes.vodomery import router as vodomery_router
@@ -85,13 +86,14 @@ def create_api_app(api_settings: ApiSettings = settings) -> FastAPI:
             allow_origins=list(api_settings.cors_origins),
             allow_credentials=False,
             allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-            allow_headers=["Accept", "Authorization", "Content-Type"],
+            allow_headers=["Accept", "Authorization", "Content-Type", "X-Filename"],
         )
 
     application.include_router(health_router)
     application.include_router(scheduler_health_router)
     application.include_router(system_health_router)
     application.include_router(monitoring_router)
+    application.include_router(smartfuelpass_excel_import_router)
     application.include_router(smartfuelpass_interactive_router)
     application.include_router(auth_router)
     application.include_router(admin_router)

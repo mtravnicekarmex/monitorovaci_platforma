@@ -22,7 +22,6 @@ from core.scheduler.metrics import (
     SCHEDULER_HEARTBEAT_TTL_SECONDS,
     get_metrics_store,
 )
-from moduly.apps.smartfuelpass.interactive_import import read_interactive_import_status
 from moduly.apps.smartfuelpass.service import (
     current_month_period,
     last_completed_week_period,
@@ -58,6 +57,7 @@ SCHEDULER_CORE_JOB_ID = "quarter_hour_job"
 SCHEDULER_CORE_JOB_MAX_AGE_SECONDS = 45 * 60
 SMARTFUELPASS_SYNC_JOB_ID = "sync_charge_sessions_to_db"
 SMARTFUELPASS_INTERACTIVE_JOB_ID = "smartfuelpass_interactive_import"
+SMARTFUELPASS_EXCEL_IMPORT_JOB_ID = "smartfuelpass_excel_import"
 SMARTFUELPASS_WEEKLY_REPORT_JOB_ID = "smartfuelpass_weekly_report_job"
 SMARTFUELPASS_TABLE_MAX_IMPORT_AGE_SECONDS = 36 * 60 * 60
 EXPECTED_POSTGRES_SCHEMAS = (
@@ -942,42 +942,20 @@ def _build_smartfuelpass_job_metric_status(
     )
 
 
-def _build_smartfuelpass_interactive_status() -> SystemSmartFuelPassJobMetricStatus:
-    stored = read_interactive_import_status()
-    if stored.state == "success":
-        status = "ok"
-        last_status = "success"
-        failure_count = 0
-        success_count = 1
-        detail = "Posledni rucni interaktivni import byl uspesny."
-    elif stored.state == "error":
-        status = "error"
-        last_status = "error"
-        failure_count = 1
-        success_count = 0
-        detail = "Posledni rucni interaktivni import skoncil chybou."
-    elif stored.state in {"starting", "waiting_for_login", "importing"}:
-        status = "degraded"
-        last_status = "running"
-        failure_count = 0
-        success_count = 0
-        detail = "Rucni interaktivni import prave probiha."
-    else:
-        status = "degraded"
-        last_status = "unknown"
-        failure_count = 0
-        success_count = 0
-        detail = "Rucni interaktivni import zatim nema zaznamenany beh."
+def _build_smartfuelpass_excel_import_status() -> SystemSmartFuelPassJobMetricStatus:
     return SystemSmartFuelPassJobMetricStatus(
-        job_id=SMARTFUELPASS_INTERACTIVE_JOB_ID,
-        label="Rucni interaktivni import",
-        status=status,
-        last_status=last_status,
-        last_run=_parse_datetime(stored.finished_at or stored.started_at),
-        success_count_24h=success_count,
-        failure_count_24h=failure_count,
+        job_id=SMARTFUELPASS_EXCEL_IMPORT_JOB_ID,
+        label="Rucni Excel import",
+        status="ok",
+        last_status="manual",
+        last_run=None,
+        success_count_24h=0,
+        failure_count_24h=0,
         last_duration_seconds=None,
-        detail=detail,
+        detail=(
+            "Aktivni SmartFuelPass importni cesta je rucni XLSX import pres "
+            "admin API; cerstvost dat se hodnoti z tabulky."
+        ),
     )
 
 
@@ -1005,28 +983,10 @@ def _build_smartfuelpass_table_status(
         last_import_age_seconds is not None
         and last_import_age_seconds > SMARTFUELPASS_TABLE_MAX_IMPORT_AGE_SECONDS
     ):
-        sync_age_seconds = (
-            _seconds_since(now, sync_job.last_run)
-            if sync_job is not None and sync_job.last_run is not None
-            else None
+        details.append(
+            "Last imported SmartFuelPass session is older than the former daily "
+            "sync window; manual Excel import cadence is operator-controlled."
         )
-        recent_successful_sync = (
-            sync_job is not None
-            and sync_job.status == "ok"
-            and str(sync_job.last_status or "").lower() == "success"
-            and sync_age_seconds is not None
-            and sync_age_seconds <= SMARTFUELPASS_TABLE_MAX_IMPORT_AGE_SECONDS
-        )
-        if recent_successful_sync:
-            details.append(
-                "No newly inserted SmartFuelPass sessions were recorded recently, "
-                "but the scheduler sync ran successfully within the expected daily window."
-            )
-        else:
-            status = "degraded"
-            details.append(
-                "Last newly inserted SmartFuelPass session is older than the expected daily sync window."
-            )
     if missing_ended_at_utc_count > 0:
         status = "degraded"
         details.append("Some synced sessions are missing normalized UTC end time.")
@@ -1044,7 +1004,7 @@ def _build_smartfuelpass_table_status(
         total_amount=round(float(row.get("total_amount") or 0), 2),
         location_count=max(0, int(row.get("location_count") or 0)),
         connector_count=max(0, int(row.get("connector_count") or 0)),
-        detail=" ".join(details) if details else "SmartFuelPass sync table and timestamps are in the expected state.",
+        detail=" ".join(details) if details else "SmartFuelPass session table and timestamps are in the expected state.",
     )
 
 
@@ -1092,10 +1052,22 @@ def _query_smartfuelpass_period_summary(
     start: datetime | None,
     end: datetime | None,
 ) -> SystemSmartFuelPassPeriodSummary:
+    conditions: list[str] = []
+    params: dict[str, datetime] = {}
+    if start is not None:
+        conditions.append("ended_at >= :start_at")
+        params["start_at"] = start
+    if end is not None:
+        conditions.append("ended_at <= :end_at")
+        params["end_at"] = end
+    where_clause = ""
+    if conditions:
+        where_clause = "WHERE " + " AND ".join(conditions)
+
     row = (
         session.execute(
             text(
-                """
+                f"""
                 SELECT
                     COUNT(*)::int AS session_count,
                     COALESCE(SUM(suma), 0)::float AS total_amount,
@@ -1104,11 +1076,10 @@ def _query_smartfuelpass_period_summary(
                     MIN(ended_at) AS first_session_at,
                     MAX(ended_at) AS last_session_at
                 FROM monitoring.smartfuelpass_relace
-                WHERE (:start_at IS NULL OR ended_at >= :start_at)
-                  AND (:end_at IS NULL OR ended_at <= :end_at)
+                {where_clause}
                 """
             ),
-            {"start_at": start, "end_at": end},
+            params,
         )
         .mappings()
         .one()
@@ -1157,7 +1128,7 @@ def collect_system_smartfuelpass_health() -> SystemSmartFuelPassHealthResponse:
     reference_datetime = datetime.now()
     checked_at = reference_datetime.astimezone()
     metrics = get_metrics_store(refresh_from_disk=True)
-    sync_job = _build_smartfuelpass_interactive_status()
+    sync_job = _build_smartfuelpass_excel_import_status()
     weekly_report_job = _build_smartfuelpass_job_metric_status(
         SMARTFUELPASS_WEEKLY_REPORT_JOB_ID,
         "Tydenni email report",

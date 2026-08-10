@@ -137,7 +137,8 @@ At the end of every substantive session:
 - `moduly/mereni/plynomery/branches.py`: gas branch and billing-meter
   configuration used by the manual billing-reading report workflow.
 - `moduly/mereni/plynomery/reporting/monthly_billing_report.py`: manual
-  plynomery billing PDF/HTML renderer for `Fakturacni odecty`.
+  plynomery billing PDF/HTML renderer for `Fakturacni odecty`, including
+  optional actual kalorimetry-based allocation for selected gas meters.
 - `moduly/mereni/kalorimetry/reporting/model_rebuild_report.py`: pure
   aggregate kalorimetry candidate/selection rebuild report and escaped HTML
   rendering without delivery side effects.
@@ -191,6 +192,8 @@ At the end of every substantive session:
   for boot time, startup task, expected listeners, and temporary listeners.
 - `services/api/routes/monitoring.py`: dedicated authenticated, GET-only
   monitoring facade with eight strict safe projections for the remote agent.
+- `services/api/routes/smartfuelpass_excel_import.py`: admin-only raw `.xlsx`
+  upload endpoints for SmartFuelPass preview and insert-only import.
 - `services/api/schemas/monitoring.py`: allowlisted response contracts for the
   monitoring facade; unsafe/transient Health fields are excluded before
   network serialization.
@@ -217,11 +220,14 @@ At the end of every substantive session:
   admin page for manual plynomery billing readings and manual PDF creation.
 - `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`: Streamlit admin page for map layer configuration.
 - `moduly/apps/dashboard/pages/36_mapove_podklady.py`: Streamlit `Mapove podklady / Mapa` page.
-- `moduly/apps/smartfuelpass/service.py`: SmartFuelPass portal access,
-  charge-session report construction, PDF/email rendering, and database-backed
-  weekly report assembly.
-- `moduly/apps/smartfuelpass/sync.py`: SmartFuelPass charge-session sync from
-  the portal into PostgreSQL.
+- `moduly/apps/smartfuelpass/service.py`: legacy SmartFuelPass portal-access
+  helpers, charge-session report construction, PDF/email rendering, and
+  database-backed weekly report assembly.
+- `moduly/apps/smartfuelpass/sync.py`: legacy SmartFuelPass charge-session
+  portal sync helpers retained for compatibility or historical diagnostics.
+- `moduly/apps/smartfuelpass/excel_import.py`: manual SmartFuelPass
+  ChargingSessions `.xlsx` parser, preview classifier, and insert-only
+  PostgreSQL import for new charge sessions.
 - `moduly/apps/smartfuelpass/database/models.py`: SmartFuelPass PostgreSQL
   ORM model for `monitoring.smartfuelpass_relace`.
 - `moduly/apps/smartfuelpass/database/db_init.py`: SmartFuelPass table and
@@ -622,7 +628,9 @@ Known hygiene topics to handle only after explicit approval:
   billing-reading workflow. Operators manually save monthly readings and
   manually create/download the PDF. It is not registered in the scheduler, has
   no automatic recipient/email delivery, and remains actual/billing-only
-  rather than prediction-bearing.
+  rather than prediction-bearing. Selected gas-meter consumptions may be
+  allocated by actual kalorimetry cumulative energy snapshots for the same
+  billing-reading interval; do not use kalorimetry predictions for this PDF.
 - Future prediction-bearing plynomery consumption PDFs/reports remain separate
   work. They must use the shared period-valid prediction-series contract for
   every report timestamp, display `Nedostupné` for unavailable periods, and
@@ -649,39 +657,29 @@ Known hygiene topics to handle only after explicit approval:
   scoring. Non-active model versions remain pure candidate rebuilds for model
   comparison. Missing selection, insufficient history, or a missing selected
   profile must not fall back to a global, current, or stale profile.
-- SmartFuelPass automation logs in with configured credentials for each portal
-  run. Do not restore JSON cookie/session persistence or
-  `SMARTFUELPASS_SESSION_COOKIES_PATH`.
-- SmartFuelPass portal fetches classify a Cloudflare mitigation response or a
-  login-page load timeout as transient. Retry at most once after the configured
-  60-second delay. Do not retry missing credentials or rejected authentication,
-  and do not bypass the portal's Cloudflare protection.
-- SmartFuelPass charge-session data is synchronized into PostgreSQL by
-  `daily_job` after midnight. Weekly SmartFuelPass reports must be built from
-  `monitoring.smartfuelpass_relace`, not by reading the portal directly during
-  report email delivery.
-- SmartFuelPass sync upserts by `id_relace`; existing rows should be updated
-  when the portal later corrects or enriches a session.
+- SmartFuelPass portal/browser import is retired as the active data path after
+  repeated Cloudflare blockage. Do not retry, automate, bypass, disguise, or
+  outsource the portal's Cloudflare flow, and do not restore JSON
+  cookie/session persistence or `SMARTFUELPASS_SESSION_COOKIES_PATH`.
+- SmartFuelPass charge-session data is loaded manually from administrator
+  selected `ChargingSessions` `.xlsx` exports on the `Nabijecky / Import`
+  page. Browser-initiated privileged writes must go through the admin-only
+  FastAPI Excel import endpoints, not direct Streamlit database writes.
+- The Excel parser maps `Nákup` to `id_relace`, imports only `Stav =
+  Dokončeno`, uses `Energie` for `kwh`, `Suma` for `suma`, normalizes `Název
+  EV lokace` to the existing short location format, stores connector/tariff
+  when present, sets `battery_status=NULL`, and applies the existing
+  SmartFuelPass interval UTC/source time semantics.
+- Excel import is insert-only by `id_relace`. Existing database rows are shown
+  in preview, including differences, but are never updated, upserted, or
+  re-imported from the Excel file.
 - SmartFuelPass weekly report periods use the previous completed calendar week
   from Monday through Sunday and filter by session end time.
-- SmartFuelPass portal synchronization is an explicit admin-initiated
-  interactive workflow. The scheduled `daily_job` must not perform a headless
-  portal login. The dedicated Windows task opens a visible temporary browser
-  only in a logged-on desktop session; the administrator completes Cloudflare
-  and portal login manually, after which the existing idempotent database
-  upsert continues. Do not persist or expose portal credentials, cookies,
-  browser storage, raw rows, or Cloudflare clearance values.
 - The database-backed SmartFuelPass weekly report remains scheduled and must
   not open the portal.
-- SmartFuelPass portal import remains knowingly paused. Do not retry, replace,
-  or otherwise modify the current interactive workflow while the monitoring
-  agent is unfinished. After that work completes, create a separately reviewed
-  replacement that renames `Přihlášení SmartFuelPass` to `Import`, accepts an
-  administrator-selected Excel file, parses it, and persists the resulting
-  records through the authenticated FastAPI/database boundary. Until then,
-  preserve the real SmartFuelPass Health error as a known planned condition;
-  do not rewrite it to `ok`, and qualify it in later incident rules rather
-  than treating it as an unexpected new outage.
+- Legacy SmartFuelPass interactive helper/task/code may remain for
+  compatibility or historical diagnostics, but it is no longer the active
+  dashboard workflow.
 - `Mapove podklady` uses general FastAPI map endpoints and admin-configured metadata in `dashboard.Map_Layers`.
 - Map feature images must be resolved server-side from `layer_id` and device identifier; do not expose an endpoint that serves arbitrary client-supplied file paths.
 - Browser map image loading must use same-origin `/api/v1/map/images` through Caddy, which routes `/api/*` to FastAPI and other requests to Streamlit.
@@ -910,9 +908,9 @@ Known job families:
 - `elektromery`: electricity meters, SOFTLINK and binary imports, OTE reporting, new device discovery.
 - `kalorimetry`: heat meter imports, normalization, and outlier review.
 - `manometry`: pressure measurements, imports, dashboard/API surfaces.
-- `smartfuelpass`: fuel/card import and reporting workflow with browser/session artifacts.
-  Daily portal sync persists charge sessions to PostgreSQL; weekly reporting
-  reads the synchronized database rows.
+- `smartfuelpass`: fuel/card import and reporting workflow with manual Excel
+  import. Administrator-selected `ChargingSessions` `.xlsx` imports persist
+  charge sessions to PostgreSQL; weekly reporting reads the database rows.
 - `web_search`: monitored web search and result persistence.
 
 Water event types currently include examples such as:

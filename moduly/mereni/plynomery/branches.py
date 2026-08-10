@@ -5,14 +5,27 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class PlynomeryKalorimetryAllocation:
+    title: str
+    identifiers: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class PlynomeryMeterNode:
     identifikace: str
     children: tuple["PlynomeryMeterNode", ...] = ()
+    kalorimetry_allocations: tuple[PlynomeryKalorimetryAllocation, ...] = ()
 
     def iter_identifiers(self) -> Iterator[str]:
         yield self.identifikace
         for child in self.children:
             yield from child.iter_identifiers()
+
+    def iter_kalorimetry_identifiers(self) -> Iterator[str]:
+        for allocation in self.kalorimetry_allocations:
+            yield from allocation.identifiers
+        for child in self.children:
+            yield from child.iter_kalorimetry_identifiers()
 
 
 @dataclass(frozen=True)
@@ -22,6 +35,7 @@ class PlynomeryBranchConfig:
     billing_ident: str
     submeters: tuple[PlynomeryMeterNode, ...] = ()
     residual_label: str | None = None
+    kalorimetry_allocations: tuple[PlynomeryKalorimetryAllocation, ...] = ()
 
     @property
     def direct_submeter_idents(self) -> tuple[str, ...]:
@@ -35,16 +49,32 @@ class PlynomeryBranchConfig:
             for identifier in submeter.iter_identifiers()
         )
 
+    @property
+    def all_kalorimetry_idents(self) -> tuple[str, ...]:
+        return _unique_identifiers(
+            (
+                identifier
+                for allocation in self.kalorimetry_allocations
+                for identifier in allocation.identifiers
+            ),
+            (
+                identifier
+                for submeter in self.submeters
+                for identifier in submeter.iter_kalorimetry_identifiers()
+            ),
+        )
 
-def _unique_identifiers(identifiers: Iterable[str]) -> tuple[str, ...]:
+
+def _unique_identifiers(*identifier_groups: Iterable[str]) -> tuple[str, ...]:
     seen: set[str] = set()
     result: list[str] = []
-    for identifier in identifiers:
-        normalized = str(identifier).strip()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        result.append(normalized)
+    for identifiers in identifier_groups:
+        for identifier in identifiers:
+            normalized = str(identifier).strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            result.append(normalized)
     return tuple(result)
 
 
@@ -53,6 +83,12 @@ PLYNOMERY_BRANCH_CONFIGS: tuple[PlynomeryBranchConfig, ...] = (
         key="INNOGY_A",
         title="INNOGY A",
         billing_ident="INNOGY_A",
+        kalorimetry_allocations=(
+            PlynomeryKalorimetryAllocation(
+                title="Budova A - rozpočet podle kalorimetrů",
+                identifiers=("Amt1", "Amt2", "Amt3"),
+            ),
+        ),
     ),
     PlynomeryBranchConfig(
         key="INNOGY_B",
@@ -76,8 +112,24 @@ PLYNOMERY_BRANCH_CONFIGS: tuple[PlynomeryBranchConfig, ...] = (
         title="INNOGY G",
         billing_ident="INNOGY_G",
         submeters=(
-            PlynomeryMeterNode("G_P1"),
-            PlynomeryMeterNode("G_P3"),
+            PlynomeryMeterNode(
+                "G_P1",
+                kalorimetry_allocations=(
+                    PlynomeryKalorimetryAllocation(
+                        title="G_P1 - rozpočet podle kalorimetrů",
+                        identifiers=("Gmt1", "Gmt2", "Gmt3", "Gmt4", "Gmt5"),
+                    ),
+                ),
+            ),
+            PlynomeryMeterNode(
+                "G_P3",
+                kalorimetry_allocations=(
+                    PlynomeryKalorimetryAllocation(
+                        title="G_P3 - rozpočet podle kalorimetrů",
+                        identifiers=("Gmt6", "Gmt7", "Gmt8"),
+                    ),
+                ),
+            ),
         ),
     ),
     PlynomeryBranchConfig(

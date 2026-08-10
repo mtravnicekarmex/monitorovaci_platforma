@@ -238,8 +238,8 @@ PAGES: tuple[DashboardPage, ...] = (
     DashboardPage(
         key="smartfuelpass_interactive_login",
         path="pages/39_smartfuelpass_prihlaseni.py",
-        title="Přihlášení SmartFuelPass",
-        icon="🔑",
+        title="Import",
+        icon="📥",
         section_key="nabijecky",
         admin_only=True,
     ),

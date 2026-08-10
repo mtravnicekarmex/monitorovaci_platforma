@@ -40,6 +40,8 @@ PUBLIC_OPERATIONS = {
 }
 
 EXPECTED_ADMIN_OPERATIONS = {
+    ("POST", "/api/v1/admin/smartfuelpass/excel-import/preview"),
+    ("POST", "/api/v1/admin/smartfuelpass/excel-import/import"),
     ("GET", "/api/v1/admin/smartfuelpass/interactive-import/status"),
     ("POST", "/api/v1/admin/smartfuelpass/interactive-import/start"),
     ("GET", "/health/scheduler"),

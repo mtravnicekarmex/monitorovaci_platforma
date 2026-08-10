@@ -2,11 +2,16 @@
 
 Prepared: 2026-07-28
 
-Status: Paused on 2026-07-29. The production restart and runtime deployment
-checks passed, but the Cloudflare challenge could not be completed manually
-from the production workstation. No bypass will be introduced. Resume this
-plan only when the portal operator provides a supported access path or an
-official API/export is available.
+Status: Superseded on 2026-08-10 by the manual `ChargingSessions` `.xlsx`
+import workflow documented in DEC-124. The production restart and runtime
+deployment checks for this historical interactive plan passed, but the
+Cloudflare challenge could not be completed manually from the production
+workstation. No bypass will be introduced, and this browser workflow is no
+longer the active dashboard import path.
+
+Replacement outcome: on 2026-08-10 the user confirmed the manual
+`Nabijecky / Import` page works as intended. The open checklist items below
+belong only to the superseded browser workflow and are not active work.
 
 ## Goal
 

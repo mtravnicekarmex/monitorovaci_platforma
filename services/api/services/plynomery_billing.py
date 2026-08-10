@@ -13,6 +13,7 @@ from core.db.connect import ENGINE_PG, get_session_pg
 from moduly.mereni.plynomery.branches import (
     PLYNOMERY_BRANCH_CONFIGS,
     PlynomeryBranchConfig,
+    PlynomeryKalorimetryAllocation,
     PlynomeryMeterNode,
 )
 from moduly.mereni.plynomery.database.models import (
@@ -64,6 +65,35 @@ class MeterSnapshot:
 
 
 @dataclass(frozen=True)
+class EnergySnapshot:
+    identifikace: str
+    spotreba_energie: float
+    measured_at: datetime | None
+
+
+@dataclass(frozen=True)
+class BranchKalorimetryAllocationRow:
+    identifikace: str
+    start_value: float | None
+    end_value: float | None
+    energy_consumption: float | None
+    start_measured_at: datetime | None
+    end_measured_at: datetime | None
+    energy_share_percent: float | None
+    allocated_gas_consumption: float | None
+
+
+@dataclass(frozen=True)
+class BranchKalorimetryAllocation:
+    title: str
+    source_identifikace: str
+    source_consumption: float | None
+    energy_consumption_total: float | None
+    missing_meter_count: int
+    rows: tuple[BranchKalorimetryAllocationRow, ...]
+
+
+@dataclass(frozen=True)
 class BranchDeviceConsumption:
     identifikace: str
     parent_identifikace: str | None
@@ -99,6 +129,7 @@ class BranchBillingSummary:
     residual_label: str | None
     residual_consumption: float | None
     device_rows: tuple[BranchDeviceConsumption, ...]
+    kalorimetry_allocations: tuple[BranchKalorimetryAllocation, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -365,6 +396,71 @@ def load_last_valid_measurements_at_or_before(
     }
 
 
+def load_last_valid_kalorimetry_measurements_at_or_before(
+    identifiers: tuple[str, ...],
+    cutoff: datetime,
+) -> dict[str, EnergySnapshot]:
+    unique_identifiers = tuple(
+        dict.fromkeys(
+            str(identifier).strip()
+            for identifier in identifiers
+            if str(identifier).strip()
+        )
+    )
+    if not unique_identifiers:
+        return {}
+
+    statement = text(
+        """
+        WITH ranked_measurements AS (
+            SELECT
+                identifikace,
+                spotreba_energie,
+                date,
+                time_utc,
+                ROW_NUMBER() OVER (
+                    PARTITION BY identifikace
+                    ORDER BY time_utc DESC NULLS LAST, date DESC NULLS LAST, id DESC
+                ) AS row_num
+            FROM monitoring."Mereni_kalorimetry_vse"
+            WHERE identifikace IN :identifiers
+              AND spotreba_energie IS NOT NULL
+              AND platne = TRUE
+              AND synthetic = FALSE
+              AND (
+                    time_utc <= :cutoff_utc
+                    OR (time_utc IS NULL AND date <= :cutoff_local)
+                  )
+        )
+        SELECT identifikace, spotreba_energie, date, time_utc
+        FROM ranked_measurements
+        WHERE row_num = 1
+        """
+    ).bindparams(bindparam("identifiers", expanding=True))
+
+    with ENGINE_PG.connect() as conn:
+        rows = conn.execute(
+            statement,
+            {
+                "identifiers": unique_identifiers,
+                "cutoff_utc": _to_utc(cutoff),
+                "cutoff_local": cutoff,
+            },
+        ).all()
+
+    snapshots: dict[str, EnergySnapshot] = {}
+    for row in rows:
+        energy_value = float(row.spotreba_energie)
+        if not math.isfinite(energy_value):
+            continue
+        snapshots[str(row.identifikace)] = EnergySnapshot(
+            identifikace=str(row.identifikace),
+            spotreba_energie=round(energy_value, 3),
+            measured_at=_normalize_snapshot_time(row.time_utc, row.date),
+        )
+    return snapshots
+
+
 def _compute_consumption(start_value: float | None, end_value: float | None) -> float | None:
     if start_value is None or end_value is None:
         return None
@@ -552,6 +648,129 @@ def _build_device_rows(
     return tuple(rows)
 
 
+def _iter_node_kalorimetry_allocations(
+    nodes: tuple[PlynomeryMeterNode, ...],
+) -> tuple[tuple[str, PlynomeryKalorimetryAllocation], ...]:
+    result: list[tuple[str, PlynomeryKalorimetryAllocation]] = []
+    for node in nodes:
+        for allocation in node.kalorimetry_allocations:
+            result.append((node.identifikace, allocation))
+        result.extend(_iter_node_kalorimetry_allocations(node.children))
+    return tuple(result)
+
+
+def _build_kalorimetry_allocation(
+    allocation: PlynomeryKalorimetryAllocation,
+    *,
+    source_identifikace: str,
+    source_consumption: float | None,
+    start_snapshots: dict[str, EnergySnapshot],
+    end_snapshots: dict[str, EnergySnapshot],
+) -> BranchKalorimetryAllocation:
+    prepared_rows: list[tuple[str, EnergySnapshot | None, EnergySnapshot | None, float | None]] = []
+    missing_count = 0
+    valid_consumptions: list[float] = []
+    for identifier in allocation.identifiers:
+        start_snapshot = start_snapshots.get(identifier)
+        end_snapshot = end_snapshots.get(identifier)
+        energy_consumption = _compute_consumption(
+            None if start_snapshot is None else start_snapshot.spotreba_energie,
+            None if end_snapshot is None else end_snapshot.spotreba_energie,
+        )
+        if energy_consumption is None:
+            missing_count += 1
+        else:
+            valid_consumptions.append(energy_consumption)
+        prepared_rows.append(
+            (identifier, start_snapshot, end_snapshot, energy_consumption)
+        )
+
+    energy_total = None
+    if prepared_rows and missing_count == 0:
+        energy_total = round(sum(valid_consumptions), 3)
+
+    can_allocate = (
+        source_consumption is not None
+        and energy_total is not None
+        and energy_total > 0
+    )
+    rows: list[BranchKalorimetryAllocationRow] = []
+    for identifier, start_snapshot, end_snapshot, energy_consumption in prepared_rows:
+        energy_share_percent = _safe_ratio_percent(energy_consumption, energy_total)
+        allocated_gas_consumption = None
+        if can_allocate and energy_consumption is not None:
+            allocated_gas_consumption = round(
+                float(source_consumption) * float(energy_consumption) / float(energy_total),
+                3,
+            )
+        rows.append(
+            BranchKalorimetryAllocationRow(
+                identifikace=identifier,
+                start_value=(
+                    None if start_snapshot is None else start_snapshot.spotreba_energie
+                ),
+                end_value=(
+                    None if end_snapshot is None else end_snapshot.spotreba_energie
+                ),
+                energy_consumption=energy_consumption,
+                start_measured_at=(
+                    None if start_snapshot is None else start_snapshot.measured_at
+                ),
+                end_measured_at=(
+                    None if end_snapshot is None else end_snapshot.measured_at
+                ),
+                energy_share_percent=energy_share_percent,
+                allocated_gas_consumption=allocated_gas_consumption,
+            )
+        )
+
+    return BranchKalorimetryAllocation(
+        title=allocation.title,
+        source_identifikace=source_identifikace,
+        source_consumption=source_consumption,
+        energy_consumption_total=energy_total,
+        missing_meter_count=missing_count,
+        rows=tuple(rows),
+    )
+
+
+def _build_kalorimetry_allocations(
+    config: PlynomeryBranchConfig,
+    *,
+    branch_consumption: float | None,
+    device_rows: tuple[BranchDeviceConsumption, ...],
+    start_snapshots: dict[str, EnergySnapshot],
+    end_snapshots: dict[str, EnergySnapshot],
+) -> tuple[BranchKalorimetryAllocation, ...]:
+    result: list[BranchKalorimetryAllocation] = []
+    for allocation in config.kalorimetry_allocations:
+        result.append(
+            _build_kalorimetry_allocation(
+                allocation,
+                source_identifikace=config.billing_ident,
+                source_consumption=branch_consumption,
+                start_snapshots=start_snapshots,
+                end_snapshots=end_snapshots,
+            )
+        )
+
+    device_rows_by_ident = {row.identifikace: row for row in device_rows}
+    for source_identifikace, allocation in _iter_node_kalorimetry_allocations(
+        config.submeters
+    ):
+        source_row = device_rows_by_ident.get(source_identifikace)
+        result.append(
+            _build_kalorimetry_allocation(
+                allocation,
+                source_identifikace=source_identifikace,
+                source_consumption=None if source_row is None else source_row.consumption,
+                start_snapshots=start_snapshots,
+                end_snapshots=end_snapshots,
+            )
+        )
+    return tuple(result)
+
+
 def _build_branch_summary(
     config: PlynomeryBranchConfig,
     *,
@@ -561,6 +780,8 @@ def _build_branch_summary(
     period_end: datetime,
     start_snapshots: dict[str, MeterSnapshot],
     end_snapshots: dict[str, MeterSnapshot],
+    calorimetry_start_snapshots: dict[str, EnergySnapshot] | None = None,
+    calorimetry_end_snapshots: dict[str, EnergySnapshot] | None = None,
 ) -> BranchBillingSummary:
     current_reading = current_readings.get(config.billing_ident)
     previous_reading = previous_readings.get(config.billing_ident)
@@ -588,6 +809,14 @@ def _build_branch_summary(
         if billing_consumption > 0:
             coverage_percent = round(submeter_total / billing_consumption * 100, 1)
 
+    kalorimetry_allocations = _build_kalorimetry_allocations(
+        config,
+        branch_consumption=billing_consumption,
+        device_rows=device_rows,
+        start_snapshots=calorimetry_start_snapshots or {},
+        end_snapshots=calorimetry_end_snapshots or {},
+    )
+
     return BranchBillingSummary(
         key=config.key,
         title=config.title,
@@ -605,6 +834,7 @@ def _build_branch_summary(
         residual_label=config.residual_label,
         residual_consumption=difference if config.residual_label and difference is not None else None,
         device_rows=device_rows,
+        kalorimetry_allocations=kalorimetry_allocations,
     )
 
 
@@ -630,6 +860,34 @@ def _load_branch_submeter_snapshots(
     )
 
 
+def _load_branch_kalorimetry_snapshots(
+    config: PlynomeryBranchConfig,
+    *,
+    current_readings: dict[str, BillingReadingRecord],
+    previous_readings: dict[str, BillingReadingRecord],
+    period_start: datetime,
+    period_end: datetime,
+) -> tuple[dict[str, EnergySnapshot], dict[str, EnergySnapshot]]:
+    identifiers = config.all_kalorimetry_idents
+    if not identifiers:
+        return {}, {}
+
+    previous = previous_readings.get(config.billing_ident)
+    current = current_readings.get(config.billing_ident)
+    start_cutoff = previous.reading_at if previous is not None else period_start
+    end_cutoff = current.reading_at if current is not None else period_end
+    return (
+        load_last_valid_kalorimetry_measurements_at_or_before(
+            identifiers,
+            start_cutoff,
+        ),
+        load_last_valid_kalorimetry_measurements_at_or_before(
+            identifiers,
+            end_cutoff,
+        ),
+    )
+
+
 def build_monthly_billing_report_data(
     *,
     year: int,
@@ -651,6 +909,15 @@ def build_monthly_billing_report_data(
             period_start=period_start,
             period_end=period_end,
         )
+        kalorimetry_start_snapshots, kalorimetry_end_snapshots = (
+            _load_branch_kalorimetry_snapshots(
+                config,
+                current_readings=current_readings,
+                previous_readings=previous_readings,
+                period_start=period_start,
+                period_end=period_end,
+            )
+        )
         branches.append(
             _build_branch_summary(
                 config,
@@ -660,6 +927,8 @@ def build_monthly_billing_report_data(
                 period_end=period_end,
                 start_snapshots=start_snapshots,
                 end_snapshots=end_snapshots,
+                calorimetry_start_snapshots=kalorimetry_start_snapshots,
+                calorimetry_end_snapshots=kalorimetry_end_snapshots,
             )
         )
     return MonthlyBillingReportData(

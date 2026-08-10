@@ -51,9 +51,33 @@ in the relevant plan, decision record, inventory, or session history.
   final PDF result.
 - Operating boundary: the PDF remains manual, actual/billing-only, and outside
   scheduler automation, scheduler manual runs, automatic email delivery, and
-  report recipient configuration.
+  report recipient configuration. On 2026-08-10 it was extended with actual
+  kalorimetry-based allocation detail for selected gas meters without changing
+  that boundary.
 - Verification: post-restart stack checks passed; July 2026 read-only billing
   validation returned seven current readings, seven previous readings, seven
   branches, and zero input issues; in-memory HTML/PDF rendering passed;
   focused billing regression passed with `13 passed`; user acceptance closed
-  the remaining page/PDF verification gap.
+  the remaining page/PDF verification gap. The kalorimetry allocation extension
+  later passed focused billing regression with `16 passed` and a read-only July
+  2026 smoke check found three configured allocation groups and no missing
+  configured kalorimeters.
+
+## SFP-001 - SmartFuelPass Excel import
+
+- Status: done
+- Completed: 2026-08-10
+- Result: `Nabijecky / Import` accepts `ChargingSessions` `.xlsx`, previews all
+  parsed rows against `monitoring.smartfuelpass_relace`, marks existing rows
+  without changing them, and inserts only new completed sessions through
+  authenticated admin FastAPI.
+- Operating boundary: the Cloudflare/browser portal workflow remains retired
+  as the active data path; the weekly SmartFuelPass report remains
+  database-backed and scheduled, while the Excel import itself is manual and
+  outside scheduler automation.
+- Verification: focused SmartFuelPass Excel/parser/API-client/navigation/API
+  authorization tests passed with `263 passed`; read-only preview of the
+  supplied sample returned 16 rows, 4 completed, 2 new importable, 2 already in
+  the database, and 12 ignored rows; `git diff --check` passed with only
+  existing line-ending normalization warnings; user confirmed on 2026-08-10
+  that the live Import page works as intended.

@@ -5,6 +5,7 @@ import datetime
 from decimal import Decimal
 from pathlib import Path
 import sys
+from urllib.parse import quote
 
 import requests
 from decouple import config
@@ -70,6 +71,7 @@ def _request(
     *,
     access_token: str | None = None,
     json_payload: dict[str, object] | None = None,
+    raw_payload: bytes | None = None,
     query_params: dict[str, object] | None = None,
     params: dict[str, object] | None = None,
     extra_headers: dict[str, str] | None = None,
@@ -92,6 +94,7 @@ def _request(
             url=_build_url(path),
             headers=request_headers,
             json=json_payload,
+            data=raw_payload,
             params=resolved_query_params,
             timeout=DEFAULT_TIMEOUT_SECONDS,
         )
@@ -462,6 +465,47 @@ def start_smartfuelpass_interactive_import(
         "POST",
         "/api/v1/admin/smartfuelpass/interactive-import/start",
         access_token=access_token,
+    )
+    return dict(response.json())
+
+
+def _smartfuelpass_excel_headers(filename: str | None) -> dict[str, str]:
+    headers = {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    }
+    if filename:
+        headers["X-Filename"] = quote(filename, safe=" ._-()")
+    return headers
+
+
+def preview_smartfuelpass_excel_import(
+    access_token: str,
+    *,
+    filename: str | None,
+    content: bytes,
+) -> dict[str, object]:
+    response = _request(
+        "POST",
+        "/api/v1/admin/smartfuelpass/excel-import/preview",
+        access_token=access_token,
+        raw_payload=content,
+        extra_headers=_smartfuelpass_excel_headers(filename),
+    )
+    return dict(response.json())
+
+
+def import_smartfuelpass_excel_records(
+    access_token: str,
+    *,
+    filename: str | None,
+    content: bytes,
+) -> dict[str, object]:
+    response = _request(
+        "POST",
+        "/api/v1/admin/smartfuelpass/excel-import/import",
+        access_token=access_token,
+        raw_payload=content,
+        extra_headers=_smartfuelpass_excel_headers(filename),
     )
     return dict(response.json())
 

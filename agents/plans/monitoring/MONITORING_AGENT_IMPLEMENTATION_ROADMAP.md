@@ -53,11 +53,13 @@ Verified runtime handoff: `MONITORING_AGENT_REPORTING_LAYER_HANDOFF.md`
   runtime/database/proxy safe projections were `ok`, all eight unauthenticated
   facade calls returned JSON HTTP 401 instead of the previous four-route 404
   baseline, and the remote 0.7 observer recovered to repeated complete
-  four-endpoint HTTP-200 cycles. SmartFuelPass truthfully remains `error` as a
-  known paused import state; successful transport/schema validation keeps
-  observer self-health separate from that payload condition. Keep this item
-  open only for the controlled remote 0.8 migration, one verified complete
-  nine-observation cycle, and the audit-v7 mixed-history pass.
+  four-endpoint HTTP-200 cycles. The then-current SmartFuelPass payload
+  truthfully remained `error` as a known paused import state; the
+  2026-08-10 application change replaces that active import condition with
+  manual Excel import health while still keeping observer self-health separate
+  from target payload status. Keep this item open only for the controlled
+  remote 0.8 migration, one verified complete nine-observation cycle, and the
+  audit-v7 mixed-history pass.
 
   Compatibility correction 2026-08-06: the first postrestart remote audit
   showed that 0.7 still required the former full `system/runtime` schema while

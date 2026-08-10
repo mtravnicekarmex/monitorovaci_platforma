@@ -377,3 +377,47 @@ class SmartFuelPassInteractiveImportStartResponse(BaseModel):
     status: str = Field(..., pattern="^started$")
     requested_at: datetime
     detail: str
+
+
+class SmartFuelPassExcelImportRow(BaseModel):
+    source_row_number: int = Field(ge=1)
+    row_status: str = Field(
+        ...,
+        pattern="^(new|existing|existing_with_differences|ignored)$",
+    )
+    status_label: str
+    existing_in_db: bool
+    can_import: bool
+    note: str
+    id_relace: str | None = None
+    raw_status: str | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    lokace: str | None = None
+    connector_id: str | None = None
+    kwh: float | None = None
+    suma: float | None = None
+    tarif: str | None = None
+    difference_fields: list[str] = Field(default_factory=list)
+
+
+class SmartFuelPassExcelImportPreviewResponse(BaseModel):
+    filename: str | None = None
+    raw_row_count: int = Field(ge=0)
+    completed_row_count: int = Field(ge=0)
+    new_row_count: int = Field(ge=0)
+    existing_row_count: int = Field(ge=0)
+    existing_with_differences_count: int = Field(ge=0)
+    ignored_row_count: int = Field(ge=0)
+    invalid_completed_row_count: int = Field(ge=0)
+    not_completed_row_count: int = Field(ge=0)
+    importable_row_count: int = Field(ge=0)
+    inserted_count: int | None = Field(default=None, ge=0)
+    rows: list[SmartFuelPassExcelImportRow]
+
+
+class SmartFuelPassExcelImportApplyResponse(SmartFuelPassExcelImportPreviewResponse):
+    inserted_count: int = Field(ge=0)
+    requested_insert_count: int = Field(ge=0)
+    skipped_existing_count: int = Field(ge=0)
+    skipped_ignored_count: int = Field(ge=0)

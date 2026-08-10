@@ -283,17 +283,18 @@ class _FakeSmartFuelPassSession:
         self.table_present = table_present
         self.aggregate_row = aggregate_row or {}
         self.period_rows = list(period_rows or [])
+        self.period_params = []
         self.period_index = 0
         self.closed = False
 
     def execute(self, statement, params=None):
-        del params
         statement_text = str(statement)
         if "to_regclass('monitoring.smartfuelpass_relace')" in statement_text:
             return _FakeScalarResult(self.table_present)
         if "total_session_count" in statement_text:
             return _FakeResult(one=self.aggregate_row)
         if "session_count" in statement_text and "FROM monitoring.smartfuelpass_relace" in statement_text:
+            self.period_params.append(dict(params or {}))
             row = self.period_rows[self.period_index]
             self.period_index += 1
             return _FakeResult(one=row)
@@ -445,18 +446,6 @@ def _fake_smartfuelpass_metrics(reference_time: datetime):
     return FakeMetricsStore()
 
 
-def _patch_successful_interactive_import(monkeypatch, reference_time: datetime):
-    monkeypatch.setattr(
-        system_health,
-        "read_interactive_import_status",
-        lambda: SimpleNamespace(
-            state="success",
-            started_at=(reference_time - timedelta(minutes=5)).isoformat(),
-            finished_at=reference_time.isoformat(),
-        ),
-    )
-
-
 def test_collect_system_smartfuelpass_health_reports_ok(monkeypatch):
     reference_time = datetime.now()
     session = _FakeSmartFuelPassSession(
@@ -469,7 +458,6 @@ def test_collect_system_smartfuelpass_health_reports_ok(monkeypatch):
         "get_metrics_store",
         lambda *args, **kwargs: _fake_smartfuelpass_metrics(reference_time),
     )
-    _patch_successful_interactive_import(monkeypatch, reference_time)
 
     response = system_health.collect_system_smartfuelpass_health()
 
@@ -480,6 +468,8 @@ def test_collect_system_smartfuelpass_health_reports_ok(monkeypatch):
     assert response.table.total_session_count == 4
     assert response.table.missing_ended_at_utc_count == 0
     assert response.sync_job.status == "ok"
+    assert response.sync_job.job_id == system_health.SMARTFUELPASS_EXCEL_IMPORT_JOB_ID
+    assert response.sync_job.last_status == "manual"
     assert response.weekly_report_job.status == "ok"
     assert {period.key for period in response.report_periods} == {
         "last_week",
@@ -488,10 +478,11 @@ def test_collect_system_smartfuelpass_health_reports_ok(monkeypatch):
         "total",
     }
     assert {period.key: period.session_count for period in response.report_periods}["last_week"] == 2
+    assert session.period_params[-1] == {}
     assert session.closed is True
 
 
-def test_collect_system_smartfuelpass_health_accepts_recent_sync_without_new_sessions(monkeypatch):
+def test_collect_system_smartfuelpass_health_does_not_require_recent_scheduler_sync(monkeypatch):
     reference_time = datetime.now()
     aggregate_row = _smartfuelpass_aggregate_row(reference_time)
     aggregate_row["last_imported_at"] = reference_time - timedelta(days=3)
@@ -505,13 +496,12 @@ def test_collect_system_smartfuelpass_health_accepts_recent_sync_without_new_ses
         "get_metrics_store",
         lambda *args, **kwargs: _fake_smartfuelpass_metrics(reference_time),
     )
-    _patch_successful_interactive_import(monkeypatch, reference_time)
 
     response = system_health.collect_system_smartfuelpass_health()
 
     assert response.status == "ok"
     assert response.table.status == "ok"
-    assert "No newly inserted SmartFuelPass sessions" in response.table.detail
+    assert "manual Excel import cadence is operator-controlled" in response.table.detail
 
 
 def test_collect_system_smartfuelpass_health_reports_missing_table(monkeypatch):

@@ -343,7 +343,9 @@ The probe:
 ### `GET /health/system/smartfuelpass`
 
 Response model: `SystemSmartFuelPassHealthResponse`. The 0.8 facade exposes
-only the previously approved safe job and table-health subset.
+only the previously approved safe job and table-health subset. Since
+2026-08-10, the `sync_job` compatibility field represents the active manual
+Excel import path, not the retired Cloudflare/browser portal import.
 
 Retain only:
 

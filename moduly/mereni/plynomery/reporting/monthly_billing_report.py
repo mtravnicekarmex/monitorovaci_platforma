@@ -9,6 +9,8 @@ from pathlib import Path
 from services.api.services.plynomery_billing import (
     BranchBillingSummary,
     BranchDeviceConsumption,
+    BranchKalorimetryAllocation,
+    BranchKalorimetryAllocationRow,
     MonthlyBillingReportData,
     build_monthly_billing_report_data,
 )
@@ -39,6 +41,18 @@ def _format_volume(value: object, *, signed: bool = False) -> str:
         numeric_value = 0.0
     format_spec = "+.3f" if signed else ".3f"
     return f"{numeric_value:{format_spec}} m³"
+
+
+def _format_energy(value: object) -> str:
+    if value is None:
+        return "-"
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    if abs(numeric_value) < 0.0005:
+        numeric_value = 0.0
+    return f"{numeric_value:.3f}"
 
 
 def _format_percent(value: object) -> str:
@@ -177,6 +191,95 @@ def _build_device_table_html(branch: BranchBillingSummary) -> str:
     """
 
 
+def _kalorimetry_allocation_status_text(
+    allocation: BranchKalorimetryAllocation,
+) -> str:
+    if allocation.source_consumption is None:
+        return "Chybí spotřeba plynoměru pro rozpočet."
+    if allocation.missing_meter_count:
+        return f"Chybí data pro {allocation.missing_meter_count} kalorimetrů."
+    if allocation.energy_consumption_total is None:
+        return "Chybí úplný součet kalorimetrů."
+    if allocation.energy_consumption_total <= 0:
+        return "Nulová spotřeba kalorimetrů, nelze určit podíly."
+    return "Rozpočet podle skutečné spotřeby kalorimetrů."
+
+
+def _build_kalorimetry_allocation_row_html(
+    row: BranchKalorimetryAllocationRow,
+) -> str:
+    return f"""
+      <tr>
+        <td>{escape(row.identifikace)}</td>
+        <td class="numeric">{_format_energy(row.start_value)}</td>
+        <td class="numeric">{_format_energy(row.end_value)}</td>
+        <td class="numeric strong">{_format_energy(row.energy_consumption)}</td>
+        <td class="numeric">{_format_percent(row.energy_share_percent)}</td>
+        <td class="numeric strong">{_format_volume(row.allocated_gas_consumption)}</td>
+      </tr>
+    """
+
+
+def _build_kalorimetry_allocation_html(
+    allocation: BranchKalorimetryAllocation,
+) -> str:
+    rows_html = "\n".join(
+        _build_kalorimetry_allocation_row_html(row)
+        for row in allocation.rows
+    )
+    if not rows_html:
+        rows_html = """
+          <tr>
+            <td colspan="6" class="muted">Pro tento rozpočet nejsou nakonfigurované kalorimetry.</td>
+          </tr>
+        """
+    return f"""
+      <div class="kalorimetry-allocation-block">
+        <div class="branch-subtitle">{escape(allocation.title)}</div>
+        <div class="allocation-meta">
+          Plynoměr: <strong>{escape(allocation.source_identifikace)}</strong>,
+          spotřeba plynu: <strong>{_format_volume(allocation.source_consumption)}</strong>,
+          spotřeba kalorimetrů: <strong>{_format_energy(allocation.energy_consumption_total)}</strong>.
+          {escape(_kalorimetry_allocation_status_text(allocation))}
+        </div>
+        <table class="branch-table kalorimetry-allocation-table">
+          <thead>
+            <tr>
+              <th>Kalorimetr</th>
+              <th class="numeric">Počáteční stav energie</th>
+              <th class="numeric">Koncový stav energie</th>
+              <th class="numeric">Spotřeba energie</th>
+              <th class="numeric">% podíl energie</th>
+              <th class="numeric">Rozpočtená spotřeba plynu</th>
+            </tr>
+          </thead>
+          <tbody>{rows_html}</tbody>
+        </table>
+      </div>
+    """
+
+
+def _build_kalorimetry_allocations_html(branch: BranchBillingSummary) -> str:
+    if not branch.kalorimetry_allocations:
+        return ""
+    allocations_html = "\n".join(
+        _build_kalorimetry_allocation_html(allocation)
+        for allocation in branch.kalorimetry_allocations
+    )
+    return f"""
+      <div class="branch-table-wrap">
+        <div class="branch-subtitle">Rozpočtení spotřeby podle kalorimetrů</div>
+        <p class="muted allocation-intro">
+          Kalorimetry rozdělují spotřebu konkrétního plynoměru podle skutečné
+          spotřeby energie ve stejném intervalu fakturačních odečtů. Rozpočtené
+          m³ jsou informativní detail k danému plynoměru a nemění součet
+          fakturační spotřeby větve.
+        </p>
+        {allocations_html}
+      </div>
+    """
+
+
 def _branch_status_text(branch: BranchBillingSummary) -> str:
     if branch.billing_consumption is None:
         return "Chybí předchozí nebo aktuální ruční stav fakturačního plynoměru."
@@ -243,6 +346,7 @@ def _build_branch_section_html(branch: BranchBillingSummary) -> str:
           <div class="branch-subtitle">Odběrná místa a podružné plynoměry</div>
           {_build_device_table_html(branch)}
         </div>
+        {_build_kalorimetry_allocations_html(branch)}
       </section>
     """
 
@@ -253,6 +357,10 @@ def build_monthly_plynomery_billing_report_html(report: MonthlyBillingReportData
     total_billing = _sum_values(tuple(branch.billing_consumption for branch in report.branches))
     total_submeters = _sum_values(tuple(branch.submeter_consumption_total for branch in report.branches))
     total_difference = _sum_values(tuple(branch.difference_vs_submeters for branch in report.branches))
+    total_kalorimetry_allocations = sum(
+        len(branch.kalorimetry_allocations)
+        for branch in report.branches
+    )
     branches_html = "\n".join(_build_branch_section_html(branch) for branch in report.branches)
     generated_at = report.generated_at.strftime("%d.%m.%Y %H:%M")
 
@@ -509,6 +617,23 @@ def build_monthly_plynomery_billing_report_html(report: MonthlyBillingReportData
       font-size: 7.8px;
       line-height: 1.25;
     }}
+    .kalorimetry-allocation-block {{
+      margin-top: 8px;
+      padding-top: 6px;
+      border-top: 1px solid #e5e7eb;
+    }}
+    .allocation-meta {{
+      margin: 0 0 6px;
+      color: #52606d;
+      font-size: 9px;
+      line-height: 1.35;
+    }}
+    .allocation-intro {{
+      margin-bottom: 6px;
+    }}
+    .kalorimetry-allocation-table {{
+      margin-top: 4px;
+    }}
     .muted {{
       color: #64748b;
       margin: 0;
@@ -539,7 +664,8 @@ def build_monthly_plynomery_billing_report_html(report: MonthlyBillingReportData
         <div class="report-description">
           Report vychází z ručních fakturačních odečtů a provozních měření podružných
           plynoměrů. Přímé podružné plynoměry jsou započtené do porovnání větve,
-          hierarchické detailní měření je uvedené informativně.
+          hierarchické detailní měření je uvedené informativně. U vybraných
+          plynoměrů je doplněn rozpočet spotřeby podle skutečných kalorimetrů.
         </div>
       </div>
     </div>
@@ -549,6 +675,7 @@ def build_monthly_plynomery_billing_report_html(report: MonthlyBillingReportData
       {_build_metric_card("Celkem přímé podružné", _format_volume(total_submeters))}
       {_build_metric_card("Celkový rozdíl", _format_volume(total_difference, signed=True), "fakturace - podružné")}
       {_build_metric_card("Počet větví", str(len(report.branches)))}
+      {_build_metric_card("Kalorimetrické rozpočty", str(total_kalorimetry_allocations))}
     </div>
 
     {branches_html}

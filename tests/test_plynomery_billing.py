@@ -20,6 +20,7 @@ from services.api.services.plynomery_billing import (
     BranchDeviceConsumption,
     BillingReadingInput,
     BillingReadingRecord,
+    EnergySnapshot,
     MeterSnapshot,
     MonthlyBillingReportData,
     PlynomeryBillingError,
@@ -223,6 +224,36 @@ def test_plynomery_branch_config_matches_static_billing_meters():
     innogy_b = get_plynomery_branch_config("INNOGY_B")
     assert innogy_b.direct_submeter_idents == ("Bk_P1",)
     assert innogy_b.residual_label == "Budova B - zbytek po odečtení Bk_P1"
+    assert innogy_b.all_kalorimetry_idents == ()
+
+    innogy_a = get_plynomery_branch_config("INNOGY_A")
+    assert innogy_a.all_kalorimetry_idents == ("Amt1", "Amt2", "Amt3")
+
+    innogy_g = get_plynomery_branch_config("INNOGY_G")
+    assert innogy_g.all_kalorimetry_idents == (
+        "Gmt1",
+        "Gmt2",
+        "Gmt3",
+        "Gmt4",
+        "Gmt5",
+        "Gmt6",
+        "Gmt7",
+        "Gmt8",
+    )
+    g_p1 = next(node for node in innogy_g.submeters if node.identifikace == "G_P1")
+    g_p3 = next(node for node in innogy_g.submeters if node.identifikace == "G_P3")
+    assert g_p1.kalorimetry_allocations[0].identifiers == (
+        "Gmt1",
+        "Gmt2",
+        "Gmt3",
+        "Gmt4",
+        "Gmt5",
+    )
+    assert g_p3.kalorimetry_allocations[0].identifiers == (
+        "Gmt6",
+        "Gmt7",
+        "Gmt8",
+    )
 
     innogy_l = get_plynomery_branch_config("INNOGY_L")
     assert innogy_l.direct_submeter_idents == (
@@ -428,6 +459,134 @@ def test_monthly_report_uses_billing_reading_times_for_submeter_cutoffs(monkeypa
     assert branch.device_rows[0].end_measured_at == current_time
 
 
+def test_innogy_a_kalorimetry_allocation_uses_branch_consumption():
+    start_time = datetime.datetime(2026, 7, 1)
+    end_time = datetime.datetime(2026, 8, 1)
+
+    summary = _build_branch_summary(
+        get_plynomery_branch_config("INNOGY_A"),
+        current_readings={
+            "INNOGY_A": _reading(
+                identifikace="INNOGY_A",
+                objem=190.0,
+                reading_at=end_time,
+            )
+        },
+        previous_readings={
+            "INNOGY_A": _reading(
+                identifikace="INNOGY_A",
+                objem=100.0,
+                reading_at=start_time,
+            )
+        },
+        period_start=start_time,
+        period_end=end_time,
+        start_snapshots={},
+        end_snapshots={},
+        calorimetry_start_snapshots={
+            "Amt1": EnergySnapshot("Amt1", 10.0, start_time),
+            "Amt2": EnergySnapshot("Amt2", 20.0, start_time),
+            "Amt3": EnergySnapshot("Amt3", 5.0, start_time),
+        },
+        calorimetry_end_snapshots={
+            "Amt1": EnergySnapshot("Amt1", 20.0, end_time),
+            "Amt2": EnergySnapshot("Amt2", 50.0, end_time),
+            "Amt3": EnergySnapshot("Amt3", 5.0, end_time),
+        },
+    )
+
+    allocation = summary.kalorimetry_allocations[0]
+    rows = {row.identifikace: row for row in allocation.rows}
+
+    assert allocation.source_identifikace == "INNOGY_A"
+    assert allocation.source_consumption == 90.0
+    assert allocation.energy_consumption_total == 40.0
+    assert allocation.missing_meter_count == 0
+    assert rows["Amt1"].energy_consumption == 10.0
+    assert rows["Amt1"].energy_share_percent == 25.0
+    assert rows["Amt1"].allocated_gas_consumption == 22.5
+    assert rows["Amt2"].allocated_gas_consumption == 67.5
+    assert rows["Amt3"].allocated_gas_consumption == 0.0
+
+
+def test_innogy_g_kalorimetry_allocation_uses_source_submeter_consumption():
+    start_time = datetime.datetime(2026, 7, 1)
+    end_time = datetime.datetime(2026, 8, 1)
+    calorimetry_start = {
+        identifier: EnergySnapshot(identifier, 0.0, start_time)
+        for identifier in (
+            "Gmt1",
+            "Gmt2",
+            "Gmt3",
+            "Gmt4",
+            "Gmt5",
+            "Gmt6",
+            "Gmt7",
+            "Gmt8",
+        )
+    }
+    calorimetry_end = {
+        "Gmt1": EnergySnapshot("Gmt1", 10.0, end_time),
+        "Gmt2": EnergySnapshot("Gmt2", 10.0, end_time),
+        "Gmt3": EnergySnapshot("Gmt3", 0.0, end_time),
+        "Gmt4": EnergySnapshot("Gmt4", 10.0, end_time),
+        "Gmt5": EnergySnapshot("Gmt5", 10.0, end_time),
+        "Gmt6": EnergySnapshot("Gmt6", 20.0, end_time),
+        "Gmt7": EnergySnapshot("Gmt7", 20.0, end_time),
+        "Gmt8": EnergySnapshot("Gmt8", 20.0, end_time),
+    }
+
+    summary = _build_branch_summary(
+        get_plynomery_branch_config("INNOGY_G"),
+        current_readings={
+            "INNOGY_G": _reading(
+                identifikace="INNOGY_G",
+                objem=200.0,
+                reading_at=end_time,
+            )
+        },
+        previous_readings={
+            "INNOGY_G": _reading(
+                identifikace="INNOGY_G",
+                objem=100.0,
+                reading_at=start_time,
+            )
+        },
+        period_start=start_time,
+        period_end=end_time,
+        start_snapshots={
+            "G_P1": MeterSnapshot("G_P1", 10.0, start_time),
+            "G_P3": MeterSnapshot("G_P3", 20.0, start_time),
+        },
+        end_snapshots={
+            "G_P1": MeterSnapshot("G_P1", 50.0, end_time),
+            "G_P3": MeterSnapshot("G_P3", 80.0, end_time),
+        },
+        calorimetry_start_snapshots=calorimetry_start,
+        calorimetry_end_snapshots=calorimetry_end,
+    )
+
+    allocations = {
+        allocation.source_identifikace: allocation
+        for allocation in summary.kalorimetry_allocations
+    }
+
+    assert summary.billing_consumption == 100.0
+    assert summary.submeter_consumption_total == 100.0
+    assert allocations["G_P1"].source_consumption == 40.0
+    assert allocations["G_P1"].energy_consumption_total == 40.0
+    assert sum(
+        row.allocated_gas_consumption or 0.0
+        for row in allocations["G_P1"].rows
+    ) == 40.0
+    assert allocations["G_P3"].source_consumption == 60.0
+    assert allocations["G_P3"].energy_consumption_total == 60.0
+    assert sum(
+        row.allocated_gas_consumption or 0.0
+        for row in allocations["G_P3"].rows
+    ) == 60.0
+
+
 def test_innogy_l_branch_summary_does_not_double_count_nested_submeters():
     config = get_plynomery_branch_config("INNOGY_L")
     start_time = datetime.datetime(2026, 7, 1)
@@ -545,6 +704,60 @@ def test_monthly_plynomery_billing_report_html_contains_manual_report_sections()
     assert "Čas konce" not in html
     assert "break-before: page" in html
     assert "page-break-before: always" in html
+
+
+def test_monthly_plynomery_billing_report_html_contains_kalorimetry_allocation():
+    start_time = datetime.datetime(2026, 7, 1)
+    end_time = datetime.datetime(2026, 8, 1)
+    branch = _build_branch_summary(
+        get_plynomery_branch_config("INNOGY_A"),
+        current_readings={
+            "INNOGY_A": _reading(
+                identifikace="INNOGY_A",
+                objem=190.0,
+                reading_at=end_time,
+            )
+        },
+        previous_readings={
+            "INNOGY_A": _reading(
+                identifikace="INNOGY_A",
+                objem=100.0,
+                reading_at=start_time,
+            )
+        },
+        period_start=start_time,
+        period_end=end_time,
+        start_snapshots={},
+        end_snapshots={},
+        calorimetry_start_snapshots={
+            "Amt1": EnergySnapshot("Amt1", 10.0, start_time),
+            "Amt2": EnergySnapshot("Amt2", 20.0, start_time),
+            "Amt3": EnergySnapshot("Amt3", 5.0, start_time),
+        },
+        calorimetry_end_snapshots={
+            "Amt1": EnergySnapshot("Amt1", 20.0, end_time),
+            "Amt2": EnergySnapshot("Amt2", 50.0, end_time),
+            "Amt3": EnergySnapshot("Amt3", 5.0, end_time),
+        },
+    )
+    report = MonthlyBillingReportData(
+        generated_at=datetime.datetime(2026, 8, 2, 9, 0),
+        period_start=start_time,
+        period_end=end_time,
+        year=2026,
+        month=7,
+        branches=(branch,),
+    )
+
+    html = build_monthly_plynomery_billing_report_html(report)
+
+    assert "Rozpočtení spotřeby podle kalorimetrů" in html
+    assert "Rozpočtená spotřeba plynu" in html
+    assert "Kalorimetrické rozpočty" in html
+    assert "Budova A - rozpočet podle kalorimetrů" in html
+    assert "Amt1" in html
+    assert "25.0 %" in html
+    assert "22.500 m³" in html
 
 
 def test_monthly_plynomery_billing_report_html_omits_control_meter_branch_share():

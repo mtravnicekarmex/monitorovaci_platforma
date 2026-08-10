@@ -1964,3 +1964,58 @@ Known risks/gaps:
   This documentation update changed no application code, production database
   row, runtime configuration, scheduler state, credential, or monitoring-agent
   state.
+
+### 2026-08-10 - SmartFuelPass Excel import implemented
+
+- The active SmartFuelPass dashboard workflow was changed from the paused
+  Cloudflare/browser login page to `Nabijecky / Import`.
+- Added an Excel parser for `ChargingSessions` `.xlsx` exports. It maps the
+  workbook to the existing `monitoring.smartfuelpass_relace` shape, imports
+  only `Stav = Dokončeno`, uses `Suma`, normalizes location to the existing
+  short DB format, preserves existing interval time semantics, and sets
+  `battery_status=NULL`.
+- Added admin-only FastAPI preview/import endpoints. Preview is read-only and
+  marks rows as new, existing, existing with differences, or ignored. Import is
+  insert-only by `id_relace`; existing rows are never updated from Excel.
+- The supplied sample was checked through the new preview path without writing
+  to the database: 16 parsed rows, 4 completed rows, 2 new importable rows, 2
+  existing rows with differences, and 12 ignored rows.
+- Focused verification passed:
+  `tests/test_smartfuelpass_excel_import.py`,
+  `tests/test_smartfuelpass_interactive.py`,
+  `tests/test_dashboard_navigation_config.py`, and
+  `tests/test_api_authorization_regression.py` returned `263 passed`.
+- `git diff --check` passed with only line-ending normalization warnings.
+  Documentation was updated in AGENTS, decisions, backlog, completed work, and
+  session notes. No production import/write was executed.
+
+### 2026-08-10 - SmartFuelPass Excel import accepted as complete
+
+- User confirmed the `Nabijecky / Import` page works as intended in operation.
+- `SFP-001` remains completed; no further import-page work is tracked in the
+  active or backlog work indexes.
+- This update records operator acceptance only. The agent did not inspect raw
+  imported data, read credentials/session artifacts, or execute a production
+  import/write.
+
+### 2026-08-10 - Plynomery billing PDF kalorimetry allocation added
+
+- The manual `Plynomery / Fakturacni odecty` PDF now includes actual
+  kalorimetry-based allocation detail for selected gas meters while remaining
+  manual, actual/billing-only, and outside scheduler/report delivery.
+- Static allocation mapping was added for `INNOGY_A` through `Amt1`-`Amt3`,
+  `G_P1` through `Gmt1`-`Gmt5`, and `G_P3` through `Gmt6`-`Gmt8`. `Bmt1`-`Bmt3`
+  were intentionally excluded because metadata identifies their source as the
+  B-building electric boiler, not a gas meter.
+- Allocation uses actual cumulative `spotreba_energie` snapshots from
+  `monitoring.Mereni_kalorimetry_vse` at the same previous/current
+  billing-reading timestamps as the gas comparison. It does not use
+  kalorimetry predictions or selected-model/profile snapshots.
+- Focused billing regression passed with `16 passed`; targeted modules
+  compiled. A read-only July 2026 smoke check found seven branches, three
+  allocation groups, 11 configured kalorimeters, no missing configured
+  kalorimeters, complete `G_P1`/`G_P3` allocations, and a visible
+  zero-energy-total state for `INNOGY_A`. The same read-only report rendered
+  valid PDF bytes.
+- No database write, scheduler change, runtime configuration change, report
+  delivery, credential/session readout, or raw measurement dump was performed.

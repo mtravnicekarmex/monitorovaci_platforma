@@ -77,8 +77,9 @@
   paths, and produced repeated complete HTTP-200 route sequences from the
   still-running remote 0.7 observer. The later client audit showed those HTTP
   responses did not constitute schema recovery. Runtime, database, and proxy
-  safe payloads are `ok`; SmartFuelPass truthfully reports the known
-  paused-import error and must be qualified later rather than rewritten.
+  safe payloads are `ok`. The SmartFuelPass application payload was later
+  changed on 2026-08-10 to represent the manual Excel import path instead of
+  the retired Cloudflare/browser import error.
 - Remote audit finding: lifecycle remains valid with no unclean/abandoned run,
   but the latest heartbeat is degraded and history added 68 schema errors
   because deployed 0.7 expects the former full System Runtime schema. Do not
@@ -105,8 +106,10 @@
   endpoint set 3, valid endpoint and cycle order, latest heartbeat `healthy`,
   nine latest observations, zero latest transport failures, valid retry and
   attempt bounds, and clean lifecycle. The two retained env-v2 schema errors
-  are historical pre-fix evidence and recovery is proved; `system_smartfuelpass`
-  remains a schema-valid known paused-import `error` payload.
+  are historical pre-fix evidence and recovery is proved. After the
+  2026-08-10 SmartFuelPass Excel-import change, future `system_smartfuelpass`
+  observations should reflect the manual import projection rather than the
+  retired paused-import error payload.
 - Next step: restore continuous operation through the reviewed
   `MonitoringAgentTest` Scheduled Task on the supervision station. A
   non-mutating `.\register_monitoring_agent_task.ps1 -WhatIf` preview passed;

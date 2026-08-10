@@ -3643,3 +3643,82 @@ Consequences:
   does not trigger prediction conversion or scheduler registration.
 - DEC-122 remains in force for append-only reading storage and time-bound
   report input validation.
+
+## DEC-124: SmartFuelPass database filling uses manual Excel import
+
+Date: 2026-08-10
+
+Status: Accepted
+
+Decision:
+
+- Replace the active SmartFuelPass dashboard workflow with a manual
+  administrator-selected `ChargingSessions` `.xlsx` import. The page formerly
+  named `Přihlášení SmartFuelPass` is now `Import`.
+- Preview is mandatory before import. The preview parses all workbook rows,
+  compares supported `id_relace` values against
+  `monitoring.smartfuelpass_relace`, and marks rows as new, already existing,
+  existing with differences, or ignored.
+- Import writes only new completed rows. Existing rows identified by
+  `id_relace` are never updated, upserted, or re-imported from the Excel file,
+  even if parsed values differ from the database.
+- The parser maps `Nákup` to `id_relace`, accepts only `Stav = Dokončeno`,
+  maps `Energie` to `kwh`, `Suma` to `suma`, `Čas spuštění`/`Čas ukončení` to
+  the existing interval time semantics, normalizes `Název EV lokace` to the
+  existing short location format, stores connector/tariff when present, and
+  sets `battery_status=NULL` because the supported export does not carry that
+  value.
+- Browser-initiated writes must go through authenticated admin FastAPI
+  endpoints; the Streamlit page must not write directly to PostgreSQL.
+
+Consequences:
+
+- This supersedes the active-work portion of DEC-119. The Cloudflare/browser
+  portal path stays paused/retired and must not be retried or bypassed.
+- The existing database-backed weekly SmartFuelPass report remains scheduled
+  and continues to read only `monitoring.smartfuelpass_relace`.
+- The old interactive helper/task code may remain as legacy compatibility or
+  diagnostic code, but it is not the active dashboard import workflow.
+- `daily_job` remains free of SmartFuelPass portal synchronization and the new
+  Excel import is intentionally not scheduler-driven.
+
+Acceptance note (2026-08-10):
+
+- User confirmed the `Nabijecky / Import` page works as intended. `SFP-001` is
+  complete and no remaining page-completion gate is tracked for this workflow.
+
+## DEC-125: Plynomery billing PDF includes actual kalorimetry allocations
+
+Date: 2026-08-10
+
+Status: Accepted
+
+Decision:
+
+- Extend the manual `Plynomery / Fakturacni odecty` PDF with actual
+  kalorimetry-based allocation tables for selected gas meters.
+- Keep the report manual, actual/billing-only, and outside scheduler
+  automation, scheduler manual runs, automatic email delivery, and recipient
+  configuration.
+- Calculate calorimetry allocation from actual cumulative
+  `monitoring.Mereni_kalorimetry_vse.spotreba_energie` snapshots at the same
+  previous/current billing-reading timestamps used for the gas comparison.
+  Use only valid non-synthetic kalorimetry rows and fail visible allocation
+  values to unavailable when source gas consumption, a calorimeter state, or a
+  positive complete energy total is unavailable.
+- Keep allocation mapping explicit in `moduly/mereni/plynomery/branches.py`.
+  `INNOGY_A` is allocated by `Amt1`, `Amt2`, and `Amt3`; `G_P1` is allocated
+  by `Gmt1` through `Gmt5`; `G_P3` is allocated by `Gmt6` through `Gmt8`.
+  `Bmt1` through `Bmt3` are not included in gas allocation because their
+  source metadata is the B-building electric boiler, not a gas meter.
+
+Consequences:
+
+- The new tables are an explanatory allocation detail for selected gas meters;
+  they do not change the branch billing consumption, direct-submeter total, or
+  scheduler/report-delivery contract.
+- This remains outside the plynomery prediction-series contract. Do not read
+  kalorimetry prediction profiles or selected-model snapshots for this PDF.
+- A zero or incomplete calorimetry energy total must be shown as an unavailable
+  allocation state rather than hidden or replaced by equal shares, stale data,
+  predictions, or a fallback constant.

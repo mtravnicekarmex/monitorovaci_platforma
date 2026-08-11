@@ -7,7 +7,16 @@ from moduly.mereni.vodomery.database.models import Mereni_vodomery, VodomeryAler
 from moduly.mereni.vodomery.database.runtime_schema import drop_legacy_identifikace_fk
 
 
-EVENT_TYPE_OPTIONS = ("", "NIGHT_USAGE", "SPIKE", "LONG_LEAK", "ZERO_FLOW", "EXPECTED_ZERO_USAGE", "OUTLIER_REVIEW")
+EVENT_TYPE_OPTIONS = (
+    "",
+    "NIGHT_USAGE",
+    "SPIKE",
+    "LONG_LEAK",
+    "SUSTAINED_HIGH_USAGE",
+    "ZERO_FLOW",
+    "EXPECTED_ZERO_USAGE",
+    "OUTLIER_REVIEW",
+)
 NON_EMPTY_EVENT_TYPE_OPTIONS = tuple(option for option in EVENT_TYPE_OPTIONS if option)
 SEVERITY_OPTIONS = ("LOW", "MEDIUM", "HIGH", "CRITICAL")
 SEND_ON_OPTIONS = ("ACTIVE", "RESOLVED", "BOTH")
@@ -100,6 +109,7 @@ def upsert_alert_rule(
     actor: str | None = None,
     rule_id: int | None = None,
 ) -> int:
+    ensure_vodomery_alerting_tables()
     session = get_session_pg()
     try:
         if rule_id is None:

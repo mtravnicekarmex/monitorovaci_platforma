@@ -2019,3 +2019,226 @@ Known risks/gaps:
   valid PDF bytes.
 - No database write, scheduler change, runtime configuration change, report
   delivery, credential/session readout, or raw measurement dump was performed.
+
+### 2026-08-11 11:57 +02:00 - Vodomery sustained high usage pre-restart handoff
+
+Reason for restart:
+
+- Load the new vodomery `SUSTAINED_HIGH_USAGE` event and alerting/UI allowlist
+  changes into the production scheduler, FastAPI, and Streamlit processes.
+- The supported production recovery model remains a whole Windows workstation
+  restart through the existing `API_dashboard_caddy` startup task; do not stop
+  or recreate individual production processes for this activation.
+
+Current task and conversation state:
+
+- Completed: diagnosed the missed 2026-08-10 `E_V1` alert as an alerting
+  semantics gap. The old pipeline scored the data and created short resolved
+  `SPIKE` events, but it did not have a direct prediction-relative sustained
+  high-usage event.
+- Completed in source: added `SUSTAINED_HIGH_USAGE`, defined as four
+  consecutive 15-minute scores where actual consumption is at least 2.0 times
+  the active prediction, absolute deviation is at least `0.05 m3`, and actual
+  consumption is at least `0.08 m3`. Event duration starts at the first
+  qualifying score.
+- Completed in source: normal vodomery event detection and outlier-review
+  event rebuild share the same trigger helper; vodomery alert-rule duration is
+  inclusive; DB check constraints, API validation allowlists, and Streamlit
+  labels/filters include the new event type.
+- Pending: restart the workstation, verify the runtime stack, wait for one
+  post-boot vodomery quarter-hour pipeline cycle, then configure the first
+  production alert rule only after explicit operator confirmation of
+  recipient, severity, and scope.
+- First action after restart: read `AGENTS.md`,
+  `agents/decisions/DECISIONS.md`, and this handoff; run
+  `git status --short`; confirm boot after `2026-08-11 11:57 +02:00` and
+  confirm `API_dashboard_caddy` result 0 after boot.
+
+Working tree and deployment:
+
+- The working tree is intentionally non-clean from the vodomery alerting work.
+  Do not reset, checkout, clean, delete, overwrite, commit, push, or create a
+  code-integrity baseline during restart handling.
+- `git status --short` before writing this handoff showed:
+  - `M AGENTS.md`
+  - `M agents/decisions/DECISIONS.md`
+  - `M agents/work/ACTIVE.md`
+  - `M moduly/apps/dashboard/alerting_shared.py`
+  - `M moduly/apps/dashboard/overview_shared.py`
+  - `M moduly/apps/dashboard/pages/4_vodomery_anomalie_eventy.py`
+  - `M moduly/apps/dashboard/pages/7_vodomery_alerting.py`
+  - `M moduly/mereni/vodomery/alerting/service.py`
+  - `M moduly/mereni/vodomery/database/alerting.py`
+  - `M moduly/mereni/vodomery/database/models.py`
+  - `M moduly/mereni/vodomery/database/outlier_review_apply.py`
+  - `M moduly/mereni/vodomery/vodomery_events.py`
+  - `M tests/test_dashboard_alerting_shared.py`
+  - `M tests/test_vodomery_alert_rule_validation.py`
+  - `?? tests/test_vodomery_alert_service.py`
+  - `?? tests/test_vodomery_events.py`
+- This handoff additionally modifies `agents/history/SESSION_NOTES.md`.
+- Relevant source behavior:
+  `moduly/mereni/vodomery/vodomery_events.py` owns the new event constants,
+  trigger config, event-table ensure path, DB event check-constraint update,
+  duration handling, and opening aggregate calculations.
+  `moduly/mereni/vodomery/database/outlier_review_apply.py` uses the same
+  trigger/duration helpers during event rebuilds. `moduly/mereni/vodomery/alerting/service.py`
+  changed alert duration matching from strictly greater-than to inclusive.
+  Dashboard pages and shared modules now expose `SUSTAINED_HIGH_USAGE`.
+- Verification before restart: production compile passed for the touched
+  vodomery/dashboard modules. Focused pytest in `.venv` passed with
+  `13 passed`:
+  `tests/test_vodomery_events.py`,
+  `tests/test_vodomery_alert_service.py`,
+  `tests/test_vodomery_alert_rule_validation.py`,
+  `tests/test_dashboard_alerting_shared.py`, and
+  `tests/test_dashboard_overview_shared.py`.
+- No production alert rule was created, no historical events were backfilled,
+  no email delivery was triggered, and no production database data row was
+  intentionally changed by the implementation session.
+- Runtime schema note: after the new code is loaded, the event engine and
+  alert-rule write path may update PostgreSQL check constraints to allow
+  `SUSTAINED_HIGH_USAGE`. This is the intended additive compatibility update;
+  it is not a manual data backfill.
+
+Sensitive and runtime artifacts:
+
+- Do not print, change, delete, or commit `.env`, database credentials, bearer
+  tokens, cookies, ProgramData proxy credentials, raw authenticated Health
+  responses, raw meter data, scheduler locks, SmartFuelPass/session data,
+  monitoring-agent credentials/state, or operational database row dumps.
+- Do not create a test alert recipient, send a test email, run a historical
+  event backfill, or execute unrelated manual scheduler/database operations
+  during post-restart verification unless explicitly approved.
+
+Expected processes/listeners after restart:
+
+- FastAPI/Uvicorn on `127.0.0.1:8000`.
+- Streamlit on `127.0.0.1:8001`.
+- Scheduler `main.py` holding the scheduler process lock.
+- Caddy on TCP 80/443 and admin `127.0.0.1:2019`.
+- Tailscale tailnet listeners 443 and 9443 retained; temporary 8010/8011
+  absent.
+
+Expected application state:
+
+- API live/ready: HTTP 200.
+- Streamlit health: HTTP 200.
+- Caddy admin `/config/`: HTTP 200.
+- Protected `/api/v1/auth/me` without bearer token: HTTP 401.
+- Scheduler running with a heartbeat newer than boot.
+- First post-boot vodomery quarter-hour cycle should complete
+  `check_database_availability`, `vodomery_db_import`,
+  `score_new_measurements`, `detect_events_from_scores`, and
+  `process_vodomery_alerts` successfully.
+- Production virtual environment still matches `requirements-production.lock.txt`.
+- Tracked and deployed Caddyfile SHA-256 hashes remain equal to
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Dashboard/API alert-rule validation recognizes `SUSTAINED_HIGH_USAGE`.
+- No `SUSTAINED_HIGH_USAGE` alert email is expected until an enabled
+  production alert rule exists and a qualifying event is active.
+
+Pre-restart runtime status at `2026-08-11 11:56 +02:00`:
+
+- Windows boot: `2026-08-11 11:07:04 +02:00`.
+- Startup task `API_dashboard_caddy`: `Ready`, last run
+  `2026-08-11 11:07:14 +02:00`, result 0.
+- Listeners were present on 80/443/2019/8000/8001 and tailnet 443/9443.
+  Sanitized process names: Caddy owned 80/443/2019, Python owned 8000/8001,
+  and Tailscale owned tailnet 443/9443. Temporary 8010/8011 were absent.
+- API live 200, API ready 200, Streamlit health 200, Caddy admin 200, and
+  protected `/api/v1/auth/me` without bearer 401.
+- Scheduler was running with heartbeat `2026-08-11T11:52:20.871395`.
+  Latest relevant successes: `check_database_availability`
+  `2026-08-11T11:47:07.835505`, `vodomery_db_import`
+  `2026-08-11T11:47:09.282869`, `score_new_measurements`
+  `2026-08-11T11:47:14.774861`, `detect_events_from_scores`
+  `2026-08-11T11:47:14.933628`, `process_vodomery_alerts`
+  `2026-08-11T11:47:14.949453`, and `quarter_hour_job`
+  `2026-08-11T11:47:16.573035`. No latest failure timestamp was present for
+  those checked keys.
+- Production virtual-environment verification returned
+  `Production Python environment matches requirements-production.lock.txt.`
+- Tracked and deployed Caddyfile SHA-256 hashes matched:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+
+Required post-restart checks:
+
+1. Confirm Windows boot time is after `2026-08-11 11:57 +02:00` and
+   `API_dashboard_caddy` ran after boot with result 0.
+2. Confirm expected listeners 80/443/2019/8000/8001 plus tailnet 9443, with
+   no 8010/8011.
+3. Confirm local API live/ready, Streamlit health, Caddy admin, and protected
+   auth 401 without bearer.
+4. Confirm scheduler heartbeat is fresh and newer than boot.
+5. Wait for the first post-boot vodomery quarter-hour cycle and require
+   successful `check_database_availability`, `vodomery_db_import`,
+   `score_new_measurements`, `detect_events_from_scores`,
+   `process_vodomery_alerts`, and `quarter_hour_job`.
+6. Verify production virtual-environment lock still matches.
+7. Verify tracked/deployed Caddyfile hashes match.
+8. Verify the loaded source recognizes `SUSTAINED_HIGH_USAGE` in
+   `EVENT_CONFIG` and vodomery alert-rule `EVENT_TYPE_OPTIONS`.
+9. In the admin dashboard, verify the vodomery alerting event-type selector
+   contains `SUSTAINED_HIGH_USAGE`. If no authenticated browser session is
+   available to the agent, record this as operator-verification required, not
+   as a failed backend check.
+10. After operator confirmation of recipient/severity/scope, create the pilot
+    alert rule. Recommended initial rule:
+    `event_type=SUSTAINED_HIGH_USAGE`, `send_on=ACTIVE`,
+    `min_duration_minutes=0`, scoped either to `E_V1` or to the selected
+    vodomery scope.
+
+Known risks/gaps:
+
+- The changes are uncommitted. A reset/checkout/clean before restart would
+  remove the intended production activation.
+- `SUSTAINED_HIGH_USAGE` will not necessarily appear immediately after
+  restart; it requires qualifying post-checkpoint scores or later rebuilt
+  history.
+- A production alert rule still has to be created explicitly. Until then the
+  new event type can be generated but will not send email.
+- Public browser verification may require an existing admin session or
+  operator action; do not print credentials or tokens to automate it.
+- This restart does not authorize monitoring-agent task restoration,
+  unrelated Caddy changes, database data corrections, historical alert
+  delivery, or any non-vodomery production write.
+
+### 2026-08-11 12:08 +02:00 - Vodomery sustained high usage post-restart verification
+
+- Windows booted at `2026-08-11 12:00:51 +02:00`, after the
+  `2026-08-11 11:57 +02:00` pre-restart handoff. Startup task
+  `API_dashboard_caddy` was `Ready`, ran at `2026-08-11 12:01:01 +02:00`,
+  and returned result 0.
+- Expected listeners 80, 443, 2019, 8000, 8001, and tailnet 9443 were
+  present. Temporary listeners 8010/8011 were absent. Sanitized ownership
+  showed Caddy on 80/443/2019, Python on 8000/8001, and Tailscale on tailnet
+  443/9443.
+- Local API live/ready, Streamlit health, and Caddy admin returned HTTP 200.
+  Protected `/api/v1/auth/me` without a bearer token returned HTTP 401. Local
+  Caddy/SNI HTTPS returned 200 HTML, and local HTTP returned 308.
+- Scheduler was running with fresh heartbeat `2026-08-11T12:06:06.132729`,
+  newer than boot. The first post-boot vodomery cycle completed successfully:
+  `check_database_availability` at `2026-08-11T12:05:05.086434`,
+  `vodomery_db_import` at `2026-08-11T12:05:06.773278`,
+  `score_new_measurements` at `2026-08-11T12:05:12.090305`,
+  `detect_events_from_scores` at `2026-08-11T12:05:12.263307`,
+  `process_vodomery_alerts` at `2026-08-11T12:05:12.292403`, and
+  `quarter_hour_job` at `2026-08-11T12:05:13.945753`. No latest failure
+  timestamp was present for those checked keys.
+- Production virtual-environment verification returned
+  `Production Python environment matches requirements-production.lock.txt.`
+  Tracked and deployed Caddyfile SHA-256 hashes matched:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Production-venv imports confirmed `SUSTAINED_HIGH_USAGE` in vodomery
+  `EVENT_CONFIG`, vodomery alert-rule `EVENT_TYPE_OPTIONS`, and dashboard
+  alerting labels/options. PostgreSQL check constraints
+  `ck_event_type_valid` and `ck_alert_rule_event_type_valid` also contain
+  `SUSTAINED_HIGH_USAGE`.
+- Authenticated Streamlit admin selector verification was not performed from
+  the agent environment because no admin browser session or credential was
+  available. Treat this as operator-verification required, not a backend
+  failure.
+- No production alert rule, historical backfill, email delivery, credential
+  readout, raw operational row dump, runtime configuration change, unrelated
+  production write, or monitoring-agent action was performed.

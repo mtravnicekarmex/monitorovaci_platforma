@@ -17,6 +17,8 @@ def test_vodomery_alerting_config_contains_zero_flow_and_expected_zero():
     config = get_alerting_module_config("vodomery")
 
     assert "ZERO_FLOW" in config.event_type_options
+    assert "SUSTAINED_HIGH_USAGE" in config.event_type_options
+    assert config.event_type_labels["SUSTAINED_HIGH_USAGE"] == "SUSTAINED_HIGH_USAGE"
     assert config.expected_zero is not None
     assert config.expected_zero.select_label == "Vodomery s ocekavanym nulovym odberem"
 

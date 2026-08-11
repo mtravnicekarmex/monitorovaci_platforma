@@ -1,4 +1,4 @@
-from sqlalchemy import func, select, update
+from sqlalchemy import func, inspect, select, text, update
 from moduly.mereni.vodomery.database.models import *
 from moduly.mereni.vodomery.database.expected_zero import ensure_expected_zero_table
 from moduly.mereni.vodomery.database.runtime_schema import drop_legacy_identifikace_fk
@@ -8,28 +8,87 @@ from app.time_utils import utc_now_naive
 from moduly.mereni.vodomery.database.vodomery_db_vse import is_night_time
 
 
+EVENT_NIGHT_USAGE = "NIGHT_USAGE"
+EVENT_SPIKE = "SPIKE"
+EVENT_LONG_LEAK = "LONG_LEAK"
+EVENT_ZERO_FLOW = "ZERO_FLOW"
+EVENT_EXPECTED_ZERO_USAGE = "EXPECTED_ZERO_USAGE"
+EVENT_SUSTAINED_HIGH_USAGE = "SUSTAINED_HIGH_USAGE"
+
 EVENT_CONFIG = {
-    "NIGHT_USAGE": {
+    EVENT_NIGHT_USAGE: {
         "threshold": 3.0,
         "min_consecutive": 2,
     },
-    "SPIKE": {
+    EVENT_SPIKE: {
         "threshold": 5.0,
         "min_consecutive": 1,
     },
-    "LONG_LEAK": {
+    EVENT_LONG_LEAK: {
         "threshold": 2.0,
         "min_consecutive": 8,
     },
-    "ZERO_FLOW": {
+    EVENT_SUSTAINED_HIGH_USAGE: {
+        "threshold": None,
+        "min_consecutive": 4,
+        "ratio_threshold": 2.0,
+        "min_deviation": 0.05,
+        "min_actual": 0.08,
+    },
+    EVENT_ZERO_FLOW: {
         "threshold": None,
         "min_consecutive": 12,
     },
-    "EXPECTED_ZERO_USAGE": {
+    EVENT_EXPECTED_ZERO_USAGE: {
         "threshold": None,
         "min_consecutive": 1,
     },
 }
+EVENT_TYPE_CONSTRAINT_OPTIONS = tuple(EVENT_CONFIG)
+
+
+def ensure_event_tables() -> None:
+    ensure_expected_zero_table()
+    with ENGINE_PG.begin() as conn:
+        VodomeryAnomalyEvent.__table__.create(bind=conn, checkfirst=True)
+        VodomeryEventState.__table__.create(bind=conn, checkfirst=True)
+        VodomeryEventEngineState.__table__.create(bind=conn, checkfirst=True)
+        _ensure_event_type_constraint(conn)
+    drop_legacy_identifikace_fk(VodomeryAnomalyEvent.__tablename__)
+
+
+def _ensure_event_type_constraint(conn) -> None:
+    inspector = inspect(conn)
+    if "vodomery_anomaly_events" not in inspector.get_table_names(schema="monitoring"):
+        return
+    if _event_type_constraint_is_current(inspector):
+        return
+
+    allowed_values = ", ".join(f"'{value}'" for value in EVENT_TYPE_CONSTRAINT_OPTIONS)
+    conn.execute(
+        text(
+            "ALTER TABLE monitoring.vodomery_anomaly_events "
+            "DROP CONSTRAINT IF EXISTS ck_event_type_valid"
+        )
+    )
+    conn.execute(
+        text(
+            "ALTER TABLE monitoring.vodomery_anomaly_events "
+            f"ADD CONSTRAINT ck_event_type_valid CHECK (event_type IN ({allowed_values}))"
+        )
+    )
+
+
+def _event_type_constraint_is_current(inspector) -> bool:
+    for constraint in inspector.get_check_constraints(
+        "vodomery_anomaly_events",
+        schema="monitoring",
+    ):
+        if constraint.get("name") != "ck_event_type_valid":
+            continue
+        sqltext = str(constraint.get("sqltext") or "")
+        return all(value in sqltext for value in EVENT_TYPE_CONSTRAINT_OPTIONS)
+    return False
 
 
 def detect_events_from_scores(
@@ -38,8 +97,7 @@ def detect_events_from_scores(
     *,
     bootstrap_to_latest_if_missing: bool = False,
 ):
-    ensure_expected_zero_table()
-    drop_legacy_identifikace_fk(VodomeryAnomalyEvent.__tablename__)
+    ensure_event_tables()
 
     with Session(ENGINE_PG, autoflush=False, expire_on_commit=False) as session:
 
@@ -184,22 +242,20 @@ def detect_events_from_scores(
                 # -------------------------------------------------
                 # TRIGGER LOGIKA
                 # -------------------------------------------------
-                if event_type == "ZERO_FLOW":
-                    triggered = score.actual_value == 0 and ident not in expected_zero_idents
-                elif event_type == "EXPECTED_ZERO_USAGE":
-                    triggered = ident in expected_zero_idents and score.actual_value > 0
-                elif event_type == "NIGHT_USAGE":
-                    triggered = (
-                        is_night_time(ts)
-                        and score.z_score > cfg["threshold"]
-                    )
-                else:
-                    triggered = score.z_score > cfg["threshold"]
+                triggered = _score_triggers_event(
+                    score,
+                    event_type=event_type,
+                    cfg=cfg,
+                    expected_zero=ident in expected_zero_idents,
+                )
 
                 # =================================================
                 # EVENT AKTIVNÍ
                 # =================================================
                 if triggered:
+
+                    if state.consecutive_count == 0:
+                        state.event_start_time = ts
 
                     state.consecutive_count += 1
                     state.accumulator += abs(score.z_score)
@@ -211,18 +267,26 @@ def detect_events_from_scores(
 
                         # otevři nový event
                         state.is_event_active = True
-                        state.event_start_time = ts
+                        event_start_time = state.event_start_time or ts
+                        duration = _duration_minutes(event_start_time, ts)
+                        max_z_score, avg_z_score, total_deviation = _event_opening_stats(
+                            session,
+                            identifikace=ident,
+                            model_version=model_version,
+                            start_time=event_start_time,
+                            end_time=ts,
+                        )
 
                         new_event = VodomeryAnomalyEvent(
                             identifikace=ident,
                             event_type=event_type,
-                            start_time=ts,
+                            start_time=event_start_time,
                             end_time=None,
-                            duration_minutes=0,
-                            max_z_score=score.z_score,
-                            avg_z_score=score.z_score,
-                            total_deviation=abs(score.z_score),
-                            severity=_compute_severity(score.z_score, 0),
+                            duration_minutes=duration,
+                            max_z_score=max_z_score,
+                            avg_z_score=avg_z_score,
+                            total_deviation=total_deviation,
+                            severity=_compute_severity(max_z_score, duration),
                             is_active=True,
                             resolved=False,
                             model_version=model_version,
@@ -248,9 +312,7 @@ def detect_events_from_scores(
 
                             event.total_deviation += abs(score.z_score)
 
-                            duration = int(
-                                (ts - event.start_time).total_seconds() / 60
-                            )
+                            duration = _duration_minutes(event.start_time, ts)
 
                             event.duration_minutes = duration
 
@@ -276,6 +338,13 @@ def detect_events_from_scores(
 
                         event = active_lookup.get(key)
                         if event:
+                            duration = _duration_minutes(event.start_time, ts)
+                            event.duration_minutes = duration
+                            event.severity = _compute_severity(
+                                event.max_z_score,
+                                duration,
+                            )
+
                             event.is_active = False
                             event.resolved = True
                             event.resolved_at = ts
@@ -335,6 +404,76 @@ def _compute_severity(max_z: float, duration_min: int) -> str:
         return "MEDIUM"
 
     return "LOW"
+
+
+def _score_triggers_event(
+    score,
+    *,
+    event_type: str,
+    cfg: dict[str, object],
+    expected_zero: bool,
+) -> bool:
+    if event_type == EVENT_ZERO_FLOW:
+        return float(score.actual_value or 0.0) == 0.0 and not expected_zero
+    if event_type == EVENT_EXPECTED_ZERO_USAGE:
+        return expected_zero and float(score.actual_value or 0.0) > 0.0
+    if event_type == EVENT_NIGHT_USAGE:
+        return is_night_time(score.date) and float(score.z_score) > float(cfg["threshold"])
+    if event_type == EVENT_SUSTAINED_HIGH_USAGE:
+        return _is_sustained_high_usage_score(score, cfg=cfg)
+
+    threshold = cfg.get("threshold")
+    return threshold is not None and float(score.z_score) > float(threshold)
+
+
+def _is_sustained_high_usage_score(score, *, cfg: dict[str, object]) -> bool:
+    actual = max(float(score.actual_value or 0.0), 0.0)
+    expected = max(float(score.expected_mean or 0.0), 0.0)
+    min_actual = float(cfg["min_actual"])
+    min_deviation = float(cfg["min_deviation"])
+    ratio_threshold = float(cfg["ratio_threshold"])
+
+    deviation = actual - expected
+    if actual < min_actual:
+        return False
+    if deviation < min_deviation:
+        return False
+    if expected <= 0.0:
+        return True
+    return actual >= expected * ratio_threshold
+
+
+def _event_opening_stats(
+    session,
+    *,
+    identifikace: str,
+    model_version: int,
+    start_time,
+    end_time,
+) -> tuple[float, float, float]:
+    z_values = [
+        float(value or 0.0)
+        for value in session.execute(
+            select(VodomeryAnomalyScore.z_score).where(
+                VodomeryAnomalyScore.identifikace == identifikace,
+                VodomeryAnomalyScore.model_version == model_version,
+                VodomeryAnomalyScore.date >= start_time,
+                VodomeryAnomalyScore.date <= end_time,
+            )
+        ).scalars()
+    ]
+    if not z_values:
+        return 0.0, 0.0, 0.0
+
+    total_deviation = sum(abs(value) for value in z_values)
+    return max(z_values), total_deviation / len(z_values), total_deviation
+
+
+def _duration_minutes(start_time, end_time) -> int:
+    return max(
+        0,
+        int((end_time - start_time).total_seconds() / 60),
+    )
 
 
 

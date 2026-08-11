@@ -71,6 +71,7 @@ VODOMERY_ALARM_EVENT_TYPE_LABELS = {
     "NIGHT_USAGE": "Noční odběr",
     "SPIKE": "Špička",
     "LONG_LEAK": "Dlouhý únik",
+    "SUSTAINED_HIGH_USAGE": "Trvale zvýšený odběr",
     "ZERO_FLOW": "Bez průtoku",
     "EXPECTED_ZERO_USAGE": "Odběr v expected zero",
     "OUTLIER_REVIEW": "Outlier review",

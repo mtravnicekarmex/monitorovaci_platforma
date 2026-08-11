@@ -81,6 +81,7 @@ ALERTING_MODULES: tuple[AlertingModuleConfig, ...] = (
             "NIGHT_USAGE": "NIGHT_USAGE",
             "SPIKE": "SPIKE",
             "LONG_LEAK": "LONG_LEAK",
+            "SUSTAINED_HIGH_USAGE": "SUSTAINED_HIGH_USAGE",
             "ZERO_FLOW": "ZERO_FLOW",
             "EXPECTED_ZERO_USAGE": "EXPECTED_ZERO_USAGE",
             "OUTLIER_REVIEW": "OUTLIER_REVIEW",

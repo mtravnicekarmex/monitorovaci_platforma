@@ -3722,3 +3722,44 @@ Consequences:
 - A zero or incomplete calorimetry energy total must be shown as an unavailable
   allocation state rather than hidden or replaced by equal shares, stale data,
   predictions, or a fallback constant.
+
+## DEC-126: Vodomery sustained high usage is a prediction-relative event
+
+Date: 2026-08-11
+
+Status: Accepted
+
+Decision:
+
+- Add vodomery event type `SUSTAINED_HIGH_USAGE` for longer elevated
+  consumption relative to the active prediction profile.
+- The default trigger is four consecutive 15-minute scores where actual
+  consumption is at least 2.0 times `expected_mean`, the absolute deviation is
+  at least `0.05 m3`, and actual consumption is at least `0.08 m3`. If
+  `expected_mean <= 0`, the material absolute guards still apply.
+- Event duration starts at the first qualifying score in the consecutive run,
+  not at the later opening score after `min_consecutive` is reached.
+- Vodomery alert-rule duration checks are inclusive. A rule with
+  `min_duration_minutes=60` matches an event whose stored duration is exactly
+  60 minutes.
+- For the first operational alert rule, prefer `min_duration_minutes=0`
+  because the event itself already gates approximately one hour of sustained
+  high usage. Raising the alert rule duration is a separate additional delay.
+- This source change does not create a production alert rule, backfill
+  historical events, send historical emails, or change recipients.
+
+Consequences:
+
+- Short one-slot spikes remain represented by `SPIKE`; sustained consumption
+  such as roughly double the prediction for about an hour can become its own
+  event without relying only on high z-score runs.
+- The normal event engine and the outlier-review rebuild path must share the
+  same trigger helper so event history can be rebuilt deterministically after
+  review changes.
+- Database event-type check constraints and alert-rule allowlists must include
+  `SUSTAINED_HIGH_USAGE`. Runtime ensure paths may update those constraints
+  after the new code is loaded.
+- Production activation requires the supported whole-workstation restart so
+  the scheduler, FastAPI, and Streamlit processes import the updated source.
+  A production alert rule still needs explicit operator configuration after
+  the restart.

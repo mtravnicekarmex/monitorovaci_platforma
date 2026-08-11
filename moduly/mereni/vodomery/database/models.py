@@ -561,7 +561,7 @@ class VodomeryScoringState(Base):
 class VodomeryAnomalyEvent(Base):
     __tablename__ = "vodomery_anomaly_events"
     __table_args__ = (
-        CheckConstraint("event_type IN ('NIGHT_USAGE','SPIKE','LONG_LEAK','ZERO_FLOW','EXPECTED_ZERO_USAGE')", name="ck_event_type_valid"), # povolené typy eventů
+        CheckConstraint("event_type IN ('NIGHT_USAGE','SPIKE','LONG_LEAK','SUSTAINED_HIGH_USAGE','ZERO_FLOW','EXPECTED_ZERO_USAGE')", name="ck_event_type_valid"), # povolené typy eventů
         Index("uq_event_active_true","identifikace", "event_type", "model_version", unique=True, postgresql_where=text("is_active = true")), # 🔥 klíčový partial unique index, dovolí jen 1 aktivní event pro danou kombinaci
         Index("ix_event_lookup","identifikace", "event_type", "model_version"), # běžný index pro rychlé filtrování historie
 
@@ -594,7 +594,7 @@ class VodomeryAlertRule(Base):
     __tablename__ = "vodomery_alert_rules"
     __table_args__ = (
         CheckConstraint(
-            "event_type IS NULL OR event_type IN ('NIGHT_USAGE','SPIKE','LONG_LEAK','ZERO_FLOW','EXPECTED_ZERO_USAGE','OUTLIER_REVIEW')",
+            "event_type IS NULL OR event_type IN ('NIGHT_USAGE','SPIKE','LONG_LEAK','SUSTAINED_HIGH_USAGE','ZERO_FLOW','EXPECTED_ZERO_USAGE','OUTLIER_REVIEW')",
             name="ck_alert_rule_event_type_valid",
         ),
         CheckConstraint(
@@ -744,7 +744,7 @@ class VodomeryAlertSubscription(Base):
         ),
         CheckConstraint(
             "event_type IS NULL OR event_type IN "
-            "('NIGHT_USAGE','SPIKE','LONG_LEAK','ZERO_FLOW','EXPECTED_ZERO_USAGE','OUTLIER_REVIEW')",
+            "('NIGHT_USAGE','SPIKE','LONG_LEAK','SUSTAINED_HIGH_USAGE','ZERO_FLOW','EXPECTED_ZERO_USAGE','OUTLIER_REVIEW')",
             name="ck_vodomery_alert_subscriptions_event_type",
         ),
         Index(

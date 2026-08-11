@@ -286,7 +286,7 @@ def _rule_matches_event(*, rule: VodomeryAlertRule, event: VodomeryAnomalyEvent,
         return False
     if not _severity_matches(event.severity, rule.severity_min):
         return False
-    if int(event.duration_minutes or 0) <= int(rule.min_duration_minutes or 0):
+    if int(event.duration_minutes or 0) < int(rule.min_duration_minutes or 0):
         return False
 
     if alert_state == "ACTIVE_THRESHOLD":

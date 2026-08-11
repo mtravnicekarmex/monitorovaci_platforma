@@ -918,6 +918,7 @@ Water event types currently include examples such as:
 - `NIGHT_USAGE`
 - `SPIKE`
 - `LONG_LEAK`
+- `SUSTAINED_HIGH_USAGE`
 - `ZERO_FLOW`
 - `EXPECTED_ZERO_USAGE`
 - `OUTLIER_REVIEW`

@@ -43,6 +43,17 @@ def _format_volume(value: object, *, signed: bool = False) -> str:
     return f"{numeric_value:{format_spec}} m³"
 
 
+def _format_submeter_minus_reference_difference(value: object) -> str:
+    """Display stored reference-minus-submeter deltas as submeter-minus-reference."""
+
+    if value is None:
+        return "-"
+    try:
+        return _format_volume(-float(value), signed=True)
+    except (TypeError, ValueError):
+        return "-"
+
+
 def _format_energy(value: object) -> str:
     if value is None:
         return "-"
@@ -119,7 +130,7 @@ def _format_control_meter_note(row: BranchDeviceConsumption) -> str:
         return ""
     note_parts = [
         f"součet podružných: {_format_volume(row.child_submeter_consumption_total)}",
-        f"rozdíl: {_format_volume(row.child_submeter_difference, signed=True)}",
+        f"rozdíl: {_format_submeter_minus_reference_difference(row.child_submeter_difference)}",
     ]
     if row.missing_child_submeter_count:
         note_parts.append(f"chybí {row.missing_child_submeter_count}")
@@ -296,7 +307,7 @@ def _build_branch_section_html(branch: BranchBillingSummary) -> str:
         residual_html = _build_metric_card(
             branch.residual_label,
             _format_volume(branch.residual_consumption),
-            "fakturační spotřeba minus přímé podružné měření",
+            "zbytek po odečtení přímého podružného měření",
         )
 
     return f"""
@@ -312,34 +323,31 @@ def _build_branch_section_html(branch: BranchBillingSummary) -> str:
         <div class="metric-grid">
           {_build_metric_card("Fakturační spotřeba", _format_volume(branch.billing_consumption), primary=True)}
           {_build_metric_card("Součet přímých podružných", _format_volume(branch.submeter_consumption_total))}
-          {_build_metric_card("Rozdíl", _format_volume(branch.difference_vs_submeters, signed=True), "fakturace - podružné")}
+          {_build_metric_card("Rozdíl", _format_submeter_minus_reference_difference(branch.difference_vs_submeters), "podružné - fakturace")}
           {_build_metric_card("Pokrytí podružnými", _format_percent(branch.submeter_coverage_percent))}
           {residual_html}
         </div>
 
-        <div class="readings-grid">
-          <div class="branch-table-wrap">
-            <div class="branch-subtitle">Fakturační odečty</div>
-            <table class="branch-table branch-readings-table">
-              <tbody>
-                <tr><th>Počáteční stav</th><td class="numeric">{_format_volume(branch.billing_start_value)}</td></tr>
-                <tr><th>Čas počátečního odečtu</th><td>{escape(_format_datetime(branch.billing_start_reading_at))}</td></tr>
-                <tr><th>Koncový stav</th><td class="numeric">{_format_volume(branch.billing_end_value)}</td></tr>
-                <tr><th>Čas koncového odečtu</th><td>{escape(_format_datetime(branch.billing_end_reading_at))}</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="branch-table-wrap branch-note-wrap">
-            <div class="branch-subtitle">Metodika porovnání</div>
-            <p class="muted">
-              Do porovnání větve se počítají pouze přímé podružné plynoměry.
-              Sloupec podílu ukazuje spotřebu odběrného místa vůči fakturační spotřebě větve.
-              U kontrolních meziměřidel s rozepsanými koncovými odběry se procentní podíl nezobrazuje,
-              aby stejná spotřeba nebyla ve sloupci započtena dvakrát.
-              Kontrolní meziměřidla, například L2-L3_P8, mají u názvu uveden součet koncových
-              podružných a rozdíl proti vlastní spotřebě, aby byla nesrovnalost vidět bez dalšího výpočtu.
-            </p>
-          </div>
+        <div class="branch-table-wrap branch-readings-wrap">
+          <div class="branch-subtitle">Fakturační odečty</div>
+          <table class="branch-table branch-readings-table">
+            <tbody>
+              <tr>
+                <td>
+                  <span class="reading-row-label">Počátek</span>
+                  <span class="reading-value">{_format_volume(branch.billing_start_value)}</span>
+                </td>
+                <td class="numeric">{escape(_format_datetime(branch.billing_start_reading_at))}</td>
+              </tr>
+              <tr>
+                <td>
+                  <span class="reading-row-label">Konec</span>
+                  <span class="reading-value">{_format_volume(branch.billing_end_value)}</span>
+                </td>
+                <td class="numeric">{escape(_format_datetime(branch.billing_end_reading_at))}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         <div class="branch-table-wrap">
@@ -533,20 +541,17 @@ def build_monthly_plynomery_billing_report_html(report: MonthlyBillingReportData
       font-size: 9px;
       font-weight: 700;
     }}
-    .readings-grid {{
-      display: grid;
-      grid-template-columns: 1.2fr 1fr;
-      gap: 8px;
-      margin-bottom: 8px;
-      break-inside: avoid-page;
-      page-break-inside: avoid;
-    }}
     .branch-table-wrap {{
       border: 1px solid #d8e1eb;
       border-radius: 10px;
       background: #ffffff;
       padding: 6px 8px 7px;
       box-shadow: 0 3px 12px rgba(15, 76, 129, 0.05);
+      margin-bottom: 8px;
+      break-inside: avoid-page;
+      page-break-inside: avoid;
+    }}
+    .branch-readings-wrap {{
       margin-bottom: 8px;
       break-inside: avoid-page;
       page-break-inside: avoid;
@@ -602,6 +607,25 @@ def build_monthly_plynomery_billing_report_html(report: MonthlyBillingReportData
     }}
     .branch-table tbody tr:last-child td, .branch-table tbody tr:last-child th {{
       border-bottom: none;
+    }}
+    .branch-readings-table tbody td {{
+      width: 50%;
+    }}
+    .reading-row-label {{
+      display: block;
+      margin-bottom: 2px;
+      color: #52606d;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-size: 7.6px;
+      font-weight: 700;
+    }}
+    .reading-value {{
+      display: block;
+      color: #111827;
+      font-weight: 700;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
     }}
     .numeric {{
       text-align: right;
@@ -673,7 +697,7 @@ def build_monthly_plynomery_billing_report_html(report: MonthlyBillingReportData
     <div class="summary-grid">
       {_build_metric_card("Celkem fakturační plynoměry", _format_volume(total_billing), primary=True)}
       {_build_metric_card("Celkem přímé podružné", _format_volume(total_submeters))}
-      {_build_metric_card("Celkový rozdíl", _format_volume(total_difference, signed=True), "fakturace - podružné")}
+      {_build_metric_card("Celkový rozdíl", _format_submeter_minus_reference_difference(total_difference), "podružné - fakturace")}
       {_build_metric_card("Počet větví", str(len(report.branches)))}
       {_build_metric_card("Kalorimetrické rozpočty", str(total_kalorimetry_allocations))}
     </div>

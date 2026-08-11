@@ -694,14 +694,28 @@ def test_monthly_plynomery_billing_report_html_contains_manual_report_sections()
     assert "Měsíční report fakturačních plynoměrů" in html
     assert "INNOGY_B" in html
     assert "Budova B - zbytek po odečtení Bk_P1" in html
-    assert "+35.000 m³" in html
+    assert "-35.000 m³" in html
+    assert "podružné - fakturace" in html
+    assert "fakturace - podružné" not in html
     assert 'class="page-header"' in html
     assert 'class="page-logo"' in html
     assert "metric-card-primary" in html
     assert 'class="branch-table"' in html
+    assert 'class="branch-table branch-readings-table"' in html
+    readings_table = html.split(
+        '<table class="branch-table branch-readings-table">',
+        1,
+    )[1].split("</table>", 1)[0]
+    assert readings_table.count("<tr>") == 2
+    assert readings_table.count("<td") == 4
+    assert "<th" not in readings_table
     assert "#0f4c81" in html
-    assert "Čas počátku" not in html
-    assert "Čas konce" not in html
+    assert "Metodika porovnání" not in html
+    assert "branch-note-wrap" not in html
+    assert '<span class="reading-row-label">Počátek</span>' in html
+    assert '<span class="reading-row-label">Konec</span>' in html
+    assert "Čas počátečního odečtu" not in html
+    assert "Čas koncového odečtu" not in html
     assert "break-before: page" in html
     assert "page-break-before: always" in html
 
@@ -823,5 +837,5 @@ def test_monthly_plynomery_billing_report_html_omits_control_meter_branch_share(
     assert "35.0 %" in html
     assert "50.0 %" not in html
     assert "kontrolní meziměřidlo pro 6 koncových" in html
-    assert "(součet podružných: 11.000 m³; rozdíl: -1.000 m³)" in html
+    assert "(součet podružných: 11.000 m³; rozdíl: +1.000 m³)" in html
     assert "control-meter-row" in html

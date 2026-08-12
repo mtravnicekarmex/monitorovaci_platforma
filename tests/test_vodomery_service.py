@@ -65,6 +65,39 @@ class _FakeConnection:
         return _FakeRowResult(self.rows)
 
 
+class _FakeBranchOverviewConnection:
+    def __init__(self, *, measurement_rows=(), prediction_rows=(), decision_rows=()):
+        self.measurement_rows = list(measurement_rows)
+        self.prediction_rows = list(prediction_rows)
+        self.decision_rows = list(decision_rows)
+        self.calls = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, statement, params):
+        sql = str(statement)
+        self.calls.append((sql, params))
+        if 'monitoring."Mereni_vodomery_vse"' in sql:
+            return _FakeRowResult(self.measurement_rows)
+        if "monitoring.prediction_profile_snapshots" in sql:
+            return _FakeRowResult(self.prediction_rows)
+        if "monitoring.prediction_selected_model_snapshots" in sql:
+            return _FakeRowResult(self.decision_rows)
+        raise AssertionError(f"Unexpected SQL in branch overview test: {sql}")
+
+
+class _FakeEngine:
+    def __init__(self, connection):
+        self.connection = connection
+
+    def connect(self):
+        return self.connection
+
+
 def test_load_archived_prediction_profiles_returns_overlapping_validity_metadata():
     period_start = datetime.datetime(2026, 1, 5)
     period_end = datetime.datetime(2026, 1, 12)
@@ -372,6 +405,65 @@ def test_load_branch_archived_prediction_rows_skips_database_for_no_devices():
 
     assert result == []
     assert connection.statement is None
+
+
+def test_load_branch_day_overview_marks_missing_prediction_snapshot_unavailable(monkeypatch):
+    target_date = datetime.date(2026, 1, 6)
+    branch_config = BranchDashboardConfig(
+        key="TEST_BRANCH",
+        title="Test branch",
+        billing_ident="BILLING_V1",
+        daily_limit=10.0,
+        intervals=(
+            (
+                datetime.datetime(2026, 1, 6, 0, 0, 0),
+                datetime.datetime(2026, 1, 6, 23, 59, 59),
+                ["A_V1"],
+            ),
+        ),
+        membership_resolver=lambda _moment: ["A_V1"],
+    )
+    connection = _FakeBranchOverviewConnection(
+        measurement_rows=[],
+        prediction_rows=[],
+        decision_rows=[],
+    )
+    monkeypatch.setattr(vodomery_service, "BRANCH_DASHBOARD_CONFIGS", (branch_config,))
+    monkeypatch.setattr(vodomery_service, "ENGINE_PG", _FakeEngine(connection))
+
+    payloads = vodomery_service.load_branch_day_overview(
+        vodomery_service.DashboardUserContext(
+            username="admin",
+            email=None,
+            is_admin=True,
+            is_active=True,
+            allowed_sections=(),
+            allowed_pages=(),
+            allowed_devices=(),
+            last_login_at=None,
+            token_version=0,
+        ),
+        target_date=target_date,
+    )
+
+    assert len(payloads) == 1
+    branch = payloads[0]
+    assert branch["expected_total"] is None
+    assert branch["expected_end_of_day"] is None
+    assert branch["remaining_to_limit"] is None
+    assert branch["expected_vs_limit"] is None
+    assert all(row["ocekavana_spotreba"] is None for row in branch["hourly_rows"])
+    assert branch["device_consumption_rows"] == [
+        {
+            "identifikace": "A_V1",
+            "start_value": None,
+            "end_value": None,
+            "spotreba": 0.0,
+            "ocekavana_spotreba": None,
+            "odchylka_od_ocekavani_procent": None,
+            "podil_procent": 0.0,
+        }
+    ]
 
 
 def test_serialize_dataframe_rows_converts_datetime_columns_without_future_warning():

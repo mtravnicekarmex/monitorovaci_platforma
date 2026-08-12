@@ -176,7 +176,20 @@ def _build_monthly_branch_chart_svg(
         return "<div class='chart-empty'>Pro zvolené období nejsou k dispozici denní data pro vykreslení grafu.</div>"
 
     x_dates = [pd.Timestamp(row["date"]) for row in daily_rows]
-    expected_values = [round(float(row.get("expected_total", 0.0) or 0.0), 3) for row in daily_rows]
+    expected_values: list[float] = []
+    prediction_available = True
+    for row in daily_rows:
+        expected_raw = row.get("expected_total")
+        if expected_raw is None:
+            prediction_available = False
+            break
+        expected_value = float(expected_raw)
+        if pd.isna(expected_value):
+            prediction_available = False
+            break
+        expected_values.append(round(expected_value, 3))
+    if not prediction_available:
+        expected_values = []
     actual_totals = [round(float(row.get("actual_total", 0.0) or 0.0), 3) for row in daily_rows]
     billing_values = [round(float(row.get("billing_total", 0.0) or 0.0), 3) for row in daily_rows]
 
@@ -237,9 +250,13 @@ def _build_monthly_branch_chart_svg(
         )
         cumulative_lower = upper
 
-    expected_path = " ".join(
-        f"{scale_x(index):.1f},{scale_y(value):.1f}"
-        for index, value in enumerate(expected_values)
+    expected_path = (
+        " ".join(
+            f"{scale_x(index):.1f},{scale_y(value):.1f}"
+            for index, value in enumerate(expected_values)
+        )
+        if prediction_available
+        else ""
     )
     billing_path = " ".join(
         f"{scale_x(index):.1f},{scale_y(value):.1f}"
@@ -285,10 +302,15 @@ def _build_monthly_branch_chart_svg(
     for label in x_labels:
         svg.write(label)
     svg.write("</svg>")
+    prediction_legend = (
+        "<span class='chart-line-legend-item'><span class='chart-line-legend-dot' style='background:#cbd5e1;'></span>Predikce</span>"
+        if prediction_available
+        else "<span class='chart-line-legend-item'>Predikce: Nedostupné</span>"
+    )
     svg.write(
         "<div class='chart-line-legend'>"
         f"<span class='chart-line-legend-item'><span class='chart-line-legend-dot' style='background:{BILLING_CURVE_COLOR};'></span>SČVK</span>"
-        "<span class='chart-line-legend-item'><span class='chart-line-legend-dot' style='background:#cbd5e1;'></span>Predikce</span>"
+        f"{prediction_legend}"
         "</div>"
     )
     svg.write("</div>")

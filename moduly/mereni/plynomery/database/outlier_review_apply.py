@@ -30,7 +30,6 @@ from moduly.mereni.plynomery.database.outlier_reviews import (
 from moduly.mereni.plynomery.database.plynomery_db_vse import (
     chunked,
     filter_valid_rows,
-    is_night_time,
     prepare_rows,
 )
 from moduly.mereni.plynomery.plynomery_anomaly import (
@@ -39,7 +38,14 @@ from moduly.mereni.plynomery.plynomery_anomaly import (
     _build_score_row,
     _load_hdd_24h_by_measurement_id,
 )
-from moduly.mereni.plynomery.plynomery_events import EVENT_CONFIG, _compute_severity
+from moduly.mereni.plynomery.plynomery_events import (
+    EVENT_CONFIG,
+    _compute_severity,
+    _duration_minutes,
+    _event_opening_stats,
+    _record_triggered_score,
+    _score_triggers_event,
+)
 from moduly.mereni.plynomery.plynomery_prediction import (
     MODEL_VERSION_WEATHER_ADJUSTED,
     get_candidate_model_versions,
@@ -627,34 +633,41 @@ def _rebuild_events_for_ident(
                 session.add(state)
                 state_lookup[key] = state
 
-            if event_type == "EXPECTED_ZERO_USAGE":
-                triggered = expected_zero and score.actual_value > 0
-            elif event_type == "NIGHT_USAGE":
-                triggered = is_night_time(ts) and score.z_score > cfg["threshold"]
-            else:
-                triggered = score.z_score > cfg["threshold"]
+            triggered = _score_triggers_event(
+                score,
+                event_type=event_type,
+                cfg=cfg,
+                expected_zero=expected_zero,
+            )
 
             if triggered:
-                state.consecutive_count += 1
-                state.accumulator += abs(score.z_score)
+                _record_triggered_score(state, score)
 
                 if (
                     not state.is_event_active
                     and state.consecutive_count >= cfg["min_consecutive"]
                 ):
                     state.is_event_active = True
-                    state.event_start_time = ts
+                    event_start_time = state.event_start_time or ts
+                    duration = _duration_minutes(event_start_time, ts)
+                    max_z_score, avg_z_score, total_deviation = _event_opening_stats(
+                        session,
+                        identifikace=identifikace,
+                        model_version=model_version,
+                        start_time=event_start_time,
+                        end_time=ts,
+                    )
 
                     event = PlynomeryAnomalyEvent(
                         identifikace=identifikace,
                         event_type=event_type,
-                        start_time=ts,
+                        start_time=event_start_time,
                         end_time=None,
-                        duration_minutes=0,
-                        max_z_score=score.z_score,
-                        avg_z_score=score.z_score,
-                        total_deviation=abs(score.z_score),
-                        severity=_compute_severity(score.z_score, 0),
+                        duration_minutes=duration,
+                        max_z_score=max_z_score,
+                        avg_z_score=avg_z_score,
+                        total_deviation=total_deviation,
+                        severity=_compute_severity(max_z_score, duration),
                         is_active=True,
                         resolved=False,
                         model_version=model_version,
@@ -668,7 +681,7 @@ def _rebuild_events_for_ident(
                     if event is not None:
                         event.max_z_score = max(event.max_z_score, score.z_score)
                         event.total_deviation += abs(score.z_score)
-                        duration = int((ts - event.start_time).total_seconds() / 60)
+                        duration = _duration_minutes(event.start_time, ts)
                         event.duration_minutes = duration
                         event.avg_z_score = event.total_deviation / max(
                             state.consecutive_count,
@@ -683,6 +696,12 @@ def _rebuild_events_for_ident(
                 if state.is_event_active:
                     event = active_lookup.get(key)
                     if event is not None:
+                        duration = _duration_minutes(event.start_time, ts)
+                        event.duration_minutes = duration
+                        event.severity = _compute_severity(
+                            event.max_z_score,
+                            duration,
+                        )
                         event.is_active = False
                         event.resolved = True
                         event.resolved_at = ts

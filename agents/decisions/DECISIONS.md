@@ -3763,3 +3763,38 @@ Consequences:
   the scheduler, FastAPI, and Streamlit processes import the updated source.
   A production alert rule still needs explicit operator configuration after
   the restart.
+
+## DEC-127: Plynomery long high usage timing uses the first qualifying score
+
+Date: 2026-08-11
+
+Status: Accepted
+
+Decision:
+
+- Keep the existing plynomery event type `LONG_HIGH_USAGE`, defined by eight
+  consecutive scores above the configured z-score threshold, but store the
+  event start at the first qualifying score in the consecutive run rather than
+  at the later score that opens the event.
+- Compute opening `duration_minutes`, `max_z_score`, `avg_z_score`, and
+  `total_deviation` across the complete qualifying run that caused the event
+  to open.
+- Plynomery alert-rule duration checks are inclusive. A rule with
+  `min_duration_minutes=30` matches an event whose stored duration is exactly
+  30 minutes.
+- The normal plynomery event engine and the outlier-review rebuild path must
+  share the same trigger, duration, and opening-stat helpers so review repair
+  remains deterministic.
+- This source change does not create a new production alert rule, change an
+  existing rule, backfill historical events, send historical emails, alter
+  recipients, or execute production database writes by itself.
+
+Consequences:
+
+- `LONG_HIGH_USAGE` alert timing now reflects the full observed high-usage run
+  instead of being delayed by the event opening threshold.
+- Existing historical event rows are not rewritten merely by deploying the
+  source. Rebuilt event history after future approved outlier-review repairs
+  will use the corrected timing.
+- Production activation requires the supported whole-workstation restart so
+  the scheduler, FastAPI, and Streamlit processes import the updated source.

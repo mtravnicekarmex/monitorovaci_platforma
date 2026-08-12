@@ -136,33 +136,31 @@
   replacement.
 - Updated: 2026-08-07
 
-## VOD-001 - Vodomery sustained high usage alert event
+## PLY-002 - Plynomery long high usage alert timing
 
 - Status: source implemented and locally verified; pending whole-workstation
-  restart, post-restart verification, and explicit production alert-rule
-  configuration.
-- Trigger contract: `SUSTAINED_HIGH_USAGE` opens after four consecutive
-  15-minute scores where actual consumption is at least 2.0 times the active
-  prediction, absolute deviation is at least `0.05 m3`, and actual consumption
-  is at least `0.08 m3`. Event duration starts at the first qualifying score.
-- Alert contract: vodomery alert-rule duration is inclusive. The recommended
-  pilot rule is `event_type=SUSTAINED_HIGH_USAGE`, `send_on=ACTIVE`,
-  `min_duration_minutes=0`, and an operator-selected recipient/severity,
-  because the event itself already waits for the sustained run.
+  restart and post-restart verification.
+- Trigger contract: existing `LONG_HIGH_USAGE` remains the plynomery sustained
+  high-usage event type. It opens after eight consecutive scores above the
+  configured z-score threshold, but the stored event starts at the first
+  qualifying score in that run.
+- Alert contract: plynomery alert-rule duration is inclusive. A rule with
+  `min_duration_minutes=30` matches an event whose stored duration is exactly
+  30 minutes.
 - Implemented source scope:
-  `moduly/mereni/vodomery/vodomery_events.py`,
-  `moduly/mereni/vodomery/database/outlier_review_apply.py`,
-  `moduly/mereni/vodomery/alerting/service.py`,
-  vodomery DB/alerting allowlists, and Streamlit dashboard labels/filters.
-- Verification before restart: production compile passed for the touched
-  vodomery/dashboard modules; focused pytest passed with `13 passed` for
-  vodomery event logic, alert matching, alert-rule validation, alerting shared
-  config, and overview shared config.
-- Not done: no production alert rule was created, no historical events were
-  backfilled, no alert delivery was triggered, and no production database row
-  was intentionally changed by the implementation session.
+  `moduly/mereni/plynomery/plynomery_events.py`,
+  `moduly/mereni/plynomery/database/outlier_review_apply.py`, and
+  `moduly/mereni/plynomery/alerting/service.py`.
+- Verification before restart: new and directly affected plynomery tests
+  passed with `14 passed`; broader adjacent regression for plynomery,
+  outlier-review, scheduler, dashboard alerting, and API authorization passed
+  with `304 passed`; production Python compile passed; `git diff --check`
+  passed with line-ending normalization warnings only.
+- Not done: no production database row was intentionally changed, no
+  historical event backfill was run, no alert email was sent, and no alert
+  rule or recipient configuration was changed by this source update.
 - Next after restart: verify the full runtime stack, wait for one post-boot
-  vodomery quarter-hour pipeline cycle, confirm the dashboard/API recognizes
-  `SUSTAINED_HIGH_USAGE`, then configure the first production alert rule only
-  after explicit operator confirmation of recipient/severity/scope.
+  plynomery quarter-hour pipeline cycle, confirm the loaded source exposes the
+  corrected helper behavior, and leave historical backfill/email delivery out
+  of scope unless separately approved.
 - Updated: 2026-08-11

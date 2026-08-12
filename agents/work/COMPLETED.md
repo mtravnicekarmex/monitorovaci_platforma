@@ -81,3 +81,20 @@ in the relevant plan, decision record, inventory, or session history.
   the database, and 12 ignored rows; `git diff --check` passed with only
   existing line-ending normalization warnings; user confirmed on 2026-08-10
   that the live Import page works as intended.
+
+## VOD-001 - Vodomery sustained high usage alert event
+
+- Status: done
+- Completed: 2026-08-11
+- Result: `SUSTAINED_HIGH_USAGE` is implemented, loaded by the production
+  runtime after the whole-workstation restart, visible in the dashboard
+  alerting selector, and configured by the operator as a production rule.
+- Operating boundary: the source change added no historical backfill, no
+  historical alert delivery, no recipient change, and no unrelated production
+  mutation. Future rule-scope or recipient changes remain operator actions.
+- Verification: post-restart runtime checks passed for boot/task, listeners,
+  API live/ready, Streamlit, Caddy, auth 401, scheduler heartbeat, and the
+  first post-boot vodomery quarter-hour cycle. Production imports confirmed
+  `SUSTAINED_HIGH_USAGE` in event config, alert-rule options, dashboard config,
+  and PostgreSQL check constraints. The user confirmed the dashboard selector
+  exposed the new type and a rule was configured.

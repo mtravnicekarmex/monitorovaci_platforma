@@ -1497,6 +1497,18 @@ def load_branch_day_overview(
                             for row in prediction_hourly.itertuples(index=False)
                         }
 
+            hourly_slots: list[tuple[pd.Timestamp, tuple[str, ...]]] = []
+            for hour_start in pd.date_range(start=day_start, periods=24, freq="h"):
+                midpoint = hour_start.to_pydatetime() + timedelta(minutes=30)
+                active_hour_devices = tuple(dict.fromkeys(config_item.membership_resolver(midpoint)))
+                hourly_slots.append((hour_start, active_hour_devices))
+                for identifier in active_hour_devices:
+                    if (
+                        identifier not in unavailable_prediction_identifiers
+                        and (identifier, hour_start) not in hourly_prediction_lookup
+                    ):
+                        unavailable_prediction_identifiers.add(identifier)
+
             hourly_rows: list[dict[str, object]] = []
             device_actual_totals = {identifier: 0.0 for identifier in active_devices}
             device_expected_totals: dict[str, float | None] = {
@@ -1509,9 +1521,7 @@ def load_branch_day_overview(
             }
             device_hourly_rows: list[dict[str, object]] = []
             last_actual_hour = pd.Timestamp(last_actual_timestamp).floor("h") if last_actual_timestamp is not None else None
-            for hour_start in pd.date_range(start=day_start, periods=24, freq="h"):
-                midpoint = hour_start.to_pydatetime() + timedelta(minutes=30)
-                active_hour_devices = tuple(dict.fromkeys(config_item.membership_resolver(midpoint)))
+            for hour_start, active_hour_devices in hourly_slots:
                 actual_values_by_device = {
                     identifier: round(float(hourly_actual_lookup.get((identifier, hour_start), 0.0)), 3)
                     for identifier in active_hour_devices

@@ -19,7 +19,7 @@ def test_build_daily_branch_report_computes_branch_metrics(monkeypatch):
             "billing_end_value": 511.0,
             "actual_total": 12.0,
             "expected_total": 14.0,
-            "last_actual_timestamp": datetime.datetime(2026, 4, 15, 23, 0, 0),
+            "last_actual_timestamp": datetime.datetime(2026, 4, 15, 2, 0, 0),
             "hourly_rows": [
                 {
                     "date": datetime.datetime(2026, 4, 15, 0, 0, 0),
@@ -140,6 +140,68 @@ def test_build_daily_branch_report_computes_branch_metrics(monkeypatch):
     assert "Skutečná data do:" not in html
     assert "data:image/png;base64" in html
     assert ".branch-table thead th.numeric" in html
+
+
+def test_build_daily_branch_report_marks_missing_prediction_unavailable(monkeypatch):
+    target_date = datetime.date(2026, 4, 15)
+    raw_branch_payload = [
+        {
+            "key": "SCVK_HE",
+            "title": "HECHT",
+            "billing_ident": "SCVK_HE",
+            "daily_limit": 20.0,
+            "billing_start_value": 500.0,
+            "billing_end_value": 503.0,
+            "actual_total": 3.0,
+            "expected_total": None,
+            "last_actual_timestamp": datetime.datetime(2026, 4, 15, 1, 0, 0),
+            "hourly_rows": [
+                {
+                    "date": datetime.datetime(2026, 4, 15, 0, 0, 0),
+                    "ocekavana_spotreba": None,
+                    "fakturacni_spotreba": 1.0,
+                },
+                {
+                    "date": datetime.datetime(2026, 4, 15, 1, 0, 0),
+                    "ocekavana_spotreba": None,
+                    "fakturacni_spotreba": 2.0,
+                },
+            ],
+            "device_consumption_rows": [
+                {
+                    "identifikace": "A_V1",
+                    "start_value": 100.0,
+                    "end_value": 103.0,
+                    "spotreba": 3.0,
+                    "podil_procent": 100.0,
+                    "ocekavana_spotreba": None,
+                },
+            ],
+            "device_hourly_rows": [
+                {"date": datetime.datetime(2026, 4, 15, 0, 0, 0), "identifikace": "A_V1", "spotreba": 1.0},
+                {"date": datetime.datetime(2026, 4, 15, 1, 0, 0), "identifikace": "A_V1", "spotreba": 2.0},
+            ],
+        }
+    ]
+
+    monkeypatch.setattr(report_module, "load_branch_day_overview", lambda *args, **kwargs: raw_branch_payload)
+
+    report = report_module.build_daily_branch_report(
+        target_date=target_date,
+        generated_at=datetime.datetime(2026, 4, 16, 6, 0, 0),
+    )
+
+    branch = report.branches[0]
+    assert branch.expected_total is None
+    assert branch.billing_row is not None
+    assert branch.billing_row.ocekavana_spotreba is None
+    assert branch.device_rows[0].ocekavana_spotreba is None
+    assert "Predikce: Nedostupné" in branch.chart_svg
+    assert "stroke='#cbd5e1'" not in branch.chart_svg
+
+    html = report_module.build_daily_branch_report_html(report)
+    assert "Nedostupné" in html
+    assert "Predikce: Nedostupné" in html
 
 
 def test_build_daily_branch_report_email_body_contains_total_row():

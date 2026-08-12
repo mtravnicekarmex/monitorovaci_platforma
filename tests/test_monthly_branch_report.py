@@ -156,6 +156,30 @@ def test_build_monthly_vodomery_branch_report_aggregates_daily_payloads(monkeypa
     assert "pdf-header-rule" in header_template
 
 
+def test_monthly_branch_chart_marks_missing_prediction_unavailable():
+    chart_svg = report_module._build_monthly_branch_chart_svg(
+        (
+            {
+                "date": datetime.date(2026, 3, 1),
+                "actual_total": 3.0,
+                "expected_total": None,
+                "billing_total": 2.0,
+            },
+            {
+                "date": datetime.date(2026, 3, 2),
+                "actual_total": 4.0,
+                "expected_total": 5.0,
+                "billing_total": 3.0,
+            },
+        ),
+        (),
+        title="HECHT",
+    )
+
+    assert "Predikce: Nedostupné" in chart_svg
+    assert "stroke='#cbd5e1'" not in chart_svg
+
+
 def test_build_monthly_branch_report_email_body_contains_total_row():
     report = report_module.MonthlyBranchReport(
         generated_at=datetime.datetime(2026, 4, 1, 6, 0, 0),

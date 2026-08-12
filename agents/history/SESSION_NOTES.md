@@ -2242,3 +2242,177 @@ Known risks/gaps:
 - No production alert rule, historical backfill, email delivery, credential
   readout, raw operational row dump, runtime configuration change, unrelated
   production write, or monitoring-agent action was performed.
+
+### 2026-08-11 - Vodomery sustained high usage operator confirmation
+
+- User confirmed the `SUSTAINED_HIGH_USAGE` event type appeared in the
+  dashboard alerting selector and configured a production rule from it.
+- `VOD-001` was moved from active work to completed work. This documentation
+  update records operator confirmation only; the agent did not create or edit
+  the rule, inspect recipient details, send email, backfill history, or change
+  production data.
+
+### 2026-08-11 13:38 +02:00 - Plynomery long high usage pre-restart handoff
+
+Reason for restart:
+
+- Load the corrected plynomery `LONG_HIGH_USAGE` event timing and inclusive
+  alert-duration matching into the production scheduler, FastAPI, and
+  Streamlit processes.
+- The supported production recovery model remains a whole Windows workstation
+  restart through the existing `API_dashboard_caddy` startup task; do not stop
+  or recreate individual production processes for this activation.
+
+Current task and conversation state:
+
+- Completed in source: existing plynomery `LONG_HIGH_USAGE` now stores
+  event `start_time` at the first qualifying score in the consecutive run,
+  not at the later eighth score that opens the event.
+- Completed in source: opening `duration_minutes`, `max_z_score`,
+  `avg_z_score`, and `total_deviation` are computed over the complete
+  qualifying run that opened the event.
+- Completed in source: plynomery alert-rule duration matching is inclusive,
+  so a rule with `min_duration_minutes=30` matches a stored 30-minute event.
+- Completed in source: normal plynomery event detection and outlier-review
+  event rebuild share trigger, duration, and opening-stat helpers.
+- Pending: restart the workstation and verify the runtime stack plus one
+  post-boot plynomery quarter-hour cycle.
+- First action after restart: read `AGENTS.md`,
+  `agents/decisions/DECISIONS.md`, and this handoff; run
+  `git status --short`; confirm boot after
+  `2026-08-11 13:38 +02:00` and confirm `API_dashboard_caddy` result 0 after
+  boot.
+
+Working tree and deployment:
+
+- The working tree is intentionally non-clean from the plynomery alert timing
+  source update and documentation handoff. Do not reset, checkout, clean,
+  delete, overwrite, commit, push, or create a code-integrity baseline during
+  restart handling.
+- Source changes:
+  `moduly/mereni/plynomery/plynomery_events.py`,
+  `moduly/mereni/plynomery/database/outlier_review_apply.py`,
+  `moduly/mereni/plynomery/alerting/service.py`,
+  `tests/test_plynomery_events.py`, and
+  `tests/test_plynomery_alert_service.py`.
+- Documentation changes:
+  `agents/decisions/DECISIONS.md`, `agents/work/ACTIVE.md`,
+  `agents/work/COMPLETED.md`, and `agents/history/SESSION_NOTES.md`.
+- Verification before restart: direct plynomery alert/event tests passed with
+  `14 passed`; broader adjacent regression for plynomery, outlier review,
+  scheduler, dashboard alerting, and API authorization passed with
+  `304 passed`; production Python compile passed; `git diff --check` passed
+  with line-ending normalization warnings only.
+- No production database row was intentionally changed, no historical event
+  backfill was run, no alert email was sent, no alert rule or recipient was
+  changed by the agent, and no runtime configuration was changed by the source
+  update.
+- Runtime rule context: one enabled plynomery rule exists for
+  `LONG_HIGH_USAGE` with `severity_min=LOW`, `min_duration_minutes=30`, and
+  `send_on=ACTIVE`; recipient details were not printed.
+
+Sensitive and runtime artifacts:
+
+- Do not print, change, delete, or commit `.env`, database credentials, bearer
+  tokens, cookies, ProgramData proxy credentials, raw authenticated Health
+  responses, raw meter data, scheduler locks, SmartFuelPass/session data,
+  monitoring-agent credentials/state, or operational database row dumps.
+- Do not send a test email, run historical event backfill, create or edit
+  alert rules, or execute unrelated manual scheduler/database operations
+  during post-restart verification unless explicitly approved.
+
+Expected processes/listeners after restart:
+
+- FastAPI/Uvicorn on `127.0.0.1:8000`.
+- Streamlit on `127.0.0.1:8001`.
+- Scheduler `main.py` holding the scheduler process lock.
+- Caddy on TCP 80/443 and admin `127.0.0.1:2019`.
+- Tailscale tailnet listeners 443 and 9443 retained; temporary 8010/8011
+  absent.
+
+Expected application state:
+
+- API live/ready: HTTP 200.
+- Streamlit health: HTTP 200.
+- Caddy admin `/config/`: HTTP 200.
+- Protected `/api/v1/auth/me` without bearer token: HTTP 401.
+- Scheduler running with a heartbeat newer than boot.
+- First post-boot plynomery quarter-hour cycle should complete
+  `check_database_availability`, `plynomery_db_import`,
+  `score_new_plynomery_measurements`,
+  `detect_plynomery_events_from_scores`, `process_plynomery_alerts`, and
+  `quarter_hour_job` successfully.
+- Production virtual environment still matches `requirements-production.lock.txt`.
+- Tracked and deployed Caddyfile SHA-256 hashes remain equal to
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+- Loaded production source recognizes `EVENT_LONG_HIGH_USAGE`, stores
+  qualified-run start time through the shared helper, and treats
+  `min_duration_minutes` inclusively in plynomery alert matching.
+- No plynomery alert email is expected until a qualifying active
+  `LONG_HIGH_USAGE` event exists and matches an enabled rule.
+
+Pre-restart runtime status at `2026-08-11 13:38 +02:00`:
+
+- Windows boot: `2026-08-11 12:00:51 +02:00`.
+- Startup task `API_dashboard_caddy`: `Ready`, last run
+  `2026-08-11 12:01:01 +02:00`, result 0.
+- Listeners were present on 80/443/2019/8000/8001 and tailnet 443/9443.
+  Sanitized process names: Caddy owned 80/443/2019, Python owned 8000/8001,
+  and Tailscale owned tailnet 443/9443. Temporary 8010/8011 were absent.
+- API live 200, API ready 200, Streamlit health 200, Caddy admin 200, and
+  protected `/api/v1/auth/me` without bearer 401.
+- Scheduler was running with heartbeat `2026-08-11T13:36:07.039081`.
+  Latest relevant successes: `check_database_availability`
+  `2026-08-11T13:35:05.092367`, `plynomery_db_import`
+  `2026-08-11T13:35:11.111572`, `score_new_plynomery_measurements`
+  `2026-08-11T13:35:11.566749`,
+  `detect_plynomery_events_from_scores`
+  `2026-08-11T13:35:11.646509`, `process_plynomery_alerts`
+  `2026-08-11T13:35:11.668035`, and `quarter_hour_job`
+  `2026-08-11T13:35:12.344473`. No latest failure timestamp was present for
+  those checked keys.
+- Production virtual-environment verification returned
+  `Production Python environment matches requirements-production.lock.txt.`
+- Tracked and deployed Caddyfile SHA-256 hashes matched:
+  `08CDF04AFC4F856FEC8DFE4AB2E07A746763B152CA91553E349CCCE8E6D3DF2C`.
+
+Required post-restart checks:
+
+1. Confirm Windows boot time is after `2026-08-11 13:38 +02:00` and
+   `API_dashboard_caddy` ran after boot with result 0.
+2. Confirm expected listeners 80/443/2019/8000/8001 plus tailnet 9443, with
+   no 8010/8011.
+3. Confirm local API live/ready, Streamlit health, Caddy admin, and protected
+   auth 401 without bearer.
+4. Confirm scheduler heartbeat is fresh and newer than boot.
+5. Wait for the first post-boot plynomery quarter-hour cycle and require
+   successful `check_database_availability`, `plynomery_db_import`,
+   `score_new_plynomery_measurements`,
+   `detect_plynomery_events_from_scores`, `process_plynomery_alerts`, and
+   `quarter_hour_job`.
+6. Verify production virtual-environment lock still matches.
+7. Verify tracked/deployed Caddyfile hashes match.
+8. Verify loaded production source imports `EVENT_LONG_HIGH_USAGE`, preserves
+   the first qualifying timestamp through `_record_triggered_score`, and
+   matches a plynomery alert rule when event duration equals
+   `min_duration_minutes`.
+9. Confirm no unexpected plynomery alert delivery failure appeared after the
+   first post-boot cycle. Do not print recipient details or raw delivery rows.
+10. Record the exact post-restart result here and stop to diagnose any
+    listener, readiness, scheduler, import, event, alerting, hash, or
+    authentication regression.
+
+Known risks/gaps:
+
+- The changes are uncommitted. A reset/checkout/clean before restart would
+  remove the intended production activation.
+- Corrected `LONG_HIGH_USAGE` timing does not rewrite existing historical
+  event rows by itself. Future approved outlier-review rebuilds will use the
+  corrected timing.
+- A matching active event may not appear immediately after restart; it depends
+  on future qualifying post-checkpoint scores.
+- Public browser verification may require an existing admin session or
+  operator action; do not print credentials or tokens to automate it.
+- This restart does not authorize monitoring-agent task restoration,
+  unrelated Caddy changes, database data corrections, historical alert
+  delivery, or any non-plynomery production write.

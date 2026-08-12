@@ -509,7 +509,7 @@ def _build_branch_chart_svg(
 
     hourly_copy = hourly_df.copy()
     hourly_copy["date"] = pd.to_datetime(hourly_copy["date"], errors="coerce")
-    hourly_copy["ocekavana_spotreba"] = pd.to_numeric(hourly_copy["ocekavana_spotreba"], errors="coerce").fillna(0.0)
+    hourly_copy["ocekavana_spotreba"] = pd.to_numeric(hourly_copy["ocekavana_spotreba"], errors="coerce")
     if "fakturacni_spotreba" in hourly_copy.columns:
         hourly_copy["fakturacni_spotreba"] = pd.to_numeric(
             hourly_copy["fakturacni_spotreba"],
@@ -530,7 +530,7 @@ def _build_branch_chart_svg(
 
     expected_series = (
         hourly_copy.set_index("date")["ocekavana_spotreba"]
-        .reindex(pd.date_range(start=hourly_copy["date"].min(), end=hourly_copy["date"].max(), freq="h"), fill_value=0.0)
+        .reindex(pd.date_range(start=hourly_copy["date"].min(), end=hourly_copy["date"].max(), freq="h"))
         if not hourly_copy.empty
         else pd.Series(dtype=float)
     )
@@ -544,7 +544,9 @@ def _build_branch_chart_svg(
     plot_width = chart_width - margin_left - margin_right
     plot_height = chart_height - margin_top - margin_bottom
     x_dates = list(area_pivot.index)
-    expected_values = [float(expected_series.get(timestamp, 0.0)) for timestamp in x_dates]
+    expected_raw_values = [expected_series.get(timestamp) for timestamp in x_dates]
+    prediction_available = bool(expected_raw_values) and all(pd.notna(value) for value in expected_raw_values)
+    expected_values = [float(value) for value in expected_raw_values] if prediction_available else []
     billing_series = hourly_copy.set_index("date")["fakturacni_spotreba"]
     billing_values = [float(billing_series.get(timestamp, 0.0)) for timestamp in x_dates]
 
@@ -595,9 +597,13 @@ def _build_branch_chart_svg(
         )
         cumulative_lower = upper
 
-    expected_path = " ".join(
-        f"{scale_x(index):.1f},{scale_y(value):.1f}"
-        for index, value in enumerate(expected_values)
+    expected_path = (
+        " ".join(
+            f"{scale_x(index):.1f},{scale_y(value):.1f}"
+            for index, value in enumerate(expected_values)
+        )
+        if prediction_available
+        else ""
     )
     billing_path = " ".join(
         f"{scale_x(index):.1f},{scale_y(value):.1f}"
@@ -642,10 +648,15 @@ def _build_branch_chart_svg(
     for label in x_labels:
         svg.write(label)
     svg.write("</svg>")
+    prediction_legend = (
+        "<span class='chart-line-legend-item'><span class='chart-line-legend-dot' style='background:#cbd5e1;'></span>Predikce</span>"
+        if prediction_available
+        else "<span class='chart-line-legend-item'>Predikce: Nedostupné</span>"
+    )
     svg.write(
         "<div class='chart-line-legend'>"
         f"<span class='chart-line-legend-item'><span class='chart-line-legend-dot' style='background:{BILLING_CURVE_COLOR};'></span>SČVK</span>"
-        "<span class='chart-line-legend-item'><span class='chart-line-legend-dot' style='background:#cbd5e1;'></span>Predikce</span>"
+        f"{prediction_legend}"
         "</div>"
     )
     svg.write("</div>")

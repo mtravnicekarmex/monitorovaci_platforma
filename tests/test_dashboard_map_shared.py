@@ -118,6 +118,7 @@ def test_leaflet_map_html_uses_configured_layer_style_and_default_visibility():
                 "title": "Custom",
                 "default_visible": False,
                 "style": {"color": "#123456", "fillColor": "#abcdef", "fillOpacity": 0.35},
+                "map_label_columns": ["name"],
                 "popup_columns": ["name"],
                 "feature_collection": {
                     "type": "FeatureCollection",
@@ -137,7 +138,43 @@ def test_leaflet_map_html_uses_configured_layer_style_and_default_visibility():
 
     assert "layerConfig.style" in html
     assert "layerConfig.default_visible !== false" in html
+    assert "layerConfig.map_label_columns" in html
     assert "layerConfig.popup_columns" in html
+
+
+def test_leaflet_map_html_binds_configured_map_labels_as_permanent_tooltips():
+    payload = {
+        "primary_layer_id": "mistnosti",
+        "layers": [
+            {
+                "layer_id": "mistnosti",
+                "title": "Mistnosti",
+                "map_label_columns": ["mistnost"],
+                "popup_columns": ["mistnost_id"],
+                "feature_collection": {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Polygon",
+                                "coordinates": [[[14.1, 50.7], [14.2, 50.7], [14.2, 50.8], [14.1, 50.7]]],
+                            },
+                            "properties": {"mistnost_id": "F-1NP-101", "mistnost": "101"},
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert "function featureMapLabel" in html
+    assert "leafletLayer.bindTooltip(labelHtml" in html
+    assert "permanent: true" in html
+    assert 'className: "map-feature-label"' in html
+    assert "layerConfig.map_label_columns" in html
 
 
 def test_leaflet_map_html_supports_conditional_feature_style():

@@ -37,6 +37,7 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
         "property_columns": ["fid", "budova", "po\u010det_podla\u017e\u00ed"],
         "property_aliases": {"po\u010det_podla\u017e\u00ed": "pocet_podlazi"},
         "filter_columns": ["budova"],
+        "map_label_columns": [],
         "popup_columns": ["fid", "budova", "pocet_podlazi"],
         "style": {
             "color": "#d97706",
@@ -64,6 +65,7 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
         "property_columns": ["fid", "mistnost_id", "m\u00edstnost", "patro", "budova", "n\u00e1jemce", "popis", "plocha"],
         "property_aliases": {"m\u00edstnost": "mistnost", "n\u00e1jemce": "najemce"},
         "filter_columns": ["budova", "patro", "mistnost_id", "n\u00e1jemce"],
+        "map_label_columns": ["mistnost"],
         "popup_columns": ["mistnost_id", "mistnost", "budova", "patro", "najemce", "popis", "plocha"],
         "style": {
             "color": "#15803d",
@@ -91,6 +93,7 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
         "property_columns": ["fid", "identifikace", "budova", "m\u00edstnost", "mistnost_id", "patro"],
         "property_aliases": {"budova": "evidence_budova", "m\u00edstnost": "evidence_mistnost", "patro": "evidence_patro"},
         "filter_columns": ["budova", "patro", "mistnost_id", "identifikace"],
+        "map_label_columns": [],
         "popup_columns": [
             "identifikace",
             "detail_source_found",
@@ -253,6 +256,7 @@ def _serialize_record(layer: Dashboard_MapLayer) -> dict[str, object]:
         "property_columns": layer.get_property_columns(),
         "property_aliases": layer.get_property_aliases(),
         "filter_columns": layer.get_filter_columns(),
+        "map_label_columns": layer.get_map_label_columns(),
         "popup_columns": layer.get_popup_columns(),
         "style": layer.get_style(),
         "device_section_key": layer.device_section_key,
@@ -288,6 +292,7 @@ def map_layer_record_to_config(record: dict[str, object]) -> MapLayerConfig:
         show_photo=bool(record.get("show_photo", False)),
         draw_order=int(record.get("draw_order", 100)),
         filter_columns=tuple(str(column) for column in record.get("filter_columns", []) or []),
+        map_label_columns=tuple(str(column) for column in record.get("map_label_columns", []) or []),
         popup_columns=tuple(str(column) for column in record.get("popup_columns", []) or []),
         style=dict(record.get("style") or {}),
     )
@@ -305,6 +310,7 @@ def _apply_record_fields(layer: Dashboard_MapLayer, values: dict[str, object]) -
     layer.set_property_columns(list(values["property_columns"]))
     layer.set_property_aliases(dict(values["property_aliases"]))
     layer.set_filter_columns(list(values["filter_columns"]))
+    layer.set_map_label_columns(list(values["map_label_columns"]))
     layer.set_popup_columns(list(values["popup_columns"]))
     layer.set_style(dict(values["style"]))
     layer.device_section_key = str(values["device_section_key"]) if values.get("device_section_key") else None
@@ -340,6 +346,7 @@ def _prepare_record_values(
     show_photo: bool,
     is_active: bool,
     draw_order: int,
+    map_label_columns: list[str] | None = None,
 ) -> dict[str, object]:
     cleaned_layer_id = _clean_layer_id(layer_id)
     cleaned_layer_kind = _clean_text(layer_kind, field_name="layer_kind")
@@ -365,6 +372,7 @@ def _prepare_record_values(
         "property_columns": cleaned_property_columns,
         "property_aliases": _clean_aliases(property_aliases),
         "filter_columns": _clean_list(filter_columns),
+        "map_label_columns": _clean_list(map_label_columns),
         "popup_columns": _clean_list(popup_columns),
         "style": cleaned_style,
         "device_section_key": (device_section_key or "").strip() or None,
@@ -481,6 +489,7 @@ def map_layer_config_to_catalog_record(config: MapLayerConfig) -> dict[str, obje
             }
             for column in config.filter_columns
         ],
+        "map_label_columns": list(config.map_label_columns),
         "popup_columns": list(config.popup_columns),
         "style": dict(config.style),
     }

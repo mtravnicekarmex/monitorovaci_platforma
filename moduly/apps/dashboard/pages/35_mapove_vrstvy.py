@@ -418,6 +418,7 @@ def build_payload(prefix: str, current: dict[str, object] | None = None) -> dict
         "property_columns": property_columns,
         "property_aliases": property_aliases,
         "filter_columns": _csv_to_list(str(st.session_state.get(f"{prefix}_filter_columns", ""))),
+        "map_label_columns": _csv_to_list(str(st.session_state.get(f"{prefix}_map_label_columns", ""))),
         "popup_columns": _csv_to_list(str(st.session_state.get(f"{prefix}_popup_columns", ""))),
         "style": style,
         "device_section_key": str(st.session_state.get(f"{prefix}_device_section_key", "")).strip() or None,
@@ -511,6 +512,15 @@ def render_layer_fields(prefix: str, current: dict[str, object] | None = None, *
         key=f"{prefix}_filter_columns",
     )
     st.text_area(
+        "Sloupce zobrazene v mape",
+        value=_list_to_csv(current.get("map_label_columns")),
+        help=(
+            "Carkou oddeleny seznam GeoJSON properties zobrazovanych primo v mape jako textove stitky. "
+            "Muze obsahovat aliasy, napr. mistnost."
+        ),
+        key=f"{prefix}_map_label_columns",
+    )
+    st.text_area(
         "Popup sloupce",
         value=_list_to_csv(current.get("popup_columns")),
         help="Carkou oddeleny seznam properties zobrazovanych v popupu. Muze obsahovat aliasy.",
@@ -545,6 +555,7 @@ def render_page() -> None:
                     "mapa": "ANO" if layer["map_enabled"] else "NE",
                     "aktivni": "ANO" if layer["is_active"] else "NE",
                     "device_filter": "ANO" if layer["restrict_to_allowed_devices"] else "NE",
+                    "stitky_v_mape": _list_to_csv(layer.get("map_label_columns")),
                     "foto": "ANO" if layer["show_photo"] else "NE",
                     "poradi": layer["draw_order"],
                 }

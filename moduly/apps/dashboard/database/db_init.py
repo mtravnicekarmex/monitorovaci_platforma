@@ -51,22 +51,38 @@ def ensure_map_layer_columns() -> None:
     except Exception:
         return
 
-    if "show_photo" in columns:
+    alter_statements: list[str] = []
+    if "show_photo" not in columns:
+        alter_statements.append(
+            'ALTER TABLE dashboard."Map_Layers" '
+            "ADD COLUMN show_photo BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+    if "map_label_columns" not in columns:
+        alter_statements.append(
+            'ALTER TABLE dashboard."Map_Layers" '
+            "ADD COLUMN map_label_columns TEXT NOT NULL DEFAULT '[]'"
+        )
+
+    if not alter_statements:
         return
 
     with ENGINE_PG.begin() as conn:
-        conn.execute(
-            text(
-                'ALTER TABLE dashboard."Map_Layers" '
-                "ADD COLUMN show_photo BOOLEAN NOT NULL DEFAULT FALSE"
+        for statement in alter_statements:
+            conn.execute(text(statement))
+        if "show_photo" not in columns:
+            conn.execute(
+                text(
+                    'UPDATE dashboard."Map_Layers" '
+                    "SET show_photo = TRUE WHERE layer_id = 'vodomery'"
+                )
             )
-        )
-        conn.execute(
-            text(
-                'UPDATE dashboard."Map_Layers" '
-                "SET show_photo = TRUE WHERE layer_id = 'vodomery'"
+        if "map_label_columns" not in columns:
+            conn.execute(
+                text(
+                    'UPDATE dashboard."Map_Layers" '
+                    "SET map_label_columns = '[\"mistnost\"]' WHERE layer_id = 'mistnosti'"
+                )
             )
-        )
 
 
 def ensure_dashboard_tables() -> None:

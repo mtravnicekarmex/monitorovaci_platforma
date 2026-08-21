@@ -98,6 +98,7 @@ def test_empty_layer_response_keeps_geojson_shape():
     assert response["layer_id"] == "vodomery"
     assert response["source_srid"] == 3857
     assert response["target_srid"] == 4326
+    assert response["map_label_columns"] == []
     assert response["total"] == 0
     assert response["feature_collection"] == {
         "type": "FeatureCollection",
@@ -242,6 +243,7 @@ def test_mistnosti_layer_config_is_context_layer_with_filterable_location_fields
     assert "mistnost_id" in MISTNOSTI_MAP_LAYER.property_columns
     assert MISTNOSTI_MAP_LAYER.property_aliases["m\u00edstnost"] == "mistnost"
     assert MISTNOSTI_MAP_LAYER.property_aliases["n\u00e1jemce"] == "najemce"
+    assert MISTNOSTI_MAP_LAYER.map_label_columns == ("mistnost",)
     assert MISTNOSTI_MAP_LAYER.restrict_to_allowed_devices is False
 
 

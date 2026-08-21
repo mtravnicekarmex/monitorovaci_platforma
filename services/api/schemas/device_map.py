@@ -21,6 +21,7 @@ class MapLayerCatalogItem(BaseModel):
     default_visible: bool = True
     draw_order: int = 100
     filter_fields: list[MapLayerFilterField] = Field(default_factory=list)
+    map_label_columns: list[str] = Field(default_factory=list)
     popup_columns: list[str] = Field(default_factory=list)
     style: dict[str, Any] = Field(default_factory=dict)
 
@@ -42,6 +43,7 @@ class MapLayerResponse(BaseModel):
     default_visible: bool = True
     draw_order: int = 100
     filter_columns: list[str] = Field(default_factory=list)
+    map_label_columns: list[str] = Field(default_factory=list)
     popup_columns: list[str] = Field(default_factory=list)
     style: dict[str, Any] = Field(default_factory=dict)
     total: int = Field(ge=0)

@@ -40,6 +40,7 @@ class MapLayerConfig:
     show_photo: bool = False
     draw_order: int = 100
     filter_columns: tuple[str, ...] = ()
+    map_label_columns: tuple[str, ...] = ()
     popup_columns: tuple[str, ...] = ()
     style: Mapping[str, object] = field(default_factory=dict)
 
@@ -174,6 +175,7 @@ MISTNOSTI_MAP_LAYER = MapLayerConfig(
     restrict_to_allowed_devices=False,
     draw_order=20,
     filter_columns=("budova", "patro", "mistnost_id", "n\u00e1jemce"),
+    map_label_columns=("mistnost",),
     popup_columns=("mistnost_id", "mistnost", "budova", "patro", "najemce", "popis", "plocha"),
     style={
         "color": "#15803d",
@@ -564,6 +566,7 @@ def load_map_layer_features(
         "default_visible": config.default_visible,
         "draw_order": config.draw_order,
         "filter_columns": list(config.filter_columns),
+        "map_label_columns": list(config.map_label_columns),
         "popup_columns": list(config.popup_columns),
         "style": dict(config.style),
         "total": len(features),
@@ -599,6 +602,7 @@ def _empty_layer_response(config: MapLayerConfig) -> dict[str, object]:
         "default_visible": config.default_visible,
         "draw_order": config.draw_order,
         "filter_columns": list(config.filter_columns),
+        "map_label_columns": list(config.map_label_columns),
         "popup_columns": list(config.popup_columns),
         "style": dict(config.style),
         "total": 0,

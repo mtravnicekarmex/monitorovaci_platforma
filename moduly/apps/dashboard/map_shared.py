@@ -257,6 +257,23 @@ def build_leaflet_map_html(
       color: #17202a;
       padding: 3px 0;
     }}
+    .map-feature-label {{
+      border: 1px solid rgba(15, 23, 42, 0.20);
+      border-radius: 6px;
+      padding: 2px 6px;
+      color: #0f172a;
+      background: rgba(255, 255, 255, 0.88);
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.15;
+      text-align: center;
+      white-space: nowrap;
+      pointer-events: none;
+    }}
+    .map-feature-label::before {{
+      display: none;
+    }}
     .map-location-control a {{
       display: flex;
       width: 40px;
@@ -672,6 +689,18 @@ def build_leaflet_map_html(
       return `<div><table class="popup-table">${{rows || "<tr><td>Bez detailu</td></tr>"}}</table>${{image}}</div>`;
     }}
 
+    function featureMapLabel(feature, layerConfig) {{
+      const properties = (feature && feature.properties) || {{}};
+      const labelFields = Array.isArray(layerConfig.map_label_columns)
+        ? layerConfig.map_label_columns
+        : [];
+      return labelFields
+        .map((key) => properties[key])
+        .filter((value) => value !== null && value !== undefined && value !== "")
+        .map((value) => escapeHtml(formatValue(value)))
+        .join("<br>");
+    }}
+
     function defaultLayerStyle(layerId) {{
       if (layerId === "budovy") {{
         return {{
@@ -841,6 +870,15 @@ def build_leaflet_map_html(
       pointToLayer: (feature, latlng) => L.circleMarker(latlng, markerStyle(feature, layerId, layerConfig)),
       style: (feature) => featureStyle(feature, layerId, layerConfig),
       onEachFeature: (feature, leafletLayer) => {{
+        const labelHtml = featureMapLabel(feature, layerConfig);
+        if (labelHtml) {{
+          leafletLayer.bindTooltip(labelHtml, {{
+            permanent: true,
+            direction: "center",
+            className: "map-feature-label",
+            opacity: 1
+          }});
+        }}
         leafletLayer.bindPopup(popupHtml(feature.properties || {{}}, layerId, layerConfig));
         leafletLayer.on("popupopen", (event) => loadPopupPhotos(event.popup.getElement()));
         leafletLayer.on("popupclose", (event) => cleanupPopupPhotos(event.popup.getElement()));

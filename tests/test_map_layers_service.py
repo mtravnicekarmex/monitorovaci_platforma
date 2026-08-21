@@ -24,11 +24,13 @@ def test_default_map_layer_seeds_cover_initial_map_layers():
 
     assert seed_ids == ["budovy", "mistnosti", "vodomery"]
     vodomery_seed = next(seed for seed in DEFAULT_MAP_LAYER_SEEDS if seed["layer_id"] == "vodomery")
+    mistnosti_seed = next(seed for seed in DEFAULT_MAP_LAYER_SEEDS if seed["layer_id"] == "mistnosti")
     assert vodomery_seed["layer_kind"] == "device"
     assert vodomery_seed["device_section_key"] == "vodomery"
     assert vodomery_seed["restrict_to_allowed_devices"] is True
     assert vodomery_seed["map_enabled"] is True
     assert vodomery_seed["show_photo"] is True
+    assert mistnosti_seed["map_label_columns"] == ["mistnost"]
 
 
 def test_map_layer_record_to_config_preserves_runtime_metadata():
@@ -45,6 +47,7 @@ def test_map_layer_record_to_config_preserves_runtime_metadata():
         "property_columns": ["identifikace", "budova"],
         "property_aliases": {"budova": "evidence_budova"},
         "filter_columns": ["budova"],
+        "map_label_columns": ["display_name"],
         "popup_columns": ["identifikace"],
         "style": {"color": "#111111", "fillOpacity": 0.4},
         "device_section_key": "vodomery",
@@ -62,6 +65,7 @@ def test_map_layer_record_to_config_preserves_runtime_metadata():
     assert config.device_section_key == "vodomery"
     assert config.property_aliases["budova"] == "evidence_budova"
     assert config.filter_columns == ("budova",)
+    assert config.map_label_columns == ("display_name",)
     assert config.popup_columns == ("identifikace",)
     assert config.style["color"] == "#111111"
     assert config.default_visible is False
@@ -88,6 +92,7 @@ def test_prepare_record_values_adds_conditional_style_property_column(monkeypatc
         property_columns=["id", "name"],
         property_aliases={},
         filter_columns=[],
+        map_label_columns=["name", "name", ""],
         popup_columns=["id", "name"],
         style={
             "color": "#2563eb",
@@ -108,6 +113,7 @@ def test_prepare_record_values_adds_conditional_style_property_column(monkeypatc
     )
 
     assert values["property_columns"] == ["id", "name", "bez_vody"]
+    assert values["map_label_columns"] == ["name"]
 
 
 def test_prepare_record_values_adds_multiple_conditional_style_property_columns(monkeypatch):

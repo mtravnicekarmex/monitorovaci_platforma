@@ -31,6 +31,10 @@ class StateWriterLockError(RuntimeError):
     """The agent-owned state cannot safely accept another writer."""
 
 
+class StateRetentionError(RuntimeError):
+    """Agent-owned state cannot be safely retained within configured bounds."""
+
+
 class StateWriterLock:
     def __init__(self, state_dir: Path) -> None:
         self._state_dir = state_dir.resolve()
@@ -124,6 +128,98 @@ class ObserverStore:
         with self._observations_path.open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(serialized)
             handle.write("\n")
+
+    def retain_recent_observations(self, *, max_records: int) -> None:
+        if (
+            isinstance(max_records, bool)
+            or not isinstance(max_records, int)
+            or max_records < 1
+        ):
+            raise ValueError("max_records must be a positive integer")
+        if not self._observations_path.exists():
+            return
+        try:
+            raw_lines = self._observations_path.read_text(
+                encoding="utf-8"
+            ).splitlines()
+        except OSError as exc:
+            raise StateRetentionError("observations file could not be read") from exc
+        if not raw_lines:
+            return
+
+        groups: list[tuple[tuple[str, str], list[str]]] = []
+        current_key: tuple[str, str] | None = None
+        current_lines: list[str] = []
+        for line_number, raw_line in enumerate(raw_lines, start=1):
+            if not raw_line.strip():
+                raise StateRetentionError(
+                    f"observation line {line_number} is unexpectedly empty"
+                )
+            try:
+                payload = json.loads(raw_line)
+            except json.JSONDecodeError as exc:
+                raise StateRetentionError(
+                    f"observation line {line_number} contains invalid JSON"
+                ) from exc
+            if not isinstance(payload, dict):
+                raise StateRetentionError(
+                    f"observation line {line_number} has an invalid schema"
+                )
+            run_id = payload.get("run_id")
+            cycle_id = payload.get("cycle_id")
+            if not isinstance(run_id, str) or not run_id.strip():
+                raise StateRetentionError(
+                    f"observation line {line_number} has an invalid run id"
+                )
+            if not isinstance(cycle_id, str) or not cycle_id.strip():
+                raise StateRetentionError(
+                    f"observation line {line_number} has an invalid cycle id"
+                )
+            key = (run_id, cycle_id)
+            if current_key is None:
+                current_key = key
+            if key != current_key:
+                groups.append((current_key, current_lines))
+                current_key = key
+                current_lines = []
+            current_lines.append(raw_line)
+        if current_key is not None:
+            groups.append((current_key, current_lines))
+
+        retained_reversed: list[str] = []
+        retained_count = 0
+        for _, group_lines in reversed(groups):
+            if len(group_lines) > max_records:
+                raise StateRetentionError(
+                    "latest observation cycle exceeds the configured retention bound"
+                )
+            if retained_count + len(group_lines) > max_records:
+                break
+            retained_reversed.extend(reversed(group_lines))
+            retained_count += len(group_lines)
+        retained_lines = list(reversed(retained_reversed))
+        if len(retained_lines) == len(raw_lines):
+            return
+        content = "\n".join(retained_lines) + "\n"
+        file_descriptor, temporary_name = tempfile.mkstemp(
+            prefix="observations-retained-",
+            suffix=".tmp",
+            dir=self._state_dir,
+        )
+        temporary_path = Path(temporary_name)
+        try:
+            with os.fdopen(
+                file_descriptor,
+                "w",
+                encoding="utf-8",
+                newline="\n",
+            ) as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            temporary_path.replace(self._observations_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
 
     def write_heartbeat(
         self,

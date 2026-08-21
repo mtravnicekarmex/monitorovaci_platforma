@@ -1,0 +1,194 @@
+{
+  "audit_contract_version": 8,
+  "captured_at": "2026-08-18T06:00:18.619947Z",
+  "configuration": {
+    "configured_timeout_cycle_budget_seconds": 94.5,
+    "endpoint_count": 9,
+    "endpoint_set_version": 3,
+    "max_attempts": 3,
+    "poll_interval_seconds": 60.0,
+    "poll_jitter_seconds": 5.0,
+    "request_timeout_seconds": 3.0,
+    "retry_backoff_seconds": 0.5
+  },
+  "cycles": {
+    "cycle_sequence_mismatch_count": 1,
+    "cycle_sequence_valid": false,
+    "endpoint_sequence_mismatch_count": 0,
+    "endpoint_sequence_valid": true,
+    "first_degraded_cycle_index": 7,
+    "first_recovery_cycle_index": 8,
+    "mixed_transport_status_count": 815,
+    "outcome_counts": {
+      "healthy": 296,
+      "partial_failure": 815
+    },
+    "process_run_reentry_count": 0,
+    "process_run_transition_count": 1,
+    "self_health_counts": {
+      "degraded": 815,
+      "healthy": 296
+    },
+    "single_writer_observation_history_valid": true,
+    "transition_counts": {
+      "degraded_to_degraded": 812,
+      "degraded_to_healthy": 3,
+      "healthy_to_degraded": 3,
+      "healthy_to_healthy": 292
+    }
+  },
+  "event": "agent_state_audit",
+  "evidence_gaps": [
+    "heartbeat_transition_history_not_persisted"
+  ],
+  "latest_heartbeat": {
+    "matches_last_complete_cycle": true,
+    "observation_count": 9,
+    "observer_instance_matches_observations": true,
+    "process_id_present": true,
+    "run_matches_last_complete_cycle": true,
+    "status": "healthy",
+    "transport_failure_count": 0
+  },
+  "lifecycle": {
+    "abandoned_unclosed_run_count": 2,
+    "clean_restart_count": 0,
+    "concurrent_start_count": 0,
+    "contract_version": 1,
+    "current_run_has_start": true,
+    "current_run_has_stop": false,
+    "current_run_is_unclosed": true,
+    "distinct_run_count": 4,
+    "duplicate_start_count": 0,
+    "duplicate_stop_count": 0,
+    "event_count": 5,
+    "history_valid": true,
+    "lifecycle_runs_without_observations_count": 2,
+    "observation_run_count": 2,
+    "observation_runs_without_start_count": 0,
+    "observer_instance_count": 1,
+    "observer_instance_matches_observations": true,
+    "orphan_stop_count": 0,
+    "process_id_mismatch_run_count": 0,
+    "process_start_count": 4,
+    "process_stop_count": 1,
+    "restart_detected": true,
+    "single_writer_history_valid": true,
+    "start_while_prior_run_open_count": 3,
+    "stop_reason_counts": {
+      "once_completed": 1
+    },
+    "timestamp_regression_count": 0,
+    "unclean_restart_count": 3,
+    "unclosed_run_count": 3
+  },
+  "observations": {
+    "attempt_bounds_valid": true,
+    "attempt_count_counts": {
+      "1": 3474,
+      "2": 14,
+      "3": 6511
+    },
+    "attempt_over_limit_count": 0,
+    "complete_cycle_count": 1111,
+    "contract_version_counts": {
+      "4": 9999
+    },
+    "current_run": {
+      "attempt_bounds_valid": true,
+      "attempt_over_limit_count": 0,
+      "non_retryable_retried_count": 0,
+      "observation_count": 7416,
+      "retry_contract_valid": true,
+      "retryable_not_exhausted_count": 0,
+      "success_after_retry_count": 3
+    },
+    "endpoint_set_version_counts": {
+      "3": 9999
+    },
+    "in_progress_cycle_count": 0,
+    "in_progress_observation_count": 0,
+    "incomplete_cycle_count": 0,
+    "incomplete_observation_count": 0,
+    "max_attempt_count": 3,
+    "non_retryable_retried_count": 0,
+    "observer_instance_count": 1,
+    "process_run_count": 2,
+    "retry_contract_valid": true,
+    "retryable_not_exhausted_count": 0,
+    "success_after_retry_count": 17,
+    "total_count": 9999,
+    "trailing_cycle_classification": null,
+    "trailing_observation_count": 0,
+    "transport_status_counts": {
+      "connection_error": 6504,
+      "success": 3491,
+      "timeout": 4
+    }
+  },
+  "shadow_incidents": {
+    "active_state_count": 0,
+    "candidate_state_count": 0,
+    "contract_version": 1,
+    "delivery_enabled": false,
+    "history_valid": true,
+    "incident_rule_version": 1,
+    "mode": "shadow_only",
+    "outbox_count": 2,
+    "outbox_dead_letter_count": 0,
+    "outbox_in_progress_count": 0,
+    "outbox_pending_count": 2,
+    "outbox_sent_count": 0,
+    "present": true,
+    "resolved_state_count": 1,
+    "state_count": 1,
+    "transition_record_count": 2000,
+    "updated_at": "2026-08-18T05:49:09.267082+00:00"
+  },
+  "timing": {
+    "cross_run_interval_average_seconds": 78.302,
+    "cross_run_interval_count": 1,
+    "cross_run_interval_max_seconds": 78.302,
+    "cross_run_interval_min_seconds": 78.302,
+    "cross_run_overlap_count": 0,
+    "cycle_duration_average_seconds": 9.954,
+    "cycle_duration_beyond_configured_budget_count": 0,
+    "cycle_duration_count": 1111,
+    "cycle_duration_max_seconds": 36.105,
+    "cycle_duration_min_seconds": 3.323,
+    "early_start_count": 0,
+    "interval_average_seconds": 62.564,
+    "interval_count": 1109,
+    "interval_max_seconds": 64.998,
+    "interval_min_seconds": 60.003,
+    "largest_late_interval": null,
+    "late_beyond_jitter_count": 0,
+    "longest_cross_run_interval": {
+      "classification": "process_run_transition",
+      "ending_cycle_index": 288,
+      "interval_seconds": 78.302,
+      "previous_cycle_duration_seconds": 3.529,
+      "previous_cycle_outcome": "healthy"
+    },
+    "longest_cycle": {
+      "configured_timeout_budget_seconds": 94.5,
+      "cycle_index": 7,
+      "duration_seconds": 36.105,
+      "endpoint_set_version": 3,
+      "excess_beyond_configured_budget_seconds": 0.0,
+      "outcome": "partial_failure"
+    },
+    "longest_interval": {
+      "allowed_maximum_seconds": 67.0,
+      "classification": "scheduled_interval",
+      "ending_cycle_index": 1003,
+      "excess_beyond_allowed_seconds": 0.0,
+      "expected_minimum_seconds": 60.0,
+      "interval_seconds": 64.998,
+      "previous_cycle_duration_seconds": 12.176,
+      "previous_cycle_outcome": "partial_failure"
+    },
+    "overlap_count": 0,
+    "tolerance_seconds": 2.0
+  }
+}

@@ -2,7 +2,9 @@
 
 Prepared: 2026-07-31
 
-Status: first scheduled workload installed and restart-verified; reporting pending
+Status: remote observer, local-agent shared runner, file-only orchestrator
+pilot, and controlled automatic test-recipient delivery gate verified in test
+mode
 
 The first-login and setup design is informed by the bounded review in
 `../../inventories/BOD_NULA_AGENT_LOGIN_SETUP_REVIEW.md`. The center adopts
@@ -18,6 +20,14 @@ agents without receiving the complete `monitorovaci_platforma` repository,
 operational databases, raw measurements, or remote-control privileges.
 
 The scheduler monitoring observer is the first supervision workload.
+`MONITORING_ORCHESTRATOR_DESIGN.md` is the accepted roadmap item-9 architecture
+baseline for the later correlation layer. It approves only the read-only
+supervision-correlation boundary and the file-only/shadow-only orchestrator
+CLI implementation scope. It does not grant lifecycle control, remediation,
+production delivery, interpretation-provider execution, alert replacement,
+live polling, scheduling, or polling-set changes. The separate 2026-08-21
+approval enables only automatic test-recipient delivery from the remote
+monitoring agent, gated by `DELIVERY_AUTOMATION_ENABLED=true`.
 
 ## Topology
 
@@ -71,11 +81,14 @@ It receives only a reviewed supervision bundle containing:
 
 The center may poll approved read-only endpoints through Tailscale, maintain
 its own incident state, correlate health, create local summaries, prepare
-programmer tasks, and record its own heartbeat and package version.
+programmer tasks, record its own heartbeat and package version, and, only in
+the currently approved test mode, send bounded monitoring-agent outbox
+messages to the configured `DELIVERY_TEST_RECIPIENT`.
 
 The center may not execute actions on monitored stations, invoke local agents,
 start jobs, connect to operational databases or shares, open remote shells,
-send external messages during test mode, or modify application source.
+send production messages, contact unapproved recipients, or modify application
+source.
 
 ### Local application agents
 
@@ -207,53 +220,40 @@ Windows 11 Pro, Python 3.14, Tailscale installation, shared-tailnet membership,
 and peer connectivity are confirmed.
 
 The private GET-only monitoring facade, digest-verified service identity, and
-tailnet-only HTTPS listener on reserved port 9443 are operational. The current
-`0.7.0-test` observer is installed with a local ignored `.env`, an isolated
-Python 3.14 virtual environment, and agent-owned state outside the code
-directory. Its four endpoint projections are liveness, readiness, system
-scheduler, and System Runtime.
+tailnet-only HTTPS listener on reserved port 9443 are operational. The remote
+observer is now the `0.8.1-test` agent from the standalone public repository
+`https://github.com/mtravnicekarmex/monitoring-agent-0.8.1.git`, with Git-pull
+iteration replacing per-change ZIP transfers during the test stage. The
+complete platform repository remains absent from the supervision center.
 
-The minimal remote project is tracked separately in public repository
-`mtravnicekarmex/monitoring_agent_0.4.0`. Current `master` commit
-`3c171cf49615cf792211f3c992320dade539ccc4` matches the verified
-`0.4.1-test` manifest and contains no live `.env`, credential, state, virtual
-environment, or IDE workspace. Remote audit v2 and local Windows events
-attribute the 4,545.121-second observation gap to supervision-station
-shutdown/restart, not a blocked target request. Remote `0.6.0-test` validated
-prospective process lifecycle/restart evidence. Remote `0.6.1-test` audit
-contract 4 prevented cross-run intervals from
-becoming scheduled-cadence findings and exposed historical writer
-interleaving. Remote `0.6.2-test` verified state-scoped OS writer exclusivity,
-lock release, and audit-v5 concurrent-start/run-reentry evidence.
+`MonitoringAgentTest` owns the remote observer lifecycle as a Windows
+Scheduled Task under `SYSTEM`. The latest verified remote checkout is commit
+`b6f4e047d59d14d0e34ac61c1a4e270b386f6ae9`; audit-v8 reports a healthy latest
+heartbeat, nine observations, zero latest transport failures, and
+`shadow_incidents.present=true` with `mode="shadow_only"` and
+`delivery_enabled=true`. The automatic delivery gate is test-only:
+`DELIVERY_AUTOMATION_ENABLED=true`, one configured
+`DELIVERY_TEST_RECIPIENT`, and at most one due pending outbox item per
+completed cycle. Latest known outbox counts on 2026-08-21 were
+`pending=0`, `sent=1`, and `dead_letter=14`. Historical unclean/restart
+artifacts from controlled test migration and stop/start activation remain
+audit evidence but are not current runtime failures unless future audits show
+concurrent start, run reentry, or overlap evidence.
 
-The monitored workstation completed the supported full restart needed to
-activate the System Runtime facade, after which the center migrated to 0.7
-without changing the credential or state path. The 0.7 ZIP and manifest,
-four-endpoint config, one controlled cycle, mixed-history audit, and continuous
-polling passed. The complete platform repository remains absent from the
-center; the separately verified public minimal repository remains at its older
-0.4.1 baseline.
+The main workstation now hosts two verified local data-bearing agents under
+the shared local Scheduled Task `MonitoringLocalAgents`: DB availability and
+scheduler metrics. Both read only their approved local source, write only
+agent-owned sanitized state below `.local-monitoring-agent-state/`, and expose
+safe aggregates through the monitoring facade. The DB-availability aggregate
+is healthy; scheduler metrics is fail-visibly degraded because of two
+historical last-error job states while the last-24-hour failure count is zero.
 
-`MonitoringAgentTest` now owns the observer lifecycle as a Windows Scheduled
-Task under `SYSTEM`. A 2026-08-06 center reboot proved automatic resume, one
-logical venv launcher/interpreter process tree, continued state updates, and a
-healthy current heartbeat. Lifecycle contained nine starts, eight stops, one
-active run, and no unclean or abandoned run. Historical pre-lock overlap facts
-remain visible but did not increment. The roughly 110-second cold-start delay
-requires postboot checks to wait for fresh lifecycle/observation evidence
-rather than trusting task state alone.
-
-Local `0.8.1-test` supersedes the undeployed 0.8.0 bundle and prepares the
-complete approved observation expansion: eight strict private-facade
-projections plus a direct credential-free external-web probe, with observation
-contract 4 / endpoint set 3 and audit contract 7. It also provides the exact
-env-v1/contract-3/set-2 bridge required to recover from the observed 0.7
-Runtime schema transition without weakening the safe target projection. It is
-not deployed. The next gate is the controlled bridge recovery followed by the
-env-v2 remote migration and a verified nine-observation mixed/current-run
-cycle. Only then does the next layer become deterministic incident evaluation
-and local reporting using `MONITORING_AGENT_REPORTING_LAYER_HANDOFF.md`.
-Bounded retention, credential rotation, independent observation of center
-loss, interpretation-provider authorization, external delivery, and
-future-agent onboarding remain open or separately gated. Current scheduler
-alerts remain authoritative.
+`MONITORING_ORCHESTRATOR_DESIGN.md` records the accepted item-9 architecture
+for the next layer. The design places the orchestrator on the supervision
+workstation, lets it correlate safe agent results, and explicitly denies
+agent lifecycle control, remediation, production delivery, interpretation-
+provider execution, raw-data access, alert replacement, remote `.env` changes
+outside separately approved keys, and polling-set changes without separate
+approval. The file-only/shadow-only orchestrator CLI over sanitized sample
+snapshots has been implemented and pilot-verified. Current scheduler alerts
+remain authoritative.

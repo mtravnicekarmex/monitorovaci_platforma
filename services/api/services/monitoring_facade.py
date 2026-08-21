@@ -9,6 +9,8 @@ from services.api.schemas.admin import (
     SystemSmartFuelPassHealthResponse,
 )
 from services.api.schemas.monitoring import (
+    MonitoringDatabaseAvailabilityLocalAgentResponse,
+    MonitoringDatabaseAvailabilityLocalAgentService,
     MonitoringPostgresSchemaStatus,
     MonitoringPostgresStatus,
     MonitoringProxyHeaderStatus,
@@ -19,6 +21,8 @@ from services.api.schemas.monitoring import (
     MonitoringScheduledRun,
     MonitoringSchedulerHealthResponse,
     MonitoringSchedulerJob,
+    MonitoringSchedulerMetricsLocalAgentJob,
+    MonitoringSchedulerMetricsLocalAgentResponse,
     MonitoringSmartFuelPassJobStatus,
     MonitoringSmartFuelPassTableStatus,
     MonitoringSystemDatabaseHealthResponse,
@@ -202,4 +206,76 @@ def project_system_smartfuelpass_health(
         ),
         sync_job=_project_smartfuelpass_job(source.sync_job),
         weekly_report_job=_project_smartfuelpass_job(source.weekly_report_job),
+    )
+
+
+def project_database_availability_local_agent(
+    source,
+) -> MonitoringDatabaseAvailabilityLocalAgentResponse:
+    return MonitoringDatabaseAvailabilityLocalAgentResponse(
+        contract_version=source.contract_version,
+        agent_key=source.agent_key,
+        mode=source.mode,
+        status=source.status,
+        checked_at=source.checked_at,
+        state_updated_at=source.state_updated_at,
+        state_age_seconds=source.state_age_seconds,
+        stale_after_seconds=source.stale_after_seconds,
+        service_count=source.service_count,
+        unavailable_service_count=source.unavailable_service_count,
+        stale_service_count=source.stale_service_count,
+        pending_event_count=source.pending_event_count,
+        delivered_event_count_24h=source.delivered_event_count_24h,
+        recent_transition_count=source.recent_transition_count,
+        services=[
+            MonitoringDatabaseAvailabilityLocalAgentService(
+                service_key=service.service_key,
+                status=service.status,
+                available=service.available,
+                failed_check_count=service.failed_check_count,
+                last_checked_at=service.last_checked_at,
+                last_checked_age_seconds=service.last_checked_age_seconds,
+                outage_age_seconds=service.outage_age_seconds,
+            )
+            for service in source.services
+        ],
+        evidence_gaps=list(source.evidence_gaps),
+    )
+
+
+def project_scheduler_metrics_local_agent(
+    source,
+) -> MonitoringSchedulerMetricsLocalAgentResponse:
+    return MonitoringSchedulerMetricsLocalAgentResponse(
+        contract_version=source.contract_version,
+        agent_key=source.agent_key,
+        mode=source.mode,
+        status=source.status,
+        checked_at=source.checked_at,
+        state_updated_at=source.state_updated_at,
+        state_age_seconds=source.state_age_seconds,
+        scheduler_running=source.scheduler_running,
+        heartbeat_at=source.heartbeat_at,
+        heartbeat_age_seconds=source.heartbeat_age_seconds,
+        heartbeat_ttl_seconds=source.heartbeat_ttl_seconds,
+        job_count=source.job_count,
+        success_count_24h=source.success_count_24h,
+        failure_count_24h=source.failure_count_24h,
+        error_job_count=source.error_job_count,
+        degraded_job_count=source.degraded_job_count,
+        jobs=[
+            MonitoringSchedulerMetricsLocalAgentJob(
+                job_id=job.job_id,
+                status=job.status,
+                last_status_class=job.last_status_class,
+                last_run_at=job.last_run_at,
+                last_run_age_seconds=job.last_run_age_seconds,
+                next_run_at=job.next_run_at,
+                success_count_24h=job.success_count_24h,
+                failure_count_24h=job.failure_count_24h,
+                failure_rate_24h=job.failure_rate_24h,
+            )
+            for job in source.jobs
+        ],
+        evidence_gaps=list(source.evidence_gaps),
     )

@@ -146,3 +146,68 @@ class MonitoringSystemSmartFuelPassHealthResponse(BaseModel):
     table: MonitoringSmartFuelPassTableStatus
     sync_job: MonitoringSmartFuelPassJobStatus
     weekly_report_job: MonitoringSmartFuelPassJobStatus
+
+
+class MonitoringDatabaseAvailabilityLocalAgentService(BaseModel):
+    service_key: str
+    status: str = Field(..., pattern="^(ok|degraded)$")
+    available: bool
+    failed_check_count: int = Field(ge=0)
+    last_checked_at: datetime | None = None
+    last_checked_age_seconds: float | None = Field(default=None, ge=0)
+    outage_age_seconds: float | None = Field(default=None, ge=0)
+
+
+class MonitoringDatabaseAvailabilityLocalAgentResponse(BaseModel):
+    contract_version: int = Field(ge=1)
+    agent_key: str
+    mode: str = Field(..., pattern="^local_agent$")
+    status: str = Field(..., pattern="^(ok|degraded|error|unavailable)$")
+    checked_at: datetime
+    state_updated_at: datetime | None = None
+    state_age_seconds: float | None = Field(default=None, ge=0)
+    stale_after_seconds: float = Field(gt=0)
+    service_count: int = Field(ge=0)
+    unavailable_service_count: int = Field(ge=0)
+    stale_service_count: int = Field(ge=0)
+    pending_event_count: int = Field(ge=0)
+    delivered_event_count_24h: int = Field(ge=0)
+    recent_transition_count: int = Field(ge=0)
+    services: list[MonitoringDatabaseAvailabilityLocalAgentService]
+    evidence_gaps: list[str]
+
+
+class MonitoringSchedulerMetricsLocalAgentJob(BaseModel):
+    job_id: str
+    status: str = Field(..., pattern="^(ok|degraded|error|unknown)$")
+    last_status_class: str = Field(
+        ...,
+        pattern="^(success|error|skipped|unknown|other)$",
+    )
+    last_run_at: datetime | None = None
+    last_run_age_seconds: float | None = Field(default=None, ge=0)
+    next_run_at: datetime | None = None
+    success_count_24h: int = Field(ge=0)
+    failure_count_24h: int = Field(ge=0)
+    failure_rate_24h: float = Field(ge=0.0, le=1.0)
+
+
+class MonitoringSchedulerMetricsLocalAgentResponse(BaseModel):
+    contract_version: int = Field(ge=1)
+    agent_key: str
+    mode: str = Field(..., pattern="^local_agent$")
+    status: str = Field(..., pattern="^(ok|degraded|error|unavailable)$")
+    checked_at: datetime
+    state_updated_at: datetime | None = None
+    state_age_seconds: float | None = Field(default=None, ge=0)
+    scheduler_running: bool
+    heartbeat_at: datetime | None = None
+    heartbeat_age_seconds: float | None = Field(default=None, ge=0)
+    heartbeat_ttl_seconds: int = Field(ge=1)
+    job_count: int = Field(ge=0)
+    success_count_24h: int = Field(ge=0)
+    failure_count_24h: int = Field(ge=0)
+    error_job_count: int = Field(ge=0)
+    degraded_job_count: int = Field(ge=0)
+    jobs: list[MonitoringSchedulerMetricsLocalAgentJob]
+    evidence_gaps: list[str]

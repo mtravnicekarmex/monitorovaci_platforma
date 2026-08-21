@@ -1,0 +1,37 @@
+{
+  "agent_key": "database_availability",
+  "checked_at": "2026-08-18T06:00:18.825140Z",
+  "contract_version": 1,
+  "delivered_event_count_24h": 0,
+  "evidence_gaps": [],
+  "mode": "local_agent",
+  "pending_event_count": 0,
+  "recent_transition_count": 0,
+  "service_count": 2,
+  "services": [
+    {
+      "available": true,
+      "failed_check_count": 0,
+      "last_checked_age_seconds": 629.252,
+      "last_checked_at": "2026-08-18T05:47:05.136631Z",
+      "outage_age_seconds": null,
+      "service_key": "mssql",
+      "status": "ok"
+    },
+    {
+      "available": true,
+      "failed_check_count": 0,
+      "last_checked_age_seconds": 629.252,
+      "last_checked_at": "2026-08-18T05:47:05.136631Z",
+      "outage_age_seconds": null,
+      "service_key": "postgres",
+      "status": "ok"
+    }
+  ],
+  "stale_after_seconds": 1800.0,
+  "stale_service_count": 0,
+  "state_age_seconds": 164.436,
+  "state_updated_at": "2026-08-18T05:57:34.389007Z",
+  "status": "ok",
+  "unavailable_service_count": 0
+}

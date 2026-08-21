@@ -18,8 +18,6 @@ from functools import wraps
 from itertools import groupby
 from zoneinfo import ZoneInfo
 from moduly.mereni.vodomery.SCVK.SCVK_to_database import SCVK_save_to_database_all
-from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_to_database import SOFTLINK_to_database_mereni
-from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_data_z_dotazu import SOFTLINK_dotaz
 from core.db.connect import ENGINE_MS, ENGINE_PG, get_session_pg
 from moduly.apps.web_search.service import hledat_nove_vyskyt, notify_new_results_for_monitor
 from moduly.apps.web_search.database.models import *
@@ -1092,6 +1090,9 @@ def job_max_instances_listener(event):
 
 
 def SOFTLINK_save_to_database_all():
+    from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_data_z_dotazu import SOFTLINK_dotaz
+    from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_to_database import SOFTLINK_to_database_mereni
+
     SOFTLINK_to_database_mereni(SOFTLINK_dotaz())
 
 
@@ -1185,6 +1186,41 @@ def safe_call(fn, *args, step_id: str | None = None, **kwargs):
     finally:
         duration = round(time.time() - start, 2)
         logger.info("DONE %s | duration=%ss", resolved_step_id, duration)
+
+
+def _run_independent_scheduler_steps(*steps) -> None:
+    failures = []
+    for step in steps:
+        try:
+            safe_call(step)
+        except SchedulerContextError as exc:
+            step_name = getattr(step, "__name__", str(step))
+            failure_targets = exc.alert_targets or (step_name,)
+            logger.warning(
+                "SCHEDULER STEP FAILED | step=%s | reason=%s | continuing=true",
+                step_name,
+                exc.alert_reason or str(exc),
+            )
+            failures.append((failure_targets, exc))
+
+    if not failures:
+        return
+
+    alert_targets = []
+    alert_reasons = []
+    for failure_targets, exc in failures:
+        for target in failure_targets:
+            if target not in alert_targets:
+                alert_targets.append(target)
+        reason = exc.alert_reason or _format_scheduler_reason(exc)
+        alert_reasons.append(f"{','.join(failure_targets)} ({reason})")
+
+    error = SchedulerContextError(
+        f"Selhaly nezavisle kroky jobu: {', '.join(alert_targets)}",
+        alert_targets=tuple(alert_targets),
+        alert_reason="; ".join(alert_reasons),
+    )
+    raise error from failures[0][1]
 
 
 
@@ -1456,16 +1492,16 @@ def daily_seven_and_two_job():
     safe_call(daily_web_monitor_job)
 
 
-# Nocni SOFTLINK import a synchronizace meteo dat.
+# Nocni synchronizace meteo dat. SOFTLINK elektromery jsou docasne pozastavene
+# kvuli zmene prihlasovacich udaju; vratit pouze s robustnejsi prihlasovaci
+# logikou podle SOFTLINK_data_zarizeni.py.
 @locked_job
 def daily_job():
     preflight_result = _run_database_preflight_or_skip("daily_job")
     if preflight_result is not None:
         return preflight_result
 
-    safe_call(SOFTLINK_save_to_database_all)
-    safe_call(elektromery_softlink_monitoring_import)
-    safe_call(meteo_sync)
+    _run_independent_scheduler_steps(meteo_sync)
 
 
 # Denní email report větví vodoměrů.
@@ -1831,24 +1867,6 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             description="Denni kontrola monitorovanych webu a notifikace novych vyskytu.",
             run_fn=daily_web_monitor_job,
             lock_names=("daily_seven_and_two_job",),
-            is_scheduled=False,
-            kind="internal_step",
-        ),
-        ManualRunnableSpec(
-            id="SOFTLINK_save_to_database_all",
-            label="Import SOFTLINK elektromeru",
-            description="Nocni import elektromernych dat ze SOFTLINKu do databaze.",
-            run_fn=SOFTLINK_save_to_database_all,
-            lock_names=("daily_job",),
-            is_scheduled=False,
-            kind="internal_step",
-        ),
-        ManualRunnableSpec(
-            id="elektromery_softlink_monitoring_import",
-            label="Import SOFTLINK elektromeru do monitoringu",
-            description="Denní import SOFTLINK elektromernych dat do monitoring.Mereni_elektromery_vse.",
-            run_fn=elektromery_softlink_monitoring_import,
-            lock_names=("daily_job",),
             is_scheduled=False,
             kind="internal_step",
         ),

@@ -1,0 +1,122 @@
+{
+  "agents": [
+    {
+      "agent_key": "external_health",
+      "agent_kind": "remote_observer",
+      "evidence_gaps": [
+        "heartbeat_transition_history_not_persisted"
+      ],
+      "freshness_status": "fresh",
+      "location": "supervision_center",
+      "observed_at": "2026-08-18T06:00:18.949124Z",
+      "orchestrator_contract_version": 1,
+      "signals": [],
+      "source_age_seconds": null,
+      "source_checked_at": "2026-08-18T06:00:18.619947Z",
+      "source_contract_version": 8,
+      "source_digest": "501612b5eaabfaa02a4620f4289c0ac76cb35d7cd01a7e7b1ba0e1a670c25bde",
+      "source_state_updated_at": "2026-08-18T06:00:18.619947Z",
+      "stale_after_seconds": 300.0,
+      "status": "ok",
+      "summary_counts": {
+        "endpoint_count": 9,
+        "latest_observation_count": 9,
+        "latest_transport_failure_count": 0,
+        "shadow_active_state_count": 0,
+        "shadow_candidate_state_count": 0,
+        "shadow_outbox_pending_count": 2,
+        "shadow_outbox_sent_count": 0,
+        "shadow_transition_record_count": 2000
+      }
+    },
+    {
+      "agent_key": "database_availability",
+      "agent_kind": "local_facade_agent",
+      "evidence_gaps": [],
+      "freshness_status": "fresh",
+      "location": "main_workstation",
+      "observed_at": "2026-08-18T06:00:18.949124Z",
+      "orchestrator_contract_version": 1,
+      "signals": [],
+      "source_age_seconds": 164.436,
+      "source_checked_at": "2026-08-18T06:00:18.825140Z",
+      "source_contract_version": 1,
+      "source_digest": "c6ae9345f22f4953c0de8efd27946a158554831b00aff3ea9988093c47506ce2",
+      "source_state_updated_at": "2026-08-18T05:57:34.389007Z",
+      "stale_after_seconds": 300.0,
+      "status": "ok",
+      "summary_counts": {
+        "delivered_event_count_24h": 0,
+        "pending_event_count": 0,
+        "recent_transition_count": 0,
+        "service_count": 2,
+        "stale_service_count": 0,
+        "unavailable_service_count": 0
+      }
+    },
+    {
+      "agent_key": "scheduler_metrics",
+      "agent_kind": "local_facade_agent",
+      "evidence_gaps": [],
+      "freshness_status": "fresh",
+      "location": "main_workstation",
+      "observed_at": "2026-08-18T06:00:18.949124Z",
+      "orchestrator_contract_version": 1,
+      "signals": [
+        "scheduler_historical_error_states_no_recent_failures"
+      ],
+      "source_age_seconds": 164.434,
+      "source_checked_at": "2026-08-18T06:00:18.825772Z",
+      "source_contract_version": 1,
+      "source_digest": "f1442a86823b91f95c66f6b69734573405606bc0e7b51e9fbb10b82936f2de3a",
+      "source_state_updated_at": "2026-08-18T05:57:34.391417Z",
+      "stale_after_seconds": 300.0,
+      "status": "degraded",
+      "summary_counts": {
+        "degraded_job_count": 0,
+        "error_job_count": 2,
+        "failure_count_24h": 0,
+        "job_count": 51,
+        "success_count_24h": 2586
+      }
+    }
+  ],
+  "contract_version": 1,
+  "correlations": [
+    {
+      "agent_keys": [
+        "scheduler_metrics"
+      ],
+      "evidence_gaps": [],
+      "kind": "scheduler_historical_error_states_no_recent_failures",
+      "status": "degraded",
+      "summary": "Global degradation is limited to historical scheduler last-error states with zero recent failures."
+    }
+  ],
+  "event": "monitoring_orchestrator_snapshot",
+  "generated_at": "2026-08-18T06:00:18.949124Z",
+  "metrics": {
+    "agent_count": 3,
+    "correlation_count": 1,
+    "freshness_counts": {
+      "fresh": 3,
+      "invalid": 0,
+      "missing": 0,
+      "stale": 0
+    },
+    "status_counts": {
+      "degraded": 1,
+      "error": 0,
+      "ok": 2,
+      "unavailable": 0,
+      "unknown": 0
+    }
+  },
+  "mode": "file_only",
+  "safety_boundary": [
+    "File-only/shadow-only orchestrator output; legacy alerts remain authoritative.",
+    "The orchestrator consumes supplied sanitized snapshots and does not poll endpoints, read .env, send email, call interpretation providers, mutate state, or control processes.",
+    "No alert may be replaced, disabled, rerouted, downgraded, or acknowledged from this output without separate approval."
+  ],
+  "status": "degraded"
+}

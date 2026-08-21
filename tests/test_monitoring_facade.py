@@ -12,7 +12,9 @@ from services.api.core import monitoring_auth
 from services.api.core.runtime_state import api_readiness
 from services.api.routes import monitoring
 from services.api.services.monitoring_facade import (
+    project_database_availability_local_agent,
     project_scheduler_health,
+    project_scheduler_metrics_local_agent,
     project_system_database_health,
     project_system_proxy_health,
     project_system_runtime_health,
@@ -132,6 +134,16 @@ def test_monitoring_readiness_preserves_unavailable_state():
             "collect_system_smartfuelpass_health",
             "project_system_smartfuelpass_health",
         ),
+        (
+            "get_monitoring_database_availability_local_agent",
+            "load_database_availability_local_agent_facade_snapshot",
+            "project_database_availability_local_agent",
+        ),
+        (
+            "get_monitoring_scheduler_metrics_local_agent",
+            "load_scheduler_metrics_local_agent_facade_snapshot",
+            "project_scheduler_metrics_local_agent",
+        ),
     ],
 )
 def test_monitoring_routes_reuse_collectors_through_safe_projection(
@@ -166,6 +178,8 @@ def test_monitoring_router_exposes_authenticated_get_only_surface():
         "/api/v1/monitoring/health/ready",
         "/api/v1/monitoring/health/scheduler",
         "/api/v1/monitoring/health/system/database",
+        "/api/v1/monitoring/health/local-agents/database-availability",
+        "/api/v1/monitoring/health/local-agents/scheduler-metrics",
         "/api/v1/monitoring/health/system/proxy",
         "/api/v1/monitoring/health/system/scheduler",
         "/api/v1/monitoring/health/system/runtime",
@@ -191,6 +205,9 @@ def test_monitoring_router_exposes_authenticated_get_only_surface():
         "scheduler_running",
         "transaction_read_only",
         "missing_ended_at_utc_count",
+        "agent_key",
+        "error_job_count",
+        "unavailable_service_count",
     } <= schema_properties
     assert {
         "actual_content_type",
@@ -203,10 +220,15 @@ def test_monitoring_router_exposes_authenticated_get_only_surface():
         "next_run_time",
         "process_ids",
         "public_host",
+        "raw_reason",
+        "raw_status",
+        "reason",
         "report_periods",
         "server_time",
         "server_timezone",
         "server_version",
+        "service_label",
+        "source_store_path",
         "table_count",
         "total_amount",
     }.isdisjoint(schema_properties)
@@ -438,3 +460,134 @@ def test_monitoring_projections_drop_transient_sensitive_and_capability_fields()
         "last_import_age_seconds",
     }
     assert "report_periods" not in smartfuelpass
+
+    database_availability_agent = project_database_availability_local_agent(
+        SimpleNamespace(
+            contract_version=1,
+            agent_key="database_availability",
+            mode="local_agent",
+            status="degraded",
+            checked_at=now,
+            state_updated_at=now,
+            state_age_seconds=1.0,
+            stale_after_seconds=1800.0,
+            service_count=1,
+            unavailable_service_count=1,
+            stale_service_count=0,
+            pending_event_count=0,
+            delivered_event_count_24h=1,
+            recent_transition_count=1,
+            evidence_gaps=[],
+            source_store_path="drop-path",
+            services=[
+                SimpleNamespace(
+                    service_key="postgres",
+                    service_label="drop-label",
+                    status="degraded",
+                    available=False,
+                    failed_check_count=1,
+                    last_checked_at=now,
+                    last_checked_age_seconds=10.0,
+                    outage_age_seconds=20.0,
+                    raw_reason="drop-reason",
+                )
+            ],
+        )
+    ).model_dump()
+    assert set(database_availability_agent) == {
+        "agent_key",
+        "checked_at",
+        "contract_version",
+        "delivered_event_count_24h",
+        "evidence_gaps",
+        "mode",
+        "pending_event_count",
+        "recent_transition_count",
+        "service_count",
+        "services",
+        "stale_after_seconds",
+        "stale_service_count",
+        "state_age_seconds",
+        "state_updated_at",
+        "status",
+        "unavailable_service_count",
+    }
+    assert set(database_availability_agent["services"][0]) == {
+        "available",
+        "failed_check_count",
+        "last_checked_age_seconds",
+        "last_checked_at",
+        "outage_age_seconds",
+        "service_key",
+        "status",
+    }
+
+    scheduler_metrics_agent = project_scheduler_metrics_local_agent(
+        SimpleNamespace(
+            contract_version=1,
+            agent_key="scheduler_metrics",
+            mode="local_agent",
+            status="degraded",
+            checked_at=now,
+            state_updated_at=now,
+            state_age_seconds=1.0,
+            scheduler_running=True,
+            heartbeat_at=now,
+            heartbeat_age_seconds=1.0,
+            heartbeat_ttl_seconds=300,
+            job_count=1,
+            success_count_24h=1,
+            failure_count_24h=1,
+            error_job_count=1,
+            degraded_job_count=0,
+            evidence_gaps=[],
+            jobs=[
+                SimpleNamespace(
+                    job_id="job",
+                    label="drop-label",
+                    description="drop-description",
+                    status="error",
+                    last_status_class="error",
+                    raw_status="drop raw status",
+                    last_run_at=now,
+                    last_run_age_seconds=2.0,
+                    next_run_at=now,
+                    success_count_24h=1,
+                    failure_count_24h=1,
+                    failure_rate_24h=0.5,
+                    detail="drop-detail",
+                )
+            ],
+        )
+    ).model_dump()
+    assert set(scheduler_metrics_agent) == {
+        "agent_key",
+        "checked_at",
+        "contract_version",
+        "degraded_job_count",
+        "error_job_count",
+        "evidence_gaps",
+        "failure_count_24h",
+        "heartbeat_age_seconds",
+        "heartbeat_at",
+        "heartbeat_ttl_seconds",
+        "job_count",
+        "jobs",
+        "mode",
+        "scheduler_running",
+        "state_age_seconds",
+        "state_updated_at",
+        "status",
+        "success_count_24h",
+    }
+    assert set(scheduler_metrics_agent["jobs"][0]) == {
+        "failure_count_24h",
+        "failure_rate_24h",
+        "job_id",
+        "last_run_age_seconds",
+        "last_run_at",
+        "last_status_class",
+        "next_run_at",
+        "status",
+        "success_count_24h",
+    }

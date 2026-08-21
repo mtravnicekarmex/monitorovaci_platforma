@@ -35,14 +35,14 @@ from scripts.build_monitoring_agent_bundle import BUNDLE_FILES, build_bundle
 def _write_runtime_env(
     path: Path,
     *,
-    env_version: int = 2,
+    env_version: int = 3,
     base_url: str = "http://127.0.0.1:8020",
     external_web_url: str | None = None,
     state_dir: str = "../state",
     token: str = "t" * 48,
     extra: dict[str, str] | None = None,
 ) -> None:
-    if env_version not in {1, 2}:
+    if env_version not in {1, 2, 3}:
         raise ValueError("test environment version is unsupported")
     values = {
         "MONITORING_AGENT_ENV_VERSION": str(env_version),
@@ -65,8 +65,20 @@ def _write_runtime_env(
         ),
         "MONITORING_AGENT_BEARER_TOKEN": token,
     }
-    if env_version == 2:
+    if env_version in {2, 3}:
         values["MONITORING_AGENT_EXTERNAL_WEB_URL"] = external_web_url or base_url
+    if env_version == 3:
+        values.update(
+            {
+                "MONITORING_AGENT_MAX_OBSERVATION_RECORDS": "10000",
+                "MONITORING_AGENT_MAX_INCIDENT_STATES": "200",
+                "MONITORING_AGENT_MAX_INCIDENT_TRANSITION_RECORDS": "2000",
+                "MONITORING_AGENT_MAX_OUTBOX_ITEMS": "1000",
+                "MONITORING_AGENT_OUTBOX_MAX_ATTEMPTS": "3",
+                "MONITORING_AGENT_OUTBOX_RETRY_BACKOFF_SECONDS": "300",
+                "MONITORING_AGENT_OUTBOX_CLAIM_TIMEOUT_SECONDS": "600",
+            }
+        )
     values.update(extra or {})
     path.write_text(
         "\n".join(f"{key}={value}" for key, value in values.items()) + "\n",
@@ -872,7 +884,7 @@ def test_state_audit_reports_safe_loss_and_recovery_aggregates(tmp_path):
 
     audit = build_state_audit(settings)
 
-    assert audit["audit_contract_version"] == 7
+    assert audit["audit_contract_version"] == 8
     assert audit["event"] == "agent_state_audit"
     assert audit["configuration"] == {
         "endpoint_count": 9,
@@ -1014,6 +1026,25 @@ def test_state_audit_reports_safe_loss_and_recovery_aggregates(tmp_path):
         "stop_reason_counts": {},
         "history_valid": True,
     }
+    assert audit["shadow_incidents"] == {
+        "active_state_count": 0,
+        "candidate_state_count": 0,
+        "contract_version": 1,
+        "delivery_enabled": False,
+        "history_valid": True,
+        "incident_rule_version": 1,
+        "mode": "shadow_only",
+        "outbox_count": 0,
+        "outbox_dead_letter_count": 0,
+        "outbox_in_progress_count": 0,
+        "outbox_pending_count": 0,
+        "outbox_sent_count": 0,
+        "present": False,
+        "resolved_state_count": 0,
+        "state_count": 0,
+        "transition_record_count": 0,
+        "updated_at": None,
+    }
     assert audit["evidence_gaps"] == [
         "heartbeat_transition_history_not_persisted",
     ]
@@ -1063,7 +1094,7 @@ def test_state_audit_preserves_legacy_v2_and_v3_cycles_after_endpoint_set_upgrad
 
     audit = build_state_audit(settings)
 
-    assert audit["audit_contract_version"] == 7
+    assert audit["audit_contract_version"] == 8
     assert audit["configuration"]["endpoint_set_version"] == 3
     assert audit["observations"]["total_count"] == 16
     assert audit["observations"]["complete_cycle_count"] == 3
@@ -1721,13 +1752,20 @@ def test_runtime_settings_load_single_strict_env_contract(tmp_path):
 
     settings = RuntimeSettings.load(env_path)
 
-    assert settings.env_contract_version == 2
+    assert settings.env_contract_version == 3
     assert settings.mode == "test"
     assert settings.instance_id == "center-test"
     assert settings.state_dir == (project_dir / "../state").resolve()
     assert settings.max_attempts == 3
     assert settings.endpoint_set_version == 3
     assert settings.observation_contract_version == 4
+    assert settings.max_observation_records == 10000
+    assert settings.max_incident_states == 200
+    assert settings.max_incident_transition_records == 2000
+    assert settings.max_outbox_items == 1000
+    assert settings.outbox_max_attempts == 3
+    assert settings.outbox_retry_backoff_seconds == 300.0
+    assert settings.outbox_claim_timeout_seconds == 600.0
     assert settings.endpoint_keys == (
         "live",
         "ready",
@@ -1741,7 +1779,7 @@ def test_runtime_settings_load_single_strict_env_contract(tmp_path):
     )
     assert settings.safe_summary() == {
         "endpoint_count": 9,
-        "env_contract_version": 2,
+        "env_contract_version": 3,
         "mode": "test",
     }
     assert "t" * 48 not in repr(settings)
@@ -1765,11 +1803,48 @@ def test_runtime_settings_loads_strict_legacy_upgrade_contract(tmp_path):
     )
     assert settings.endpoint_set_version == 2
     assert settings.observation_contract_version == 3
+    assert settings.max_observation_records == 10000
+    assert settings.max_incident_states == 200
+    assert settings.max_incident_transition_records == 2000
+    assert settings.max_outbox_items == 1000
+    assert settings.outbox_max_attempts == 3
+    assert settings.outbox_retry_backoff_seconds == 300.0
+    assert settings.outbox_claim_timeout_seconds == 600.0
     assert settings.safe_summary() == {
         "endpoint_count": 4,
         "env_contract_version": 1,
         "mode": "test",
     }
+
+
+def test_runtime_settings_loads_v2_with_legacy_safe_retention_defaults(tmp_path):
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    env_path = project_dir / ".env"
+    _write_runtime_env(env_path, env_version=2)
+
+    settings = RuntimeSettings.load(env_path)
+
+    assert settings.env_contract_version == 2
+    assert settings.external_web_url == "http://127.0.0.1:8020/"
+    assert settings.endpoint_keys == (
+        "live",
+        "ready",
+        "system_scheduler",
+        "scheduler_detail",
+        "system_runtime",
+        "system_database",
+        "system_proxy",
+        "system_smartfuelpass",
+        "external_web",
+    )
+    assert settings.max_observation_records == 10000
+    assert settings.max_incident_states == 200
+    assert settings.max_incident_transition_records == 2000
+    assert settings.max_outbox_items == 1000
+    assert settings.outbox_max_attempts == 3
+    assert settings.outbox_retry_backoff_seconds == 300.0
+    assert settings.outbox_claim_timeout_seconds == 600.0
 
 
 def test_runtime_settings_rejects_v2_only_key_in_legacy_contract(tmp_path):
@@ -1784,19 +1859,61 @@ def test_runtime_settings_rejects_v2_only_key_in_legacy_contract(tmp_path):
         RuntimeSettings.load(env_path)
 
 
+def test_runtime_settings_rejects_missing_v3_retention_key(tmp_path):
+    env_path = tmp_path / ".env"
+    _write_runtime_env(env_path)
+    lines = [
+        line
+        for line in env_path.read_text(encoding="utf-8").splitlines()
+        if not line.startswith("MONITORING_AGENT_MAX_OBSERVATION_RECORDS=")
+    ]
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="schema mismatch"):
+        RuntimeSettings.load(env_path)
+
+
+def test_runtime_settings_rejects_observation_retention_below_one_cycle(tmp_path):
+    env_path = tmp_path / ".env"
+    _write_runtime_env(
+        env_path,
+        extra={"MONITORING_AGENT_MAX_OBSERVATION_RECORDS": "8"},
+    )
+
+    with pytest.raises(ValueError, match="one complete endpoint cycle"):
+        RuntimeSettings.load(env_path)
+
+
 def test_runtime_settings_accepts_powershell_utf8_bom(tmp_path):
     env_path = tmp_path / ".env"
     _write_runtime_env(env_path)
     content = env_path.read_text(encoding="utf-8")
     env_path.write_text(content, encoding="utf-8-sig")
 
-    assert RuntimeSettings.load(env_path).env_contract_version == 2
+    assert RuntimeSettings.load(env_path).env_contract_version == 3
+
+
+def test_runtime_settings_ignores_non_monitoring_delivery_keys(tmp_path):
+    env_path = tmp_path / ".env"
+    _write_runtime_env(
+        env_path,
+        extra={
+            "O_EMAIL": "sender@unit.local",
+            "O_APP": "placeholder-password",
+            "DELIVERY_TEST_RECIPIENT": "operator@unit.local",
+        },
+    )
+
+    settings = RuntimeSettings.load(env_path)
+
+    assert settings.env_contract_version == 3
+    assert settings.endpoint_set_version == 3
 
 
 @pytest.mark.parametrize(
     ("extra", "message"),
     [
-        ({"UNEXPECTED": "value"}, "unexpected"),
+        ({"MONITORING_AGENT_UNEXPECTED": "value"}, "unexpected"),
         ({"MONITORING_AGENT_MODE": "production"}, "test mode"),
         ({"MONITORING_AGENT_BASE_URL": "https://example.invalid:9443"}, "placeholder"),
         (
@@ -1844,6 +1961,36 @@ def test_env_contract_has_only_monitoring_agent_keys():
     assert "MONITORING_AGENT_BEARER_TOKEN" in ENV_KEYS
 
 
+def test_runtime_settings_reads_non_schema_delivery_automation_gate(tmp_path):
+    env_path = tmp_path / ".env"
+    _write_runtime_env(
+        env_path,
+        extra={
+            "DELIVERY_AUTOMATION_ENABLED": "true",
+            "O_EMAIL": "sender@unit.local",
+            "O_APP": "placeholder-password",
+            "DELIVERY_TEST_RECIPIENT": "recipient@unit.local",
+        },
+    )
+
+    settings = RuntimeSettings.load(env_path)
+
+    assert settings.delivery_automation_enabled is True
+    assert settings.safe_summary() == {
+        "endpoint_count": 9,
+        "env_contract_version": 3,
+        "mode": "test",
+    }
+
+
+def test_runtime_settings_rejects_invalid_delivery_automation_gate(tmp_path):
+    env_path = tmp_path / ".env"
+    _write_runtime_env(env_path, extra={"DELIVERY_AUTOMATION_ENABLED": "yes"})
+
+    with pytest.raises(ValueError, match="DELIVERY_AUTOMATION_ENABLED"):
+        RuntimeSettings.load(env_path)
+
+
 def test_runner_check_config_uses_default_env_without_secret_output(
     tmp_path,
     monkeypatch,
@@ -1859,7 +2006,7 @@ def test_runner_check_config_uses_default_env_without_secret_output(
     output = capsys.readouterr().out
     assert json.loads(output) == {
         "endpoint_count": 9,
-        "env_contract_version": 2,
+        "env_contract_version": 3,
         "event": "configuration_valid",
         "mode": "test",
     }
@@ -1890,10 +2037,26 @@ def test_runner_once_uses_env_for_authenticated_foreground_cycle(
         _stop_server(server, thread)
 
     output = json.loads(capsys.readouterr().out)
-    assert output == {
-        "event": "observation_cycle",
-        "observation_count": 9,
-        "transport_statuses": ["success"],
+    assert output["event"] == "observation_cycle"
+    assert output["observation_count"] == 9
+    assert output["transport_statuses"] == ["success"]
+    assert output["shadow_incidents"] | {"updated_at": None} == {
+        "active_state_count": 0,
+        "candidate_state_count": 0,
+        "contract_version": 1,
+        "delivery_enabled": False,
+        "incident_rule_version": 1,
+        "mode": "shadow_only",
+        "outbox_count": 0,
+        "outbox_dead_letter_count": 0,
+        "outbox_in_progress_count": 0,
+        "outbox_pending_count": 0,
+        "outbox_sent_count": 0,
+        "resolved_state_count": 0,
+        "state_count": 0,
+        "transition_count": 0,
+        "transition_record_count": 0,
+        "updated_at": None,
     }
     heartbeat = json.loads(
         (state_dir / "observer_heartbeat.json").read_text(encoding="utf-8")
@@ -1922,6 +2085,64 @@ def test_runner_once_uses_env_for_authenticated_foreground_cycle(
     assert heartbeat["run_id"] == lifecycle[0]["run_id"]
 
 
+def test_runner_once_applies_configured_observation_retention_after_cycle(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    server, thread = _start_server()
+    try:
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        env_path = project_dir / ".env"
+        state_dir = tmp_path / "state"
+        _write_runtime_env(
+            env_path,
+            base_url=f"http://127.0.0.1:{server.server_port}",
+            state_dir=str(state_dir),
+            extra={"MONITORING_AGENT_MAX_OBSERVATION_RECORDS": "18"},
+        )
+        settings = RuntimeSettings.load(env_path)
+        store = ObserverStore(state_dir)
+        base = datetime(2026, 8, 14, 8, 0, tzinfo=timezone.utc)
+        _append_serial_audit_cycle(
+            store=store,
+            endpoint_keys=settings.endpoint_keys,
+            cycle_start=base,
+            outcomes=tuple(("success", 1, 1.0) for _ in settings.endpoint_keys),
+            cycle_sequence=1,
+            run_id="private-old-run",
+        )
+        _append_serial_audit_cycle(
+            store=store,
+            endpoint_keys=settings.endpoint_keys,
+            cycle_start=base + timedelta(seconds=60),
+            outcomes=tuple(("success", 1, 1.0) for _ in settings.endpoint_keys),
+            cycle_sequence=2,
+            run_id="private-old-run",
+        )
+        monkeypatch.setattr(sys, "argv", ["run_monitoring_agent.py", "--once"])
+
+        assert main(default_env_file=env_path) == 0
+    finally:
+        _stop_server(server, thread)
+
+    assert json.loads(capsys.readouterr().out)["event"] == "observation_cycle"
+    observations = [
+        json.loads(line)
+        for line in (state_dir / "observations.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert len(observations) == 18
+    assert {item["cycle_sequence"] for item in observations[:9]} == {2}
+    assert {item["run_id"] for item in observations[:9]} == {"private-old-run"}
+    assert {item["cycle_sequence"] for item in observations[9:]} == {1}
+    assert {item["endpoint_key"] for item in observations[9:]} == set(
+        settings.endpoint_keys
+    )
+
+
 def test_runner_once_supports_legacy_env_as_safe_upgrade_bridge(
     tmp_path,
     monkeypatch,
@@ -1945,11 +2166,14 @@ def test_runner_once_supports_legacy_env_as_safe_upgrade_bridge(
     finally:
         _stop_server(server, thread)
 
-    assert json.loads(capsys.readouterr().out) == {
-        "event": "observation_cycle",
-        "observation_count": 4,
-        "transport_statuses": ["success"],
-    }
+    output = json.loads(capsys.readouterr().out)
+    assert output["event"] == "observation_cycle"
+    assert output["observation_count"] == 4
+    assert output["transport_statuses"] == ["success"]
+    assert output["shadow_incidents"]["delivery_enabled"] is False
+    assert output["shadow_incidents"]["mode"] == "shadow_only"
+    assert output["shadow_incidents"]["state_count"] == 0
+    assert output["shadow_incidents"]["outbox_count"] == 0
     observations = [
         json.loads(line)
         for line in (state_dir / "observations.jsonl")

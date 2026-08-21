@@ -12,11 +12,16 @@ from .client import (
     CONTRACT_ENDPOINT_SET_VERSIONS,
     ENDPOINT_SETS,
 )
+from .incident_store import IncidentStoreError
+from .runtime_shadow import (
+    build_incident_store,
+    summarize_shadow_incident_snapshot,
+)
 from .settings import RuntimeSettings
 from .store import LIFECYCLE_CONTRACT_VERSION, LIFECYCLE_EVENT_REASONS
 
 
-AUDIT_CONTRACT_VERSION = 7
+AUDIT_CONTRACT_VERSION = 8
 TIMING_TOLERANCE_SECONDS = 2.0
 TRANSPORT_STATUSES = {
     "connection_error",
@@ -152,6 +157,7 @@ def build_state_audit(settings: RuntimeSettings) -> dict[str, object]:
     observations_path = settings.state_dir / "observations.jsonl"
     heartbeat_path = settings.state_dir / "observer_heartbeat.json"
     lifecycle_path = settings.state_dir / "observer_lifecycle.jsonl"
+    incident_state_path = settings.state_dir / "incident_state.json"
     if not observations_path.is_file():
         raise StateAuditError("observations file is unavailable")
 
@@ -461,6 +467,10 @@ def build_state_audit(settings: RuntimeSettings) -> dict[str, object]:
         observation_instance_ids=instance_ids,
         current_run_id=heartbeat.run_id,
     )
+    shadow_incident_audit = _summarize_shadow_incidents(
+        settings,
+        incident_state_present=incident_state_path.is_file(),
+    )
     heartbeat_instance_matches = (
         heartbeat.observer_instance_id in instance_ids if instance_ids else None
     )
@@ -621,9 +631,32 @@ def build_state_audit(settings: RuntimeSettings) -> dict[str, object]:
             "matches_last_complete_cycle": heartbeat_matches_last_cycle,
         },
         "lifecycle": lifecycle_audit,
+        "shadow_incidents": shadow_incident_audit,
         "evidence_gaps": [
             "heartbeat_transition_history_not_persisted",
         ],
+    }
+
+
+def _summarize_shadow_incidents(
+    settings: RuntimeSettings,
+    *,
+    incident_state_present: bool,
+) -> dict[str, object]:
+    try:
+        snapshot = build_incident_store(settings).load()
+    except IncidentStoreError as exc:
+        raise StateAuditError("incident state file could not be audited") from exc
+    summary = summarize_shadow_incident_snapshot(
+        snapshot,
+        incident_rule_version=1,
+        delivery_enabled=settings.delivery_automation_enabled,
+    ).to_dict()
+    summary.pop("transition_count")
+    return {
+        **summary,
+        "history_valid": True,
+        "present": incident_state_present,
     }
 
 

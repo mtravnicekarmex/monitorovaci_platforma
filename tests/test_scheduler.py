@@ -168,6 +168,47 @@ def test_safe_call_uses_explicit_step_id_for_metrics_logs_and_errors(
     ]
 
 
+def test_independent_scheduler_steps_continue_after_failure_and_raise_aggregate(monkeypatch):
+    fake_logger = FakeLogger()
+    calls = []
+    completed = []
+
+    def failing_step():
+        completed.append("failing_step")
+
+    def next_step():
+        completed.append("next_step")
+
+    def last_step():
+        completed.append("last_step")
+
+    def fake_safe_call(fn, *args, **kwargs):
+        calls.append(fn.__name__)
+        if fn is failing_step:
+            raise scheduler.SchedulerContextError(
+                "first step failed",
+                alert_targets=("failing_step",),
+                alert_reason="portal timeout",
+            )
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr(scheduler, "logger", fake_logger)
+    monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
+
+    with pytest.raises(scheduler.SchedulerContextError) as exc_info:
+        scheduler._run_independent_scheduler_steps(failing_step, next_step, last_step)
+
+    assert calls == ["failing_step", "next_step", "last_step"]
+    assert completed == ["next_step", "last_step"]
+    assert exc_info.value.alert_targets == ("failing_step",)
+    assert exc_info.value.alert_reason == "failing_step (portal timeout)"
+    assert exc_info.value.__cause__.__class__ is scheduler.SchedulerContextError
+    assert (
+        "warning",
+        "SCHEDULER STEP FAILED | step=failing_step | reason=portal timeout | continuing=true",
+    ) in fake_logger.records
+
+
 def test_alert_technical_text_redacts_common_secret_forms():
     source = (
         "postgresql://user:password@server/db "
@@ -1552,35 +1593,23 @@ def test_plynomery_manual_alerting_step_uses_per_identifier_selection(monkeypatc
     }
 
 
-def test_daily_job_runs_meteo_sync_as_last_step(monkeypatch):
+def test_daily_job_runs_only_meteo_sync_while_softlink_is_paused(monkeypatch):
     calls = []
 
     def fake_safe_call(fn, *args, **kwargs):
         calls.append(fn.__name__)
         return fn(*args, **kwargs)
 
-    def fake_softlink_import():
-        return None
-
-    def fake_softlink_monitoring_import():
-        return {"inserted_softlink": 1}
-
     def fake_meteo_sync():
         return None
 
     monkeypatch.setattr(scheduler, "_run_database_preflight_or_skip", lambda job_id: None)
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
-    monkeypatch.setattr(scheduler, "SOFTLINK_save_to_database_all", fake_softlink_import)
-    monkeypatch.setattr(scheduler, "elektromery_softlink_monitoring_import", fake_softlink_monitoring_import)
     monkeypatch.setattr(scheduler, "meteo_sync", fake_meteo_sync)
 
     scheduler.daily_job.__scheduler_unlocked_fn__()
 
-    assert calls == [
-        "fake_softlink_import",
-        "fake_softlink_monitoring_import",
-        "fake_meteo_sync",
-    ]
+    assert calls == ["fake_meteo_sync"]
 
 
 def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
@@ -1699,16 +1728,19 @@ def test_scheduler_job_registry_matches_schedule_specs():
     }
 
 
-def test_daily_job_schedule_description_excludes_smartfuelpass_sync():
+def test_daily_job_schedule_description_excludes_paused_portal_syncs():
     daily_job_spec = next(job_spec for job_spec in get_scheduler_job_specs() if job_spec.id == "daily_job")
 
     assert "SmartFuelPass" not in daily_job_spec.description
+    assert "SOFTLINK" not in daily_job_spec.description
 
 
-def test_manual_specs_exclude_smartfuelpass_database_sync():
+def test_manual_specs_exclude_paused_portal_syncs():
     manual_specs = scheduler.get_manual_run_specs()
 
     assert "sync_charge_sessions_to_db" not in manual_specs
+    assert "SOFTLINK_save_to_database_all" not in manual_specs
+    assert "elektromery_softlink_monitoring_import" not in manual_specs
 
 
 def test_smartfuelpass_report_manual_labels_distinguish_job_and_email_step():

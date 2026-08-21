@@ -84,33 +84,122 @@ At the end of every substantive session:
   abandoned-run evidence. Windows exposes the one venv invocation as a
   two-process launcher/interpreter tree; do not mistake raw process count two
   for two writers. While the task is running, only `--check-config` and
-  `--audit-state` are safe concurrent commands. The agent remains test-mode,
-  with no external delivery or application mutation capability. Local
-  `0.8.1-test` now supersedes the undeployed `0.8.0-test` candidate. It retains
-  observation contract 4 / endpoint set 3 and audit contract 7, adding strict
-  safe projections for detailed Scheduler Health, System Database, Proxy, and
+  `--audit-state` are safe concurrent commands. The continuous observer remains
+  test-mode. As of 2026-08-21, automatic runtime delivery is enabled only as
+  controlled test delivery through `DELIVERY_AUTOMATION_ENABLED=true`,
+  `DELIVERY_TEST_RECIPIENT`, and the existing Outlook test credentials; it
+  sends at most one due pending outbox item after a completed cycle and still
+  has no production-recipient, application mutation, remediation, process
+  control, provider-execution, alert-suppression, or legacy-alert replacement
+  capability.
+  `0.8.1-test`
+  supersedes the undeployed `0.8.0-test` candidate. It retains observation
+  contract 4 / endpoint set 3 and audit contract 7, adding strict safe
+  projections for detailed Scheduler Health, System Database, Proxy, and
   SmartFuelPass plus a credential-free direct public-page probe from the
-  supervision center, for nine observations per cycle. The 2026-08-06
-  monitored-workstation restart activated all eight safe facade routes, but
-  exposed a rolling-upgrade incompatibility: deployed 0.7 expects the former
-  full System Runtime response while the new server projection correctly drops
-  transient details, addresses, and PIDs. Remote audit v6 consequently retains
-  new System Runtime schema failures and a degraded latest heartbeat; do not
-  stop or directly promote that writer as though recovery passed. `0.8.1-test`
-  adds a strict env-v1/contract-3/set-2 compatibility bridge so the new client
-  can first recover against the safe target without changing `.env`, then move
-  to env v2 / nine endpoints. A matching 0.8.1 ZIP hash was reported on
-  2026-08-07, but the same console could not find `MonitoringAgentTest`; remote
-  transfer identity therefore remains unproved until the check is repeated on
-  the actual supervision center. The user then confirmed the console is the
-  supervision station and explicitly accepted a one-time test-stage hard stop
-  plus manual `.env` transfer. Identify only the exact 0.7 process tree,
-  preserve append-only state, and qualify any resulting unclean/abandoned run
-  as planned migration evidence. The exact two-process Session-0 Python tree
-  was then validated and hard stopped; no Python process remained, env v1 was
-  preserved, and the remote 0.8.1 ZIP matched the reviewed hash. Roadmap item
-  1 remains open until side-by-side extraction, both controlled phases, and
-  the audit-v7 mixed-history/current-run proof pass. Continue from
+  supervision center, for nine observations per cycle. The 0.7-to-0.8.1
+  migration used the approved one-time planned hard stop, preserved the real
+  `.env` values and append-only state policy, and established the clean
+  `monitoring-agent-state-ops002` baseline. Env-v1 bridge, target
+  scheduler-detail timezone restart, env-v2 nine-endpoint proof, and
+  continuous `MonitoringAgentTest` restoration all passed. On 2026-08-14 the
+  task was `Running` under `SYSTEM`, latest audit-v7 heartbeat was `healthy`
+  with nine observations and zero latest transport failures, and there was no
+  new concurrent-start, run-reentry, unclean, abandoned, incomplete, or
+  overlap evidence. Roadmap item 1 is complete. Local item 2 source then added
+  incident-rule version 1 as a pure deterministic lifecycle layer with no
+  persistence, outbox, delivery, `.env` reads, network access, target mutation,
+  or legacy-alert replacement. Local item 3 source added bounded
+  `incident_state.json` persistence, delivery-intent outbox state, env
+  contract 3 retention limits, and bounded observation retention; the outbox
+  still has no sender, recipients, credentials, message body, network access,
+  or delivery authorization. Local item 4 source added pure report and
+  programming-agent prompt renderers over supplied normalized facts and
+  optional incident-store snapshots; reports keep verified facts, rule
+  conclusions, historical qualifications, evidence gaps, and hypotheses
+  separate, and prompts are bounded draft-only text with no authorization for
+  execution, delivery, mutation, process control, or alert replacement.
+  Local item 5 then added a disabled-by-default test-only
+  delivery adapter over incident outbox items, with a controlled test
+  recipient from `DELIVERY_TEST_RECIPIENT`, an in-memory recipient allowlist
+  derived from that same value, supplied report bodies by `report_reference`,
+  sanitized results, and a standalone `send_email_outlook()` implementation
+  that mirrors the local alarm-email Office365 STARTTLS pattern using
+  `O_EMAIL` and `O_APP` for login/default sender, with `EMAIL`/`APP` accepted
+  only as compatibility fallback. `monitoring_agent/delivery_cli.py`
+  adds optional recipient hashing diagnostics, synthetic local outbox
+  preparation, dry-run, and confirmed `send-due` entry points; real sending
+  requires `--confirm SEND_TEST_DELIVERY`, exact `report_reference`,
+  `DELIVERY_TEST_RECIPIENT`, `O_EMAIL`, `O_APP`, and a sanitized report file
+  that is not `.env`. Delivery-test recipient variables avoid the
+  `MONITORING_AGENT_` prefix so they do not collide with the strict runtime
+  schema; the polling runtime validates only `MONITORING_AGENT_*` keys, so
+  these non-prefixed delivery keys may live in the same local `.env`. On
+  2026-08-14 the supervision station verified Git commit
+  `5cfc5916d3e83cdcc1eecd34f3f2719d62ec351c`, hashed the configured test
+  recipient without printing it, prepared an isolated synthetic outbox/report,
+  dry-ran one due item, and executed one explicitly confirmed `send-due`
+  command that returned `status="sent"`, `action="opened"`,
+  `attempt_count=1`, and no error code. A follow-up dry-run for the same
+  `idempotency_key` returned `due_count=0`, proving the sent synthetic item was
+  no longer pending. At that point the delivery adapter was not wired into the
+  polling loop and did not authorize further external delivery, production
+  recipients, delivery channels, or legacy-alert replacement.
+  Local item 6 then added pure draft-only interpretation over supplied
+  report snapshots with at least one confirmed active incident. The
+  interpretation policy records provider/model names, timeout, cost ceiling,
+  prompt/output bounds, and item-count bounds, but all permission-style flags
+  for network, state mutation, process control, delivery, and alert
+  suppression must remain false. It adds no `.env` keys, provider
+  credentials, network client, polling-loop integration, or state writes.
+  Disabled, candidate-only, missing-provider, provider-failed, invalid, or
+  unsafe-output cases fall back to the deterministic report and cannot
+  suppress legacy alerts. Local item 7 source preflight adds
+  `monitoring_agent/shadow_pilot.py`, a pure shadow-only comparison contract
+  for supplied sanitized monitoring-agent and legacy-alert events over one
+  reviewed period. It computes matched detections, confirmation/recovery
+  delay, duplicate counts/rates, false positives, false negatives,
+  agent/legacy-only recoveries, and blind spots without `.env` reads, DB
+  access, endpoint polling, delivery, provider calls, state writes, process
+  control, remediation, or alert suppression. 2026-08-17 item 7 source
+  then added `monitoring_agent/runtime_shadow.py`, which runs deterministic
+  incident evaluation after each completed polling cycle, persists bounded
+  `incident_state.json`, emits sanitized `shadow_incidents`, and advances
+  `--audit-state` to audit contract 8. It adds no `.env` variable and still
+  does not claim or send outbox items, call providers, mutate the monitored
+  application, control processes, remediate, or suppress/replace legacy
+  alerts. This source was pushed to the standalone Git repository as commit
+  `207fc1d38d066cdc642dc86bc0cc0b2b6c817cfc`; remote activation exposed an
+  env-v2 source compatibility bug because `RuntimeSettings.load()` accepted
+  the env-v2 key set but did not load `MONITORING_AGENT_EXTERNAL_WEB_URL` for
+  `external_web`. Follow-up commit
+  `e23f5f893d76951995a8b6df833e60aadb96a858` fixes that bug with no `.env`
+  change required. The supervision station then proved this commit with
+  foreground `--once`, running `MonitoringAgentTest`, audit-v8 latest
+  heartbeat `healthy`, and `shadow_incidents.present=true`,
+  `mode="shadow_only"`, `delivery_enabled=false`. Retained lifecycle/sequence
+  findings from the activation are planned restart artifacts. Follow-up source commit
+  `3c6502c74d478a7518d3bbc37f7799951bbbaba4` adds a file-based
+  `monitoring_agent.shadow_pilot_cli` for exporting comparable agent events
+  from explicit `incident_state.json`, consuming supplied sanitized
+  `legacy_alert` event JSON, and writing JSON/Markdown comparison outputs
+  only. It has a 22-file Git manifest SHA-256
+  `f10e0392b2e294956f522f62df270859fad7c153ba4dee6a7fbac2fbba760c11` and is
+  remote-proved on the supervision station with valid config, healthy
+  audit-v8, and `shadow_incidents.present=true`. Roadmap items 1 through 7
+  are complete as of 2026-08-17. Item 7 closed with a real healthy no-event
+  reviewed comparison plus file-only synthetic comparison proof for
+  matched detection/recovery, false-positive, false-negative, duplicate,
+  blind-spot, and delay metrics. Legacy alerts remain authoritative and no
+  alert replacement, production delivery, real provider execution,
+  remediation, or process control is approved.
+  Earlier in item 7, the supervision station pulled commit
+  `3e7b94e9045527a1254b10066a3a34493577f025`; `--check-config` stayed valid
+  with nine endpoints, env contract 2, and test mode, and audit-v7 retained a
+  healthy latest heartbeat with nine observations, zero latest transport
+  failures, 323 complete cycles, valid ordering/retry/timing, and no new
+  lifecycle or writer anomalies.
+  Continue from item 8 in
   `agents/plans/monitoring/MONITORING_AGENT_IMPLEMENTATION_ROADMAP.md`.
 - `https://github.com/mtravnicekarmex/monitoring_agent_0.4.0`: standalone
   public repository for the minimal remote test project. Verified `master`
@@ -125,12 +214,213 @@ At the end of every substantive session:
   `Restricted` PowerShell policy; an elevated, semantically equivalent
   registration created and restart-verified the test task without changing or
   bypassing that policy.
+- `https://github.com/mtravnicekarmex/monitoring-agent-0.8.1`: standalone
+  public repository for the monitoring-agent test checkout. Verified on
+  2026-08-14 at commit `02a90a4ae887867d20819e4b2b618d86f750c48d` with the
+  original 0.8.1 bundle manifest SHA-256
+  `18A3E477E724EEA61F3EFDCBE303BEBE4DC298A4D646D37FE643D6CD9C49CBB1`.
+  On 2026-08-14 the user switched the test iteration workflow from per-change
+  ZIP bundles to direct Git pulls. Commit
+  `5cfc5916d3e83cdcc1eecd34f3f2719d62ec351c` was pushed to `master` with the
+  local item 2-5 candidate source, including incident rules, bounded
+  incident/outbox state, pure report/prompt rendering, and the
+  `O_EMAIL`/`O_APP`/`DELIVERY_TEST_RECIPIENT` test delivery path. Commit
+  `86ee42b058c74675976904c1e51a2f3677c5f138` was then pushed to `master`
+  with item 6 draft/fallback interpretation source and manifest updates.
+  Commit `3e7b94e9045527a1254b10066a3a34493577f025` was then pushed to
+  `master` with item 7 shadow-pilot comparison source and manifest updates.
+  Commit `207fc1d38d066cdc642dc86bc0cc0b2b6c817cfc` was then pushed to
+  `master` with item 7 runtime shadow incident persistence, audit contract 8,
+  and a 21-file Git manifest SHA-256
+  `4011bb7de330b30371199123dca41aabaaddecd267293dadf990c91f57445287`.
+  Commit `e23f5f893d76951995a8b6df833e60aadb96a858` was then pushed to
+  `master` with the env-v2 external-web URL compatibility fix and a 21-file
+  Git manifest SHA-256
+  `b15c3d6288352c051a30e5693ea710b19b826d7c62bd6e803be0b79163e7d113`.
+  This commit is remote-proved on the supervision station with audit-v8
+  runtime shadow persistence and a running Scheduled Task. Commit
+  `3c6502c74d478a7518d3bbc37f7799951bbbaba4` was then pushed with the
+  file-based shadow-pilot comparison CLI and a 22-file Git manifest SHA-256
+  `f10e0392b2e294956f522f62df270859fad7c153ba4dee6a7fbac2fbba760c11`; the
+  supervision station pulled and verified it with env contract 2, endpoint
+  count 9, healthy audit-v8 latest heartbeat, zero latest transport failures,
+  and `shadow_incidents.present=true`, `mode="shadow_only"`,
+  `delivery_enabled=false`. Commit
+  `f6583d80a77695b3f4a094337251c6835b389b59` was pushed on 2026-08-21 with
+  item-9 file-only orchestrator modules
+  `monitoring_agent/orchestrator.py`,
+  `monitoring_agent/orchestrator_cli.py`, and
+  `monitoring_agent/orchestrator_export_cli.py`; the regenerated Git manifest
+  declares 25 runtime files and has SHA-256
+  `37e2967efa4edbf5cfcfdeaa5a9bb8e073ef417fd2499ed058cf7085a8daf61b`. The
+  supervision station pulled and verified this commit on 2026-08-21:
+  `--check-config` returned endpoint count 9, env contract 2, and test mode,
+  and `orchestrator_export_cli wrap-remote-audit` wrote `remote-audit.json`
+  with audit contract 8 and `captured_at="2026-08-21T05:21:19.603716Z"`.
+  A 180-second follow-up runtime sample on 2026-08-21 showed
+  `MonitoringAgentTest` `Running`, audit-v8 latest heartbeat `healthy`, nine
+  latest observations, zero latest transport failures, valid endpoint/retry
+  contracts, no in-progress/incomplete observations, and no current
+  concurrent-start, run-reentry, overlap, or process-run-transition evidence.
+  Retained lifecycle counts
+  `unclean_restart_count=3`, `start_while_prior_run_open_count=3`, and
+  `abandoned_unclosed_run_count=2` are activation/restart history, not by
+  themselves current second-writer proof. Shadow incidents remained
+  `mode="shadow_only"` and `delivery_enabled=false`, with
+  `active_state_count=1` and `outbox_pending_count=11`; these counts require
+  follow-up analysis before any delivery or alert-layer action.
+  Follow-up sanitized incident-state inspection on 2026-08-21 confirmed the
+  active state is `endpoint:system_scheduler`, opened at
+  `2026-08-20T00:17:37.512339+02:00`, with
+  `last_reason="endpoint_payload_status:degraded"`. The user identified the
+  corresponding operational source as the last two days' midnight
+  `daily_job` failure in `SOFTLINK_save_to_database_all`. The outbox contains
+  only one pending `opened` item for `endpoint:system_scheduler`; the
+  remaining pending items are older `system_runtime` and
+  `target_wide_outage` intents, so this is not repeated email-delivery
+  creation. Standalone commit
+  `601a50587c73627835d4860b2212a82a92670f12` was pushed on 2026-08-21 to
+  collapse redundant unchanged `updated` transition records, document the
+  steady-state `300` second poll interval with `30` second jitter, and
+  regenerate the 25-file Git manifest with SHA-256
+  `07e08ccd56275a30e0169b863c60aee07241ba2f1c7126fb19989382c2c1a349`.
+  The supervision station pulled and verified this commit on 2026-08-21:
+  `git rev-parse HEAD` returned the exact commit, `--check-config` returned
+  endpoint count 9 / env contract 2 / test mode, audit contract 8 reported
+  `poll_interval_seconds=300.0`, `poll_jitter_seconds=30.0`, latest heartbeat
+  `healthy`, and zero latest transport failures. After a confirmed stop with
+  no remaining agent process, the restarted task produced a new
+  310.977-second scheduled interval inside the 332-second allowed maximum.
+  The transition-compaction check then showed no new repeated
+  `endpoint:system_scheduler` unchanged `updated` records after the restarted
+  300-second runtime began.
+  Standalone commit `19919303fe50a280ca7e2c84b10c9a66887c9f05`
+  then added a sanitized `review-outbox` CLI, and commit
+  `7390aeb03303736a34d924dc6c229ab85bb1c1d5` added
+  `skip-outbox` for operator-skipping selected pending items without sending.
+  The supervision station verified one manually confirmed test email for
+  `endpoint:system_scheduler/opened`, then used `skip-outbox` to mark the
+  remaining 14 historical pending intents as `dead_letter` with
+  `last_error_code="operator_skipped"`, leaving outbox counts at
+  `sent=1`, `dead_letter=14`, and `pending=0`.
+  Standalone commit `b6f4e047d59d14d0e34ac61c1a4e270b386f6ae9`
+  was pushed on 2026-08-21 with `monitoring_agent/runtime_delivery.py`, an
+  explicit non-`MONITORING_AGENT_` `DELIVERY_AUTOMATION_ENABLED` gate, runtime
+  wiring after completed observation cycles, sanitized deterministic report
+  bodies from `incident_state.json`, and a 26-file Git manifest SHA-256
+  `429fac118d8e67bbadd8e1b53b55154953eba0a07aafd1225ec3ed40f68371cc`.
+  Local verification for this commit passed with 19 runtime-delivery/shadow/
+  delivery tests, 89 main monitoring-agent tests, compileall, standalone
+  env-v2 `--check-config`, and fake-transport smoke proof that exactly one
+  due item is marked sent. The supervision station pulled, enabled
+  `DELIVERY_AUTOMATION_ENABLED=true`, restarted `MonitoringAgentTest`, and
+  verified audit contract 8: task `Running`, latest heartbeat `healthy`, nine
+  latest observations, zero latest transport failures,
+  `shadow_incidents.delivery_enabled=true`, `outbox_pending_count=0`,
+  `outbox_sent_count=1`, `outbox_dead_letter_count=14`, and update time
+  `2026-08-21T11:08:28.897356+00:00`. The remaining active state is still
+  one `endpoint:system_scheduler` incident; if it later recovers, the first
+  recovery outbox item is expected to be sent automatically to the configured
+  test recipient only.
+  Treat the pulled Git commit hash as the active test-checkout identity; the original
+  0.8.1 ZIP identity remains historical release evidence only until a new
+  bundle is explicitly built.
 - `core/db/connect.py`: SQLAlchemy database connections for PostgreSQL and MSSQL, configured through `python-decouple`.
-- `core/scheduler/job_schedule.py`: single source of truth for APScheduler cron schedules.
+- `core/scheduler/job_schedule.py`: single source of truth for APScheduler cron schedules. As of
+  2026-08-21 the scheduled `daily_job` description is intentionally only
+  `Meteo sync.` because SOFTLINK electric-meter imports are paused until the
+  changed SOFTLINK credentials/login path are resolved.
 - `core/scheduler/scheduler.py`: scheduler execution, locks, metrics, manual run specs, and alert emails.
+  The `daily_job` now uses an independent-step runner so a failing independent
+  step does not prevent later independent steps from running; it raises one
+  aggregate `SchedulerContextError` after attempted steps. The SOFTLINK
+  measurement import and `elektromery_softlink_monitoring_import` are removed
+  from the scheduled and manual scheduler registry until SOFTLINK login is
+  restored. `SOFTLINK_save_to_database_all()` lazy-loads SOFTLINK credentials
+  and import modules only when explicitly called. When SOFTLINK returns, port
+  `SOFTLINK_data_z_dotazu.py` to the more robust saved-session/API-validation
+  pattern used by `SOFTLINK_data_zarizeni.py` before re-adding it.
 - `core/scheduler/metrics.py`: scheduler metrics persistence in `core/scheduler/logs/scheduler_metrics.json`.
 - `core/scheduler/database_availability_state.py`: local SQLite state and
   transition-event persistence for PostgreSQL/MSSQL availability.
+- `local_monitoring_agents/database_availability.py`: first roadmap item-8
+  local data-bearing agent. It reads the scheduler database-availability
+  SQLite store in read-only mode on the main workstation, writes only its own
+  bounded sanitized state under `.local-monitoring-agent-state/`, uses an
+  agent-owned writer lock, and exposes no raw reason text, service labels,
+  SQLite path, SQL, credentials, delivery, provider execution, process
+  control, remediation, or alert replacement.
+- `local_monitoring_agents/scheduler_metrics.py`: second roadmap item-8
+  local data-bearing agent. It reads the local scheduler metrics JSON
+  read-only, interprets naive scheduler timestamps as Europe/Prague local
+  time, writes bounded sanitized agent-owned state under
+  `.local-monitoring-agent-state/`, and exposes only aggregate scheduler/job
+  health without labels, descriptions, raw skipped reasons, logs, file paths,
+  delivery, provider execution, process control, remediation, or alert
+  replacement.
+- `monitoring_agent/incidents.py`: pure monitoring-agent incident rule and
+  lifecycle engine. Rule version 1 consumes normalized observation facts or
+  complete-cycle snapshots, returns sanitized states/transitions, and performs
+  no persistence, delivery, network access, `.env` reads, target mutation, or
+  alert replacement. Persistence/outbox state is implemented separately in
+  `monitoring_agent/incident_store.py`; runtime delivery is implemented only
+  by the separate gated `monitoring_agent/runtime_delivery.py` bridge.
+- `monitoring_agent/incident_store.py`: bounded local monitoring-agent
+  incident state and delivery-intent outbox store. It persists only normalized
+  incident states, sanitized transition records, report references, and outbox
+  retry/dead-letter/claim state in `incident_state.json`. It is not a sender
+  and has no recipients, credentials, message body, network access, delivery
+  authorization, target mutation, or alert replacement capability.
+- `monitoring_agent/interpretation.py`: pure draft-only interpretation
+  contract over confirmed monitoring incidents. It uses supplied report
+  snapshots and an injected provider object only when explicitly enabled in
+  draft mode; it adds no `.env` keys, no provider credentials, no network
+  client, no polling-loop integration, no state writes, no delivery, no
+  process control, and no alert suppression. Disabled, candidate-only, missing
+  provider, provider-failed, invalid, or unsafe output falls back to the
+  deterministic report.
+- `monitoring_agent/shadow_pilot.py`: pure shadow-pilot comparison contract
+  for roadmap item 7. It compares supplied sanitized monitoring-agent and
+  legacy-alert detection/recovery events over one reviewed period, reports
+  matched detections, delays, recoveries, duplicates, false positives, false
+  negatives, and blind spots, and renders a bounded redacted operator summary.
+  It performs no `.env` reads, database inspection, endpoint polling,
+  delivery, interpretation-provider calls, state writes, process control, or
+  alert suppression/replacement.
+- `monitoring_agent/runtime_shadow.py`: runtime shadow-only incident
+  persistence bridge for roadmap item 7. It evaluates the completed polling
+  cycle through the deterministic incident lifecycle, applies it to the
+  bounded local `IncidentStateStore`, prints sanitized aggregate
+  `shadow_incidents`, and supports audit contract 8. It performs no delivery,
+  provider execution, remediation, target mutation, process control, or
+  legacy-alert suppression/replacement.
+- `monitoring_agent/runtime_delivery.py`: opt-in runtime delivery bridge for
+  controlled test email only. It runs after a completed observation cycle only
+  when `DELIVERY_AUTOMATION_ENABLED=true`, reads only approved non-prefixed
+  delivery keys, sends at most one due pending outbox item per cycle to
+  `DELIVERY_TEST_RECIPIENT`, writes only sanitized delivery attempt state
+  through `IncidentStateStore`, and performs no production delivery, provider
+  execution, target mutation, remediation, process control, or legacy-alert
+  replacement.
+- `monitoring_agent/orchestrator.py`: file-only/shadow-only orchestrator v1
+  correlation engine. It consumes only registry-approved sanitized snapshot
+  files, normalizes agent status/freshness/evidence gaps/counts, computes
+  bounded correlation findings, rejects duplicate agent identities, rejects
+  `.env` sources, and performs no live polling, `.env` reads, delivery,
+  provider execution, state mutation, process control, remediation, or alert
+  replacement.
+- `monitoring_agent/orchestrator_cli.py`: operator CLI for the file-only
+  orchestrator proof. `python -m monitoring_agent.orchestrator_cli run`
+  consumes a static registry and sanitized source files and writes bounded JSON
+  and/or Markdown outputs; it does not register tasks or change runtime
+  configuration.
+- `monitoring_agent/orchestrator_export_cli.py`: file-only input preparation
+  helper for the orchestrator. `python -m
+  monitoring_agent.orchestrator_export_cli wrap-remote-audit` reads a supplied
+  sanitized remote `--audit-state` JSON object from a file or stdin, rejects
+  `.env` paths and wrong events, adds `captured_at`, and writes wrapped JSON
+  for `remote_agent_audit_v8`; it does not poll endpoints, read `.env`, send
+  email, mutate state, or control tasks.
 - `moduly/mereni/prediction/storage.py`: shared prediction selected-model
   snapshot ORM/storage for per-medium, per-identifier, per-forecast-period
   model selection.
@@ -191,14 +481,17 @@ At the end of every substantive session:
 - `services/api/services/system_health.py`: sanitized Windows runtime probes
   for boot time, startup task, expected listeners, and temporary listeners.
 - `services/api/routes/monitoring.py`: dedicated authenticated, GET-only
-  monitoring facade with eight strict safe projections for the remote agent.
+  monitoring facade with the eight strict safe Health projections for the
+  remote agent plus item-8 local-agent safe aggregate projections for database
+  availability and scheduler metrics.
 - `services/api/routes/smartfuelpass_excel_import.py`: admin-only raw `.xlsx`
   upload endpoints for SmartFuelPass preview and insert-only import.
 - `services/api/schemas/monitoring.py`: allowlisted response contracts for the
   monitoring facade; unsafe/transient Health fields are excluded before
   network serialization.
 - `services/api/services/monitoring_facade.py`: explicit projectors from the
-  existing Health collectors into the safe monitoring response contracts.
+  existing Health collectors and approved local-agent snapshots into the safe
+  monitoring response contracts.
 - `services/api/services/scheduler_health.py`: shared detailed Scheduler Health
   collector reused by the administrator route and safe monitoring facade.
 - `services/api/routes/map.py`: general map API for layer catalog, features, filter options, and authorized device images.
@@ -274,6 +567,13 @@ At the end of every substantive session:
   hub-and-spoke boundary for the clean remote supervision center, minimal
   distribution bundle, local data-bearing agents, Tailscale facade, packaging,
   installation, self-monitoring, and future-agent onboarding.
+- `agents/plans/monitoring/MONITORING_ORCHESTRATOR_DESIGN.md`: accepted
+  roadmap item 9 architecture baseline for the first supervision-center
+  orchestrator, based on the verified remote observer plus DB-availability
+  and scheduler-metrics local agents. It inventories observed shared
+  contracts, failure isolation, allowed read-only correlation, explicit
+  non-goals, and the next approved file-only/shadow-only CLI scope before any
+  runtime-contract change.
 - `agents/plans/monitoring/MONITORING_AGENT_REPORTING_LAYER_HANDOFF.md`:
   verified deployed 0.7 task/restart baseline, local 0.8 observation-contract
   candidate, audit interpretation rules, safe reporting inputs, and known
@@ -313,6 +613,41 @@ At the end of every substantive session:
   manual or scheduled code integrity baseline/scan runs.
 - `scripts/register_code_integrity_scan_task.ps1`: idempotent helper for
   registering the daily Windows code integrity scheduled task.
+- `scripts/export_monitoring_orchestrator_local_inputs.py`: file-only
+  orchestrator pilot input helper. It exports the two local sanitized
+  monitoring facade aggregates into `artifacts/monitoring/orchestrator/...`,
+  optionally includes a supplied sanitized remote audit JSON, and writes a
+  static orchestrator registry. It does not read `.env`, poll endpoints, send
+  email, mutate application state, or control tasks.
+- `scripts/run_database_availability_local_agent.py`: manual/Task-ready
+  one-shot runner for the first item-8 local data-bearing agent. It reads the
+  local scheduler database-availability SQLite store read-only and writes only
+  bounded sanitized agent-owned state; it does not register itself, send
+  email, read `.env`, or mutate scheduler/application state.
+- `scripts/register_database_availability_local_agent_task.ps1`: explicit
+  operator-run Scheduled Task registrar for the first item-8 local agent. It
+  registers a limited current-user recurring task with `IgnoreNew` and a
+  two-minute execution limit; it does not start, stop, or unregister tasks by
+  itself.
+- `scripts/run_local_monitoring_agents.py`: preferred item-8 shared local
+  one-shot runner for all approved local agents. It runs DB availability and
+  scheduler metrics sequentially, lets each agent keep its own state/lock, and
+  returns only a sanitized aggregate result. Agent-reported `degraded`/`error`
+  status is monitoring evidence, not runner failure; the runner fails only on
+  execution/schema exceptions.
+- `scripts/register_local_monitoring_agents_task.ps1`: preferred item-8
+  Scheduled Task registrar for the shared local runner. It registers a limited
+  current-user recurring task with `IgnoreNew` and a three-minute execution
+  limit; it does not start, stop, or unregister tasks by itself. On
+  2026-08-17 the older DB-only local task was retired and the active local
+  monitoring task became `MonitoringLocalAgents`. Do not re-register the older
+  DB-only task alongside the shared task because that would duplicate
+  DB-availability agent executions.
+- `scripts/run_scheduler_metrics_local_agent.py`: manual one-shot runner for
+  the second item-8 local data-bearing agent. It reads local scheduler metrics
+  JSON read-only and writes only bounded sanitized agent-owned state; it does
+  not register itself, send email, read `.env`, or mutate scheduler/application
+  state.
 - `scripts/run_with_rotating_log.py`: captures API, Streamlit, and Caddy
   stdout/stderr into size-rotated ProgramData logs.
 - `tests/`: pytest suite for scheduler, imports, dashboards, reports, auth/navigation, anomaly handling, and supporting services.
@@ -326,6 +661,9 @@ Current active surfaces:
 - Scheduler process started from `main.py`.
 - FastAPI service from `services/api/main.py`.
 - Streamlit dashboard from `moduly/apps/dashboard/login.py`.
+- Local monitoring Scheduled Task `MonitoringLocalAgents`, registered from
+  `scripts/register_local_monitoring_agents_task.ps1`, running approved local
+  monitoring agents through `scripts/run_local_monitoring_agents.py`.
 
 Experimental or future-facing surface:
 

@@ -1,0 +1,31 @@
+{
+  "agents": [
+    {
+      "agent_key": "database_availability",
+      "agent_kind": "local_facade_agent",
+      "contract_version_max": 1,
+      "contract_version_min": 1,
+      "enabled": true,
+      "location": "main_workstation",
+      "payload_kind": "local_agent_facade_v1",
+      "source_file": "database-availability.json",
+      "stale_after_seconds": 300,
+      "status_mapping_version": 1
+    },
+    {
+      "agent_key": "scheduler_metrics",
+      "agent_kind": "local_facade_agent",
+      "contract_version_max": 1,
+      "contract_version_min": 1,
+      "enabled": true,
+      "location": "main_workstation",
+      "payload_kind": "local_agent_facade_v1",
+      "source_file": "scheduler-metrics.json",
+      "stale_after_seconds": 300,
+      "status_mapping_version": 1
+    }
+  ],
+  "contract_version": 1,
+  "event": "monitoring_orchestrator_registry",
+  "mode": "file_only"
+}

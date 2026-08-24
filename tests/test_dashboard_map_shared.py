@@ -29,6 +29,9 @@ def test_leaflet_map_html_exposes_osm_and_aerial_base_layers():
     assert "sourceMappingURL=leaflet.js.map" not in html
     assert "osmBaseLayer" in html
     assert "aerialBaseLayer" in html
+    assert "emptyBaseLayer" in html
+    assert '"Bez mapy": emptyBaseLayer' in html
+    assert "background: #ffffff" in html
     assert "ORTOFOTO_WM/MapServer/tile/{z}/{y}/{x}" in html
     assert "L.control.layers" in html
 
@@ -137,6 +140,7 @@ def test_leaflet_map_html_uses_configured_layer_style_and_default_visibility():
     html = build_leaflet_map_html(payload)
 
     assert "layerConfig.style" in html
+    assert "leafletLayer.addTo(map);" in html
     assert "layerConfig.default_visible !== false" in html
     assert "layerConfig.map_label_columns" in html
     assert "layerConfig.popup_columns" in html
@@ -149,6 +153,8 @@ def test_leaflet_map_html_binds_configured_map_labels_as_permanent_tooltips():
             {
                 "layer_id": "mistnosti",
                 "title": "Mistnosti",
+                "layer_kind": "device",
+                "style": {"color": "#15803d"},
                 "map_label_columns": ["mistnost"],
                 "popup_columns": ["mistnost_id"],
                 "feature_collection": {
@@ -171,9 +177,17 @@ def test_leaflet_map_html_binds_configured_map_labels_as_permanent_tooltips():
     html = build_leaflet_map_html(payload)
 
     assert "function featureMapLabel" in html
+    assert "function featureLabelColor" in html
+    assert "function featureLabelTooltipOptions" in html
+    assert "function applyFeatureLabelStyle" in html
     assert "leafletLayer.bindTooltip(labelHtml" in html
     assert "permanent: true" in html
+    assert 'direction: isDeviceLayer ? "top" : "center"' in html
+    assert "offset: isDeviceLayer ? [0, -10] : [0, 0]" in html
     assert 'className: "map-feature-label"' in html
+    assert "element.style.color = featureLabelColor(layerId, layerConfig)" in html
+    assert "background: transparent" in html
+    assert "box-shadow: none" in html
     assert "layerConfig.map_label_columns" in html
 
 
@@ -248,6 +262,74 @@ def test_leaflet_map_html_supports_multiple_conditional_feature_styles():
     assert "Array.isArray(conditionalStyle.rules)" in html
     assert "const matchedRule = conditionalRules(conditionalStyle).find" in html
     assert "? (matchedRule.style || matchedRule.match)" in html
+
+
+def test_leaflet_map_html_renders_in_map_filter_control():
+    payload = {
+        "primary_layer_id": "mistnosti",
+        "layers": [
+            {
+                "layer_id": "mistnosti",
+                "title": "Mistnosti",
+                "default_visible": False,
+                "filter_fields": [
+                    {
+                        "key": "budova",
+                        "source_column": "budova",
+                        "property_key": "evidence_budova",
+                        "label": "Budova",
+                        "multiple": True,
+                    }
+                ],
+                "filter_options": {"budova": ["F", "A"]},
+                "feature_collection": {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "Point", "coordinates": [14.1, 50.7]},
+                            "properties": {"evidence_budova": "F"},
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert "map-filter-control" in html
+    assert "map-filter-toggle" in html
+    assert "map-filter-select" in html
+    assert "Vynulovat filtry" in html
+    assert "function layerFilterFields" in html
+    assert "function featureFilterOptions" in html
+    assert "function featurePassesLayerFilters" in html
+    assert "function filteredFeatureCollection" in html
+    assert "function createMapFilterControl" in html
+    assert "function ensureLayerDataLoaded" in html
+    assert "const filterableLayerEntries = () => leafletLayers" in html
+    assert "const visibleEntries = filterableLayerEntries().filter((item) => map.hasLayer(item.layer))" in html
+    assert 'document.createElement("details")' in html
+    assert 'document.createElement("summary")' in html
+    assert "Zapnete vrstvu s filtrem pres ovladani vrstev." in html
+    assert 'map.on("overlayadd overlayremove", renderPanel)' in html
+    assert "const activeLayerFilters = {}" in html
+    assert "item.layer.clearLayers()" in html
+    assert "item.layer.addData(filteredFeatureCollection(item.config))" in html
+    assert "item.loaded || map.hasLayer(item.layer)" in html
+    assert "const isInitiallyVisible = layerConfig.default_visible !== false" in html
+    assert 'isInitiallyVisible ? filteredFeatureCollection(layerConfig) : { type: "FeatureCollection", features: [] }' in html
+    assert "loaded: isInitiallyVisible" in html
+    assert 'map.on("overlayadd", (event) =>' in html
+    assert "ensureLayerDataLoaded(item)" in html
+    assert "filteredFeatureCollection(layerConfig)" in html
+    assert "geoJsonLayerOptions(layerId, layerConfig)" in html
+    assert "layerConfig.default_visible !== false" in html
+    assert "filter_options" in html
+    assert "selectElements" not in html
+    assert "Authorization" not in html
+    assert "Bearer" not in html
 
 
 def test_leaflet_map_html_renders_foto_as_popup_image_only_when_present():

@@ -1019,6 +1019,8 @@ Known hygiene topics to handle only after explicit approval:
   compatibility or historical diagnostics, but it is no longer the active
   dashboard workflow.
 - `Mapove podklady` uses general FastAPI map endpoints and admin-configured metadata in `dashboard.Map_Layers`.
+- `Mapove podklady / Mapa` uses a full-width Streamlit iframe where Leaflet owns base-layer, overlay, location, and visible-layer filter controls. Streamlit prepares the safe catalog, filter-option, and feature payload with bearer authentication; iframe JavaScript receives no bearer token and currently does not call map feature/filter APIs directly.
+- Hidden map overlays are registered empty in Leaflet and lazy-initialize their GeoJSON only after the first `overlayadd`. The in-map filter panel shows only currently visible filterable overlays and groups filters per layer.
 - Map feature images must be resolved server-side from `layer_id` and device identifier; do not expose an endpoint that serves arbitrary client-supplied file paths.
 - Browser map image loading must use same-origin `/api/v1/map/images` through Caddy, which routes `/api/*` to FastAPI and other requests to Streamlit.
 - Map iframe JavaScript must never receive the main API bearer token. The image endpoint authenticates through HttpOnly dashboard cookies; other API routes continue to require bearer authentication.

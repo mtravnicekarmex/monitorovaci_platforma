@@ -22,6 +22,14 @@ Date: 2026-08-21
 
 ## Active handoff
 
+- 2026-08-24 dashboard map UI handoff: `Mapove podklady / Mapa` now uses a
+  full-width Streamlit iframe with Leaflet-owned base-layer, overlay,
+  location, and visible-layer filter controls. The map includes a `Bez mapy`
+  white-base option; hidden overlays lazy-initialize their GeoJSON only when
+  enabled, and the in-map filter panel shows only currently visible
+  filterable layers grouped per layer. Streamlit still prepares the safe
+  catalog/filter-options/features payload with bearer auth; iframe JavaScript
+  receives no bearer token and does not call map feature/filter APIs directly.
 - Active product work: `OPS-002`, the independent read-only scheduler
   monitoring agent.
 - Remote `0.8.1-test` is deployed on the separate supervision center and runs

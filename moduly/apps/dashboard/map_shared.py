@@ -227,6 +227,7 @@ def build_leaflet_map_html(
       height: {int(height_px)}px;
       border: 1px solid #d8dee9;
       border-radius: 14px;
+      background: #ffffff;
       overflow: hidden;
     }}
     .map-badge {{
@@ -258,12 +259,11 @@ def build_leaflet_map_html(
       padding: 3px 0;
     }}
     .map-feature-label {{
-      border: 1px solid rgba(15, 23, 42, 0.20);
-      border-radius: 6px;
-      padding: 2px 6px;
-      color: #0f172a;
-      background: rgba(255, 255, 255, 0.88);
-      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+      border: 0;
+      padding: 0;
+      color: inherit;
+      background: transparent;
+      box-shadow: none;
       font-size: 12px;
       font-weight: 700;
       line-height: 1.15;
@@ -316,6 +316,91 @@ def build_leaflet_map_html(
       color: #991b1b;
       border-color: rgba(185, 28, 28, 0.24);
       background: rgba(254, 242, 242, 0.97);
+    }}
+    .map-filter-control {{
+      min-width: 250px;
+      max-width: min(320px, calc(100vw - 92px));
+      color: #0f172a;
+      background: rgba(255, 255, 255, 0.97);
+      border: 1px solid rgba(15, 23, 42, 0.16);
+      border-radius: 6px;
+      box-shadow: 0 8px 22px rgba(15, 23, 42, 0.16);
+      overflow: hidden;
+      font-size: 12px;
+    }}
+    .map-filter-toggle {{
+      display: flex;
+      width: 100%;
+      align-items: center;
+      justify-content: space-between;
+      border: 0;
+      padding: 8px 10px;
+      color: #0f172a;
+      background: #ffffff;
+      font: inherit;
+      font-weight: 700;
+      text-align: left;
+      cursor: pointer;
+    }}
+    .map-filter-panel {{
+      display: none;
+      max-height: min(520px, calc(100vh - 150px));
+      overflow-y: auto;
+      padding: 8px 10px 10px;
+      border-top: 1px solid rgba(15, 23, 42, 0.12);
+    }}
+    .map-filter-control.is-open .map-filter-panel {{
+      display: block;
+    }}
+    .map-filter-layer {{
+      padding: 8px 0;
+      border-top: 1px solid rgba(15, 23, 42, 0.10);
+    }}
+    .map-filter-layer:first-child {{
+      border-top: 0;
+      padding-top: 0;
+    }}
+    .map-filter-layer-title {{
+      margin-bottom: 6px;
+      font-weight: 700;
+      cursor: pointer;
+    }}
+    .map-filter-field {{
+      display: block;
+      margin-top: 8px;
+    }}
+    .map-filter-label {{
+      display: block;
+      margin-bottom: 4px;
+      color: #475569;
+      font-weight: 600;
+    }}
+    .map-filter-select {{
+      width: 100%;
+      min-height: 58px;
+      box-sizing: border-box;
+      border: 1px solid rgba(15, 23, 42, 0.18);
+      border-radius: 6px;
+      padding: 4px;
+      color: #0f172a;
+      background: #ffffff;
+      font: inherit;
+    }}
+    .map-filter-reset {{
+      width: 100%;
+      margin-top: 8px;
+      border: 1px solid rgba(15, 23, 42, 0.18);
+      border-radius: 6px;
+      padding: 6px 8px;
+      color: #0f172a;
+      background: #f8fafc;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }}
+    .map-filter-empty {{
+      color: #64748b;
+      line-height: 1.35;
     }}
     .map-popup-photo {{
       display: block;
@@ -416,6 +501,9 @@ def build_leaflet_map_html(
         max-width: calc(100vw - 80px);
         max-height: 44vh;
         overflow-y: auto;
+      }}
+      .map-filter-control {{
+        max-width: calc(100vw - 80px);
       }}
       .leaflet-popup-content {{
         width: auto !important;
@@ -701,6 +789,33 @@ def build_leaflet_map_html(
         .join("<br>");
     }}
 
+    function featureLabelColor(layerId, layerConfig) {{
+      const style = layerStyle(layerId, layerConfig);
+      const color = String(style.color || style.fillColor || "").trim();
+      return color || "#0f172a";
+    }}
+
+    function featureLabelTooltipOptions(layerConfig) {{
+      const isDeviceLayer = String(layerConfig.layer_kind || "").toLowerCase() === "device";
+      return {{
+        permanent: true,
+        direction: isDeviceLayer ? "top" : "center",
+        offset: isDeviceLayer ? [0, -10] : [0, 0],
+        className: "map-feature-label",
+        opacity: 1
+      }};
+    }}
+
+    function applyFeatureLabelStyle(tooltip, layerId, layerConfig) {{
+      const element = tooltip && typeof tooltip.getElement === "function"
+        ? tooltip.getElement()
+        : null;
+      if (!element) {{
+        return;
+      }}
+      element.style.color = featureLabelColor(layerId, layerConfig);
+    }}
+
     function defaultLayerStyle(layerId) {{
       if (layerId === "budovy") {{
         return {{
@@ -843,6 +958,281 @@ def build_leaflet_map_html(
       }};
     }}
 
+    function layerFeatureCollection(layerConfig) {{
+      const featureCollection = layerConfig.feature_collection || {{ type: "FeatureCollection", features: [] }};
+      const features = Array.isArray(featureCollection.features) ? featureCollection.features : [];
+      return {{
+        ...featureCollection,
+        features
+      }};
+    }}
+
+    function layerFilterFields(layerConfig) {{
+      if (Array.isArray(layerConfig.filter_fields) && layerConfig.filter_fields.length) {{
+        return layerConfig.filter_fields
+          .filter((field) => field && typeof field === "object" && field.key)
+          .map((field) => ({{
+            key: String(field.key),
+            property_key: String(field.property_key || field.key),
+            label: String(field.label || field.property_key || field.key)
+          }}));
+      }}
+      const filterColumns = Array.isArray(layerConfig.filter_columns) ? layerConfig.filter_columns : [];
+      return filterColumns
+        .filter((column) => String(column).trim())
+        .map((column) => ({{
+          key: String(column),
+          property_key: String(column),
+          label: String(column)
+        }}));
+    }}
+
+    function uniqueSortedValues(values) {{
+      return Array.from(
+        new Set(
+          values
+            .map((value) => String(value).trim())
+            .filter((value) => value)
+        )
+      ).sort((left, right) => left.localeCompare(right, "cs", {{ sensitivity: "base" }}));
+    }}
+
+    function featureFilterValue(feature, field) {{
+      const properties = (feature && feature.properties) || {{}};
+      const propertyKey = String(field.property_key || field.key || "");
+      const filterKey = String(field.key || propertyKey);
+      let value = properties[propertyKey];
+      if (isEmptyValue(value)) {{
+        value = properties[filterKey];
+      }}
+      return value;
+    }}
+
+    function featureFilterOptions(layerConfig, field) {{
+      const filterOptions = layerConfig.filter_options && typeof layerConfig.filter_options === "object"
+        ? layerConfig.filter_options
+        : {{}};
+      const configuredOptions = Array.isArray(filterOptions[field.key]) ? filterOptions[field.key] : [];
+      if (configuredOptions.length) {{
+        return uniqueSortedValues(configuredOptions);
+      }}
+      const featureCollection = layerFeatureCollection(layerConfig);
+      return uniqueSortedValues(
+        featureCollection.features
+          .map((feature) => featureFilterValue(feature, field))
+          .filter((value) => !isEmptyValue(value))
+      );
+    }}
+
+    const activeLayerFilters = {{}};
+
+    function selectedLayerFilterValues(layerId, filterKey) {{
+      const layerFilters = activeLayerFilters[layerId] || {{}};
+      const values = Array.isArray(layerFilters[filterKey]) ? layerFilters[filterKey] : [];
+      return values.map((value) => String(value));
+    }}
+
+    function setLayerFilterValues(layerId, filterKey, values) {{
+      if (!activeLayerFilters[layerId]) {{
+        activeLayerFilters[layerId] = {{}};
+      }}
+      const cleanedValues = uniqueSortedValues(values);
+      if (cleanedValues.length) {{
+        activeLayerFilters[layerId][filterKey] = cleanedValues;
+      }} else {{
+        delete activeLayerFilters[layerId][filterKey];
+      }}
+      if (!Object.keys(activeLayerFilters[layerId]).length) {{
+        delete activeLayerFilters[layerId];
+      }}
+    }}
+
+    function featurePassesLayerFilters(feature, layerConfig) {{
+      const layerId = String(layerConfig.layer_id || "layer");
+      return layerFilterFields(layerConfig).every((field) => {{
+        const selectedValues = selectedLayerFilterValues(layerId, field.key);
+        if (!selectedValues.length) {{
+          return true;
+        }}
+        const value = featureFilterValue(feature, field);
+        if (isEmptyValue(value)) {{
+          return false;
+        }}
+        const normalizedValue = String(value);
+        return selectedValues.some((selectedValue) => String(selectedValue) === normalizedValue);
+      }});
+    }}
+
+    function filteredFeatureCollection(layerConfig) {{
+      const featureCollection = layerFeatureCollection(layerConfig);
+      return {{
+        ...featureCollection,
+        features: featureCollection.features.filter((feature) => featurePassesLayerFilters(feature, layerConfig))
+      }};
+    }}
+
+    function geoJsonLayerOptions(layerId, layerConfig) {{
+      return {{
+        pointToLayer: (feature, latlng) => L.circleMarker(latlng, markerStyle(feature, layerId, layerConfig)),
+        style: (feature) => featureStyle(feature, layerId, layerConfig),
+        onEachFeature: (feature, leafletLayer) => {{
+          const labelHtml = featureMapLabel(feature, layerConfig);
+          if (labelHtml) {{
+            leafletLayer.bindTooltip(labelHtml, featureLabelTooltipOptions(layerConfig));
+            leafletLayer.on("tooltipopen", (event) => applyFeatureLabelStyle(event.tooltip, layerId, layerConfig));
+          }}
+          leafletLayer.bindPopup(popupHtml(feature.properties || {{}}, layerId, layerConfig));
+          leafletLayer.on("popupopen", (event) => loadPopupPhotos(event.popup.getElement()));
+          leafletLayer.on("popupclose", (event) => cleanupPopupPhotos(event.popup.getElement()));
+        }}
+      }};
+    }}
+
+    function applyLayerFilters() {{
+      leafletLayers.forEach((item) => {{
+        if (item.loaded || map.hasLayer(item.layer)) {{
+          item.layer.clearLayers();
+          item.layer.addData(filteredFeatureCollection(item.config));
+          item.loaded = true;
+        }}
+      }});
+    }}
+
+    function ensureLayerDataLoaded(item) {{
+      if (!item || item.loaded) {{
+        return;
+      }}
+      item.layer.clearLayers();
+      item.layer.addData(filteredFeatureCollection(item.config));
+      item.loaded = true;
+    }}
+
+    function createMapFilterControl() {{
+      const filterableLayerEntries = () => leafletLayers
+        .map((item) => {{
+          const layerConfig = item.config;
+          const fields = layerFilterFields(layerConfig)
+            .map((field) => ({{
+              ...field,
+              options: featureFilterOptions(layerConfig, field)
+            }}))
+            .filter((field) => field.options.length);
+          return {{ ...item, layerConfig, fields }};
+        }})
+        .filter((item) => item.fields.length);
+
+      if (!filterableLayerEntries().length) {{
+        return null;
+      }}
+
+      const control = L.control({{ position: "topright" }});
+      control.onAdd = () => {{
+        const container = L.DomUtil.create("div", "leaflet-control map-filter-control");
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "map-filter-toggle";
+        toggle.setAttribute("aria-expanded", "false");
+        toggle.textContent = "Filtry";
+
+        const panel = document.createElement("div");
+        panel.className = "map-filter-panel";
+
+        const renderPanel = () => {{
+          while (panel.firstChild) {{
+            panel.removeChild(panel.firstChild);
+          }}
+
+          const visibleEntries = filterableLayerEntries().filter((item) => map.hasLayer(item.layer));
+          if (!visibleEntries.length) {{
+            const emptyElement = document.createElement("div");
+            emptyElement.className = "map-filter-empty";
+            emptyElement.textContent = "Zapnete vrstvu s filtrem pres ovladani vrstev.";
+            panel.appendChild(emptyElement);
+            return;
+          }}
+
+          visibleEntries.forEach((item) => {{
+          const layerId = String(item.layerConfig.layer_id || "layer");
+          const layerTitle = String(item.layerConfig.title || layerId);
+          const layerElement = document.createElement("details");
+          layerElement.className = "map-filter-layer";
+          layerElement.open = visibleEntries.length === 1;
+
+          const titleElement = document.createElement("summary");
+          titleElement.className = "map-filter-layer-title";
+          titleElement.textContent = layerTitle;
+          layerElement.appendChild(titleElement);
+
+          item.fields.forEach((field) => {{
+            const fieldElement = document.createElement("label");
+            fieldElement.className = "map-filter-field";
+
+            const labelElement = document.createElement("span");
+            labelElement.className = "map-filter-label";
+            labelElement.textContent = field.label;
+            fieldElement.appendChild(labelElement);
+
+            const selectElement = document.createElement("select");
+            selectElement.className = "map-filter-select";
+            selectElement.multiple = true;
+            selectElement.size = Math.min(6, Math.max(2, field.options.length));
+
+            field.options.forEach((optionValue) => {{
+              const optionElement = document.createElement("option");
+              optionElement.value = optionValue;
+              optionElement.textContent = optionValue;
+              selectElement.appendChild(optionElement);
+            }});
+
+            selectElement.addEventListener("change", () => {{
+              setLayerFilterValues(
+                layerId,
+                field.key,
+                Array.from(selectElement.selectedOptions).map((option) => option.value)
+              );
+              applyLayerFilters();
+            }});
+
+            const selectedValues = new Set(selectedLayerFilterValues(layerId, field.key));
+            Array.from(selectElement.options).forEach((optionElement) => {{
+              optionElement.selected = selectedValues.has(optionElement.value);
+            }});
+
+            fieldElement.appendChild(selectElement);
+            layerElement.appendChild(fieldElement);
+          }});
+
+          panel.appendChild(layerElement);
+          }});
+
+          const resetButton = document.createElement("button");
+          resetButton.type = "button";
+          resetButton.className = "map-filter-reset";
+          resetButton.textContent = "Vynulovat filtry";
+          resetButton.addEventListener("click", () => {{
+            Object.keys(activeLayerFilters).forEach((layerId) => delete activeLayerFilters[layerId]);
+            renderPanel();
+            applyLayerFilters();
+          }});
+          panel.appendChild(resetButton);
+        }};
+
+        toggle.addEventListener("click", () => {{
+          const isOpen = container.classList.toggle("is-open");
+          toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+        }});
+
+        container.appendChild(toggle);
+        container.appendChild(panel);
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.disableScrollPropagation(container);
+        renderPanel();
+        map.on("overlayadd overlayremove", renderPanel);
+        return container;
+      }};
+      return control;
+    }}
+
     const mapPayload = decodePayload(encodedPayload);
     const map = L.map("map", {{ center: [50.77, 14.23], zoom: 17, maxZoom: 22 }});
     const osmBaseLayer = L.tileLayer("https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
@@ -856,6 +1246,8 @@ def build_leaflet_map_html(
       attribution: "&copy; ČÚZK"
     }});
 
+    const emptyBaseLayer = L.layerGroup();
+
     const overlayLayers = {{}};
     const leafletLayers = [];
     let currentLocationMarker = null;
@@ -865,41 +1257,41 @@ def build_leaflet_map_html(
     layers.forEach((layerConfig) => {{
       const layerId = String(layerConfig.layer_id || "layer");
       const title = String(layerConfig.title || layerId);
-      const featureCollection = layerConfig.feature_collection || {{ type: "FeatureCollection", features: [] }};
-      const leafletLayer = L.geoJSON(featureCollection, {{
-      pointToLayer: (feature, latlng) => L.circleMarker(latlng, markerStyle(feature, layerId, layerConfig)),
-      style: (feature) => featureStyle(feature, layerId, layerConfig),
-      onEachFeature: (feature, leafletLayer) => {{
-        const labelHtml = featureMapLabel(feature, layerConfig);
-        if (labelHtml) {{
-          leafletLayer.bindTooltip(labelHtml, {{
-            permanent: true,
-            direction: "center",
-            className: "map-feature-label",
-            opacity: 1
-          }});
-        }}
-        leafletLayer.bindPopup(popupHtml(feature.properties || {{}}, layerId, layerConfig));
-        leafletLayer.on("popupopen", (event) => loadPopupPhotos(event.popup.getElement()));
-        leafletLayer.on("popupclose", (event) => cleanupPopupPhotos(event.popup.getElement()));
-      }}
-      }});
-      if (layerConfig.default_visible !== false) {{
+      const isInitiallyVisible = layerConfig.default_visible !== false;
+      const leafletLayer = L.geoJSON(
+        isInitiallyVisible ? filteredFeatureCollection(layerConfig) : {{ type: "FeatureCollection", features: [] }},
+        geoJsonLayerOptions(layerId, layerConfig)
+      );
+      if (isInitiallyVisible) {{
         leafletLayer.addTo(map);
       }}
       overlayLayers[title] = leafletLayer;
-      leafletLayers.push({{ id: layerId, layer: leafletLayer }});
+      leafletLayers.push({{
+        id: layerId,
+        layer: leafletLayer,
+        config: layerConfig,
+        loaded: isInitiallyVisible
+      }});
     }});
 
     const compactMapControls = window.matchMedia("(max-width: 720px)").matches;
     L.control.layers(
       {{
         "Zakladni mapa": osmBaseLayer,
-        "Letecka mapa (CUZK)": aerialBaseLayer
+        "Letecka mapa (CUZK)": aerialBaseLayer,
+        "Bez mapy": emptyBaseLayer
       }},
       overlayLayers,
       {{ collapsed: compactMapControls, position: "topright" }}
     ).addTo(map);
+    map.on("overlayadd", (event) => {{
+      const item = leafletLayers.find((entry) => entry.layer === event.layer);
+      ensureLayerDataLoaded(item);
+    }});
+    const filterControl = createMapFilterControl();
+    if (filterControl) {{
+      filterControl.addTo(map);
+    }}
 
     function showLocationStatus(message, isError = false) {{
       if (locationStatusTimer) {{
@@ -986,7 +1378,9 @@ def build_leaflet_map_html(
     }});
 
     try {{
-      const primaryLayer = leafletLayers.find((item) => item.id === primaryLayerId)?.layer || leafletLayers[0]?.layer;
+      const primaryLayer = leafletLayers.find((item) => item.id === primaryLayerId && item.loaded)?.layer
+        || leafletLayers.find((item) => item.loaded)?.layer
+        || leafletLayers[0]?.layer;
       const bounds = primaryLayer ? primaryLayer.getBounds() : null;
       if (bounds && bounds.isValid()) {{
         map.fitBounds(bounds, {{ padding: [24, 24], maxZoom: 20 }});

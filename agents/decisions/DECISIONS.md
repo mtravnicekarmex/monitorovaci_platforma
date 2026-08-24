@@ -4592,3 +4592,38 @@ Consequences:
   `outbox_sent_count=1`, and `outbox_dead_letter_count=14`; any later
   increase in sent count should be correlated with the incident/action that
   produced it.
+
+## DEC-149: Move dashboard map controls into Leaflet while keeping token boundary
+
+Date: 2026-08-24
+
+Status: Accepted
+
+Decision:
+
+- `Mapove podklady / Mapa` should use a full-width Streamlit iframe where the
+  remaining page area is occupied by the map.
+- Base-map, overlay, location, and filter controls belong inside the Leaflet
+  map. The base-map selector includes `Bez mapy`, which renders overlays on a
+  white background.
+- Filters are displayed only for currently visible filterable overlays and are
+  grouped per layer, so unrelated layer filters are not mixed in one global
+  Streamlit panel.
+- Hidden overlays are registered in Leaflet with empty GeoJSON and
+  lazy-initialize their feature data only on first `overlayadd`.
+- Streamlit continues to prepare the safe catalog, filter-option, and feature
+  payload through authenticated backend calls. The generated iframe JavaScript
+  must not receive the main API bearer token and must not directly call the
+  protected map feature/filter APIs.
+
+Consequences:
+
+- The map can use almost all dashboard content area while the sidebar remains
+  available; when the Streamlit sidebar is collapsed, the map naturally gets
+  the freed horizontal space.
+- The browser does less Leaflet work for disabled overlays, but the current
+  safe-auth design still prepares accessible layer payloads on the Streamlit
+  backend before iframe rendering.
+- True browser-side lazy loading through map data APIs would require a
+  separate cookie-authenticated API design decision. Do not add the bearer
+  token to iframe JavaScript to implement it.

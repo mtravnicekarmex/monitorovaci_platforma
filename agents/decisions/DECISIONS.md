@@ -4609,6 +4609,9 @@ Decision:
 - Filters are displayed only for currently visible filterable overlays and are
   grouped per layer, so unrelated layer filters are not mixed in one global
   Streamlit panel.
+- The expanded Leaflet layers panel keeps its natural content width. The
+  in-map filter panel measures that width and applies it to `Filtry`, so
+  alignment does not make the main layer panel wider.
 - Hidden overlays are registered in Leaflet with empty GeoJSON and
   lazy-initialize their feature data only on first `overlayadd`.
 - Streamlit continues to prepare the safe catalog, filter-option, and feature
@@ -4627,3 +4630,114 @@ Consequences:
 - True browser-side lazy loading through map data APIs would require a
   separate cookie-authenticated API design decision. Do not add the bearer
   token to iframe JavaScript to implement it.
+
+## DEC-150: Support compound conditional styling for dashboard map layers
+
+Date: 2026-08-24
+
+Status: Accepted
+
+Decision:
+
+- Dashboard map-layer `style.conditionalStyle` supports compound conditions
+  for style rules.
+- Existing simple conditions using `property`, `operator`, and `value` remain
+  valid and require no migration.
+- A style rule may use `all: [...]` for AND logic or `any: [...]` for OR
+  logic. Nested items use the same condition shape as simple rules.
+- Conditional style rules are evaluated in configured order; the first
+  matching rule supplies the style override. `fallback` behavior remains
+  unchanged.
+- The `Mapove vrstvy` admin editor exposes three rule modes: one condition,
+  all conditions (AND), and at least one condition (OR).
+- Backend and admin save logic must recurse through `all` and `any` when
+  collecting conditional-style property names, so every referenced source
+  column is included in GeoJSON properties and validated against the source
+  table.
+
+Consequences:
+
+- A rule such as `teplota = 'studena' AND stav_prutoku = 'tece'` can be
+  represented directly in map-layer configuration without adding a helper SQL
+  column or view just for styling.
+- This changes styling only. Map filter semantics remain separate: multiple
+  active filter fields still behave as AND, and multiple selected values
+  within one field behave as OR.
+- No database schema migration is required because the style remains JSON in
+  `dashboard.Map_Layers.style`.
+- Do not implement this by injecting custom JavaScript or exposing the main
+  API bearer token to the map iframe.
+
+## DEC-151: Dashboard map fills the viewport while preserving sidebar controls
+
+Date: 2026-08-24
+
+Status: Accepted
+
+Decision:
+
+- `Mapove podklady / Mapa` should use the full available browser area for the
+  map: no top white gutter, no right page margin, and no bottom page margin.
+- A collapsed-sidebar left gutter is allowed only to the width needed for the
+  sidebar-open arrow. The current page CSS uses
+  `--map-sidebar-toggle-gutter: 2.5rem` only when `stExpandSidebarButton` is
+  present; otherwise left padding remains zero.
+- Width still follows the Streamlit sidebar state. With the sidebar expanded,
+  the map uses the remaining content area; with the sidebar collapsed, the map
+  expands across the freed horizontal space.
+- Height follows the browser viewport. The Streamlit iframe and inner Leaflet
+  map use dynamic viewport-height CSS with fallbacks plus explicit Leaflet
+  resize invalidation.
+- The Streamlit header must not be hidden with `display:none` on this page.
+  It remains transparent, fixed, zero-height, overflow-visible, and
+  pointer-event pass-through so the Streamlit sidebar open/collapse controls
+  can stay visible and clickable above the map.
+- The collapsed-sidebar open control is intentionally fixed near the upper
+  left corner above the Leaflet iframe. In Streamlit 1.57 this control is
+  `stExpandSidebarButton` inside `stToolbar`, so `stToolbar` must remain
+  transparent/overflow-visible rather than `display:none`.
+
+Consequences:
+
+- Do not restore a visible Streamlit header or extra page padding merely to
+  recover the sidebar arrows; keep the zero-height transparent header approach
+  and fix the exact sidebar-control selector if Streamlit changes it.
+- Browser verification for this page must include both sidebar states:
+  expanded and collapsed.
+- This is a layout/UI decision only. It does not change map authentication,
+  FastAPI route authorization, the iframe bearer-token boundary, database
+  schema, or map-layer JSON semantics.
+
+## DEC-152: Revision renewal preserves history through an explicit replacement link
+
+Date: 2026-08-24
+
+Status: Accepted
+
+Decision:
+
+- `Prehled / Revize` renewal uses history-preserving replacement, not an
+  in-place overwrite.
+- The `revize.revize` table owns nullable
+  `nahrazena_revizi_id`, pointing from an older revision row to the newer row
+  that replaced it.
+- `Obnovit revizi` calls a dedicated admin API operation:
+  `POST /api/v1/admin/revize/{revize_id}/renew`.
+- The renew operation runs as one transaction: validate payload and linked
+  devices, create the new revision, write its device links, and mark the
+  source revision as replaced by the new ID.
+- The normal dashboard overview filters to current rows by default. Replaced
+  historical rows are still available through an explicit record-scope filter
+  and show status `Nahrazené`.
+- Schema deployment is a separate PostgreSQL step using
+  `scripts/postgres_revize_replacement_link.sql`.
+
+Consequences:
+
+- A renewed expired revision no longer remains in the default overview as
+  `Po platnosti`; it is classified as replaced and hidden from the current
+  list.
+- Revision history is retained for audit and later review.
+- Replaced rows should not be renewed again; renew from the current row only.
+- Code that reads or writes the replacement link requires the database column
+  to exist before runtime testing or production deployment.

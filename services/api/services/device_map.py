@@ -323,7 +323,7 @@ def _build_layer_statement(
     selected_column_names = tuple(
         dict.fromkeys(
             column
-            for column in (*internal_columns, *config.property_columns)
+            for column in (*internal_columns, *config.property_columns, *config.filter_columns)
             if column in available_columns
         )
     )

@@ -22,6 +22,165 @@ Date: 2026-08-21
 
 ## Active handoff
 
+### 2026-08-24 - Dashboard Revize renewal replacement link
+
+- Source state: `Prehled / Revize` now implements the approved
+  history-preserving renewal flow. `Obnovit revizi` calls
+  `POST /api/v1/admin/revize/{revize_id}/renew`; the backend creates the new
+  revision row, writes its linked-device rows, and sets
+  `revize.revize.nahrazena_revizi_id` on the source row in one transaction.
+- UI behavior: the overview defaults to current records only. Historical
+  replaced rows can be shown through the sidebar record-scope filter and are
+  classified as `Nahrazené`, not `Po platnosti`. Replaced rows cannot be
+  renewed again from the dashboard.
+- Schema step: apply `scripts/postgres_revize_replacement_link.sql` to
+  PostgreSQL before runtime testing/deployment of this source, because the
+  SQLAlchemy model and overview query read the new column.
+- Changed local source for this task:
+  `moduly/evidence/revize/database/models.py`,
+  `services/api/services/revize_admin.py`,
+  `services/api/routes/admin.py`,
+  `moduly/apps/dashboard/api_client.py`,
+  `moduly/apps/dashboard/revize_shared.py`,
+  `moduly/apps/dashboard/pages/28_revize.py`,
+  `tests/test_dashboard_revize_shared.py`,
+  `tests/test_dashboard_admin_write_api_client.py`,
+  `tests/test_api_authorization_regression.py`, and
+  `scripts/postgres_revize_replacement_link.sql`.
+- Verification: targeted revize/API/auth tests returned `255 passed`.
+  `git diff --check` returned no whitespace errors, only existing LF/CRLF
+  normalization warnings.
+- Not done: the PostgreSQL migration script was prepared but not executed;
+  no production data was changed.
+
+### 2026-08-24 10:29 +02:00 - Pre-restart handoff: dashboard map WIP
+
+- Reason for restart: user plans a workstation restart after iterative
+  testing of the `Mapove podklady / Mapa` page layout and sidebar behavior.
+- Current conversation state: the map edges now match the intended browser
+  edges on the top, right, and bottom. The latest source change fixes the
+  missing Streamlit sidebar arrows by keeping the header transparent/fixed and
+  zero-height instead of `display:none`, and by fixing the collapsed-sidebar
+  open control above the Leaflet iframe.
+- Follow-up after restart: the first sidebar-arrow CSS still hid the open
+  arrow because both project `.venv` and `.venv-production` use Streamlit
+  1.57, which renders the collapsed-sidebar open control as
+  `stExpandSidebarButton` inside `stToolbar`. The source now keeps
+  `stToolbar` transparent, zero-height, and overflow-visible instead of
+  hiding it, and fixes `stExpandSidebarButton` above the Leaflet iframe.
+- Follow-up layout adjustment: after the arrow became visible, the collapsed
+  sidebar state still left an unnecessarily wide white strip on the left. The
+  source now sets normal map left padding to zero and applies only
+  `--map-sidebar-toggle-gutter: 2.5rem` when `stExpandSidebarButton` is
+  present; the arrow itself is fixed at `left: 0.25rem`.
+- Follow-up Leaflet control adjustment: the first width alignment made both
+  controls use the former wider `Filtry` width. The source now leaves the
+  expanded Leaflet layer control at its natural content width, measures that
+  width after rendering, and applies it only to `Filtry` through
+  `--map-filter-panel-width`.
+- Completed local source scope:
+  - `Bez mapy` base layer renders overlays on a white background.
+  - Leaflet owns base-layer, overlay, location, and visible-layer filter
+    controls inside the map.
+  - Hidden overlays lazy-initialize their GeoJSON on first `overlayadd`.
+  - The in-map filter panel shows only currently visible filterable overlays
+    and groups filters per layer.
+  - Map-layer `style.conditionalStyle` supports old single conditions plus
+    compound `all`/`any` rules; the `Mapove vrstvy` admin page can edit those
+    modes.
+  - GeoJSON property collection now includes conditional-style and configured
+    filter columns needed by Leaflet, including boolean/string normalization
+    fixes validated against `vodovodni_potrubi` and `vodovodni_uzly` use
+    cases.
+  - The Streamlit map page removes page padding, sizes the iframe and Leaflet
+    map to the viewport height, and preserves sidebar controls above the map.
+- Pending after restart/follow-up: browser-test the latest
+  `stExpandSidebarButton` fix in both sidebar states. The expected collapsed
+  left white gutter is now only about `2.5rem`, just enough for the sidebar
+  open arrow. If the arrow still disappears after collapsing the sidebar,
+  inspect whether the running production Streamlit frontend differs from
+  local Streamlit 1.57 and adjust only the selector/positioning CSS. If the
+  `Filtry` panel width still does not match the main layer panel, inspect the
+  measurement feeding `--map-filter-panel-width` in `map_shared.py`; do not
+  force the main Leaflet layer panel wider.
+- Changed/uncommitted files at this handoff:
+  `AGENTS.md`, `agents/decisions/DECISIONS.md`,
+  `agents/history/SESSION_NOTES.md`,
+  `moduly/apps/dashboard/map_shared.py`,
+  `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`,
+  `moduly/apps/dashboard/pages/36_mapove_podklady.py`,
+  `services/api/services/device_map.py`,
+  `services/api/services/map_layers.py`,
+  `tests/test_dashboard_map_page_layout.py`,
+  `tests/test_dashboard_map_shared.py`, `tests/test_device_map_service.py`,
+  `tests/test_map_layers_service.py`, and new
+  `tests/test_dashboard_map_layers_admin.py`.
+- Verification already run before restart:
+  - `python -m pytest tests\test_dashboard_map_page_layout.py -q` returned
+    `2 passed`.
+  - The focused map regression set
+    `tests\test_map_routes.py`, `tests\test_map_layers_service.py`,
+    `tests\test_dashboard_map_shared.py`,
+    `tests\test_dashboard_map_page_layout.py`,
+    `tests\test_dashboard_map_layers_admin.py`,
+    `tests\test_dashboard_navigation_config.py`,
+    `tests\test_device_map_service.py`, and
+    `tests\test_dashboard_responsive.py` returned `102 passed`.
+  - AST syntax parsing for the touched map page/test passed.
+  - `git diff --check` returned no whitespace errors, only expected LF/CRLF
+    normalization warnings.
+  - PyCharm lint on the map page reported only pre-existing weak/type
+    warnings around `_layer_id`, `_request_header`, and
+    `catalog_layer.get("filter_fields", [])`; no new CSS/layout warning was
+    introduced.
+- Deployment/runtime state: these changes are local working-tree source and
+  are not committed yet. No database migration, production data write,
+  credential change, cookie/token print, Caddy config change, or map bearer
+  token exposure was made. The iframe JavaScript still receives no main API
+  bearer token.
+- Expected local post-restart runtime:
+  - the startup Scheduled Task runs `start_api_dashboard.bat`;
+  - FastAPI listens on `127.0.0.1:8000`;
+  - Streamlit listens on `127.0.0.1:8001`;
+  - the scheduler starts from `main.py`;
+  - Caddy listens publicly on ports `80` and `443` and keeps its admin API on
+    `127.0.0.1:2019`;
+  - the local shared monitoring task `MonitoringLocalAgents` should continue
+    on its five-minute schedule;
+  - the separate supervision-center `MonitoringAgentTest` is not part of the
+    local workstation restart, but later local health evidence can be
+    correlated with its safe `--audit-state` output if needed.
+- Post-restart verification checklist:
+  1. Confirm expected listeners for `8000`, `8001`, `80`, `443`, and `2019`
+     and confirm the scheduler process is running.
+  2. Open `Health systemu` as an admin and verify API, Streamlit dashboard,
+     scheduler, Caddy, startup task, expected listeners, and temporary
+     listeners show safe/expected statuses.
+  3. Verify dashboard routing through local Caddy TLS/SNI and with a real
+     external client for `https://monitoring.armexholding.cz`; an on-host
+     public-hostname timeout alone is not an outage on this multi-homed
+     workstation.
+  4. Log in through the normal dashboard flow and verify the authenticated
+     session works after a browser refresh.
+  5. Open `Mapove podklady / Mapa` and verify no top white gutter, no right
+     margin, and no bottom margin.
+  6. Test sidebar expanded and collapsed: the collapse/open arrows must stay
+     visible and clickable, and the map must resize to the available width.
+  7. Test map controls: `Bez mapy`, base-map switching, overlays,
+     per-visible-layer filters, geolocation button, popups/photos where
+     available, and repeated browser resize/sidebar toggles.
+  8. Recheck the specific regression cases: `vodovodni_potrubi` filter
+     `páteřní rozvod=True` must not hide all matching segments, and
+     `vodovodni_uzly` filters `budova`/`patro` must not hide all matching
+     nodes.
+
+- 2026-08-24 dashboard map conditional-style handoff: map-layer
+  `style.conditionalStyle` now supports compound rule conditions with `all`
+  for AND and `any` for OR, while keeping old single
+  `property`/`operator`/`value` rules valid. `Mapove vrstvy` admin can edit
+  one-condition, AND, and OR style rules. Server and admin property-column
+  collection recurse through compound conditions so referenced columns are
+  automatically included in GeoJSON properties.
 - 2026-08-24 dashboard map UI handoff: `Mapove podklady / Mapa` now uses a
   full-width Streamlit iframe with Leaflet-owned base-layer, overlay,
   location, and visible-layer filter controls. The map includes a `Bez mapy`

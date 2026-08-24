@@ -36,6 +36,32 @@ def test_leaflet_map_html_exposes_osm_and_aerial_base_layers():
     assert "L.control.layers" in html
 
 
+def test_leaflet_map_html_can_fill_parent_height():
+    payload = {
+        "primary_layer_id": "vodomery",
+        "layers": [
+            {
+                "layer_id": "vodomery",
+                "title": "Vodomery",
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            }
+        ],
+    }
+
+    html = build_leaflet_map_html(payload, height_px=920, fill_parent_height=True)
+
+    assert "overflow: hidden" in html
+    assert "height: 100vh" in html
+    assert "height: 100dvh" in html
+    assert "box-sizing: border-box" in html
+    assert "height: 920px" not in html
+    assert "function invalidateMapSize" in html
+    assert "new ResizeObserver(() => invalidateMapSize())" in html
+    assert 'resizeObserver.observe(document.getElementById("map"))' in html
+    assert 'window.addEventListener("resize", invalidateMapSize)' in html
+    assert "[0, 100, 300, 800].forEach" in html
+
+
 def test_leaflet_map_html_exposes_budovy_overlay_layer():
     payload = {
         "primary_layer_id": "vodomery",
@@ -264,6 +290,57 @@ def test_leaflet_map_html_supports_multiple_conditional_feature_styles():
     assert "? (matchedRule.style || matchedRule.match)" in html
 
 
+def test_leaflet_map_html_supports_compound_conditional_feature_styles():
+    payload = {
+        "primary_layer_id": "potrubi",
+        "layers": [
+            {
+                "layer_id": "potrubi",
+                "title": "Potrubi",
+                "style": {
+                    "color": "#94a3b8",
+                    "conditionalStyle": {
+                        "rules": [
+                            {
+                                "all": [
+                                    {"property": "teplota", "operator": "equals", "value": "studena"},
+                                    {"property": "stav_prutoku", "operator": "equals", "value": "tece"},
+                                ],
+                                "style": {"color": "#2563eb", "weight": 5},
+                            },
+                            {
+                                "any": [
+                                    {"property": "stav_prutoku", "operator": "equals", "value": "netece"},
+                                    {"property": "stav_prutoku", "operator": "is_empty"},
+                                ],
+                                "style": {"color": "#dc2626", "weight": 5},
+                            },
+                        ],
+                    },
+                },
+                "feature_collection": {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "LineString", "coordinates": [[14.1, 50.7], [14.2, 50.8]]},
+                            "properties": {"teplota": "studena", "stav_prutoku": "tece"},
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert "Array.isArray(condition.all)" in html
+    assert "conditions.every((item) => conditionMatches(properties, item))" in html
+    assert "Array.isArray(condition.any)" in html
+    assert "conditions.some((item) => conditionMatches(properties, item))" in html
+    assert "const normalizedExpected = normalizeConditionValue(condition.value)" in html
+
+
 def test_leaflet_map_html_renders_in_map_filter_control():
     payload = {
         "primary_layer_id": "mistnosti",
@@ -301,6 +378,16 @@ def test_leaflet_map_html_renders_in_map_filter_control():
     assert "map-filter-control" in html
     assert "map-filter-toggle" in html
     assert "map-filter-select" in html
+    assert "const layersControl = L.control.layers" in html
+    assert "function syncFilterControlWidthToLayerControl" in html
+    assert 'filterContainer.style.setProperty("--map-filter-panel-width", `${measuredWidth}px`)' in html
+    assert '["mouseover", "focusin", "click"].forEach((eventName) =>' in html
+    assert "width: var(--map-filter-panel-width, auto)" in html
+    assert "--map-control-panel-width" not in html
+    assert ".leaflet-control-layers-expanded," not in html
+    assert "width: min(var(--map-control-panel-width), calc(100vw - 92px))" not in html
+    assert "max-width: min(var(--map-control-panel-width), calc(100vw - 92px))" not in html
+    assert "max-width: min(320px, calc(100vw - 92px))" not in html
     assert "Vynulovat filtry" in html
     assert "function layerFilterFields" in html
     assert "function featureFilterOptions" in html
@@ -330,6 +417,47 @@ def test_leaflet_map_html_renders_in_map_filter_control():
     assert "selectElements" not in html
     assert "Authorization" not in html
     assert "Bearer" not in html
+
+
+def test_leaflet_map_html_normalizes_boolean_like_filter_values():
+    payload = {
+        "primary_layer_id": "vodovodni_potrubi",
+        "layers": [
+            {
+                "layer_id": "vodovodni_potrubi",
+                "title": "Vodovodni potrubi",
+                "filter_fields": [
+                    {
+                        "key": "paterni_rozvod",
+                        "source_column": "páteřní rozvod",
+                        "property_key": "páteřní rozvod",
+                        "label": "páteřní rozvod",
+                        "multiple": True,
+                    }
+                ],
+                "filter_options": {"paterni_rozvod": ["True", "False"]},
+                "feature_collection": {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "LineString", "coordinates": [[14.1, 50.7], [14.2, 50.8]]},
+                            "properties": {"páteřní rozvod": True},
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert "function normalizeFilterCompareValue" in html
+    assert 'return value ? "true" : "false"' in html
+    assert 'if (lowered === "true" || lowered === "false")' in html
+    assert "normalizeFilterCompareValue(value)" in html
+    assert "optionElement.value = normalizeFilterCompareValue(optionValue)" in html
+    assert "optionElement.textContent = optionValue" in html
 
 
 def test_leaflet_map_html_renders_foto_as_popup_image_only_when_present():

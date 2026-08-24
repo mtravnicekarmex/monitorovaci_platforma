@@ -462,3 +462,59 @@ def test_map_features_query_restricts_rows_to_assigned_devices(monkeypatch):
     assert captured["params"]["filter_0"] == ("V-2",)
     assert captured["closed"] is True
     assert response["feature_collection"]["features"] == []
+
+
+def test_map_features_query_selects_filter_columns_as_feature_properties(monkeypatch):
+    config = MapLayerConfig(
+        layer_id="vodovodni_uzly",
+        title="Vodovodni uzly",
+        schema="evidence",
+        table="vodovodni_uzly",
+        geometry_column="geom",
+        identifier_column="id",
+        property_columns=("id", "nazev"),
+        filter_columns=("budova", "patro"),
+        restrict_to_allowed_devices=False,
+    )
+    captured: dict[str, object] = {}
+
+    class _Result:
+        def mappings(self):
+            return self
+
+        def all(self):
+            return []
+
+    class _Session:
+        def execute(self, statement, params):
+            captured["statement"] = str(statement)
+            captured["params"] = params
+            return _Result()
+
+        def close(self):
+            captured["closed"] = True
+
+    current_user = SimpleNamespace(is_admin=False, allowed_devices=())
+    monkeypatch.setattr(
+        "services.api.services.device_map.get_session_pg",
+        lambda: _Session(),
+    )
+    monkeypatch.setattr(
+        "services.api.services.device_map._load_table_columns",
+        lambda _session, _config: {"geom", "id", "nazev", "budova", "patro"},
+    )
+    monkeypatch.setattr(
+        "services.api.services.device_map._load_detail_properties",
+        lambda _config, _identifiers: {},
+    )
+
+    response = load_map_layer_features(current_user, config)
+
+    assert 't."budova" AS "budova"' in captured["statement"]
+    assert 't."patro" AS "patro"' in captured["statement"]
+    assert captured["params"] == {
+        "source_srid": config.source_srid,
+        "target_srid": config.target_srid,
+    }
+    assert captured["closed"] is True
+    assert response["feature_collection"]["features"] == []

@@ -22,6 +22,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from moduly.apps.dashboard.api_client import (
     DashboardApiError,
     create_admin_revize,
+    renew_admin_revize,
     update_admin_revize,
 )
 from moduly.apps.dashboard.auth import get_auth_token, is_admin, require_page_access
@@ -29,6 +30,8 @@ from moduly.apps.dashboard.device_list_shared import _full_dataframe_height
 from moduly.apps.dashboard.revize_shared import (
     REVIZE_BUILDING_OPTIONS,
     REVIZE_DISPLAY_COLUMNS,
+    REVIZE_RECORD_SCOPE_ACTIVE,
+    REVIZE_RECORD_SCOPE_OPTIONS,
     REVIZE_STATUS_ALL,
     REVIZE_STATUS_OPTIONS,
     build_revize_metrics,
@@ -57,6 +60,7 @@ require_page_access("revize_overview")
 BUILDINGS_KEY = "revize_overview_buildings"
 DEVICE_TYPES_KEY = "revize_overview_device_types"
 STATUS_KEY = "revize_overview_status"
+RECORD_SCOPE_KEY = "revize_overview_record_scope"
 SEARCH_KEY = "revize_overview_search"
 APPLIED_KEY = "revize_overview_applied"
 CREATE_OPEN_KEY = "revize_overview_create_open"
@@ -166,16 +170,19 @@ def init_overview_state(prepared_df: pd.DataFrame) -> None:
     st.session_state.setdefault(BUILDINGS_KEY, building_options)
     st.session_state.setdefault(DEVICE_TYPES_KEY, type_options)
     st.session_state.setdefault(STATUS_KEY, REVIZE_STATUS_ALL)
+    st.session_state.setdefault(RECORD_SCOPE_KEY, REVIZE_RECORD_SCOPE_ACTIVE)
     st.session_state.setdefault(SEARCH_KEY, "")
     st.session_state.setdefault(APPLIED_KEY, False)
 
+    if st.session_state.get(RECORD_SCOPE_KEY) not in REVIZE_RECORD_SCOPE_OPTIONS:
+        st.session_state[RECORD_SCOPE_KEY] = REVIZE_RECORD_SCOPE_ACTIVE
     if not st.session_state.get(BUILDINGS_KEY):
         st.session_state[BUILDINGS_KEY] = building_options
     if not st.session_state.get(DEVICE_TYPES_KEY):
         st.session_state[DEVICE_TYPES_KEY] = type_options
 
 
-def render_sidebar_filters(prepared_df: pd.DataFrame) -> tuple[list[str], list[str], str, str]:
+def render_sidebar_filters(prepared_df: pd.DataFrame) -> tuple[list[str], list[str], str, str, str]:
     init_overview_state(prepared_df)
 
     building_options = _dataframe_option_values(prepared_df, "budova")
@@ -188,13 +195,14 @@ def render_sidebar_filters(prepared_df: pd.DataFrame) -> tuple[list[str], list[s
             selected_buildings = st.multiselect("Budova", building_options, key=BUILDINGS_KEY)
             selected_types = st.multiselect("Typ zařízení", type_options, key=DEVICE_TYPES_KEY)
             selected_status = st.selectbox("Stav platnosti", REVIZE_STATUS_OPTIONS, key=STATUS_KEY)
+            selected_record_scope = st.selectbox("Záznamy", REVIZE_RECORD_SCOPE_OPTIONS, key=RECORD_SCOPE_KEY)
             search_text = st.text_input("Hledat", placeholder="název, dodavatel, soubor...", key=SEARCH_KEY)
             apply_filters = st.form_submit_button("Načíst data", width="stretch")
 
     if apply_filters:
         st.session_state[APPLIED_KEY] = True
 
-    return selected_buildings, selected_types, selected_status, search_text
+    return selected_buildings, selected_types, selected_status, selected_record_scope, search_text
 
 
 def render_metrics(metrics: dict[str, int]) -> None:
@@ -834,6 +842,18 @@ def _render_revize_form(
             )
             _clear_revize_cache_and_rerun("Revize byla upravena.")
             return
+        if is_renew:
+            source_revize_id = record_values.get("id")
+            if source_revize_id is None:
+                raise ValueError("Chybí ID původní revize pro obnovu.")
+            renew_admin_revize(
+                access_token,
+                int(source_revize_id),
+                payload,
+                linked_device_ids,
+            )
+            _clear_revize_cache_and_rerun("Revize byla obnovena a původní záznam byl označen jako nahrazený.")
+            return
         create_admin_revize(
             access_token,
             payload,
@@ -863,6 +883,7 @@ def render_revize_edit_controls(
         else "-"
     )
     selected_record_id = str(selected_row.get("id") or "") if selected_row is not None else ""
+    selected_is_replaced = bool(selected_row.get("is_replaced")) if selected_row is not None else False
     can_preview_pdf = selected_file is not None and is_pdf_preview_target(selected_file)
     can_download_pdf = can_preview_pdf
     download_data: bytes | None = None
@@ -892,6 +913,9 @@ def render_revize_edit_controls(
         renew_help = "Revizi může obnovit pouze admin."
     elif selected_row is None:
         renew_help = "Vyberte jeden řádek v tabulce pro obnovu."
+
+    if user_is_admin and selected_row is not None and selected_is_replaced:
+        renew_help = "Tato revize už byla nahrazena novější revizí."
 
     preview_col, save_col, contract_col, create_col, renew_col, edit_col = st.columns(
         (1.15, 1.1, 1.2, 1.1, 1.2, 1.2)
@@ -949,7 +973,7 @@ def render_revize_edit_controls(
         if st.button(
             "Obnovit revizi",
             width="stretch",
-            disabled=not user_is_admin or selected_row is None,
+            disabled=not user_is_admin or selected_row is None or selected_is_replaced,
             help=renew_help,
         ):
             st.session_state[RENEW_RECORD_ID_KEY] = int(selected_row["id"])
@@ -989,6 +1013,11 @@ def render_revize_edit_controls(
             st.session_state[RENEW_OPEN_KEY] = False
             st.session_state.pop(RENEW_RECORD_ID_KEY, None)
             return
+        if record_values.get("nahrazena_revizi_id") is not None:
+            st.warning("Vybraná revize už byla nahrazena novější revizí.")
+            st.session_state[RENEW_OPEN_KEY] = False
+            st.session_state.pop(RENEW_RECORD_ID_KEY, None)
+            return
         _render_revize_form(
             mode="renew",
             prepared_df=prepared_df,
@@ -1017,7 +1046,9 @@ def render_dashboard() -> None:
 
     raw_df = load_revize_rows()
     prepared_df = prepare_revize_dataframe(raw_df, reference_date=prague_today())
-    selected_buildings, selected_types, selected_status, search_text = render_sidebar_filters(prepared_df)
+    selected_buildings, selected_types, selected_status, selected_record_scope, search_text = render_sidebar_filters(
+        prepared_df
+    )
 
     st.caption("Filtr se aplikuje až po kliknutí na `Načíst data` v sidebaru.")
 
@@ -1030,6 +1061,7 @@ def render_dashboard() -> None:
         buildings=selected_buildings,
         device_types=selected_types,
         status=selected_status,
+        record_scope=selected_record_scope,
         search_text=search_text,
     )
 

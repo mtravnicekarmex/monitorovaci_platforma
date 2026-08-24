@@ -41,8 +41,15 @@ DEFAULT_STYLE = {
 }
 CONDITIONAL_STYLE_KEY = "conditionalStyle"
 CONDITIONAL_STYLE_OPERATORS = ("equals", "not_equals", "is_empty", "is_not_empty")
+CONDITIONAL_STYLE_LOGIC_MODES = ("simple", "all", "any")
+CONDITIONAL_STYLE_LOGIC_LABELS = {
+    "simple": "Jedna podminka",
+    "all": "Vsechny podminky (AND)",
+    "any": "Alespon jedna podminka (OR)",
+}
 CONDITIONAL_VALUE_TYPES = ("boolean", "text", "number")
 MAX_CONDITIONAL_RULES = 10
+MAX_CONDITIONAL_RULE_CONDITIONS = 10
 
 
 @st.cache_data(ttl=60)
@@ -131,9 +138,28 @@ def _conditional_rules_from_style(conditional_style: dict[str, object]) -> list[
         parsed_rules = [dict(rule) for rule in rules if isinstance(rule, dict)]
         if parsed_rules:
             return parsed_rules[:MAX_CONDITIONAL_RULES]
-    if conditional_style.get("property"):
+    if (
+        conditional_style.get("property")
+        or isinstance(conditional_style.get("all"), list)
+        or isinstance(conditional_style.get("any"), list)
+    ):
         return [conditional_style]
     return []
+
+
+def _conditional_rule_logic_mode(rule: dict[str, object]) -> str:
+    for mode in ("all", "any"):
+        if isinstance(rule.get(mode), list):
+            return mode
+    return "simple"
+
+
+def _conditional_rule_conditions(rule: dict[str, object]) -> list[dict[str, object]]:
+    mode = _conditional_rule_logic_mode(rule)
+    if mode in {"all", "any"}:
+        conditions = [dict(item) for item in rule.get(mode, []) if isinstance(item, dict)]
+        return conditions[:MAX_CONDITIONAL_RULE_CONDITIONS] or [{}]
+    return [rule] if rule.get("property") else [{}]
 
 
 def _style_subset_from_state(prefix: str) -> dict[str, object]:
@@ -186,6 +212,50 @@ def render_compact_style_editor(prefix: str, style: dict[str, object], *, label:
     )
 
 
+def render_conditional_condition_editor(prefix: str, condition: dict[str, object], *, label: str) -> None:
+    operator = str(condition.get("operator") or "equals")
+    if operator not in CONDITIONAL_STYLE_OPERATORS:
+        operator = "equals"
+    value = condition.get("value", True)
+    value_type = _conditional_value_type(value)
+
+    st.caption(label)
+    condition_cols = st.columns([2, 1, 1, 2])
+    condition_cols[0].text_input(
+        "Sloupec podminky",
+        value=str(condition.get("property") or ""),
+        key=f"{prefix}_property",
+    )
+    operator = condition_cols[1].selectbox(
+        "Operator",
+        options=list(CONDITIONAL_STYLE_OPERATORS),
+        index=CONDITIONAL_STYLE_OPERATORS.index(operator),
+        key=f"{prefix}_operator",
+    )
+    value_type = condition_cols[2].selectbox(
+        "Typ hodnoty",
+        options=list(CONDITIONAL_VALUE_TYPES),
+        index=CONDITIONAL_VALUE_TYPES.index(value_type),
+        key=f"{prefix}_value_type",
+        disabled=operator in {"is_empty", "is_not_empty"},
+    )
+    if value_type == "boolean":
+        condition_cols[3].selectbox(
+            "Hodnota",
+            options=["true", "false"],
+            index=0 if bool(value) else 1,
+            key=f"{prefix}_value_bool",
+            disabled=operator in {"is_empty", "is_not_empty"},
+        )
+    else:
+        condition_cols[3].text_input(
+            "Hodnota",
+            value="" if value is None else str(value),
+            key=f"{prefix}_value",
+            disabled=operator in {"is_empty", "is_not_empty"},
+        )
+
+
 def render_conditional_style_editor(prefix: str, style: dict[str, object]) -> None:
     conditional_style = style.get(CONDITIONAL_STYLE_KEY)
     if not isinstance(conditional_style, dict):
@@ -203,7 +273,7 @@ def render_conditional_style_editor(prefix: str, style: dict[str, object]) -> No
         return
 
     rule_count = st.number_input(
-        "Pocet podminek",
+        "Pocet stylovych pravidel",
         min_value=1,
         max_value=MAX_CONDITIONAL_RULES,
         value=max(1, len(rules)),
@@ -212,46 +282,41 @@ def render_conditional_style_editor(prefix: str, style: dict[str, object]) -> No
     )
     for rule_index in range(int(rule_count)):
         rule = rules[rule_index] if rule_index < len(rules) else {}
-        operator = str(rule.get("operator") or "equals")
-        if operator not in CONDITIONAL_STYLE_OPERATORS:
-            operator = "equals"
-        value = rule.get("value", True)
-        value_type = _conditional_value_type(value)
-        st.caption(f"Podminka {rule_index + 1}")
-        condition_cols = st.columns([2, 1, 1, 2])
-        condition_cols[0].text_input(
-            "Sloupec podminky",
-            value=str(rule.get("property") or ""),
-            key=f"{prefix}_conditional_rule_{rule_index}_property",
+        mode = _conditional_rule_logic_mode(rule)
+        if mode not in CONDITIONAL_STYLE_LOGIC_MODES:
+            mode = "simple"
+        conditions = _conditional_rule_conditions(rule)
+
+        st.caption(f"Stylove pravidlo {rule_index + 1}")
+        mode = st.selectbox(
+            "Logika podminek",
+            options=list(CONDITIONAL_STYLE_LOGIC_MODES),
+            index=CONDITIONAL_STYLE_LOGIC_MODES.index(mode),
+            format_func=lambda item: CONDITIONAL_STYLE_LOGIC_LABELS.get(str(item), str(item)),
+            key=f"{prefix}_conditional_rule_{rule_index}_mode",
         )
-        operator = condition_cols[1].selectbox(
-            "Operator",
-            options=list(CONDITIONAL_STYLE_OPERATORS),
-            index=CONDITIONAL_STYLE_OPERATORS.index(operator),
-            key=f"{prefix}_conditional_rule_{rule_index}_operator",
-        )
-        value_type = condition_cols[2].selectbox(
-            "Typ hodnoty",
-            options=list(CONDITIONAL_VALUE_TYPES),
-            index=CONDITIONAL_VALUE_TYPES.index(value_type),
-            key=f"{prefix}_conditional_rule_{rule_index}_value_type",
-            disabled=operator in {"is_empty", "is_not_empty"},
-        )
-        if value_type == "boolean":
-            condition_cols[3].selectbox(
-                "Hodnota",
-                options=["true", "false"],
-                index=0 if bool(value) else 1,
-                key=f"{prefix}_conditional_rule_{rule_index}_value_bool",
-                disabled=operator in {"is_empty", "is_not_empty"},
+        if mode == "simple":
+            render_conditional_condition_editor(
+                f"{prefix}_conditional_rule_{rule_index}",
+                conditions[0],
+                label="Podminka",
             )
         else:
-            condition_cols[3].text_input(
-                "Hodnota",
-                value="" if value is None else str(value),
-                key=f"{prefix}_conditional_rule_{rule_index}_value",
-                disabled=operator in {"is_empty", "is_not_empty"},
+            condition_count = st.number_input(
+                "Pocet dilcich podminek",
+                min_value=1,
+                max_value=MAX_CONDITIONAL_RULE_CONDITIONS,
+                value=max(1, len(conditions)),
+                step=1,
+                key=f"{prefix}_conditional_rule_{rule_index}_condition_count",
             )
+            for condition_index in range(int(condition_count)):
+                condition = conditions[condition_index] if condition_index < len(conditions) else {}
+                render_conditional_condition_editor(
+                    f"{prefix}_conditional_rule_{rule_index}_condition_{condition_index}",
+                    condition,
+                    label=f"Podminka {condition_index + 1}",
+                )
 
         render_compact_style_editor(
             f"{prefix}_conditional_rule_{rule_index}_style",
@@ -273,23 +338,52 @@ def render_conditional_style_editor(prefix: str, style: dict[str, object]) -> No
         )
 
 
-def _conditional_rule_payload_from_state(prefix: str, rule_index: int) -> dict[str, object]:
-    property_name = str(st.session_state.get(f"{prefix}_conditional_rule_{rule_index}_property", "")).strip()
+def _conditional_condition_payload_from_state(prefix: str, label: str) -> dict[str, object]:
+    property_name = str(st.session_state.get(f"{prefix}_property", "")).strip()
     if not property_name:
-        raise ValueError(f"Sloupec podminky {rule_index + 1} je povinny.")
+        raise ValueError(f"Sloupec {label} je povinny.")
 
-    operator = str(st.session_state.get(f"{prefix}_conditional_rule_{rule_index}_operator", "equals"))
+    operator = str(st.session_state.get(f"{prefix}_operator", "equals"))
     if operator not in CONDITIONAL_STYLE_OPERATORS:
-        raise ValueError(f"Neplatny operator podminky {rule_index + 1}.")
+        raise ValueError(f"Neplatny operator {label}.")
 
-    rule: dict[str, object] = {
+    condition: dict[str, object] = {
         "property": property_name,
         "operator": operator,
-        "style": _style_subset_from_state(f"{prefix}_conditional_rule_{rule_index}_style"),
     }
-    value = _parse_conditional_value(f"{prefix}_conditional_rule_{rule_index}", operator)
+    value = _parse_conditional_value(prefix, operator)
     if value is not None:
-        rule["value"] = value
+        condition["value"] = value
+    return condition
+
+
+def _conditional_rule_payload_from_state(prefix: str, rule_index: int) -> dict[str, object]:
+    mode = str(st.session_state.get(f"{prefix}_conditional_rule_{rule_index}_mode", "simple"))
+    if mode not in CONDITIONAL_STYLE_LOGIC_MODES:
+        raise ValueError(f"Neplatna logika podminek u pravidla {rule_index + 1}.")
+
+    style = _style_subset_from_state(f"{prefix}_conditional_rule_{rule_index}_style")
+    if mode == "simple":
+        rule = _conditional_condition_payload_from_state(
+            f"{prefix}_conditional_rule_{rule_index}",
+            f"podminky pravidla {rule_index + 1}",
+        )
+        rule["style"] = style
+        return rule
+
+    condition_count = int(st.session_state.get(f"{prefix}_conditional_rule_{rule_index}_condition_count", 1))
+    condition_count = max(1, min(condition_count, MAX_CONDITIONAL_RULE_CONDITIONS))
+    conditions = [
+        _conditional_condition_payload_from_state(
+            f"{prefix}_conditional_rule_{rule_index}_condition_{condition_index}",
+            f"dilci podminky {condition_index + 1} pravidla {rule_index + 1}",
+        )
+        for condition_index in range(condition_count)
+    ]
+    rule: dict[str, object] = {
+        mode: conditions,
+        "style": style,
+    }
     return rule
 
 
@@ -314,10 +408,22 @@ def _conditional_style_properties(style: dict[str, object]) -> list[str]:
     if not isinstance(conditional_style, dict):
         return []
     properties: list[str] = []
-    for rule in _conditional_rules_from_style(conditional_style):
-        property_name = str(rule.get("property") or "").strip()
+
+    def append_condition_properties(condition: object) -> None:
+        if not isinstance(condition, dict):
+            return
+        property_name = str(condition.get("property") or "").strip()
         if property_name and property_name not in properties:
             properties.append(property_name)
+        for mode in ("all", "any"):
+            conditions = condition.get(mode)
+            if not isinstance(conditions, list):
+                continue
+            for item in conditions:
+                append_condition_properties(item)
+
+    for rule in _conditional_rules_from_style(conditional_style):
+        append_condition_properties(rule)
     return properties
 
 

@@ -158,6 +158,59 @@ def test_prepare_record_values_adds_multiple_conditional_style_property_columns(
     assert values["property_columns"] == ["id", "name", "stav", "priorita"]
 
 
+def test_prepare_record_values_adds_compound_conditional_style_property_columns(monkeypatch):
+    monkeypatch.setattr(
+        "services.api.services.map_layers._table_columns",
+        lambda _schema, _table: {"geom", "id", "teplota", "stav_prutoku", "priorita"},
+    )
+
+    values = _prepare_record_values(
+        layer_id="potrubi",
+        title="Potrubi",
+        layer_kind="context",
+        source_schema="evidence",
+        source_table="POTRUBI",
+        geometry_column="geom",
+        identifier_column="id",
+        source_srid=3857,
+        target_srid=4326,
+        property_columns=["id"],
+        property_aliases={},
+        filter_columns=[],
+        popup_columns=["id"],
+        style={
+            "color": "#94a3b8",
+            "conditionalStyle": {
+                "rules": [
+                    {
+                        "all": [
+                            {"property": "teplota", "operator": "equals", "value": "studena"},
+                            {"property": "stav_prutoku", "operator": "equals", "value": "tece"},
+                        ],
+                        "style": {"color": "#2563eb", "weight": 5},
+                    },
+                    {
+                        "any": [
+                            {"property": "stav_prutoku", "operator": "equals", "value": "netece"},
+                            {"property": "priorita", "operator": "equals", "value": 1},
+                        ],
+                        "style": {"color": "#dc2626", "weight": 5},
+                    },
+                ],
+            },
+        },
+        device_section_key=None,
+        restrict_to_allowed_devices=False,
+        map_enabled=True,
+        default_visible=True,
+        show_photo=False,
+        is_active=True,
+        draw_order=100,
+    )
+
+    assert values["property_columns"] == ["id", "teplota", "stav_prutoku", "priorita"]
+
+
 def test_list_map_layers_admin_requires_admin():
     current_user = SimpleNamespace(is_admin=False)
 

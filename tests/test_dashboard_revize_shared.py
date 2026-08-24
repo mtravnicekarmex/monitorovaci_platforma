@@ -12,9 +12,12 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from moduly.apps.dashboard import revize_shared
 from moduly.apps.dashboard.revize_shared import (
+    REVIZE_RECORD_SCOPE_REPLACED_ONLY,
+    REVIZE_RECORD_SCOPE_WITH_REPLACED,
     REVIZE_STATUS_DUE_SOON,
     REVIZE_STATUS_EXPIRED,
     REVIZE_STATUS_NO_DATE,
+    REVIZE_STATUS_REPLACED,
     REVIZE_STATUS_VALID,
     RevizeLinkedDeviceValidationError,
     build_revize_metrics,
@@ -31,6 +34,7 @@ from moduly.apps.dashboard.revize_shared import (
 from services.api.services import revize_admin
 from services.api.services.revize_admin import (
     create_revize_admin,
+    renew_revize_admin,
     update_revize_admin,
 )
 
@@ -71,6 +75,50 @@ def test_prepare_revize_dataframe_adds_status_labels_and_links():
     assert prepared.loc[0, "Navázaná zařízení"] == 3
 
 
+def test_prepare_revize_dataframe_marks_replaced_records():
+    df = pd.DataFrame(
+        [
+            {
+                "id": 1,
+                "budova": "F",
+                "datum": datetime.date(2025, 12, 18),
+                "datum_platnosti": datetime.date(2026, 1, 18),
+                "typ_zarizeni": "HYDRANTY",
+                "nazev_revize": "Puvodni hydranty",
+                "dodavatel": None,
+                "soubor": None,
+                "servisni_smlouva": None,
+                "poznamka": None,
+                "linked_devices": 0,
+                "nahrazena_revizi_id": 2,
+            },
+            {
+                "id": 2,
+                "budova": "F",
+                "datum": datetime.date(2026, 5, 7),
+                "datum_platnosti": datetime.date(2027, 5, 7),
+                "typ_zarizeni": "HYDRANTY",
+                "nazev_revize": "Nova hydranty",
+                "dodavatel": None,
+                "soubor": None,
+                "servisni_smlouva": None,
+                "poznamka": None,
+                "linked_devices": 0,
+                "nahrazena_revizi_id": None,
+            },
+        ]
+    )
+
+    prepared = prepare_revize_dataframe(df, reference_date=datetime.date(2026, 5, 7))
+
+    replaced = prepared[prepared["id"] == 1].iloc[0]
+    active = prepared[prepared["id"] == 2].iloc[0]
+    assert replaced["status"] == REVIZE_STATUS_REPLACED
+    assert bool(replaced["is_replaced"]) is True
+    assert active["status"] == REVIZE_STATUS_VALID
+    assert bool(active["is_replaced"]) is False
+
+
 def test_filter_revize_dataframe_applies_building_status_and_search():
     source_df = pd.DataFrame(
         [
@@ -107,6 +155,51 @@ def test_filter_revize_dataframe_applies_building_status_and_search():
 
     assert len(filtered) == 1
     assert filtered.iloc[0]["budova"] == "F"
+
+
+def test_filter_revize_dataframe_defaults_to_current_records():
+    source_df = pd.DataFrame(
+        [
+            {
+                "id": 1,
+                "budova": "F",
+                "typ_zarizeni": "HYDRANTY",
+                "status": REVIZE_STATUS_REPLACED,
+                "is_replaced": True,
+                "nazev_revize": "Puvodni hydranty",
+                "dodavatel": "",
+                "soubor": "",
+                "servisni_smlouva": "",
+                "poznamka": "",
+            },
+            {
+                "id": 2,
+                "budova": "F",
+                "typ_zarizeni": "HYDRANTY",
+                "status": REVIZE_STATUS_VALID,
+                "is_replaced": False,
+                "nazev_revize": "Nova hydranty",
+                "dodavatel": "",
+                "soubor": "",
+                "servisni_smlouva": "",
+                "poznamka": "",
+            },
+        ]
+    )
+
+    current = filter_revize_dataframe(source_df)
+    with_replaced = filter_revize_dataframe(
+        source_df,
+        record_scope=REVIZE_RECORD_SCOPE_WITH_REPLACED,
+    )
+    replaced_only = filter_revize_dataframe(
+        source_df,
+        record_scope=REVIZE_RECORD_SCOPE_REPLACED_ONLY,
+    )
+
+    assert current["id"].tolist() == [2]
+    assert with_replaced["id"].tolist() == [1, 2]
+    assert replaced_only["id"].tolist() == [1]
 
 
 def test_build_revize_metrics_counts_statuses_and_missing_files():
@@ -345,9 +438,11 @@ class _FakeCreateSession(_FakeRevizeValidationSession):
 
     def flush(self):
         self.flush_count += 1
-        for index, record in enumerate(self.added_records, start=1):
+        next_id = max([0, *self.records.keys()])
+        for record in self.added_records:
             if getattr(record, "id", None) is None:
-                record.id = index
+                next_id += 1
+                record.id = next_id
 
     def commit(self):
         self.commit_count += 1
@@ -389,6 +484,7 @@ def _minimal_revize_record(**overrides):
         "servisni_smlouva": None,
         "soubor": r"P:\revize\plyn.pdf",
         "poznamka": None,
+        "nahrazena_revizi_id": None,
     }
     record.update(overrides)
     return SimpleNamespace(**record)
@@ -458,6 +554,58 @@ def test_create_revize_admin_rejects_duplicate_before_flush(monkeypatch):
         )
 
     assert session.added_records == []
+    assert session.flush_count == 0
+    assert session.commit_count == 0
+    assert session.rollback_count == 1
+    assert session.close_count == 1
+
+
+def test_renew_revize_admin_creates_new_record_and_marks_source(monkeypatch):
+    source_record = _minimal_revize_record(id=5, soubor=r"P:\revize\puvodni.pdf")
+    session = _FakeCreateSession(
+        table_info={"table_exists": True, "has_fid": True, "has_budova": True},
+        device_rows=[{"fid": 10, "budova": "F"}],
+        records={5: source_record},
+    )
+    monkeypatch.setattr(revize_admin, "get_session_pg", lambda: session)
+
+    renewed_id = renew_revize_admin(
+        _admin_user(),
+        source_revize_id=5,
+        payload=_minimal_revize_payload(soubor=None),
+        linked_device_ids=[10],
+    )
+
+    assert renewed_id == 6
+    assert source_record.nahrazena_revizi_id == 6
+    assert len(session.added_records) == 1
+    assert session.added_records[0].id == 6
+    assert session.added_records[0].soubor is None
+    assert [(link.revize_id, link.zarizeni_id) for link in session.added_links] == [(6, 10)]
+    assert session.commit_count == 1
+    assert session.rollback_count == 0
+    assert session.close_count == 1
+
+
+def test_renew_revize_admin_rejects_already_replaced_source(monkeypatch):
+    source_record = _minimal_revize_record(id=5, nahrazena_revizi_id=6)
+    session = _FakeCreateSession(
+        table_info={"table_exists": True, "has_fid": True, "has_budova": True},
+        device_rows=[],
+        records={5: source_record},
+    )
+    monkeypatch.setattr(revize_admin, "get_session_pg", lambda: session)
+
+    with pytest.raises(ValueError, match="byla obnovena"):
+        renew_revize_admin(
+            _admin_user(),
+            source_revize_id=5,
+            payload=_minimal_revize_payload(),
+            linked_device_ids=[],
+        )
+
+    assert session.added_records == []
+    assert source_record.nahrazena_revizi_id == 6
     assert session.flush_count == 0
     assert session.commit_count == 0
     assert session.rollback_count == 1

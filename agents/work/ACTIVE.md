@@ -1,5 +1,66 @@
 # Active work
 
+## DASH-MAP-001 - Dashboard map viewport, controls, and filtering
+
+- Status: source implemented and locally verified; pending post-restart
+  browser verification and commit.
+- Scope completed on 2026-08-24:
+  `Mapove podklady / Mapa` moved base-map, overlay, location, and
+  visible-layer filter controls into Leaflet; added `Bez mapy`; groups
+  filters per visible layer; lazy-initializes hidden overlays; supports
+  compound conditional style rules through `all`/`any`; includes style/filter
+  properties in GeoJSON; normalizes Leaflet filter values for boolean/string
+  source data; and makes the map fill the browser viewport while preserving
+  Streamlit sidebar open/collapse controls above the map.
+- Current pause point: the user is restarting the workstation. After restart,
+  browser-test the map page with the sidebar expanded and collapsed. The
+  latest CSS uses a transparent fixed zero-height Streamlit header and a
+  fixed collapsed-sidebar open control. Follow-up after restart found that
+  Streamlit 1.57 uses `stExpandSidebarButton` inside `stToolbar` for the
+  collapsed-sidebar open arrow; the page must keep `stToolbar` transparent and
+  overflow-visible rather than hiding it. The collapsed map layout now keeps
+  only a `2.5rem` left gutter for this arrow and otherwise keeps left padding
+  at zero. If the arrow still disappears, inspect whether the running frontend
+  differs from local Streamlit 1.57 and adjust only that CSS
+  selector/positioning. The expanded Leaflet layers panel now keeps its
+  natural content width, and `Filtry` measures that panel and applies the
+  result through `--map-filter-panel-width`; do not force the main layer panel
+  wider to align the two controls.
+- Verification before restart:
+  `tests/test_dashboard_map_page_layout.py` returned `2 passed`; the focused
+  map regression set returned `102 passed`; AST syntax passed; `git diff
+  --check` had only LF/CRLF warnings. PyCharm lint reported only existing
+  weak/type warnings outside the new CSS behavior.
+- Changed files are listed in the 2026-08-24 10:29 +02:00 pre-restart
+  handoff in `../history/SESSION_NOTES.md`.
+- Updated: 2026-08-24
+
+## DASH-REVIZE-001 - Dashboard Revize renewal history
+
+- Status: source implemented and locally verified; pending PostgreSQL schema
+  script application and browser/API runtime test.
+- Scope completed on 2026-08-24:
+  `Prehled / Revize` renewal now uses a dedicated admin API endpoint
+  `POST /api/v1/admin/revize/{revize_id}/renew`. The backend creates a new
+  revision row, writes linked-device rows for it, and marks the source row as
+  replaced through `revize.revize.nahrazena_revizi_id` in one transaction.
+  The overview defaults to current records only; historical replaced records
+  are available through an explicit sidebar record-scope filter and show
+  status `Nahrazené`.
+- Schema prerequisite:
+  apply `scripts/postgres_revize_replacement_link.sql` before running this
+  source against PostgreSQL. The script adds
+  `revize.revize.nahrazena_revizi_id`, foreign-key/check constraints, and an
+  index.
+- Verification:
+  `tests/test_dashboard_revize_shared.py`,
+  `tests/test_dashboard_admin_write_api_client.py`, and
+  `tests/test_api_authorization_regression.py` returned `255 passed`;
+  `git diff --check` returned only LF/CRLF normalization warnings.
+- Not done: PostgreSQL migration was not executed; no production revize data
+  was changed.
+- Updated: 2026-08-24
+
 ## OPS-002 - Independent scheduler monitoring agent
 
 - Status: roadmap items 1, 2, 3, 4, 5, and 6 completed on 2026-08-14; item 7

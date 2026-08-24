@@ -334,6 +334,26 @@ def update_admin_revize(
     return int(response.json()["id"])
 
 
+def renew_admin_revize(
+    access_token: str,
+    revize_id: int,
+    payload: dict[str, object],
+    linked_device_ids: list[int],
+) -> int:
+    response = _request(
+        "POST",
+        f"/api/v1/admin/revize/{int(revize_id)}/renew",
+        access_token=access_token,
+        json_payload=_json_compatible(
+            {
+                **payload,
+                "linked_device_ids": linked_device_ids,
+            }
+        ),
+    )
+    return int(response.json()["id"])
+
+
 def create_admin_device(
     access_token: str,
     meter_key: str,

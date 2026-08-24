@@ -14,6 +14,7 @@ class Revize(Base):
     __table_args__ = (UniqueConstraint("budova", "datum", "soubor", name="uq_revize_budova_datum_soubor"),
                 Index("idx_revize_platnost", "datum_platnosti"),
                 Index("idx_revize_budova", "budova"),
+                Index("idx_revize_nahrazena_revizi_id", "nahrazena_revizi_id"),
         {"schema": "revize"},
     )
 
@@ -28,6 +29,8 @@ class Revize(Base):
     servisni_smlouva: Mapped[str | None] = mapped_column(String(500), nullable=True) # Odkaz na smlouvu, pokud existuje
     soubor: Mapped[str | None] = mapped_column(String(500), nullable=True) # Odkaz na soubor revize
     poznamka: Mapped[str | None] = mapped_column(Text, nullable=True) # Poznámka (volitelná)
+
+    nahrazena_revizi_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("revize.revize.id"), nullable=True)
 
     # Relationship
     revize_zarizeni: Mapped[list["Revize_zarizeni"]] = relationship("Revize_zarizeni", back_populates="revize")

@@ -37,7 +37,7 @@ from services.api.services.map_layers import (
     list_map_layers_admin,
     update_map_layer_admin,
 )
-from services.api.services.revize_admin import create_revize_admin, update_revize_admin
+from services.api.services.revize_admin import create_revize_admin, renew_revize_admin, update_revize_admin
 
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
@@ -386,6 +386,34 @@ def update_revize(
             detail=str(exc),
         ) from exc
     return AdminRevizeMutationResponse(id=updated_id)
+
+
+@router.post(
+    "/revize/{revize_id}/renew",
+    response_model=AdminRevizeMutationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Renew revision record",
+    description="Vytvori obnovenou revizi a puvodni revizi oznaci jako nahrazenou. Vyzaduje admin opravneni.",
+)
+def renew_revize(
+    revize_id: int,
+    payload: AdminRevizeMutationRequest,
+    current_user: DashboardUserContext = Depends(get_current_admin_user),
+) -> AdminRevizeMutationResponse:
+    values = payload.model_dump(exclude={"linked_device_ids"})
+    try:
+        renewed_id = renew_revize_admin(
+            current_user,
+            source_revize_id=revize_id,
+            payload=values,
+            linked_device_ids=payload.linked_device_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return AdminRevizeMutationResponse(id=renewed_id)
 
 
 @router.post(

@@ -178,12 +178,22 @@ def _conditional_style_properties(style: dict[str, object]) -> list[str]:
     raw_rules = conditional_style.get("rules")
     rules = raw_rules if isinstance(raw_rules, list) else [conditional_style]
     properties: list[str] = []
-    for rule in rules:
-        if not isinstance(rule, dict):
-            continue
-        property_name = str(rule.get("property") or "").strip()
+
+    def append_condition_properties(condition: object) -> None:
+        if not isinstance(condition, dict):
+            return
+        property_name = str(condition.get("property") or "").strip()
         if property_name and property_name not in properties:
             properties.append(property_name)
+        for group_key in ("all", "any"):
+            group = condition.get(group_key)
+            if not isinstance(group, list):
+                continue
+            for item in group:
+                append_condition_properties(item)
+
+    for rule in rules:
+        append_condition_properties(rule)
     return properties
 
 

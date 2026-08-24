@@ -512,7 +512,9 @@ At the end of every substantive session:
 - `moduly/apps/dashboard/pages/34_plynomery_fakturacni_odecty.py`: Streamlit
   admin page for manual plynomery billing readings and manual PDF creation.
 - `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`: Streamlit admin page for map layer configuration.
-- `moduly/apps/dashboard/pages/36_mapove_podklady.py`: Streamlit `Mapove podklady / Mapa` page.
+- `moduly/apps/dashboard/pages/36_mapove_podklady.py`: Streamlit `Mapove podklady / Mapa` page,
+  including the full-viewport map layout CSS and the Streamlit sidebar toggle
+  preservation while Leaflet owns in-map controls.
 - `moduly/apps/smartfuelpass/service.py`: legacy SmartFuelPass portal-access
   helpers, charge-session report construction, PDF/email rendering, and
   database-backed weekly report assembly.
@@ -705,6 +707,13 @@ Known hygiene topics to handle only after explicit approval:
   `/api/v1/admin/revize` and `/api/v1/admin/devices/{meter_key}` with both
   route-level and service-level admin checks; do not restore direct
   PostgreSQL/MSSQL writes in Streamlit pages or shared UI modules.
+- Dashboard revision renewal preserves history. `Obnovit revizi` must call
+  the dedicated admin API renewal operation, create a new revision row, and
+  mark the source row through `revize.revize.nahrazena_revizi_id`. The normal
+  `Prehled / Revize` list shows only current rows by default; historical
+  replaced rows are available only through the explicit record-scope filter.
+  Apply `scripts/postgres_revize_replacement_link.sql` before deploying code
+  that reads or writes this replacement link.
 - FastAPI liveness must not depend on database availability. Dashboard table
   initialization runs as a background retry task; `/health/ready` returns HTTP
   503 until that initialization succeeds.
@@ -1021,6 +1030,29 @@ Known hygiene topics to handle only after explicit approval:
 - `Mapove podklady` uses general FastAPI map endpoints and admin-configured metadata in `dashboard.Map_Layers`.
 - `Mapove podklady / Mapa` uses a full-width Streamlit iframe where Leaflet owns base-layer, overlay, location, and visible-layer filter controls. Streamlit prepares the safe catalog, filter-option, and feature payload with bearer authentication; iframe JavaScript receives no bearer token and currently does not call map feature/filter APIs directly.
 - Hidden map overlays are registered empty in Leaflet and lazy-initialize their GeoJSON only after the first `overlayadd`. The in-map filter panel shows only currently visible filterable overlays and groups filters per layer.
+- The expanded Leaflet layers panel keeps its natural Leaflet/content width.
+  The in-map `Filtry` panel measures that expanded layer-control width in
+  `map_shared.py` and applies it through `--map-filter-panel-width`; do not
+  force the main layer panel wider just to align the two controls.
+- The map page intentionally removes Streamlit page padding and sizes the
+  iframe/Leaflet map to the browser viewport height. Preserve the Streamlit
+  header as transparent, fixed, zero-height, and overflow-visible rather than
+  hiding it with `display:none`, because the sidebar open/collapse controls
+  live there and must remain visible/clickable above the map. In Streamlit
+  1.57, the expanded-sidebar control is `stSidebarCollapseButton`, while the
+  collapsed-sidebar open control is `stExpandSidebarButton` inside
+  `stToolbar`; do not hide `stToolbar` as a whole on this page. When
+  `stExpandSidebarButton` is present, the page intentionally keeps only a
+  narrow `--map-sidebar-toggle-gutter` left gutter for that button; otherwise
+  the map block's left padding remains zero.
+- Map layer `style.conditionalStyle` supports backward-compatible single
+  conditions (`property`/`operator`/`value`) plus compound rule conditions
+  using `all` for AND and `any` for OR. Rules are evaluated in order and the
+  first matching rule supplies the style override; `fallback` semantics remain
+  unchanged. Keep conditional-style property collection in sync between
+  `services/api/services/map_layers.py` and
+  `moduly/apps/dashboard/pages/35_mapove_vrstvy.py` so all referenced source
+  columns are included in GeoJSON properties.
 - Map feature images must be resolved server-side from `layer_id` and device identifier; do not expose an endpoint that serves arbitrary client-supplied file paths.
 - Browser map image loading must use same-origin `/api/v1/map/images` through Caddy, which routes `/api/*` to FastAPI and other requests to Streamlit.
 - Map iframe JavaScript must never receive the main API bearer token. The image endpoint authenticates through HttpOnly dashboard cookies; other API routes continue to require bearer authentication.

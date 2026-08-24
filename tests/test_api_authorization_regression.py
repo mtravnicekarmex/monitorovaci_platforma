@@ -63,6 +63,7 @@ EXPECTED_ADMIN_OPERATIONS = {
     ("DELETE", "/api/v1/admin/map-layers/{layer_id}"),
     ("POST", "/api/v1/admin/revize"),
     ("PATCH", "/api/v1/admin/revize/{revize_id}"),
+    ("POST", "/api/v1/admin/revize/{revize_id}/renew"),
     ("POST", "/api/v1/admin/devices/{meter_key}"),
     ("PATCH", "/api/v1/admin/devices/{meter_key}"),
     ("GET", "/api/v1/prediction/performance"),

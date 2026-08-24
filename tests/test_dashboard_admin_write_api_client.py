@@ -52,6 +52,47 @@ def test_create_admin_revize_serializes_dates_and_decimals(monkeypatch):
     }
 
 
+def test_renew_admin_revize_uses_renew_endpoint(monkeypatch):
+    captured = {}
+
+    def fake_request(method, path, **kwargs):
+        captured.update(
+            method=method,
+            path=path,
+            access_token=kwargs["access_token"],
+            json_payload=kwargs["json_payload"],
+        )
+        return _Response({"id": 8})
+
+    monkeypatch.setattr(api_client, "_request", fake_request)
+
+    revize_id = api_client.renew_admin_revize(
+        "token",
+        7,
+        {
+            "budova": "F",
+            "datum": datetime.date(2026, 8, 24),
+            "delka_platnosti": Decimal("12"),
+            "typ_zarizeni": "HYDRANTY",
+        },
+        [10],
+    )
+
+    assert revize_id == 8
+    assert captured == {
+        "method": "POST",
+        "path": "/api/v1/admin/revize/7/renew",
+        "access_token": "token",
+        "json_payload": {
+            "budova": "F",
+            "datum": "2026-08-24",
+            "delka_platnosti": 12,
+            "typ_zarizeni": "HYDRANTY",
+            "linked_device_ids": [10],
+        },
+    }
+
+
 def test_update_admin_device_uses_admin_endpoint(monkeypatch):
     captured = {}
 

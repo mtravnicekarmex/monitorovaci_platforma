@@ -27,12 +27,24 @@ REVIZE_STATUS_DUE_SOON = "Do 30 dní"
 REVIZE_STATUS_VALID = "Platné"
 REVIZE_STATUS_NO_DATE = "Bez data platnosti"
 
+REVIZE_STATUS_REPLACED = "Nahrazené"
+
+REVIZE_RECORD_SCOPE_ACTIVE = "Aktuální"
+REVIZE_RECORD_SCOPE_WITH_REPLACED = "Včetně nahrazených"
+REVIZE_RECORD_SCOPE_REPLACED_ONLY = "Pouze nahrazené"
+REVIZE_RECORD_SCOPE_OPTIONS = (
+    REVIZE_RECORD_SCOPE_ACTIVE,
+    REVIZE_RECORD_SCOPE_WITH_REPLACED,
+    REVIZE_RECORD_SCOPE_REPLACED_ONLY,
+)
+
 REVIZE_STATUS_OPTIONS = (
     REVIZE_STATUS_ALL,
     REVIZE_STATUS_EXPIRED,
     REVIZE_STATUS_DUE_SOON,
     REVIZE_STATUS_VALID,
     REVIZE_STATUS_NO_DATE,
+    REVIZE_STATUS_REPLACED,
 )
 
 REVIZE_BUILDING_OPTIONS = ("F", "G")
@@ -382,6 +394,7 @@ def _revize_to_dict(record: Revize) -> dict[str, object]:
         "servisni_smlouva": record.servisni_smlouva,
         "soubor": record.soubor,
         "poznamka": record.poznamka,
+        "nahrazena_revizi_id": getattr(record, "nahrazena_revizi_id", None),
     }
 
 
@@ -456,6 +469,10 @@ def prepare_revize_dataframe(
     prepared["datum"] = pd.to_datetime(prepared["datum"], errors="coerce")
     prepared["datum_platnosti"] = pd.to_datetime(prepared["datum_platnosti"], errors="coerce")
     prepared["linked_devices"] = pd.to_numeric(prepared["linked_devices"], errors="coerce").fillna(0).astype(int)
+    if "nahrazena_revizi_id" not in prepared.columns:
+        prepared["nahrazena_revizi_id"] = pd.NA
+    prepared["nahrazena_revizi_id"] = pd.to_numeric(prepared["nahrazena_revizi_id"], errors="coerce").astype("Int64")
+    prepared["is_replaced"] = prepared["nahrazena_revizi_id"].notna()
 
     prepared["status"] = prepared["datum_platnosti"].map(
         lambda value: classify_revize_status(
@@ -464,6 +481,7 @@ def prepare_revize_dataframe(
             due_soon_days=due_soon_days,
         )
     )
+    prepared.loc[prepared["is_replaced"], "status"] = REVIZE_STATUS_REPLACED
     prepared["days_to_expiry"] = (
         prepared["datum_platnosti"].dt.date.map(
             lambda value: (value - reference_date).days if isinstance(value, datetime.date) else None
@@ -481,6 +499,7 @@ def prepare_revize_dataframe(
             REVIZE_STATUS_DUE_SOON: 1,
             REVIZE_STATUS_VALID: 2,
             REVIZE_STATUS_NO_DATE: 3,
+            REVIZE_STATUS_REPLACED: 4,
         }
     ).fillna(9)
 
@@ -513,12 +532,23 @@ def filter_revize_dataframe(
     buildings: Iterable[str] | None = None,
     device_types: Iterable[str] | None = None,
     status: str = REVIZE_STATUS_ALL,
+    record_scope: str = REVIZE_RECORD_SCOPE_ACTIVE,
     search_text: str = "",
 ) -> pd.DataFrame:
     if df.empty:
         return df.copy()
 
     filtered = df.copy()
+
+    if "is_replaced" in filtered.columns:
+        replaced_mask = filtered["is_replaced"].fillna(False).astype(bool)
+    else:
+        replaced_mask = pd.Series(False, index=filtered.index)
+
+    if record_scope == REVIZE_RECORD_SCOPE_ACTIVE:
+        filtered = filtered[~replaced_mask].copy()
+    elif record_scope == REVIZE_RECORD_SCOPE_REPLACED_ONLY:
+        filtered = filtered[replaced_mask].copy()
 
     building_values = [value for value in (buildings or []) if value]
     if building_values:
@@ -612,6 +642,7 @@ def load_revize_rows() -> pd.DataFrame:
                 Revize.servisni_smlouva.label("servisni_smlouva"),
                 Revize.soubor.label("soubor"),
                 Revize.poznamka.label("poznamka"),
+                Revize.nahrazena_revizi_id.label("nahrazena_revizi_id"),
                 func.count(Revize_zarizeni.id).label("linked_devices"),
                 func.count(func.distinct(Revize_zarizeni.typ_zarizeni)).label("linked_device_type_count"),
                 func.min(Revize_zarizeni.typ_zarizeni).label("linked_device_type"),
@@ -629,6 +660,7 @@ def load_revize_rows() -> pd.DataFrame:
                 Revize.servisni_smlouva,
                 Revize.soubor,
                 Revize.poznamka,
+                Revize.nahrazena_revizi_id,
             )
             .order_by(Revize.datum_platnosti.asc().nulls_last(), Revize.datum.desc(), Revize.id.desc())
             .all()
@@ -648,6 +680,7 @@ def load_revize_rows() -> pd.DataFrame:
                     "servisni_smlouva": row.servisni_smlouva,
                     "soubor": row.soubor,
                     "poznamka": row.poznamka,
+                    "nahrazena_revizi_id": row.nahrazena_revizi_id,
                     "linked_devices": row.linked_devices,
                     "linked_device_type_count": row.linked_device_type_count,
                     "linked_device_type": row.linked_device_type,

@@ -33,8 +33,7 @@ st.set_page_config(
 
 require_page_access("mapove_podklady_map")
 MAP_IMAGE_ENDPOINT_PATH = "/api/v1/map/images"
-MAP_HTML_HEIGHT_PX = 920
-MAP_IFRAME_HEIGHT_PX = MAP_HTML_HEIGHT_PX + 20
+MAP_IFRAME_FALLBACK_HEIGHT_PX = 920
 
 
 def _layer_id(layer: dict[str, object]) -> str:
@@ -125,9 +124,117 @@ def render_map_page_styles() -> None:
     st.markdown(
         """
         <style>
+        :root {
+            --map-sidebar-toggle-gutter: 2.5rem;
+        }
+        header[data-testid="stHeader"],
+        .stApp > header {
+            position: fixed !important;
+            top: 0 !important;
+            right: 0 !important;
+            left: 0 !important;
+            display: block !important;
+            background: transparent !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            overflow: visible !important;
+            pointer-events: none !important;
+            z-index: 999999 !important;
+        }
+        header[data-testid="stHeader"] *,
+        .stApp > header * {
+            pointer-events: auto !important;
+        }
+        div[data-testid="stToolbar"],
+        .stAppToolbar {
+            display: flex !important;
+            background: transparent !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            overflow: visible !important;
+            pointer-events: none !important;
+        }
+        div[data-testid="stToolbar"] *,
+        .stAppToolbar * {
+            pointer-events: auto !important;
+        }
+        div[data-testid="stSidebarCollapsedControl"],
+        button[data-testid="stSidebarCollapsedControl"],
+        div[data-testid="collapsedControl"],
+        button[data-testid="collapsedControl"],
+        div[data-testid="stExpandSidebarButton"],
+        button[data-testid="stExpandSidebarButton"] {
+            position: fixed !important;
+            top: 0.5rem !important;
+            left: 0.25rem !important;
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            pointer-events: auto !important;
+            z-index: 1000000 !important;
+        }
+        button[data-testid="stSidebarCollapseButton"],
+        button[kind="header"] {
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            pointer-events: auto !important;
+            z-index: 1000000 !important;
+        }
+        div[data-testid="stDecoration"],
+        div[data-testid="stStatusWidget"] {
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
+        }
+        div[data-testid="stAppViewContainer"],
+        section.main {
+            padding-top: 0 !important;
+        }
+        section.main > div.block-container,
+        div[data-testid="stMainBlockContainer"] {
+            box-sizing: border-box;
+            max-width: none !important;
+            padding-top: 0 !important;
+            padding-right: 0 !important;
+            padding-bottom: 0 !important;
+            padding-left: 0 !important;
+        }
+        body:has(div[data-testid="stExpandSidebarButton"]) section.main > div.block-container,
+        body:has(div[data-testid="stExpandSidebarButton"]) div[data-testid="stMainBlockContainer"],
+        body:has(button[data-testid="stExpandSidebarButton"]) section.main > div.block-container,
+        body:has(button[data-testid="stExpandSidebarButton"]) div[data-testid="stMainBlockContainer"] {
+            padding-left: var(--map-sidebar-toggle-gutter) !important;
+        }
+        section.main > div.block-container > div[data-testid="stVerticalBlock"],
+        div[data-testid="stMainBlockContainer"] > div[data-testid="stVerticalBlock"] {
+            gap: 0 !important;
+        }
+        div[data-testid="stElementContainer"]:has(style),
+        div[data-testid="stElementContainer"]:has(div[data-testid="stMarkdownContainer"] style) {
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        .st-key-map_page_layout {
+            width: 100%;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
         .st-key-map_page_layout iframe {
             display: block;
             width: 100%;
+            height: 100vh !important;
+            height: 100dvh !important;
+            margin: 0 !important;
+        }
+        @media (max-width: 720px) {
+            .st-key-map_page_layout iframe {
+                height: 100svh !important;
+                height: 100dvh !important;
+            }
         }
         </style>
         """,
@@ -165,10 +272,11 @@ def render_page() -> None:
         components.html(
             build_leaflet_map_html(
                 leaflet_payload,
-                height_px=MAP_HTML_HEIGHT_PX,
+                height_px=MAP_IFRAME_FALLBACK_HEIGHT_PX,
                 image_endpoint_url=_map_image_endpoint_url(),
+                fill_parent_height=True,
             ),
-            height=MAP_IFRAME_HEIGHT_PX,
+            height=MAP_IFRAME_FALLBACK_HEIGHT_PX,
             scrolling=False,
         )
 

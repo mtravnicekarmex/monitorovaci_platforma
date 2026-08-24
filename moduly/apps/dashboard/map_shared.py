@@ -190,6 +190,7 @@ def build_leaflet_map_html(
     *,
     height_px: int = DEFAULT_MAP_HEIGHT_PX,
     image_endpoint_url: str = "/api/v1/map/images",
+    fill_parent_height: bool = False,
 ) -> str:
     layers = _normalize_map_layers(payload)
 
@@ -207,6 +208,11 @@ def build_leaflet_map_html(
         },
         separators=(",", ":"),
     )
+    body_overflow = "hidden" if fill_parent_height else "auto"
+    if fill_parent_height:
+        map_height_rules = "height: 100vh;\n      height: 100dvh;"
+    else:
+        map_height_rules = f"height: {int(height_px)}px;"
     return f"""
 <!doctype html>
 <html lang="cs">
@@ -219,12 +225,14 @@ def build_leaflet_map_html(
       margin: 0;
       padding: 0;
       height: 100%;
+      overflow: {body_overflow};
       font-family: "Segoe UI", sans-serif;
       background: #f6f8fb;
     }}
     #map {{
       width: 100%;
-      height: {int(height_px)}px;
+      {map_height_rules}
+      box-sizing: border-box;
       border: 1px solid #d8dee9;
       border-radius: 14px;
       background: #ffffff;
@@ -317,9 +325,15 @@ def build_leaflet_map_html(
       border-color: rgba(185, 28, 28, 0.24);
       background: rgba(254, 242, 242, 0.97);
     }}
+    .leaflet-control-layers-expanded {{
+      max-height: min(520px, calc(100vh - 90px));
+      overflow-y: auto;
+    }}
     .map-filter-control {{
-      min-width: 250px;
-      max-width: min(320px, calc(100vw - 92px));
+      width: var(--map-filter-panel-width, auto);
+      min-width: 0;
+      max-width: calc(100vw - 92px);
+      box-sizing: border-box;
       color: #0f172a;
       background: rgba(255, 255, 255, 0.97);
       border: 1px solid rgba(15, 23, 42, 0.16);
@@ -885,16 +899,24 @@ def build_leaflet_map_html(
       return value;
     }}
 
-    function conditionMatches(properties, conditionalStyle) {{
-      if (!conditionalStyle || typeof conditionalStyle !== "object") {{
+    function conditionMatches(properties, condition) {{
+      if (!condition || typeof condition !== "object") {{
         return false;
       }}
-      const propertyName = String(conditionalStyle.property || "");
+      if (Array.isArray(condition.all)) {{
+        const conditions = condition.all.filter((item) => item && typeof item === "object");
+        return conditions.length > 0 && conditions.every((item) => conditionMatches(properties, item));
+      }}
+      if (Array.isArray(condition.any)) {{
+        const conditions = condition.any.filter((item) => item && typeof item === "object");
+        return conditions.length > 0 && conditions.some((item) => conditionMatches(properties, item));
+      }}
+      const propertyName = String(condition.property || "");
       if (!propertyName) {{
         return false;
       }}
       const actual = properties[propertyName];
-      const operator = String(conditionalStyle.operator || "equals");
+      const operator = String(condition.operator || "equals");
       if (operator === "is_empty") {{
         return isEmptyValue(actual);
       }}
@@ -902,7 +924,7 @@ def build_leaflet_map_html(
         return !isEmptyValue(actual);
       }}
       const normalizedActual = normalizeConditionValue(actual);
-      const normalizedExpected = normalizeConditionValue(conditionalStyle.value);
+      const normalizedExpected = normalizeConditionValue(condition.value);
       if (operator === "not_equals") {{
         return normalizedActual !== normalizedExpected;
       }}
@@ -1024,6 +1046,24 @@ def build_leaflet_map_html(
       );
     }}
 
+    function normalizeFilterCompareValue(value) {{
+      if (typeof value === "boolean") {{
+        return value ? "true" : "false";
+      }}
+      if (typeof value === "string") {{
+        const trimmed = value.trim();
+        const lowered = trimmed.toLowerCase();
+        if (lowered === "true" || lowered === "false") {{
+          return lowered;
+        }}
+        return trimmed;
+      }}
+      if (value === null || value === undefined) {{
+        return "";
+      }}
+      return String(value).trim();
+    }}
+
     const activeLayerFilters = {{}};
 
     function selectedLayerFilterValues(layerId, filterKey) {{
@@ -1036,7 +1076,7 @@ def build_leaflet_map_html(
       if (!activeLayerFilters[layerId]) {{
         activeLayerFilters[layerId] = {{}};
       }}
-      const cleanedValues = uniqueSortedValues(values);
+      const cleanedValues = uniqueSortedValues(values.map((value) => normalizeFilterCompareValue(value)));
       if (cleanedValues.length) {{
         activeLayerFilters[layerId][filterKey] = cleanedValues;
       }} else {{
@@ -1058,8 +1098,8 @@ def build_leaflet_map_html(
         if (isEmptyValue(value)) {{
           return false;
         }}
-        const normalizedValue = String(value);
-        return selectedValues.some((selectedValue) => String(selectedValue) === normalizedValue);
+        const normalizedValue = normalizeFilterCompareValue(value);
+        return selectedValues.some((selectedValue) => normalizeFilterCompareValue(selectedValue) === normalizedValue);
       }});
     }}
 
@@ -1179,7 +1219,7 @@ def build_leaflet_map_html(
 
             field.options.forEach((optionValue) => {{
               const optionElement = document.createElement("option");
-              optionElement.value = optionValue;
+              optionElement.value = normalizeFilterCompareValue(optionValue);
               optionElement.textContent = optionValue;
               selectElement.appendChild(optionElement);
             }});
@@ -1275,7 +1315,7 @@ def build_leaflet_map_html(
     }});
 
     const compactMapControls = window.matchMedia("(max-width: 720px)").matches;
-    L.control.layers(
+    const layersControl = L.control.layers(
       {{
         "Zakladni mapa": osmBaseLayer,
         "Letecka mapa (CUZK)": aerialBaseLayer,
@@ -1284,6 +1324,23 @@ def build_leaflet_map_html(
       overlayLayers,
       {{ collapsed: compactMapControls, position: "topright" }}
     ).addTo(map);
+    function syncFilterControlWidthToLayerControl(filterControlInstance) {{
+      if (!filterControlInstance) {{
+        return;
+      }}
+      const layersContainer = layersControl.getContainer ? layersControl.getContainer() : null;
+      const filterContainer = filterControlInstance.getContainer ? filterControlInstance.getContainer() : null;
+      if (!layersContainer || !filterContainer) {{
+        return;
+      }}
+      if (!layersContainer.classList.contains("leaflet-control-layers-expanded")) {{
+        return;
+      }}
+      const measuredWidth = Math.ceil(layersContainer.getBoundingClientRect().width);
+      if (measuredWidth > 0) {{
+        filterContainer.style.setProperty("--map-filter-panel-width", `${{measuredWidth}}px`);
+      }}
+    }}
     map.on("overlayadd", (event) => {{
       const item = leafletLayers.find((entry) => entry.layer === event.layer);
       ensureLayerDataLoaded(item);
@@ -1291,6 +1348,15 @@ def build_leaflet_map_html(
     const filterControl = createMapFilterControl();
     if (filterControl) {{
       filterControl.addTo(map);
+      const syncFilterWidth = () => syncFilterControlWidthToLayerControl(filterControl);
+      window.requestAnimationFrame(syncFilterWidth);
+      window.addEventListener("resize", syncFilterWidth);
+      const layersContainer = layersControl.getContainer ? layersControl.getContainer() : null;
+      if (layersContainer) {{
+        ["mouseover", "focusin", "click"].forEach((eventName) => {{
+          layersContainer.addEventListener(eventName, () => window.setTimeout(syncFilterWidth, 0));
+        }});
+      }}
     }}
 
     function showLocationStatus(message, isError = false) {{
@@ -1387,7 +1453,19 @@ def build_leaflet_map_html(
       }}
     }} catch (_) {{}}
 
-    setTimeout(() => map.invalidateSize(), 200);
+    function invalidateMapSize() {{
+      try {{
+        map.invalidateSize({{ pan: false }});
+      }} catch (_) {{}}
+    }}
+
+    if (window.ResizeObserver) {{
+      const resizeObserver = new ResizeObserver(() => invalidateMapSize());
+      resizeObserver.observe(document.body);
+      resizeObserver.observe(document.getElementById("map"));
+    }}
+    window.addEventListener("resize", invalidateMapSize);
+    [0, 100, 300, 800].forEach((delay) => setTimeout(invalidateMapSize, delay));
   </script>
 </body>
 </html>

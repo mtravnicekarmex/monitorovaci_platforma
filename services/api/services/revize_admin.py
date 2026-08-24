@@ -98,6 +98,55 @@ def update_revize_admin(
         session.close()
 
 
+def renew_revize_admin(
+    user_context: DashboardUserContext,
+    *,
+    source_revize_id: int,
+    payload: dict[str, object],
+    linked_device_ids: Iterable[int] | None = None,
+) -> int:
+    require_admin_access(user_context)
+    normalized_payload = _normalize_payload(payload)
+    session = get_session_pg()
+    try:
+        source_record = session.get(Revize, int(source_revize_id))
+        if source_record is None:
+            raise ValueError(f"Revize s ID {source_revize_id} nebyla nalezena.")
+        if source_record.nahrazena_revizi_id is not None:
+            raise ValueError("Revize už byla obnovena a je označena jako nahrazená.")
+
+        normalized_device_ids = _validate_linked_devices(
+            session,
+            budova=normalized_payload.get("budova"),
+            typ_zarizeni=normalized_payload.get("typ_zarizeni"),
+            linked_device_ids=linked_device_ids,
+        )
+        _raise_if_duplicate_revize(session, normalized_payload)
+        renewed_record = Revize(**normalized_payload)
+        session.add(renewed_record)
+        session.flush()
+        renewed_id = int(renewed_record.id)
+        _write_revize_device_links(
+            session,
+            revize_id=renewed_id,
+            typ_zarizeni=normalized_payload.get("typ_zarizeni"),
+            normalized_device_ids=normalized_device_ids,
+        )
+        source_record.nahrazena_revizi_id = renewed_id
+        session.commit()
+        return renewed_id
+    except IntegrityError as exc:
+        session.rollback()
+        if _is_revize_unique_constraint_error(exc):
+            raise ValueError(_format_revize_duplicate_message(normalized_payload)) from exc
+        raise
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def _normalize_payload(payload: dict[str, object]) -> dict[str, object]:
     from moduly.apps.dashboard.revize_shared import normalize_revize_payload
 

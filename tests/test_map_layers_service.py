@@ -46,6 +46,7 @@ def test_map_layer_record_to_config_preserves_runtime_metadata():
         "target_srid": 4326,
         "property_columns": ["identifikace", "budova"],
         "property_aliases": {"budova": "evidence_budova"},
+        "property_labels": {"evidence_budova": "Budova evidence"},
         "filter_columns": ["budova"],
         "map_label_columns": ["display_name"],
         "popup_columns": ["identifikace"],
@@ -64,6 +65,7 @@ def test_map_layer_record_to_config_preserves_runtime_metadata():
     assert config.layer_kind == "device"
     assert config.device_section_key == "vodomery"
     assert config.property_aliases["budova"] == "evidence_budova"
+    assert config.property_labels["evidence_budova"] == "Budova evidence"
     assert config.filter_columns == ("budova",)
     assert config.map_label_columns == ("display_name",)
     assert config.popup_columns == ("identifikace",)
@@ -91,6 +93,7 @@ def test_prepare_record_values_adds_conditional_style_property_column(monkeypatc
         target_srid=4326,
         property_columns=["id", "name"],
         property_aliases={},
+        property_labels={},
         filter_columns=[],
         map_label_columns=["name", "name", ""],
         popup_columns=["id", "name"],
@@ -134,6 +137,7 @@ def test_prepare_record_values_adds_multiple_conditional_style_property_columns(
         target_srid=4326,
         property_columns=["id", "name"],
         property_aliases={},
+        property_labels={},
         filter_columns=[],
         popup_columns=["id", "name"],
         style={
@@ -176,6 +180,7 @@ def test_prepare_record_values_adds_compound_conditional_style_property_columns(
         target_srid=4326,
         property_columns=["id"],
         property_aliases={},
+        property_labels={},
         filter_columns=[],
         popup_columns=["id"],
         style={
@@ -265,6 +270,11 @@ def test_map_layer_catalog_filters_unavailable_device_layers(monkeypatch):
         "budovy",
         "vodomery",
     ]
+    vodomery_catalog = next(layer for layer in allowed_catalog if layer["layer_id"] == "vodomery")
+    budova_filter = next(field for field in vodomery_catalog["filter_fields"] if field["key"] == "budova")
+    assert budova_filter["property_key"] == "evidence_budova"
+    assert budova_filter["label"] == "Evidence budova"
+    assert vodomery_catalog["property_labels"]["evidence_budova"] == "Evidence budova"
 
 
 def test_normalize_requested_filters_accepts_source_column_and_property_alias():

@@ -76,6 +76,7 @@ class Dashboard_MapLayer(Base):
     target_srid: Mapped[int] = mapped_column(Integer, nullable=False, default=4326, server_default="4326")
     property_columns: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
     property_aliases: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
+    property_labels: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
     filter_columns: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
     map_label_columns: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
     popup_columns: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
@@ -125,6 +126,12 @@ class Dashboard_MapLayer(Base):
 
     def set_property_aliases(self, aliases: dict[str, object]) -> None:
         self.property_aliases = json.dumps(aliases, ensure_ascii=True)
+
+    def get_property_labels(self) -> dict[str, object]:
+        return self._load_json_dict(self.property_labels)
+
+    def set_property_labels(self, labels: dict[str, object]) -> None:
+        self.property_labels = json.dumps(labels, ensure_ascii=True)
 
     def get_filter_columns(self) -> list[str]:
         return self._load_json_list(self.filter_columns)

@@ -27,3 +27,23 @@ def test_map_layers_admin_supports_named_conditional_style_rules():
     assert "_conditional_rule_{rule_index}_name" in source
     assert "rule_name = str(st.session_state.get" in source
     assert 'rule["name"] = rule_name' in source
+
+
+def test_map_layers_admin_supports_property_display_labels_json():
+    source = MAP_LAYERS_ADMIN_PATH.read_text(encoding="utf-8")
+
+    assert '"Popisky vlastnosti JSON"' in source
+    assert "property_labels = _json_to_dict" in source
+    assert 'st.session_state.get(f"{prefix}_property_labels", "{}")' in source
+    assert '"property_labels": property_labels' in source
+    assert 'key=f"{prefix}_property_labels"' in source
+
+
+def test_map_layers_admin_orders_source_alias_usage_and_display_label_fields():
+    source = MAP_LAYERS_ADMIN_PATH.read_text(encoding="utf-8")
+
+    assert source.index('"Property sloupce"') < source.index('"Filter sloupce"')
+    assert source.index('"Filter sloupce"') < source.index('"Aliasy vlastnosti JSON"')
+    assert source.index('"Aliasy vlastnosti JSON"') < source.index('"Sloupce zobrazene v mape"')
+    assert source.index('"Sloupce zobrazene v mape"') < source.index('"Popup sloupce"')
+    assert source.index('"Popup sloupce"') < source.index('"Popisky vlastnosti JSON"')

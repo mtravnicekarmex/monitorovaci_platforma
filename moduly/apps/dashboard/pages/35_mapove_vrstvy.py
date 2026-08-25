@@ -515,6 +515,10 @@ def build_payload(prefix: str, current: dict[str, object] | None = None) -> dict
         st.session_state.get(f"{prefix}_property_aliases", "{}"),
         field_name="Aliasy vlastnosti",
     )
+    property_labels = _json_to_dict(
+        st.session_state.get(f"{prefix}_property_labels", "{}"),
+        field_name="Popisky vlastnosti",
+    )
     style = _style_payload_from_state(prefix)
 
     property_columns = _csv_to_list(str(st.session_state.get(f"{prefix}_property_columns", "")))
@@ -534,6 +538,7 @@ def build_payload(prefix: str, current: dict[str, object] | None = None) -> dict
         "target_srid": int(st.session_state.get(f"{prefix}_target_srid", 4326)),
         "property_columns": property_columns,
         "property_aliases": property_aliases,
+        "property_labels": property_labels,
         "filter_columns": _csv_to_list(str(st.session_state.get(f"{prefix}_filter_columns", ""))),
         "map_label_columns": _csv_to_list(str(st.session_state.get(f"{prefix}_map_label_columns", ""))),
         "popup_columns": _csv_to_list(str(st.session_state.get(f"{prefix}_popup_columns", ""))),
@@ -629,6 +634,12 @@ def render_layer_fields(prefix: str, current: dict[str, object] | None = None, *
         key=f"{prefix}_filter_columns",
     )
     st.text_area(
+        "Aliasy vlastnosti JSON",
+        value=_dict_to_json(current.get("property_aliases")),
+        help='Mapovani zdrojovy_sloupec -> property_key, napr. {"puvodni_db_sloupec": "mapovy_klic"}.',
+        key=f"{prefix}_property_aliases",
+    )
+    st.text_area(
         "Sloupce zobrazene v mape",
         value=_list_to_csv(current.get("map_label_columns")),
         help=(
@@ -644,10 +655,10 @@ def render_layer_fields(prefix: str, current: dict[str, object] | None = None, *
         key=f"{prefix}_popup_columns",
     )
     st.text_area(
-        "Aliasy vlastnosti JSON",
-        value=_dict_to_json(current.get("property_aliases")),
-        help='Mapovani zdrojovy_sloupec -> property_key, napr. {"místnost": "mistnost"}.',
-        key=f"{prefix}_property_aliases",
+        "Popisky vlastnosti JSON",
+        value=_dict_to_json(current.get("property_labels")),
+        help='Mapovani GeoJSON property_key -> zobrazovany popisek, napr. {"mistnost": "Mistnost"}.',
+        key=f"{prefix}_property_labels",
     )
     st.caption("Styl vrstvy")
     render_style_editor(prefix, dict(current.get("style") or {}))

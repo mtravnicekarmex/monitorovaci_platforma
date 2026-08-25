@@ -62,6 +62,7 @@ class AdminMapLayerRecord(BaseModel):
     target_srid: int
     property_columns: list[str]
     property_aliases: dict[str, Any]
+    property_labels: dict[str, Any]
     filter_columns: list[str]
     map_label_columns: list[str]
     popup_columns: list[str]
@@ -94,6 +95,7 @@ class AdminMapLayerCreateRequest(BaseModel):
     target_srid: int = 4326
     property_columns: list[str] = Field(default_factory=list)
     property_aliases: dict[str, Any] = Field(default_factory=dict)
+    property_labels: dict[str, Any] = Field(default_factory=dict)
     filter_columns: list[str] = Field(default_factory=list)
     map_label_columns: list[str] = Field(default_factory=list)
     popup_columns: list[str] = Field(default_factory=list)

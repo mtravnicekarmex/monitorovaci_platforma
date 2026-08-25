@@ -32,6 +32,7 @@ class MapLayerConfig:
     target_srid: int = WEB_MAP_TARGET_SRID
     property_columns: tuple[str, ...] = ()
     property_aliases: Mapping[str, str] = field(default_factory=dict)
+    property_labels: Mapping[str, str] = field(default_factory=dict)
     restrict_to_allowed_devices: bool = True
     layer_kind: str = "context"
     device_section_key: str | None = None
@@ -92,6 +93,21 @@ VODOMERY_MAP_LAYER = MapLayerConfig(
         "místnost": "evidence_mistnost",
         "patro": "evidence_patro",
     },
+    property_labels={
+        "identifikace": "Identifikace",
+        "detail_source_found": "Detail MS",
+        "evidence_budova": "Evidence budova",
+        "evidence_patro": "Evidence patro",
+        "evidence_mistnost": "Evidence mistnost",
+        "mistnost_id": "Mistnost ID",
+        "seriove_cislo": "Seriove cislo",
+        "MBUS": "MBUS",
+        "objekt": "Objekt",
+        "patro": "Patro",
+        "mistnost": "Mistnost",
+        "umisteni": "Umisteni",
+        "pozice": "Pozice",
+    },
     restrict_to_allowed_devices=True,
     layer_kind="device",
     device_section_key="vodomery",
@@ -138,6 +154,7 @@ BUDOVY_MAP_LAYER = MapLayerConfig(
     property_aliases={
         "po\u010det_podla\u017e\u00ed": "pocet_podlazi",
     },
+    property_labels={"fid": "FID", "budova": "Budova", "pocet_podlazi": "Pocet podlazi"},
     restrict_to_allowed_devices=False,
     draw_order=10,
     filter_columns=("budova",),
@@ -171,6 +188,16 @@ MISTNOSTI_MAP_LAYER = MapLayerConfig(
     property_aliases={
         "m\u00edstnost": "mistnost",
         "n\u00e1jemce": "najemce",
+    },
+    property_labels={
+        "fid": "FID",
+        "mistnost_id": "Mistnost ID",
+        "mistnost": "Mistnost",
+        "patro": "Patro",
+        "budova": "Budova",
+        "najemce": "Najemce",
+        "popis": "Popis",
+        "plocha": "Plocha",
     },
     restrict_to_allowed_devices=False,
     draw_order=20,
@@ -568,6 +595,7 @@ def load_map_layer_features(
         "filter_columns": list(config.filter_columns),
         "map_label_columns": list(config.map_label_columns),
         "popup_columns": list(config.popup_columns),
+        "property_labels": dict(config.property_labels),
         "style": dict(config.style),
         "total": len(features),
         "feature_collection": {
@@ -604,6 +632,7 @@ def _empty_layer_response(config: MapLayerConfig) -> dict[str, object]:
         "filter_columns": list(config.filter_columns),
         "map_label_columns": list(config.map_label_columns),
         "popup_columns": list(config.popup_columns),
+        "property_labels": dict(config.property_labels),
         "style": dict(config.style),
         "total": 0,
         "feature_collection": {

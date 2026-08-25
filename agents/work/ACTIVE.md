@@ -12,6 +12,12 @@
   properties in GeoJSON; normalizes Leaflet filter values for boolean/string
   source data; and makes the map fill the browser viewport while preserving
   Streamlit sidebar open/collapse controls above the map.
+- Follow-up completed on 2026-08-25:
+  layers with configured `Sloupce zobrazene v mape` / `map_label_columns`
+  now appear in a separate Leaflet control `Popisky`. The control lists only
+  currently visible labeled layers and lets the user hide/show labels per
+  layer without hiding the layer geometry, filters, styles, or popups. Labels
+  remain visible by default after page load.
 - Current pause point: the user is restarting the workstation. After restart,
   browser-test the map page with the sidebar expanded and collapsed. The
   latest CSS uses a transparent fixed zero-height Streamlit header and a
@@ -30,10 +36,14 @@
   `tests/test_dashboard_map_page_layout.py` returned `2 passed`; the focused
   map regression set returned `102 passed`; AST syntax passed; `git diff
   --check` had only LF/CRLF warnings. PyCharm lint reported only existing
-  weak/type warnings outside the new CSS behavior.
+  weak/type warnings outside the new CSS behavior. Follow-up label-toggle
+  verification on 2026-08-25 returned `21 passed` for
+  `tests/test_dashboard_map_shared.py`, `74 passed` for the focused map
+  regression subset, `py_compile` passed for `map_shared.py`, and
+  `git diff --check` returned only LF/CRLF normalization warnings.
 - Changed files are listed in the 2026-08-24 10:29 +02:00 pre-restart
   handoff in `../history/SESSION_NOTES.md`.
-- Updated: 2026-08-24
+- Updated: 2026-08-25
 
 ## DASH-REVIZE-001 - Dashboard Revize renewal history
 

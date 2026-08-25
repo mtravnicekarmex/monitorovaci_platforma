@@ -217,6 +217,50 @@ def test_leaflet_map_html_binds_configured_map_labels_as_permanent_tooltips():
     assert "layerConfig.map_label_columns" in html
 
 
+def test_leaflet_map_html_can_toggle_configured_map_labels_by_layer():
+    payload = {
+        "primary_layer_id": "mistnosti",
+        "layers": [
+            {
+                "layer_id": "mistnosti",
+                "title": "Mistnosti",
+                "map_label_columns": ["mistnost"],
+                "feature_collection": {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "Point", "coordinates": [14.1, 50.7]},
+                            "properties": {"mistnost": "101"},
+                        }
+                    ],
+                },
+            },
+            {
+                "layer_id": "bez_popisku",
+                "title": "Bez popisku",
+                "map_label_columns": [],
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            },
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert "function createMapLabelControl" in html
+    assert "const labelVisibilityByLayer = {}" in html
+    assert "function layerHasMapLabels" in html
+    assert "function layerLabelsVisible" in html
+    assert "function setLayerLabelsVisible" in html
+    assert "labelHtml && layerLabelsVisible(layerId)" in html
+    assert 'toggle.textContent = "Popisky"' in html
+    assert 'checkboxElement.type = "checkbox"' in html
+    assert "checkboxElement.checked = layerLabelsVisible(layerId)" in html
+    assert "setLayerLabelsVisible(layerId, checkboxElement.checked)" in html
+    assert "const labelControl = createMapLabelControl()" in html
+    assert "syncFilterControlWidthToLayerControl(filterControl, labelControl)" in html
+
+
 def test_leaflet_map_html_supports_conditional_feature_style():
     payload = {
         "primary_layer_id": "potrubi",
@@ -380,7 +424,7 @@ def test_leaflet_map_html_renders_in_map_filter_control():
     assert "map-filter-select" in html
     assert "const layersControl = L.control.layers" in html
     assert "function syncFilterControlWidthToLayerControl" in html
-    assert 'filterContainer.style.setProperty("--map-filter-panel-width", `${measuredWidth}px`)' in html
+    assert 'controlContainer.style.setProperty("--map-filter-panel-width", `${measuredWidth}px`)' in html
     assert '["mouseover", "focusin", "click"].forEach((eventName) =>' in html
     assert "width: var(--map-filter-panel-width, auto)" in html
     assert "--map-control-panel-width" not in html
@@ -404,7 +448,7 @@ def test_leaflet_map_html_renders_in_map_filter_control():
     assert "const activeLayerFilters = {}" in html
     assert "item.layer.clearLayers()" in html
     assert "item.layer.addData(filteredFeatureCollection(item.config))" in html
-    assert "item.loaded || map.hasLayer(item.layer)" in html
+    assert "!item.loaded && !map.hasLayer(item.layer)" in html
     assert "const isInitiallyVisible = layerConfig.default_visible !== false" in html
     assert 'isInitiallyVisible ? filteredFeatureCollection(layerConfig) : { type: "FeatureCollection", features: [] }' in html
     assert "loaded: isInitiallyVisible" in html

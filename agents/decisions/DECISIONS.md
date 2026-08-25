@@ -4741,3 +4741,31 @@ Consequences:
 - Replaced rows should not be renewed again; renew from the current row only.
 - Code that reads or writes the replacement link requires the database column
   to exist before runtime testing or production deployment.
+
+## DEC-153: Dashboard map labels are toggled per visible layer in Leaflet
+
+Date: 2026-08-25
+
+Status: Accepted
+
+Decision:
+
+- `Mapove podklady / Mapa` renders a separate Leaflet control named
+  `Popisky` when at least one accessible layer has configured
+  `map_label_columns` / `Sloupce zobrazene v mape`.
+- The control lists only currently visible layers that have configured map
+  labels.
+- Each listed layer has its own checkbox. Disabling the checkbox removes the
+  bound Leaflet tooltips for that layer, but keeps the layer geometry,
+  filters, styles, popups, and layer visibility unchanged.
+- Labels are visible by default after page load or dashboard rerender.
+
+Consequences:
+
+- Dense labels at wide map zoom levels can be hidden without disabling the
+  underlying data layer.
+- Label visibility remains a client-side map display preference and does not
+  change map-layer metadata, GeoJSON generation, database state, API
+  authorization, or the iframe bearer-token boundary.
+- If persistent per-user label preferences are later needed, that is a
+  separate dashboard preference/storage decision.

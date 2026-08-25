@@ -329,7 +329,8 @@ def build_leaflet_map_html(
       max-height: min(520px, calc(100vh - 90px));
       overflow-y: auto;
     }}
-    .map-filter-control {{
+    .map-filter-control,
+    .map-label-control {{
       width: var(--map-filter-panel-width, auto);
       min-width: 0;
       max-width: calc(100vw - 92px);
@@ -342,7 +343,8 @@ def build_leaflet_map_html(
       overflow: hidden;
       font-size: 12px;
     }}
-    .map-filter-toggle {{
+    .map-filter-toggle,
+    .map-label-toggle {{
       display: flex;
       width: 100%;
       align-items: center;
@@ -356,14 +358,16 @@ def build_leaflet_map_html(
       text-align: left;
       cursor: pointer;
     }}
-    .map-filter-panel {{
+    .map-filter-panel,
+    .map-label-panel {{
       display: none;
       max-height: min(520px, calc(100vh - 150px));
       overflow-y: auto;
       padding: 8px 10px 10px;
       border-top: 1px solid rgba(15, 23, 42, 0.12);
     }}
-    .map-filter-control.is-open .map-filter-panel {{
+    .map-filter-control.is-open .map-filter-panel,
+    .map-label-control.is-open .map-label-panel {{
       display: block;
     }}
     .map-filter-layer {{
@@ -412,7 +416,22 @@ def build_leaflet_map_html(
       font-weight: 600;
       cursor: pointer;
     }}
-    .map-filter-empty {{
+    .map-label-field {{
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      padding: 6px 0;
+      color: #0f172a;
+      font-weight: 600;
+      line-height: 1.25;
+      cursor: pointer;
+    }}
+    .map-label-checkbox {{
+      margin-top: 1px;
+      flex: 0 0 auto;
+    }}
+    .map-filter-empty,
+    .map-label-empty {{
       color: #64748b;
       line-height: 1.35;
     }}
@@ -793,14 +812,38 @@ def build_leaflet_map_html(
 
     function featureMapLabel(feature, layerConfig) {{
       const properties = (feature && feature.properties) || {{}};
-      const labelFields = Array.isArray(layerConfig.map_label_columns)
-        ? layerConfig.map_label_columns
-        : [];
-      return labelFields
+      return layerLabelFields(layerConfig)
         .map((key) => properties[key])
         .filter((value) => value !== null && value !== undefined && value !== "")
         .map((value) => escapeHtml(formatValue(value)))
         .join("<br>");
+    }}
+
+    function layerLabelFields(layerConfig) {{
+      return Array.isArray(layerConfig.map_label_columns)
+        ? layerConfig.map_label_columns.map((key) => String(key || "").trim()).filter((key) => key)
+        : [];
+    }}
+
+    const labelVisibilityByLayer = {{}};
+
+    function layerHasMapLabels(layerConfig) {{
+      return layerLabelFields(layerConfig).length > 0;
+    }}
+
+    function layerLabelsVisible(layerId) {{
+      return labelVisibilityByLayer[String(layerId)] !== false;
+    }}
+
+    function setLayerLabelsVisible(layerId, isVisible) {{
+      const normalizedLayerId = String(layerId);
+      if (isVisible) {{
+        delete labelVisibilityByLayer[normalizedLayerId];
+      }} else {{
+        labelVisibilityByLayer[normalizedLayerId] = false;
+      }}
+      const item = leafletLayers.find((entry) => entry.id === normalizedLayerId);
+      refreshLayerData(item);
     }}
 
     function featureLabelColor(layerId, layerConfig) {{
@@ -1117,7 +1160,7 @@ def build_leaflet_map_html(
         style: (feature) => featureStyle(feature, layerId, layerConfig),
         onEachFeature: (feature, leafletLayer) => {{
           const labelHtml = featureMapLabel(feature, layerConfig);
-          if (labelHtml) {{
+          if (labelHtml && layerLabelsVisible(layerId)) {{
             leafletLayer.bindTooltip(labelHtml, featureLabelTooltipOptions(layerConfig));
             leafletLayer.on("tooltipopen", (event) => applyFeatureLabelStyle(event.tooltip, layerId, layerConfig));
           }}
@@ -1128,23 +1171,24 @@ def build_leaflet_map_html(
       }};
     }}
 
+    function refreshLayerData(item) {{
+      if (!item || (!item.loaded && !map.hasLayer(item.layer))) {{
+        return;
+      }}
+      item.layer.clearLayers();
+      item.layer.addData(filteredFeatureCollection(item.config));
+      item.loaded = true;
+    }}
+
     function applyLayerFilters() {{
-      leafletLayers.forEach((item) => {{
-        if (item.loaded || map.hasLayer(item.layer)) {{
-          item.layer.clearLayers();
-          item.layer.addData(filteredFeatureCollection(item.config));
-          item.loaded = true;
-        }}
-      }});
+      leafletLayers.forEach((item) => refreshLayerData(item));
     }}
 
     function ensureLayerDataLoaded(item) {{
       if (!item || item.loaded) {{
         return;
       }}
-      item.layer.clearLayers();
-      item.layer.addData(filteredFeatureCollection(item.config));
-      item.loaded = true;
+      refreshLayerData(item);
     }}
 
     function createMapFilterControl() {{
@@ -1273,6 +1317,83 @@ def build_leaflet_map_html(
       return control;
     }}
 
+    function createMapLabelControl() {{
+      const labelLayerEntries = () => leafletLayers
+        .map((item) => ({{ ...item, layerConfig: item.config }}))
+        .filter((item) => layerHasMapLabels(item.layerConfig));
+
+      if (!labelLayerEntries().length) {{
+        return null;
+      }}
+
+      const control = L.control({{ position: "topright" }});
+      control.onAdd = () => {{
+        const container = L.DomUtil.create("div", "leaflet-control map-label-control");
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "map-label-toggle";
+        toggle.setAttribute("aria-expanded", "false");
+        toggle.textContent = "Popisky";
+
+        const panel = document.createElement("div");
+        panel.className = "map-label-panel";
+
+        const renderPanel = () => {{
+          while (panel.firstChild) {{
+            panel.removeChild(panel.firstChild);
+          }}
+
+          const visibleEntries = labelLayerEntries().filter((item) => map.hasLayer(item.layer));
+          if (!visibleEntries.length) {{
+            const emptyElement = document.createElement("div");
+            emptyElement.className = "map-label-empty";
+            emptyElement.textContent = "Zapnete vrstvu s popisky pres ovladani vrstev.";
+            panel.appendChild(emptyElement);
+            return;
+          }}
+
+          visibleEntries.forEach((item) => {{
+            const layerId = String(item.layerConfig.layer_id || item.id || "layer");
+            const layerTitle = String(item.layerConfig.title || layerId);
+            const fieldElement = document.createElement("label");
+            fieldElement.className = "map-label-field";
+
+            const checkboxElement = document.createElement("input");
+            checkboxElement.type = "checkbox";
+            checkboxElement.className = "map-label-checkbox";
+            checkboxElement.checked = layerLabelsVisible(layerId);
+            checkboxElement.addEventListener("change", () => {{
+              setLayerLabelsVisible(layerId, checkboxElement.checked);
+            }});
+
+            const labelElement = document.createElement("span");
+            labelElement.textContent = layerTitle;
+
+            fieldElement.appendChild(checkboxElement);
+            fieldElement.appendChild(labelElement);
+            panel.appendChild(fieldElement);
+          }});
+        }};
+
+        toggle.addEventListener("click", () => {{
+          const isOpen = container.classList.toggle("is-open");
+          toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+          if (isOpen) {{
+            renderPanel();
+          }}
+        }});
+
+        container.appendChild(toggle);
+        container.appendChild(panel);
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.disableScrollPropagation(container);
+        renderPanel();
+        map.on("overlayadd overlayremove", renderPanel);
+        return container;
+      }};
+      return control;
+    }}
+
     const mapPayload = decodePayload(encodedPayload);
     const map = L.map("map", {{ center: [50.77, 14.23], zoom: 17, maxZoom: 22 }});
     const osmBaseLayer = L.tileLayer("https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
@@ -1324,13 +1445,9 @@ def build_leaflet_map_html(
       overlayLayers,
       {{ collapsed: compactMapControls, position: "topright" }}
     ).addTo(map);
-    function syncFilterControlWidthToLayerControl(filterControlInstance) {{
-      if (!filterControlInstance) {{
-        return;
-      }}
+    function syncFilterControlWidthToLayerControl(...controlInstances) {{
       const layersContainer = layersControl.getContainer ? layersControl.getContainer() : null;
-      const filterContainer = filterControlInstance.getContainer ? filterControlInstance.getContainer() : null;
-      if (!layersContainer || !filterContainer) {{
+      if (!layersContainer) {{
         return;
       }}
       if (!layersContainer.classList.contains("leaflet-control-layers-expanded")) {{
@@ -1338,7 +1455,13 @@ def build_leaflet_map_html(
       }}
       const measuredWidth = Math.ceil(layersContainer.getBoundingClientRect().width);
       if (measuredWidth > 0) {{
-        filterContainer.style.setProperty("--map-filter-panel-width", `${{measuredWidth}}px`);
+        controlInstances
+          .filter((controlInstance) => controlInstance && typeof controlInstance.getContainer === "function")
+          .map((controlInstance) => controlInstance.getContainer())
+          .filter((controlContainer) => controlContainer)
+          .forEach((controlContainer) => {{
+            controlContainer.style.setProperty("--map-filter-panel-width", `${{measuredWidth}}px`);
+          }});
       }}
     }}
     map.on("overlayadd", (event) => {{
@@ -1348,7 +1471,13 @@ def build_leaflet_map_html(
     const filterControl = createMapFilterControl();
     if (filterControl) {{
       filterControl.addTo(map);
-      const syncFilterWidth = () => syncFilterControlWidthToLayerControl(filterControl);
+    }}
+    const labelControl = createMapLabelControl();
+    if (labelControl) {{
+      labelControl.addTo(map);
+    }}
+    if (filterControl || labelControl) {{
+      const syncFilterWidth = () => syncFilterControlWidthToLayerControl(filterControl, labelControl);
       window.requestAnimationFrame(syncFilterWidth);
       window.addEventListener("resize", syncFilterWidth);
       const layersContainer = layersControl.getContainer ? layersControl.getContainer() : null;

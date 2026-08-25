@@ -22,6 +22,41 @@ Date: 2026-08-21
 
 ## Active handoff
 
+### 2026-08-25 - Dashboard map label visibility control
+
+- Source state: `Mapove podklady / Mapa` now adds a Leaflet control
+  `Popisky` when at least one accessible layer has configured
+  `Sloupce zobrazene v mape` / `map_label_columns`.
+- UI behavior: the `Popisky` panel lists only currently visible layers with
+  configured map labels. Each listed layer has a checkbox. Turning it off
+  removes Leaflet tooltip labels for that layer but keeps the layer geometry,
+  filters, styles, popups, and layer visibility unchanged. Labels are visible
+  by default after page load.
+- Implementation note: label changes refresh the already loaded visible
+  GeoJSON layer through the same filtered feature collection, so active layer
+  filters stay applied while tooltip bindings are rebuilt.
+- Changed local source for this task:
+  `moduly/apps/dashboard/map_shared.py` and
+  `tests/test_dashboard_map_shared.py`.
+- Documentation updated for this task:
+  `agents/decisions/DECISIONS.md`, `agents/history/SESSION_NOTES.md`, and
+  `agents/work/ACTIVE.md`.
+- Verification:
+  `tests/test_dashboard_map_shared.py` returned `21 passed`; the focused map
+  regression subset
+  `tests/test_map_routes.py`,
+  `tests/test_map_layers_service.py`,
+  `tests/test_dashboard_map_shared.py`,
+  `tests/test_dashboard_map_page_layout.py`,
+  `tests/test_dashboard_map_layers_admin.py`, and
+  `tests/test_device_map_service.py`
+  returned `74 passed`; `py_compile` passed for
+  `moduly/apps/dashboard/map_shared.py`; `git diff --check` returned no
+  whitespace errors, only existing LF/CRLF normalization warnings.
+- Not done: browser runtime has not yet been manually checked after this
+  source change. No database migration, data write, credential change, Caddy
+  config change, or iframe bearer-token exposure was made.
+
 ### 2026-08-24 - Pre-restart handoff: dashboard Revize renewal
 
 - Reason for restart: load the updated FastAPI and Streamlit dashboard source

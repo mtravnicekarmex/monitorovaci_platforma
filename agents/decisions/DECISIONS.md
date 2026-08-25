@@ -4788,6 +4788,9 @@ Decision:
   each rule's `name` as the displayed legend text. Existing or manual
   `title`/`label` aliases are tolerated, and unnamed legacy rules fall back
   to `Stylove pravidlo X`.
+- Legend swatches should preserve visual color semantics: line layers are
+  shown as line samples using `style.color`, while polygon/point samples keep
+  stroke color separate from fill color and apply opacity only to fill.
 - Each listed layer has its own legend checkbox. Turning it off hides that
   layer's legend entries only; it does not change layer visibility, geometry,
   filters, labels, popups, styles, database state, or API authorization.

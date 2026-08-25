@@ -362,7 +362,16 @@ def test_leaflet_map_html_can_toggle_conditional_style_legend_by_layer():
                         ]
                     },
                 },
-                "feature_collection": {"type": "FeatureCollection", "features": []},
+                "feature_collection": {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "LineString", "coordinates": [[14.1, 50.7], [14.2, 50.8]]},
+                            "properties": {"stav": "tece"},
+                        }
+                    ],
+                },
             }
         ],
     }
@@ -373,15 +382,21 @@ def test_leaflet_map_html_can_toggle_conditional_style_legend_by_layer():
     assert "const legendVisibilityByLayer = {}" in html
     assert "function conditionalRuleDisplayName" in html
     assert "rule.name || rule.title || rule.label" in html
+    assert "function layerGeometryKind" in html
     assert "function layerLegendEntries" in html
     assert "function layerHasLegend" in html
     assert "function layerLegendVisible" in html
     assert "function setLayerLegendVisible" in html
+    assert "function colorWithOpacity" in html
+    assert "function applyLegendSwatchStyle" in html
     assert 'toggle.textContent = "Legenda"' in html
     assert 'checkboxElement.className = "map-legend-checkbox"' in html
     assert "checkboxElement.checked = layerLegendVisible(layerId)" in html
     assert "setLayerLegendVisible(layerId, checkboxElement.checked)" in html
-    assert "swatchElement.style.borderColor" in html
+    assert "applyLegendSwatchStyle(swatchElement, legendEntry)" in html
+    assert "swatchElement.style.opacity" not in html
+    assert 'swatchElement.classList.add("is-line")' in html
+    assert "swatchElement.style.background = colorWithOpacity(fillColor, fillOpacity)" in html
     assert "textElement.textContent = legendEntry.label" in html
     assert "const legendControl = createMapLegendControl()" in html
     assert "syncFilterControlWidthToLayerControl(filterControl, labelControl, legendControl)" in html

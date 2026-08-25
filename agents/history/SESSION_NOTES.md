@@ -32,6 +32,10 @@ Date: 2026-08-21
   legend lists currently visible layers, shows color swatches from each rule's
   style override, and displays rule names from `name`; manual `title`/`label`
   aliases and unnamed legacy-rule fallbacks remain tolerated.
+- Follow-up color fix: legend swatches now derive their geometry kind from
+  layer features. Line layers render the swatch as an actual line using
+  `style.color`; polygon/point swatches keep the stroke color separate and
+  apply opacity only to fill color, not to the whole swatch.
 - Per-layer legend checkbox: turning a layer off in `Legenda` hides only that
   layer's legend entries. It does not hide geometry, filters, labels, popups,
   styles, or the layer itself.
@@ -45,7 +49,8 @@ Date: 2026-08-21
   `agents/history/SESSION_NOTES.md`, and `agents/work/ACTIVE.md`.
 - Verification:
   `tests/test_dashboard_map_shared.py` and
-  `tests/test_dashboard_map_layers_admin.py` returned `24 passed`.
+  `tests/test_dashboard_map_layers_admin.py` returned `24 passed`. After the
+  legend color fix, the same focused test pair returned `24 passed`.
 - Not done: browser runtime has not yet been manually checked after this
   source change.
 

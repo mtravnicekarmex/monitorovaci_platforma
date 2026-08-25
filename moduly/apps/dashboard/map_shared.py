@@ -477,6 +477,20 @@ def build_leaflet_map_html(
       border-radius: 3px;
       background: #ffffff;
     }}
+    .map-legend-swatch.is-line {{
+      width: 20px;
+      height: 12px;
+      border: 0;
+      border-top: 4px solid #0f172a;
+      border-radius: 0;
+      background: transparent;
+    }}
+    .map-legend-swatch.is-point {{
+      width: 14px;
+      height: 14px;
+      margin-left: 2px;
+      border-radius: 999px;
+    }}
     .map-filter-empty,
     .map-label-empty,
     .map-legend-empty {{
@@ -979,11 +993,30 @@ def build_leaflet_map_html(
       return styleOverride && typeof styleOverride === "object" ? styleOverride : null;
     }}
 
+    function layerGeometryKind(layerConfig) {{
+      const featureCollection = layerFeatureCollection(layerConfig);
+      const features = Array.isArray(featureCollection.features) ? featureCollection.features : [];
+      const geometryTypes = features
+        .map((feature) => feature && feature.geometry && feature.geometry.type)
+        .filter((geometryType) => geometryType);
+      if (geometryTypes.some((geometryType) => String(geometryType).includes("LineString"))) {{
+        return "line";
+      }}
+      if (geometryTypes.some((geometryType) => String(geometryType).includes("Polygon"))) {{
+        return "polygon";
+      }}
+      if (geometryTypes.some((geometryType) => String(geometryType).includes("Point"))) {{
+        return "point";
+      }}
+      return "polygon";
+    }}
+
     function layerLegendEntries(layerId, layerConfig) {{
       const conditionalStyle = (layerConfig.style || {{}}).conditionalStyle;
       if (!conditionalStyle || typeof conditionalStyle !== "object") {{
         return [];
       }}
+      const geometryKind = layerGeometryKind(layerConfig);
       return conditionalRules(conditionalStyle)
         .map((rule, ruleIndex) => {{
           const styleOverride = conditionalRuleStyleOverride(rule);
@@ -992,6 +1025,7 @@ def build_leaflet_map_html(
           }}
           return {{
             label: conditionalRuleDisplayName(rule, ruleIndex),
+            geometryKind,
             style: {{
               ...layerStyle(layerId, layerConfig),
               ...styleOverride
@@ -1017,6 +1051,61 @@ def build_leaflet_map_html(
         delete legendVisibilityByLayer[normalizedLayerId];
       }} else {{
         legendVisibilityByLayer[normalizedLayerId] = false;
+      }}
+    }}
+
+    function legendStrokeWidth(style) {{
+      const rawWeight = Number(style && style.weight);
+      if (Number.isFinite(rawWeight) && rawWeight > 0) {{
+        return Math.max(2, Math.min(6, Math.round(rawWeight)));
+      }}
+      return 4;
+    }}
+
+    function boundedOpacity(value, fallback) {{
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) {{
+        return fallback;
+      }}
+      return Math.max(0, Math.min(1, parsed));
+    }}
+
+    function colorWithOpacity(color, opacity) {{
+      const normalizedColor = String(color || "").trim();
+      const normalizedOpacity = boundedOpacity(opacity, 1);
+      if (normalizedOpacity >= 1) {{
+        return normalizedColor;
+      }}
+      const hexMatch = normalizedColor.match(/^#([0-9a-f]{{3}}|[0-9a-f]{{6}})$/i);
+      if (!hexMatch) {{
+        return normalizedColor;
+      }}
+      const hex = hexMatch[1].length === 3
+        ? hexMatch[1].split("").map((part) => part + part).join("")
+        : hexMatch[1];
+      const red = parseInt(hex.slice(0, 2), 16);
+      const green = parseInt(hex.slice(2, 4), 16);
+      const blue = parseInt(hex.slice(4, 6), 16);
+      return `rgba(${{red}}, ${{green}}, ${{blue}}, ${{normalizedOpacity}})`;
+    }}
+
+    function applyLegendSwatchStyle(swatchElement, legendEntry) {{
+      const style = (legendEntry && legendEntry.style) || {{}};
+      const strokeColor = String(style.color || style.fillColor || "#0f172a");
+      const fillColor = String(style.fillColor || style.color || "#ffffff");
+      const geometryKind = String((legendEntry && legendEntry.geometryKind) || "polygon");
+      const fillOpacity = geometryKind === "point"
+        ? boundedOpacity(style.markerFillOpacity, boundedOpacity(style.fillOpacity, 0.9))
+        : boundedOpacity(style.fillOpacity, 1);
+      swatchElement.style.borderColor = strokeColor;
+      swatchElement.style.background = colorWithOpacity(fillColor, fillOpacity);
+      if (geometryKind === "line") {{
+        swatchElement.classList.add("is-line");
+        swatchElement.style.borderTopColor = strokeColor;
+        swatchElement.style.borderTopWidth = `${{legendStrokeWidth(style)}}px`;
+        swatchElement.style.background = "transparent";
+      }} else if (geometryKind === "point") {{
+        swatchElement.classList.add("is-point");
       }}
     }}
 
@@ -1570,9 +1659,7 @@ def build_leaflet_map_html(
 
                 const swatchElement = document.createElement("span");
                 swatchElement.className = "map-legend-swatch";
-                swatchElement.style.borderColor = String(legendEntry.style.color || legendEntry.style.fillColor || "#0f172a");
-                swatchElement.style.background = String(legendEntry.style.fillColor || legendEntry.style.color || "#ffffff");
-                swatchElement.style.opacity = String(legendEntry.style.fillOpacity ?? 1);
+                applyLegendSwatchStyle(swatchElement, legendEntry);
 
                 const textElement = document.createElement("span");
                 textElement.textContent = legendEntry.label;

@@ -261,6 +261,62 @@ def test_leaflet_map_html_can_toggle_configured_map_labels_by_layer():
     assert "syncFilterControlWidthToLayerControl(filterControl, labelControl, legendControl)" in html
 
 
+def test_leaflet_map_html_keeps_top_right_control_stack_scrollable():
+    payload = {
+        "primary_layer_id": "potrubi",
+        "layers": [
+            {
+                "layer_id": "potrubi",
+                "title": "Potrubi",
+                "map_label_columns": ["nazev"],
+                "filter_fields": [
+                    {
+                        "key": "stav",
+                        "source_column": "stav",
+                        "property_key": "stav",
+                        "label": "Stav",
+                    }
+                ],
+                "filter_options": {"stav": ["tece", "netece"]},
+                "style": {
+                    "conditionalStyle": {
+                        "rules": [
+                            {
+                                "name": "Tece",
+                                "property": "stav",
+                                "operator": "equals",
+                                "value": "tece",
+                                "style": {"color": "#2563eb"},
+                            }
+                        ]
+                    }
+                },
+                "feature_collection": {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "LineString", "coordinates": [[14.1, 50.7], [14.2, 50.8]]},
+                            "properties": {"nazev": "P1", "stav": "tece"},
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert ".leaflet-top.leaflet-right" in html
+    assert "max-height: calc(100vh - 12px)" in html
+    assert "max-height: calc(100dvh - 12px)" in html
+    assert "overflow-y: auto" in html
+    assert "overscroll-behavior: contain" in html
+    assert "padding-bottom: 10px" in html
+    assert "pointer-events: auto" in html
+    assert "scrollbar-width: thin" in html
+
+
 def test_leaflet_map_html_supports_conditional_feature_style():
     payload = {
         "primary_layer_id": "potrubi",

@@ -4803,3 +4803,30 @@ Consequences:
   the existing JSON `style` payload.
 - Rule names are display metadata only. Conditional matching continues to use
   the existing `property`/`operator`/`value`, `all`, and `any` semantics.
+
+## DEC-155: Dashboard map top-right Leaflet controls stay scrollable
+
+Date: 2026-08-25
+
+Status: Accepted
+
+Decision:
+
+- The `Mapove podklady / Mapa` top-right Leaflet control corner is bounded to
+  the map viewport height and scrolls vertically when multiple panels such as
+  base layers, `Filtry`, `Popisky`, and `Legenda` are open at the same time.
+- Individual control panels may still keep their own internal scroll for long
+  content, but the whole top-right stack must also remain reachable.
+- The scroll boundary uses viewport-height CSS with a dynamic viewport
+  fallback so the behavior remains usable on desktop and mobile browsers.
+- The scrollable corner must have pointer events enabled; otherwise the
+  scrollbar may be visible but not draggable because Leaflet disables pointer
+  events on corner containers by default.
+
+Consequences:
+
+- Opening several map controls no longer pushes the lower controls below the
+  visible browser edge without a way to reach them.
+- This is a client-side layout behavior only. It does not change map-layer
+  metadata, filtering, styling, labels, legend content, database state, API
+  authorization, or the iframe bearer-token boundary.

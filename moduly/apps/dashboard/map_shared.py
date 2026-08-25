@@ -329,6 +329,17 @@ def build_leaflet_map_html(
       max-height: min(520px, calc(100vh - 90px));
       overflow-y: auto;
     }}
+    .leaflet-top.leaflet-right {{
+      max-height: calc(100vh - 12px);
+      max-height: calc(100dvh - 12px);
+      box-sizing: border-box;
+      overflow-x: hidden;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding-bottom: 10px;
+      pointer-events: auto;
+      scrollbar-width: thin;
+    }}
     .map-filter-control,
     .map-label-control,
     .map-legend-control {{

@@ -36,6 +36,14 @@ Date: 2026-08-21
   layer features. Line layers render the swatch as an actual line using
   `style.color`; polygon/point swatches keep the stroke color separate and
   apply opacity only to fill color, not to the whole swatch.
+- Follow-up control-stack fix: the top-right Leaflet control corner now has a
+  viewport-bounded vertical scroll. If base layers, `Filtry`, `Popisky`, and
+  `Legenda` are open at the same time, the lower controls remain reachable
+  instead of dropping below the visible browser edge.
+- Follow-up pointer-events fix: the scrollable Leaflet corner explicitly sets
+  `pointer-events: auto`, because Leaflet corner containers default to
+  disabled pointer events; without this, the scrollbar can be visible but not
+  draggable/clickable.
 - Per-layer legend checkbox: turning a layer off in `Legenda` hides only that
   layer's legend entries. It does not hide geometry, filters, labels, popups,
   styles, or the layer itself.
@@ -50,7 +58,9 @@ Date: 2026-08-21
 - Verification:
   `tests/test_dashboard_map_shared.py` and
   `tests/test_dashboard_map_layers_admin.py` returned `24 passed`. After the
-  legend color fix, the same focused test pair returned `24 passed`.
+  legend color fix, the same focused test pair returned `24 passed`. After
+  the control-stack scroll and pointer-events fixes,
+  `tests/test_dashboard_map_shared.py` returned `23 passed`.
 - Not done: browser runtime has not yet been manually checked after this
   source change.
 

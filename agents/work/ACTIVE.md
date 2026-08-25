@@ -26,7 +26,11 @@
   or show legend entries per visible layer without changing map data,
   filters, labels, popups, or layer visibility. Follow-up fixed legend color
   fidelity by rendering line swatches as lines in `style.color` and applying
-  opacity only to polygon/point fill, not to the whole swatch.
+  opacity only to polygon/point fill, not to the whole swatch. The top-right
+  Leaflet control stack is now viewport-bounded and vertically scrollable, so
+  lower controls remain reachable when multiple panels are open; the
+  scrollable Leaflet corner also enables `pointer-events: auto` so the
+  scrollbar is draggable/clickable.
 - Current pause point: the user is restarting the workstation. After restart,
   browser-test the map page with the sidebar expanded and collapsed. The
   latest CSS uses a transparent fixed zero-height Streamlit header and a
@@ -53,7 +57,9 @@
   legend-rule verification on 2026-08-25 returned `24 passed` for
   `tests/test_dashboard_map_shared.py` and
   `tests/test_dashboard_map_layers_admin.py`; after the legend color fix the
-  same focused test pair returned `24 passed`.
+  same focused test pair returned `24 passed`. After the control-stack scroll
+  and pointer-events fix, `tests/test_dashboard_map_shared.py` returned
+  `23 passed`.
 - Changed files are listed in the 2026-08-24 10:29 +02:00 pre-restart
   handoff in `../history/SESSION_NOTES.md`.
 - Updated: 2026-08-25

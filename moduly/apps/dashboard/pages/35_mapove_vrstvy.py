@@ -288,6 +288,12 @@ def render_conditional_style_editor(prefix: str, style: dict[str, object]) -> No
         conditions = _conditional_rule_conditions(rule)
 
         st.caption(f"Stylove pravidlo {rule_index + 1}")
+        st.text_input(
+            "Název pravidla",
+            value=str(rule.get("name") or rule.get("title") or rule.get("label") or ""),
+            max_chars=120,
+            key=f"{prefix}_conditional_rule_{rule_index}_name",
+        )
         mode = st.selectbox(
             "Logika podminek",
             options=list(CONDITIONAL_STYLE_LOGIC_MODES),
@@ -362,12 +368,15 @@ def _conditional_rule_payload_from_state(prefix: str, rule_index: int) -> dict[s
     if mode not in CONDITIONAL_STYLE_LOGIC_MODES:
         raise ValueError(f"Neplatna logika podminek u pravidla {rule_index + 1}.")
 
+    rule_name = str(st.session_state.get(f"{prefix}_conditional_rule_{rule_index}_name", "")).strip()
     style = _style_subset_from_state(f"{prefix}_conditional_rule_{rule_index}_style")
     if mode == "simple":
         rule = _conditional_condition_payload_from_state(
             f"{prefix}_conditional_rule_{rule_index}",
             f"podminky pravidla {rule_index + 1}",
         )
+        if rule_name:
+            rule["name"] = rule_name
         rule["style"] = style
         return rule
 
@@ -384,6 +393,8 @@ def _conditional_rule_payload_from_state(prefix: str, rule_index: int) -> dict[s
         mode: conditions,
         "style": style,
     }
+    if rule_name:
+        rule["name"] = rule_name
     return rule
 
 

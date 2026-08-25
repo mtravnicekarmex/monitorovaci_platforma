@@ -18,6 +18,13 @@
   currently visible labeled layers and lets the user hide/show labels per
   layer without hiding the layer geometry, filters, styles, or popups. Labels
   remain visible by default after page load.
+- Legend follow-up completed on 2026-08-25:
+  conditional-style rules in `Mapove vrstvy` now have optional
+  `Název pravidla` stored as rule `name`. `Mapove podklady / Mapa` has a
+  separate Leaflet control `Legenda` that lists currently visible
+  conditional-style layers, shows rule color swatches, and lets the user hide
+  or show legend entries per visible layer without changing map data,
+  filters, labels, popups, or layer visibility.
 - Current pause point: the user is restarting the workstation. After restart,
   browser-test the map page with the sidebar expanded and collapsed. The
   latest CSS uses a transparent fixed zero-height Streamlit header and a
@@ -40,7 +47,10 @@
   verification on 2026-08-25 returned `21 passed` for
   `tests/test_dashboard_map_shared.py`, `74 passed` for the focused map
   regression subset, `py_compile` passed for `map_shared.py`, and
-  `git diff --check` returned only LF/CRLF normalization warnings.
+  `git diff --check` returned only LF/CRLF normalization warnings. Initial
+  legend-rule verification on 2026-08-25 returned `24 passed` for
+  `tests/test_dashboard_map_shared.py` and
+  `tests/test_dashboard_map_layers_admin.py`.
 - Changed files are listed in the 2026-08-24 10:29 +02:00 pre-restart
   handoff in `../history/SESSION_NOTES.md`.
 - Updated: 2026-08-25

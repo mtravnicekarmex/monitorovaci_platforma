@@ -258,7 +258,7 @@ def test_leaflet_map_html_can_toggle_configured_map_labels_by_layer():
     assert "checkboxElement.checked = layerLabelsVisible(layerId)" in html
     assert "setLayerLabelsVisible(layerId, checkboxElement.checked)" in html
     assert "const labelControl = createMapLabelControl()" in html
-    assert "syncFilterControlWidthToLayerControl(filterControl, labelControl)" in html
+    assert "syncFilterControlWidthToLayerControl(filterControl, labelControl, legendControl)" in html
 
 
 def test_leaflet_map_html_supports_conditional_feature_style():
@@ -332,6 +332,59 @@ def test_leaflet_map_html_supports_multiple_conditional_feature_styles():
     assert "Array.isArray(conditionalStyle.rules)" in html
     assert "const matchedRule = conditionalRules(conditionalStyle).find" in html
     assert "? (matchedRule.style || matchedRule.match)" in html
+
+
+def test_leaflet_map_html_can_toggle_conditional_style_legend_by_layer():
+    payload = {
+        "primary_layer_id": "potrubi",
+        "layers": [
+            {
+                "layer_id": "potrubi",
+                "title": "Potrubi",
+                "style": {
+                    "color": "#64748b",
+                    "conditionalStyle": {
+                        "rules": [
+                            {
+                                "name": "Studena voda tece",
+                                "property": "stav",
+                                "operator": "equals",
+                                "value": "tece",
+                                "style": {"color": "#2563eb", "fillColor": "#bfdbfe"},
+                            },
+                            {
+                                "name": "Bez prutoku",
+                                "property": "stav",
+                                "operator": "equals",
+                                "value": "netece",
+                                "style": {"color": "#dc2626", "fillColor": "#fecaca"},
+                            },
+                        ]
+                    },
+                },
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            }
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert "function createMapLegendControl" in html
+    assert "const legendVisibilityByLayer = {}" in html
+    assert "function conditionalRuleDisplayName" in html
+    assert "rule.name || rule.title || rule.label" in html
+    assert "function layerLegendEntries" in html
+    assert "function layerHasLegend" in html
+    assert "function layerLegendVisible" in html
+    assert "function setLayerLegendVisible" in html
+    assert 'toggle.textContent = "Legenda"' in html
+    assert 'checkboxElement.className = "map-legend-checkbox"' in html
+    assert "checkboxElement.checked = layerLegendVisible(layerId)" in html
+    assert "setLayerLegendVisible(layerId, checkboxElement.checked)" in html
+    assert "swatchElement.style.borderColor" in html
+    assert "textElement.textContent = legendEntry.label" in html
+    assert "const legendControl = createMapLegendControl()" in html
+    assert "syncFilterControlWidthToLayerControl(filterControl, labelControl, legendControl)" in html
 
 
 def test_leaflet_map_html_supports_compound_conditional_feature_styles():

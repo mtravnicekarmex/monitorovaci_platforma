@@ -330,7 +330,8 @@ def build_leaflet_map_html(
       overflow-y: auto;
     }}
     .map-filter-control,
-    .map-label-control {{
+    .map-label-control,
+    .map-legend-control {{
       width: var(--map-filter-panel-width, auto);
       min-width: 0;
       max-width: calc(100vw - 92px);
@@ -344,7 +345,8 @@ def build_leaflet_map_html(
       font-size: 12px;
     }}
     .map-filter-toggle,
-    .map-label-toggle {{
+    .map-label-toggle,
+    .map-legend-toggle {{
       display: flex;
       width: 100%;
       align-items: center;
@@ -359,7 +361,8 @@ def build_leaflet_map_html(
       cursor: pointer;
     }}
     .map-filter-panel,
-    .map-label-panel {{
+    .map-label-panel,
+    .map-legend-panel {{
       display: none;
       max-height: min(520px, calc(100vh - 150px));
       overflow-y: auto;
@@ -367,7 +370,8 @@ def build_leaflet_map_html(
       border-top: 1px solid rgba(15, 23, 42, 0.12);
     }}
     .map-filter-control.is-open .map-filter-panel,
-    .map-label-control.is-open .map-label-panel {{
+    .map-label-control.is-open .map-label-panel,
+    .map-legend-control.is-open .map-legend-panel {{
       display: block;
     }}
     .map-filter-layer {{
@@ -430,8 +434,52 @@ def build_leaflet_map_html(
       margin-top: 1px;
       flex: 0 0 auto;
     }}
+    .map-legend-layer {{
+      padding: 8px 0;
+      border-top: 1px solid rgba(15, 23, 42, 0.10);
+    }}
+    .map-legend-layer:first-child {{
+      border-top: 0;
+      padding-top: 0;
+    }}
+    .map-legend-layer-toggle {{
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      color: #0f172a;
+      font-weight: 700;
+      line-height: 1.25;
+      cursor: pointer;
+    }}
+    .map-legend-checkbox {{
+      margin-top: 1px;
+      flex: 0 0 auto;
+    }}
+    .map-legend-items {{
+      display: grid;
+      gap: 6px;
+      margin-top: 8px;
+    }}
+    .map-legend-item {{
+      display: grid;
+      grid-template-columns: 22px minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
+      color: #334155;
+      line-height: 1.25;
+    }}
+    .map-legend-swatch {{
+      display: block;
+      width: 18px;
+      height: 12px;
+      box-sizing: border-box;
+      border: 3px solid #0f172a;
+      border-radius: 3px;
+      background: #ffffff;
+    }}
     .map-filter-empty,
-    .map-label-empty {{
+    .map-label-empty,
+    .map-legend-empty {{
       color: #64748b;
       line-height: 1.35;
     }}
@@ -917,6 +965,61 @@ def build_leaflet_map_html(
       return [conditionalStyle];
     }}
 
+    function conditionalRuleDisplayName(rule, ruleIndex) {{
+      const configuredName = String(
+        (rule && (rule.name || rule.title || rule.label)) || ""
+      ).trim();
+      return configuredName || `Stylove pravidlo ${{ruleIndex + 1}}`;
+    }}
+
+    function conditionalRuleStyleOverride(rule) {{
+      const styleOverride = rule && typeof rule === "object"
+        ? (rule.style || rule.match)
+        : null;
+      return styleOverride && typeof styleOverride === "object" ? styleOverride : null;
+    }}
+
+    function layerLegendEntries(layerId, layerConfig) {{
+      const conditionalStyle = (layerConfig.style || {{}}).conditionalStyle;
+      if (!conditionalStyle || typeof conditionalStyle !== "object") {{
+        return [];
+      }}
+      return conditionalRules(conditionalStyle)
+        .map((rule, ruleIndex) => {{
+          const styleOverride = conditionalRuleStyleOverride(rule);
+          if (!styleOverride) {{
+            return null;
+          }}
+          return {{
+            label: conditionalRuleDisplayName(rule, ruleIndex),
+            style: {{
+              ...layerStyle(layerId, layerConfig),
+              ...styleOverride
+            }}
+          }};
+        }})
+        .filter((entry) => entry && entry.label);
+    }}
+
+    const legendVisibilityByLayer = {{}};
+
+    function layerHasLegend(layerId, layerConfig) {{
+      return layerLegendEntries(layerId, layerConfig).length > 0;
+    }}
+
+    function layerLegendVisible(layerId) {{
+      return legendVisibilityByLayer[String(layerId)] !== false;
+    }}
+
+    function setLayerLegendVisible(layerId, isVisible) {{
+      const normalizedLayerId = String(layerId);
+      if (isVisible) {{
+        delete legendVisibilityByLayer[normalizedLayerId];
+      }} else {{
+        legendVisibilityByLayer[normalizedLayerId] = false;
+      }}
+    }}
+
     function isEmptyValue(value) {{
       return value === null || value === undefined || String(value).trim() === "";
     }}
@@ -1394,6 +1497,116 @@ def build_leaflet_map_html(
       return control;
     }}
 
+    function createMapLegendControl() {{
+      const legendLayerEntries = () => leafletLayers
+        .map((item) => ({{
+          ...item,
+          layerConfig: item.config,
+          legendEntries: layerLegendEntries(item.id, item.config)
+        }}))
+        .filter((item) => item.legendEntries.length);
+
+      if (!legendLayerEntries().length) {{
+        return null;
+      }}
+
+      const control = L.control({{ position: "topright" }});
+      control.onAdd = () => {{
+        const container = L.DomUtil.create("div", "leaflet-control map-legend-control");
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "map-legend-toggle";
+        toggle.setAttribute("aria-expanded", "false");
+        toggle.textContent = "Legenda";
+
+        const panel = document.createElement("div");
+        panel.className = "map-legend-panel";
+
+        const renderPanel = () => {{
+          while (panel.firstChild) {{
+            panel.removeChild(panel.firstChild);
+          }}
+
+          const visibleEntries = legendLayerEntries().filter((item) => map.hasLayer(item.layer));
+          if (!visibleEntries.length) {{
+            const emptyElement = document.createElement("div");
+            emptyElement.className = "map-legend-empty";
+            emptyElement.textContent = "Zapnete vrstvu s legendou pres ovladani vrstev.";
+            panel.appendChild(emptyElement);
+            return;
+          }}
+
+          visibleEntries.forEach((item) => {{
+            const layerId = String(item.layerConfig.layer_id || item.id || "layer");
+            const layerTitle = String(item.layerConfig.title || layerId);
+            const layerElement = document.createElement("div");
+            layerElement.className = "map-legend-layer";
+
+            const fieldElement = document.createElement("label");
+            fieldElement.className = "map-legend-layer-toggle";
+
+            const checkboxElement = document.createElement("input");
+            checkboxElement.type = "checkbox";
+            checkboxElement.className = "map-legend-checkbox";
+            checkboxElement.checked = layerLegendVisible(layerId);
+            checkboxElement.addEventListener("change", () => {{
+              setLayerLegendVisible(layerId, checkboxElement.checked);
+              renderPanel();
+            }});
+
+            const labelElement = document.createElement("span");
+            labelElement.textContent = layerTitle;
+
+            fieldElement.appendChild(checkboxElement);
+            fieldElement.appendChild(labelElement);
+            layerElement.appendChild(fieldElement);
+
+            if (layerLegendVisible(layerId)) {{
+              const itemsElement = document.createElement("div");
+              itemsElement.className = "map-legend-items";
+              item.legendEntries.forEach((legendEntry) => {{
+                const itemElement = document.createElement("div");
+                itemElement.className = "map-legend-item";
+
+                const swatchElement = document.createElement("span");
+                swatchElement.className = "map-legend-swatch";
+                swatchElement.style.borderColor = String(legendEntry.style.color || legendEntry.style.fillColor || "#0f172a");
+                swatchElement.style.background = String(legendEntry.style.fillColor || legendEntry.style.color || "#ffffff");
+                swatchElement.style.opacity = String(legendEntry.style.fillOpacity ?? 1);
+
+                const textElement = document.createElement("span");
+                textElement.textContent = legendEntry.label;
+
+                itemElement.appendChild(swatchElement);
+                itemElement.appendChild(textElement);
+                itemsElement.appendChild(itemElement);
+              }});
+              layerElement.appendChild(itemsElement);
+            }}
+
+            panel.appendChild(layerElement);
+          }});
+        }};
+
+        toggle.addEventListener("click", () => {{
+          const isOpen = container.classList.toggle("is-open");
+          toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+          if (isOpen) {{
+            renderPanel();
+          }}
+        }});
+
+        container.appendChild(toggle);
+        container.appendChild(panel);
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.disableScrollPropagation(container);
+        renderPanel();
+        map.on("overlayadd overlayremove", renderPanel);
+        return container;
+      }};
+      return control;
+    }}
+
     const mapPayload = decodePayload(encodedPayload);
     const map = L.map("map", {{ center: [50.77, 14.23], zoom: 17, maxZoom: 22 }});
     const osmBaseLayer = L.tileLayer("https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
@@ -1476,8 +1689,12 @@ def build_leaflet_map_html(
     if (labelControl) {{
       labelControl.addTo(map);
     }}
-    if (filterControl || labelControl) {{
-      const syncFilterWidth = () => syncFilterControlWidthToLayerControl(filterControl, labelControl);
+    const legendControl = createMapLegendControl();
+    if (legendControl) {{
+      legendControl.addTo(map);
+    }}
+    if (filterControl || labelControl || legendControl) {{
+      const syncFilterWidth = () => syncFilterControlWidthToLayerControl(filterControl, labelControl, legendControl);
       window.requestAnimationFrame(syncFilterWidth);
       window.addEventListener("resize", syncFilterWidth);
       const layersContainer = layersControl.getContainer ? layersControl.getContainer() : null;

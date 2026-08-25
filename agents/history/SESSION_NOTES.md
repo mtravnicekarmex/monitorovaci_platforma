@@ -22,6 +22,33 @@ Date: 2026-08-21
 
 ## Active handoff
 
+### 2026-08-25 - Dashboard map legend for named style rules
+
+- Source state: `Mapove vrstvy` admin now adds `Název pravidla` directly
+  under each `Stylove pravidlo X` caption and stores the non-empty value as
+  `name` on the corresponding `style.conditionalStyle.rules[]` item.
+- Map UI behavior: `Mapove podklady / Mapa` now adds a Leaflet control
+  `Legenda` when visible layers have conditional-style legend entries. The
+  legend lists currently visible layers, shows color swatches from each rule's
+  style override, and displays rule names from `name`; manual `title`/`label`
+  aliases and unnamed legacy-rule fallbacks remain tolerated.
+- Per-layer legend checkbox: turning a layer off in `Legenda` hides only that
+  layer's legend entries. It does not hide geometry, filters, labels, popups,
+  styles, or the layer itself.
+- Changed local source for this task:
+  `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`,
+  `moduly/apps/dashboard/map_shared.py`,
+  `tests/test_dashboard_map_layers_admin.py`, and
+  `tests/test_dashboard_map_shared.py`.
+- Documentation updated for this task:
+  `agents/decisions/DECISIONS.md`,
+  `agents/history/SESSION_NOTES.md`, and `agents/work/ACTIVE.md`.
+- Verification:
+  `tests/test_dashboard_map_shared.py` and
+  `tests/test_dashboard_map_layers_admin.py` returned `24 passed`.
+- Not done: browser runtime has not yet been manually checked after this
+  source change.
+
 ### 2026-08-25 - Dashboard map label visibility control
 
 - Source state: `Mapove podklady / Mapa` now adds a Leaflet control

@@ -4769,3 +4769,34 @@ Consequences:
   authorization, or the iframe bearer-token boundary.
 - If persistent per-user label preferences are later needed, that is a
   separate dashboard preference/storage decision.
+
+## DEC-154: Dashboard map conditional-style legends use named rules
+
+Date: 2026-08-25
+
+Status: Accepted
+
+Decision:
+
+- The `Mapove vrstvy` admin editor stores an optional `name` on each
+  `style.conditionalStyle.rules[]` item through the UI field
+  `Název pravidla`.
+- `Mapove podklady / Mapa` renders a separate Leaflet control named
+  `Legenda` when at least one visible/accessible layer has conditional-style
+  legend entries.
+- The legend lists currently visible layers with conditional styling and uses
+  each rule's `name` as the displayed legend text. Existing or manual
+  `title`/`label` aliases are tolerated, and unnamed legacy rules fall back
+  to `Stylove pravidlo X`.
+- Each listed layer has its own legend checkbox. Turning it off hides that
+  layer's legend entries only; it does not change layer visibility, geometry,
+  filters, labels, popups, styles, database state, or API authorization.
+
+Consequences:
+
+- Operators can explain conditional map colors without adding ad-hoc text
+  outside the Leaflet map.
+- No database migration is required because the rule name is metadata inside
+  the existing JSON `style` payload.
+- Rule names are display metadata only. Conditional matching continues to use
+  the existing `property`/`operator`/`value`, `all`, and `any` semantics.

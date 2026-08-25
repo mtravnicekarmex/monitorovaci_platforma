@@ -18,3 +18,12 @@ def test_map_layers_admin_supports_compound_conditional_style_rules():
     assert "mode: conditions" in source
     assert 'for mode in ("all", "any")' in source
     assert "append_condition_properties(item)" in source
+
+
+def test_map_layers_admin_supports_named_conditional_style_rules():
+    source = MAP_LAYERS_ADMIN_PATH.read_text(encoding="utf-8")
+
+    assert '"Název pravidla"' in source
+    assert "_conditional_rule_{rule_index}_name" in source
+    assert "rule_name = str(st.session_state.get" in source
+    assert 'rule["name"] = rule_name' in source

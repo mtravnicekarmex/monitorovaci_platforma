@@ -867,13 +867,24 @@ def build_leaflet_map_html(
       }});
     }}
 
+    function propertyLabels(layerConfig) {{
+      return layerConfig.property_labels && typeof layerConfig.property_labels === "object"
+        ? layerConfig.property_labels
+        : {{}};
+    }}
+
+    function propertyDisplayLabel(layerConfig, propertyKey) {{
+      const key = String(propertyKey || "");
+      return String(propertyLabels(layerConfig)[key] || key);
+    }}
+
     function popupHtml(properties, layerId, layerConfig) {{
       const configuredPopupFields = Array.isArray(layerConfig.popup_columns)
-        ? layerConfig.popup_columns.map((key) => [key, key])
+        ? layerConfig.popup_columns.map((key) => [key, propertyDisplayLabel(layerConfig, key)])
         : [];
       const displayFields = configuredPopupFields.length
         ? configuredPopupFields
-        : (displayFieldsByLayer[layerId] || Object.keys(properties).map((key) => [key, key]));
+        : (displayFieldsByLayer[layerId] || Object.keys(properties).map((key) => [key, propertyDisplayLabel(layerConfig, key)]));
       const rows = displayFields
         .filter(([key]) => String(key).toLowerCase() !== "foto")
         .filter(([key]) => properties[key] !== null && properties[key] !== undefined && properties[key] !== "")
@@ -1014,11 +1025,46 @@ def build_leaflet_map_html(
       return [conditionalStyle];
     }}
 
-    function conditionalRuleDisplayName(rule, ruleIndex) {{
+    function conditionalConditionDisplayName(condition, layerConfig) {{
+      if (!condition || typeof condition !== "object") {{
+        return "";
+      }}
+      if (Array.isArray(condition.all)) {{
+        const parts = condition.all
+          .map((item) => conditionalConditionDisplayName(item, layerConfig))
+          .filter((item) => item);
+        return parts.length ? parts.join(" AND ") : "";
+      }}
+      if (Array.isArray(condition.any)) {{
+        const parts = condition.any
+          .map((item) => conditionalConditionDisplayName(item, layerConfig))
+          .filter((item) => item);
+        return parts.length ? parts.join(" OR ") : "";
+      }}
+      const propertyName = String(condition.property || "").trim();
+      if (!propertyName) {{
+        return "";
+      }}
+      const label = propertyDisplayLabel(layerConfig, propertyName);
+      const operator = String(condition.operator || "equals");
+      if (operator === "is_empty") {{
+        return `${{label}} je prazdne`;
+      }}
+      if (operator === "is_not_empty") {{
+        return `${{label}} neni prazdne`;
+      }}
+      const value = formatValue(condition.value);
+      if (operator === "not_equals") {{
+        return `${{label}} != ${{value}}`;
+      }}
+      return `${{label}} = ${{value}}`;
+    }}
+
+    function conditionalRuleDisplayName(rule, ruleIndex, layerConfig) {{
       const configuredName = String(
         (rule && (rule.name || rule.title || rule.label)) || ""
       ).trim();
-      return configuredName || `Stylove pravidlo ${{ruleIndex + 1}}`;
+      return configuredName || conditionalConditionDisplayName(rule, layerConfig) || `Stylove pravidlo ${{ruleIndex + 1}}`;
     }}
 
     function conditionalRuleStyleOverride(rule) {{
@@ -1059,7 +1105,7 @@ def build_leaflet_map_html(
             return null;
           }}
           return {{
-            label: conditionalRuleDisplayName(rule, ruleIndex),
+            label: conditionalRuleDisplayName(rule, ruleIndex, layerConfig),
             geometryKind,
             style: {{
               ...layerStyle(layerId, layerConfig),
@@ -1279,7 +1325,7 @@ def build_leaflet_map_html(
         .map((column) => ({{
           key: String(column),
           property_key: String(column),
-          label: String(column)
+          label: propertyDisplayLabel(layerConfig, column)
         }}));
     }}
 

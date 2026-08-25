@@ -224,6 +224,41 @@ def test_leaflet_map_html_keeps_layer_draw_order_stable_with_leaflet_panes():
     assert 'pane.style.zIndex = "620"' in html
 
 
+def test_leaflet_map_html_uses_property_labels_for_popup_and_filter_labels():
+    payload = {
+        "primary_layer_id": "potrubi",
+        "layers": [
+            {
+                "layer_id": "potrubi",
+                "title": "Potrubi",
+                "popup_columns": ["paterni_rozvod"],
+                "filter_columns": ["paterni_rozvod"],
+                "property_labels": {"paterni_rozvod": "Paterni rozvod"},
+                "feature_collection": {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "LineString", "coordinates": [[14.1, 50.7], [14.2, 50.8]]},
+                            "properties": {"paterni_rozvod": True},
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert "function propertyLabels" in html
+    assert "function propertyDisplayLabel" in html
+    assert "function conditionalConditionDisplayName" in html
+    assert "conditionalRuleDisplayName(rule, ruleIndex, layerConfig)" in html
+    assert "layerConfig.popup_columns.map((key) => [key, propertyDisplayLabel(layerConfig, key)])" in html
+    assert "Object.keys(properties).map((key) => [key, propertyDisplayLabel(layerConfig, key)])" in html
+    assert "label: propertyDisplayLabel(layerConfig, column)" in html
+
+
 def test_leaflet_map_html_binds_configured_map_labels_as_permanent_tooltips():
     payload = {
         "primary_layer_id": "mistnosti",

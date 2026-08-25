@@ -25,6 +25,7 @@ from moduly.apps.dashboard.revize_shared import (
     calculate_revize_valid_until,
     classify_revize_status,
     filter_revize_dataframe,
+    load_evidence_building_options,
     load_revize_record_values,
     normalize_revize_payload,
     parse_revize_linked_device_ids,
@@ -308,6 +309,43 @@ class _FakeRevizeValidationSession:
         if "information_schema.tables" in statement_text:
             return _FakeMappingResult(one_row=self.table_info)
         return _FakeMappingResult(rows=self.device_rows)
+
+
+class _FakeScalarResult:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def scalars(self):
+        return iter(self.rows)
+
+
+class _FakeBuildingOptionsSession:
+    def __init__(self, rows):
+        self.rows = rows
+        self.close_count = 0
+        self.executed_sql = ""
+
+    def execute(self, statement, params=None):
+        self.executed_sql = str(statement)
+        return _FakeScalarResult(self.rows)
+
+    def close(self):
+        self.close_count += 1
+
+
+def test_load_evidence_building_options_reads_evidence_budovy(monkeypatch):
+    session = _FakeBuildingOptionsSession(["F", "G", "H"])
+    monkeypatch.setattr(revize_shared, "get_session_pg", lambda: session)
+    load_evidence_building_options.clear()
+
+    try:
+        assert load_evidence_building_options() == ["F", "G", "H"]
+    finally:
+        load_evidence_building_options.clear()
+
+    assert '"evidence"."BUDOVY"' in session.executed_sql
+    assert "btrim(budova)" in session.executed_sql
+    assert session.close_count == 1
 
 
 def test_validate_revize_linked_devices_checks_fid_and_building():

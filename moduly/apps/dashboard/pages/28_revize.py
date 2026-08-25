@@ -28,7 +28,6 @@ from moduly.apps.dashboard.api_client import (
 from moduly.apps.dashboard.auth import get_auth_token, is_admin, require_page_access
 from moduly.apps.dashboard.device_list_shared import _full_dataframe_height
 from moduly.apps.dashboard.revize_shared import (
-    REVIZE_BUILDING_OPTIONS,
     REVIZE_DISPLAY_COLUMNS,
     REVIZE_RECORD_SCOPE_ACTIVE,
     REVIZE_RECORD_SCOPE_OPTIONS,
@@ -37,6 +36,7 @@ from moduly.apps.dashboard.revize_shared import (
     build_revize_metrics,
     calculate_revize_valid_until,
     filter_revize_dataframe,
+    load_evidence_building_options,
     load_evidence_device_type_options,
     load_revize_rows,
     load_revize_record_values,
@@ -745,10 +745,7 @@ def _render_revize_form(
     today = prague_today()
     revision_date = _as_date(record_values.get("datum"), today)
     validity_months = _resolve_validity_months(record_values, revision_date)
-    building_options = _build_select_options(
-        [*REVIZE_BUILDING_OPTIONS, *_dataframe_option_values(prepared_df, "budova")],
-        record_values.get("budova"),
-    )
+    building_options = _build_select_options(load_evidence_building_options(), record_values.get("budova"))
     device_type_options = _build_select_options(load_evidence_device_type_options())
     selected_device_type = _resolve_form_device_type(record_values, device_type_options)
 

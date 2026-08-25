@@ -22,6 +22,52 @@ Date: 2026-08-21
 
 ## Active handoff
 
+### 2026-08-24 - Pre-restart handoff: dashboard Revize renewal
+
+- Reason for restart: load the updated FastAPI and Streamlit dashboard source
+  for the `Prehled / Revize` renewal workflow.
+- Source state: revize renewal variant 2 is implemented. `Obnovit revizi`
+  calls `POST /api/v1/admin/revize/{revize_id}/renew`; the backend creates
+  the renewed revision, writes linked-device rows, and marks the source row
+  through `revize.revize.nahrazena_revizi_id`. The revision form `Budova`
+  options now load from `"evidence"."BUDOVY".budova`; edit/renew forms still
+  append the current record value if it is missing from the evidence table.
+- Database state: `scripts/postgres_revize_replacement_link.sql` was applied
+  on 2026-08-24. Follow-up schema verification returned
+  `has_column=true`, `has_fk=true`, `has_check=true`, and `has_index=true`.
+- Expected post-restart test:
+  1. Open dashboard `Prehled / Revize`.
+  2. With default sidebar filter `Zaznamy = Aktualni`, confirm replaced
+     historical rows are hidden.
+  3. Renew one suitable current revision through `Obnovit revizi`.
+  4. Confirm the newly renewed revision is visible as current.
+  5. Switch `Zaznamy` to include replaced records and confirm the source row
+     appears as `Nahrazené`, not `Po platnosti`.
+  6. Confirm `Obnovit revizi` is disabled for replaced rows.
+  7. Open `Nová revize` and confirm the `Budova` selectbox shows values from
+     `evidence.BUDOVY.budova`.
+- Verification before restart: targeted revize/API/auth tests returned
+  `255 passed`; `git diff --check` returned no whitespace errors, only
+  existing LF/CRLF normalization warnings. After switching `Budova` options
+  to `evidence.BUDOVY`, `tests/test_dashboard_revize_shared.py` returned
+  `25 passed`.
+- Changed local source for this task:
+  `moduly/evidence/revize/database/models.py`,
+  `services/api/services/revize_admin.py`,
+  `services/api/routes/admin.py`,
+  `moduly/apps/dashboard/api_client.py`,
+  `moduly/apps/dashboard/revize_shared.py`,
+  `moduly/apps/dashboard/pages/28_revize.py`,
+  `tests/test_dashboard_revize_shared.py`,
+  `tests/test_dashboard_admin_write_api_client.py`,
+  `tests/test_api_authorization_regression.py`, and
+  `scripts/postgres_revize_replacement_link.sql`.
+- Runtime expectation after workstation restart:
+  the startup Scheduled Task runs `start_api_dashboard.bat`; FastAPI listens
+  on `127.0.0.1:8000`; Streamlit listens on `127.0.0.1:8001`; scheduler and
+  Caddy return to their normal configured runtime. No credential, token,
+  Caddy, or production revize row change was made by this handoff.
+
 ### 2026-08-24 - Dashboard Revize renewal replacement link
 
 - Source state: `Prehled / Revize` now implements the approved
@@ -33,9 +79,9 @@ Date: 2026-08-21
   replaced rows can be shown through the sidebar record-scope filter and are
   classified as `Nahrazené`, not `Po platnosti`. Replaced rows cannot be
   renewed again from the dashboard.
-- Schema step: apply `scripts/postgres_revize_replacement_link.sql` to
-  PostgreSQL before runtime testing/deployment of this source, because the
-  SQLAlchemy model and overview query read the new column.
+- Schema step: `scripts/postgres_revize_replacement_link.sql` was applied to
+  PostgreSQL on 2026-08-24, and the follow-up schema check confirmed the new
+  column, foreign key, check constraint, and index exist.
 - Changed local source for this task:
   `moduly/evidence/revize/database/models.py`,
   `services/api/services/revize_admin.py`,
@@ -50,8 +96,8 @@ Date: 2026-08-21
 - Verification: targeted revize/API/auth tests returned `255 passed`.
   `git diff --check` returned no whitespace errors, only existing LF/CRLF
   normalization warnings.
-- Not done: the PostgreSQL migration script was prepared but not executed;
-  no production data was changed.
+- Not done: dashboard runtime has not yet been restarted after the schema and
+  source change; no production revize row was intentionally changed.
 
 ### 2026-08-24 10:29 +02:00 - Pre-restart handoff: dashboard map WIP
 

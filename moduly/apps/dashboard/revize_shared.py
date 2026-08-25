@@ -47,7 +47,6 @@ REVIZE_STATUS_OPTIONS = (
     REVIZE_STATUS_REPLACED,
 )
 
-REVIZE_BUILDING_OPTIONS = ("F", "G")
 REVIZE_EVIDENCE_SCHEMA = "evidence"
 
 REVIZE_DISPLAY_COLUMNS = [
@@ -159,6 +158,26 @@ def normalize_revize_payload(
         "soubor": _clean_optional_text(soubor, max_length=500),
         "poznamka": _clean_optional_text(poznamka),
     }
+
+
+@st.cache_data(ttl=60)
+def load_evidence_building_options() -> list[str]:
+    session = get_session_pg()
+    try:
+        rows = session.execute(
+            text(
+                """
+                SELECT DISTINCT btrim(budova) AS budova
+                FROM "evidence"."BUDOVY"
+                WHERE budova IS NOT NULL
+                  AND btrim(budova) <> ''
+                ORDER BY btrim(budova)
+                """
+            )
+        ).scalars()
+        return [str(row) for row in rows]
+    finally:
+        session.close()
 
 
 @st.cache_data(ttl=60)

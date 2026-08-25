@@ -37,28 +37,33 @@
 
 ## DASH-REVIZE-001 - Dashboard Revize renewal history
 
-- Status: source implemented and locally verified; pending PostgreSQL schema
-  script application and browser/API runtime test.
+- Status: source implemented, locally verified, and PostgreSQL schema applied;
+  pending workstation restart and browser/API runtime test.
 - Scope completed on 2026-08-24:
   `Prehled / Revize` renewal now uses a dedicated admin API endpoint
   `POST /api/v1/admin/revize/{revize_id}/renew`. The backend creates a new
   revision row, writes linked-device rows for it, and marks the source row as
   replaced through `revize.revize.nahrazena_revizi_id` in one transaction.
+  The revision form `Budova` options now load from
+  `"evidence"."BUDOVY".budova`; edit/renew forms still append the current
+  record value if it is missing from the evidence table.
   The overview defaults to current records only; historical replaced records
   are available through an explicit sidebar record-scope filter and show
   status `Nahrazené`.
 - Schema prerequisite:
-  apply `scripts/postgres_revize_replacement_link.sql` before running this
-  source against PostgreSQL. The script adds
-  `revize.revize.nahrazena_revizi_id`, foreign-key/check constraints, and an
-  index.
+  `scripts/postgres_revize_replacement_link.sql` was applied on 2026-08-24.
+  Follow-up schema verification confirmed
+  `revize.revize.nahrazena_revizi_id`, the foreign key, the self-link check,
+  and the index exist.
 - Verification:
   `tests/test_dashboard_revize_shared.py`,
   `tests/test_dashboard_admin_write_api_client.py`, and
   `tests/test_api_authorization_regression.py` returned `255 passed`;
+  after switching `Budova` options to `evidence.BUDOVY`,
+  `tests/test_dashboard_revize_shared.py` returned `25 passed`;
   `git diff --check` returned only LF/CRLF normalization warnings.
-- Not done: PostgreSQL migration was not executed; no production revize data
-  was changed.
+- Not done: dashboard runtime has not yet been restarted after the schema and
+  source change; no production revize row was intentionally changed.
 - Updated: 2026-08-24
 
 ## OPS-002 - Independent scheduler monitoring agent

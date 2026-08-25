@@ -980,6 +980,30 @@ def build_leaflet_map_html(
       return style;
     }}
 
+    function layerDrawOrder(layerConfig) {{
+      const configuredOrder = Number(layerConfig && layerConfig.draw_order);
+      return Number.isFinite(configuredOrder) ? configuredOrder : 100;
+    }}
+
+    function orderedMapLayers(rawLayers) {{
+      return rawLayers
+        .filter((layerConfig) => layerConfig && typeof layerConfig === "object")
+        .map((layerConfig, originalIndex) => ({{ layerConfig, originalIndex }}))
+        .sort((left, right) => {{
+          const orderDifference = layerDrawOrder(left.layerConfig) - layerDrawOrder(right.layerConfig);
+          if (orderDifference !== 0) {{
+            return orderDifference;
+          }}
+          return left.originalIndex - right.originalIndex;
+        }})
+        .map((entry) => entry.layerConfig);
+    }}
+
+    function layerPaneName(layerId) {{
+      const safeLayerId = String(layerId || "layer").replace(/[^a-zA-Z0-9_-]/g, "_");
+      return `map-layer-pane-${{safeLayerId}}`;
+    }}
+
     function conditionalRules(conditionalStyle) {{
       if (!conditionalStyle || typeof conditionalStyle !== "object") {{
         return [];
@@ -1197,10 +1221,12 @@ def build_leaflet_map_html(
       }};
     }}
 
-    function markerStyle(feature, layerId, layerConfig) {{
+    function markerStyle(feature, layerId, layerConfig, paneName) {{
       const style = featureStyle(feature, layerId, layerConfig);
+      const markerPaneName = paneName || layerPaneName(layerId);
       if (layerId === "budovy") {{
         return {{
+          pane: markerPaneName,
           radius: style.radius || 5,
           weight: style.weight || 2,
           color: style.color || "#d97706",
@@ -1210,6 +1236,7 @@ def build_leaflet_map_html(
       }}
       if (layerId === "mistnosti") {{
         return {{
+          pane: markerPaneName,
           radius: style.radius || 5,
           weight: style.weight || 2,
           color: style.color || "#15803d",
@@ -1218,6 +1245,7 @@ def build_leaflet_map_html(
         }};
       }}
       return {{
+        pane: markerPaneName,
         radius: style.radius || 6,
         weight: style.weight || 2,
         color: style.color || "#0f5e9c",
@@ -1357,9 +1385,10 @@ def build_leaflet_map_html(
       }};
     }}
 
-    function geoJsonLayerOptions(layerId, layerConfig) {{
+    function geoJsonLayerOptions(layerId, layerConfig, paneName) {{
       return {{
-        pointToLayer: (feature, latlng) => L.circleMarker(latlng, markerStyle(feature, layerId, layerConfig)),
+        pane: paneName,
+        pointToLayer: (feature, latlng) => L.circleMarker(latlng, markerStyle(feature, layerId, layerConfig, paneName)),
         style: (feature) => featureStyle(feature, layerId, layerConfig),
         onEachFeature: (feature, leafletLayer) => {{
           const labelHtml = featureMapLabel(feature, layerConfig);
@@ -1725,14 +1754,26 @@ def build_leaflet_map_html(
     let currentLocationMarker = null;
     let currentAccuracyCircle = null;
     let locationStatusTimer = null;
-    const layers = Array.isArray(mapPayload.layers) ? mapPayload.layers : [];
-    layers.forEach((layerConfig) => {{
+    const layers = orderedMapLayers(Array.isArray(mapPayload.layers) ? mapPayload.layers : []);
+    function ensureLayerPane(layerId, layerIndex) {{
+      const paneName = layerPaneName(layerId);
+      const pane = map.getPane(paneName) || map.createPane(paneName);
+      pane.style.zIndex = String(410 + layerIndex);
+      return paneName;
+    }}
+    function ensureLocationPane() {{
+      const pane = map.getPane("map-location-pane") || map.createPane("map-location-pane");
+      pane.style.zIndex = "620";
+      return "map-location-pane";
+    }}
+    layers.forEach((layerConfig, layerIndex) => {{
       const layerId = String(layerConfig.layer_id || "layer");
       const title = String(layerConfig.title || layerId);
       const isInitiallyVisible = layerConfig.default_visible !== false;
+      const paneName = ensureLayerPane(layerId, layerIndex);
       const leafletLayer = L.geoJSON(
         isInitiallyVisible ? filteredFeatureCollection(layerConfig) : {{ type: "FeatureCollection", features: [] }},
-        geoJsonLayerOptions(layerId, layerConfig)
+        geoJsonLayerOptions(layerId, layerConfig, paneName)
       );
       if (isInitiallyVisible) {{
         leafletLayer.addTo(map);
@@ -1859,6 +1900,7 @@ def build_leaflet_map_html(
         map.removeLayer(currentAccuracyCircle);
       }}
       currentLocationMarker = L.circleMarker(event.latlng, {{
+        pane: ensureLocationPane(),
         radius: 9,
         color: "#ffffff",
         weight: 3,
@@ -1866,6 +1908,7 @@ def build_leaflet_map_html(
         fillOpacity: 1
       }}).addTo(map);
       currentAccuracyCircle = L.circle(event.latlng, {{
+        pane: ensureLocationPane(),
         radius: event.accuracy,
         color: "#2563eb",
         weight: 1.5,

@@ -172,6 +172,58 @@ def test_leaflet_map_html_uses_configured_layer_style_and_default_visibility():
     assert "layerConfig.popup_columns" in html
 
 
+def test_leaflet_map_html_keeps_layer_draw_order_stable_with_leaflet_panes():
+    payload = {
+        "primary_layer_id": "spodni",
+        "layers": [
+            {
+                "layer_id": "horni",
+                "title": "Horni",
+                "draw_order": 200,
+                "feature_collection": {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "Point", "coordinates": [14.1, 50.7]},
+                            "properties": {},
+                        }
+                    ],
+                },
+            },
+            {
+                "layer_id": "spodni",
+                "title": "Spodni",
+                "draw_order": 10,
+                "feature_collection": {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "Polygon", "coordinates": []},
+                            "properties": {},
+                        }
+                    ],
+                },
+            },
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert "function layerDrawOrder" in html
+    assert "function orderedMapLayers" in html
+    assert "function layerPaneName" in html
+    assert "function ensureLayerPane" in html
+    assert "const layers = orderedMapLayers(Array.isArray(mapPayload.layers) ? mapPayload.layers : [])" in html
+    assert "pane.style.zIndex = String(410 + layerIndex)" in html
+    assert "const paneName = ensureLayerPane(layerId, layerIndex)" in html
+    assert "geoJsonLayerOptions(layerId, layerConfig, paneName)" in html
+    assert "pane: paneName" in html
+    assert "markerStyle(feature, layerId, layerConfig, paneName)" in html
+    assert 'pane.style.zIndex = "620"' in html
+
+
 def test_leaflet_map_html_binds_configured_map_labels_as_permanent_tooltips():
     payload = {
         "primary_layer_id": "mistnosti",
@@ -385,7 +437,10 @@ def test_leaflet_map_html_supports_conditional_feature_style():
     assert "function featureStyle" in html
     assert "delete style.conditionalStyle" in html
     assert "style: (feature) => featureStyle(feature, layerId, layerConfig)" in html
-    assert "pointToLayer: (feature, latlng) => L.circleMarker(latlng, markerStyle(feature, layerId, layerConfig))" in html
+    assert (
+        "pointToLayer: (feature, latlng) => "
+        "L.circleMarker(latlng, markerStyle(feature, layerId, layerConfig, paneName))"
+    ) in html
 
 
 def test_leaflet_map_html_supports_multiple_conditional_feature_styles():
@@ -608,7 +663,7 @@ def test_leaflet_map_html_renders_in_map_filter_control():
     assert 'map.on("overlayadd", (event) =>' in html
     assert "ensureLayerDataLoaded(item)" in html
     assert "filteredFeatureCollection(layerConfig)" in html
-    assert "geoJsonLayerOptions(layerId, layerConfig)" in html
+    assert "geoJsonLayerOptions(layerId, layerConfig, paneName)" in html
     assert "layerConfig.default_visible !== false" in html
     assert "filter_options" in html
     assert "selectElements" not in html

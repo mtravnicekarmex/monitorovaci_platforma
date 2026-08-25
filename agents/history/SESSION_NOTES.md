@@ -49,6 +49,11 @@ Date: 2026-08-21
   their native tile limits at 19/20, so high detail can be used together with
   `Bez mapy` while background tiles remain contextual. Automatic `fitBounds`
   is capped at zoom 22.
+- Follow-up draw-order fix: `poradi` / `draw_order` now controls stable
+  overlay stacking through per-layer Leaflet panes. Lower values render below
+  higher values, and toggling a layer off/on no longer lifts it above layers
+  with higher `poradi`. The current-location marker uses its own higher pane
+  so it remains visible above map overlays.
 - Per-layer legend checkbox: turning a layer off in `Legenda` hides only that
   layer's legend entries. It does not hide geometry, filters, labels, popups,
   styles, or the layer itself.
@@ -67,7 +72,9 @@ Date: 2026-08-21
   the control-stack scroll and pointer-events fixes,
   `tests/test_dashboard_map_shared.py` returned `23 passed`. After the
   zoom-limit fix, `tests/test_dashboard_map_shared.py` returned `24 passed`
-  and the focused map regression subset returned `78 passed`.
+  and the focused map regression subset returned `78 passed`. After the
+  draw-order pane fix, `tests/test_dashboard_map_shared.py` returned
+  `25 passed` and the focused map regression subset returned `79 passed`.
 - Not done: browser runtime has not yet been manually checked after this
   source change.
 

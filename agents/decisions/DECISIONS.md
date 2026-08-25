@@ -4859,3 +4859,32 @@ Consequences:
 - This is a client-side map display change only. It does not change geometry,
   map-layer metadata, database state, API authorization, or the iframe
   bearer-token boundary.
+
+## DEC-157: Dashboard map layer draw order is enforced with Leaflet panes
+
+Date: 2026-08-25
+
+Status: Accepted
+
+Decision:
+
+- `Mapove podklady / Mapa` treats `draw_order` / `poradi` as the intended
+  visual stacking order for map overlay layers.
+- The map renderer sorts client-side layer payloads by `draw_order` and
+  assigns each overlay layer to its own Leaflet pane with a stable z-index.
+- Lower `draw_order` values render below higher `draw_order` values. Layers
+  with equal `draw_order` keep the order supplied by the API payload, which is
+  already ordered deterministically by the backend.
+- Point layers and line/polygon layers use the same pane contract, so toggling
+  a layer off and back on should not move it visually above layers with higher
+  priority.
+
+Consequences:
+
+- The `poradi` field now controls visual layer stacking, not only catalog/list
+  order.
+- Changing `poradi` in `Mapove vrstvy` is enough to control which overlays
+  appear above others after the map is reloaded.
+- This is a client-side map rendering behavior only. It does not change
+  GeoJSON content, source tables, database schema, API authorization, filters,
+  labels, legends, or popups.

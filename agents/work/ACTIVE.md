@@ -33,7 +33,9 @@
   scrollbar is draggable/clickable. Manual map zoom now allows level 24 for
   detailed vector-layer inspection; base tiles can be upscaled to level 24
   while retaining native tile limits 19/20, and automatic `fitBounds` is
-  capped at zoom 22.
+  capped at zoom 22. The `poradi` / `draw_order` field now controls stable
+  overlay stacking through per-layer Leaflet panes; lower values render below
+  higher values even after a layer is toggled off and back on.
 - Current pause point: the user is restarting the workstation. After restart,
   browser-test the map page with the sidebar expanded and collapsed. The
   latest CSS uses a transparent fixed zero-height Streamlit header and a
@@ -64,7 +66,9 @@
   and pointer-events fix, `tests/test_dashboard_map_shared.py` returned
   `23 passed`. After the zoom-limit fix,
   `tests/test_dashboard_map_shared.py` returned `24 passed` and the focused
-  map regression subset returned `78 passed`.
+  map regression subset returned `78 passed`. After the draw-order pane fix,
+  `tests/test_dashboard_map_shared.py` returned `25 passed` and the focused
+  map regression subset returned `79 passed`.
 - Changed files are listed in the 2026-08-24 10:29 +02:00 pre-restart
   handoff in `../history/SESSION_NOTES.md`.
 - Updated: 2026-08-25

@@ -54,13 +54,34 @@ Date: 2026-08-21
   higher values, and toggling a layer off/on no longer lifts it above layers
   with higher `poradi`. The current-location marker uses its own higher pane
   so it remains visible above map overlays.
+- Follow-up property-label fix: map-layer aliases and display labels are now
+  separate. `Aliasy vlastnosti JSON` remains source-column -> GeoJSON-property
+  mapping, while the new `Popisky vlastnosti JSON` field stores
+  GeoJSON-property -> operator label mapping. Filter labels and configured
+  popup row headers use `property_labels`; unnamed conditional-style legend
+  fallbacks can also use these labels. Technical GeoJSON keys remain
+  unchanged.
+- Follow-up property-label runtime fix: the map page now explicitly merges
+  `property_labels` from catalog metadata and loaded feature payloads when
+  building the Leaflet iframe payload, preventing an empty/partial layer
+  payload from erasing configured popup labels.
 - Per-layer legend checkbox: turning a layer off in `Legenda` hides only that
   layer's legend entries. It does not hide geometry, filters, labels, popups,
   styles, or the layer itself.
 - Changed local source for this task:
   `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`,
   `moduly/apps/dashboard/map_shared.py`,
-  `tests/test_dashboard_map_layers_admin.py`, and
+  `moduly/apps/dashboard/database/models.py`,
+  `moduly/apps/dashboard/database/db_init.py`,
+  `services/api/schemas/admin.py`,
+  `services/api/schemas/device_map.py`,
+  `services/api/services/map_layers.py`,
+  `services/api/services/device_map.py`,
+  `scripts/postgres_map_layer_property_labels.sql`,
+  `moduly/apps/dashboard/pages/36_mapove_podklady.py`,
+  `tests/test_dashboard_map_layers_admin.py`,
+  `tests/test_dashboard_map_page_layout.py`,
+  `tests/test_map_layers_service.py`, and
   `tests/test_dashboard_map_shared.py`.
 - Documentation updated for this task:
   `agents/decisions/DECISIONS.md`,
@@ -75,8 +96,15 @@ Date: 2026-08-21
   and the focused map regression subset returned `78 passed`. After the
   draw-order pane fix, `tests/test_dashboard_map_shared.py` returned
   `25 passed` and the focused map regression subset returned `79 passed`.
+  After the property-label fix, targeted map-layer tests returned `46 passed`,
+  the focused map regression subset returned `81 passed`, and `py_compile`
+  passed for the touched dashboard/API map modules. After the property-label
+  runtime merge fix, targeted map-page/renderer/admin tests returned
+  `32 passed`, the focused map regression subset returned `82 passed`, and
+  `py_compile` passed for `36_mapove_podklady.py` and `map_shared.py`.
 - Not done: browser runtime has not yet been manually checked after this
-  source change.
+  source change. The PostgreSQL property-label column script has not been
+  applied in this session.
 
 ### 2026-08-25 - Dashboard map label visibility control
 

@@ -4888,3 +4888,41 @@ Consequences:
 - This is a client-side map rendering behavior only. It does not change
   GeoJSON content, source tables, database schema, API authorization, filters,
   labels, legends, or popups.
+
+## DEC-158: Dashboard map property aliases and display labels are separate
+
+Date: 2026-08-25
+
+Status: Accepted
+
+Decision:
+
+- `property_aliases` remains a technical mapping from source database column
+  name to GeoJSON property key.
+- `property_labels` is a separate display mapping from GeoJSON property key
+  to the operator-facing label used in map UI surfaces.
+- `Mapove vrstvy` exposes `Popisky vlastnosti JSON` as the admin editor for
+  `property_labels`.
+- Map filter metadata uses `property_labels` for filter labels when available.
+- Leaflet popup rows use `property_labels` for configured `popup_columns`;
+  the underlying feature property keys remain unchanged.
+- The dashboard map page preserves and merges `property_labels` while
+  combining catalog metadata with loaded feature payloads, so a partial/empty
+  feature response cannot erase labels supplied by the catalog response.
+- Conditional-style legend entries still prefer an explicit rule `name`, but
+  unnamed rules can use `property_labels` when composing a fallback condition
+  description.
+- Existing databases need the `dashboard."Map_Layers".property_labels` text
+  column. Runtime bootstrap can add it, and
+  `scripts/postgres_map_layer_property_labels.sql` provides an explicit
+  operator-applied SQL step.
+
+Consequences:
+
+- Operators can keep safe technical keys such as `paterni_rozvod` while
+  displaying labels such as `Paterni rozvod` in filters, popups, and unnamed
+  legend-condition fallbacks.
+- Aliases should not be used as human-facing labels with spaces/diacritics;
+  labels belong in `property_labels`.
+- This does not change source data, GeoJSON values, map filters, popup value
+  selection, conditional style matching, authorization, or layer visibility.

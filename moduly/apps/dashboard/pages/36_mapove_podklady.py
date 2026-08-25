@@ -40,6 +40,12 @@ def _layer_id(layer: dict[str, object]) -> str:
     return str(layer.get("layer_id") or "")
 
 
+def _dict_value(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): item for key, item in value.items()}
+
+
 def _request_header(name: str) -> str:
     headers = getattr(st.context, "headers", {}) or {}
     value = ""
@@ -93,9 +99,14 @@ def _leaflet_map_payload(
         if not layer_id:
             continue
         catalog_layer = catalog_by_id.get(layer_id, {})
+        property_labels = {
+            **_dict_value(catalog_layer.get("property_labels")),
+            **_dict_value(layer_payload.get("property_labels")),
+        }
         merged_layer = {
             **catalog_layer,
             **layer_payload,
+            "property_labels": property_labels,
             "filter_fields": [
                 field
                 for field in catalog_layer.get("filter_fields", [])

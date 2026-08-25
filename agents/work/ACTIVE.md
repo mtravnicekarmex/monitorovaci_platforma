@@ -35,7 +35,14 @@
   while retaining native tile limits 19/20, and automatic `fitBounds` is
   capped at zoom 22. The `poradi` / `draw_order` field now controls stable
   overlay stacking through per-layer Leaflet panes; lower values render below
-  higher values even after a layer is toggled off and back on.
+  higher values even after a layer is toggled off and back on. Map-layer
+  aliases and display labels are now separate: `property_aliases` maps source
+  columns to technical GeoJSON keys, while `property_labels` maps GeoJSON keys
+  to human-facing filter/popup labels and unnamed legend-condition fallback
+  labels through the new `Popisky vlastnosti JSON` admin field. The map page
+  also explicitly merges `property_labels` from catalog metadata and feature
+  payloads when building the Leaflet iframe payload, so configured popup
+  labels are not erased by an empty/partial layer payload.
 - Current pause point: the user is restarting the workstation. After restart,
   browser-test the map page with the sidebar expanded and collapsed. The
   latest CSS uses a transparent fixed zero-height Streamlit header and a
@@ -68,7 +75,13 @@
   `tests/test_dashboard_map_shared.py` returned `24 passed` and the focused
   map regression subset returned `78 passed`. After the draw-order pane fix,
   `tests/test_dashboard_map_shared.py` returned `25 passed` and the focused
-  map regression subset returned `79 passed`.
+  map regression subset returned `79 passed`. After the property-label fix,
+  targeted map-layer tests returned `46 passed`, the focused map regression
+  subset returned `81 passed`, and `py_compile` passed for the touched
+  dashboard/API map modules. After the property-label runtime merge fix,
+  targeted map-page/renderer/admin tests returned `32 passed`, the focused
+  map regression subset returned `82 passed`, and `py_compile` passed for
+  `36_mapove_podklady.py` and `map_shared.py`.
 - Changed files are listed in the 2026-08-24 10:29 +02:00 pre-restart
   handoff in `../history/SESSION_NOTES.md`.
 - Updated: 2026-08-25

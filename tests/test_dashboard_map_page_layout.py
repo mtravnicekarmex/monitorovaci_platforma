@@ -10,6 +10,10 @@ def test_map_page_uses_full_width_map_with_in_map_controls():
 
     assert "MAP_IFRAME_FALLBACK_HEIGHT_PX = 920" in source
     assert "def _leaflet_map_payload(" in source
+    assert "def _dict_value(" in source
+    assert '"property_labels": property_labels' in source
+    assert '**_dict_value(catalog_layer.get("property_labels"))' in source
+    assert '**_dict_value(layer_payload.get("property_labels"))' in source
     assert '"filter_fields": [' in source
     assert '"filter_options": filter_options_by_layer.get(layer_id, {})' in source
     assert "filter_options_request = build_map_features_request(layer_ids)" in source

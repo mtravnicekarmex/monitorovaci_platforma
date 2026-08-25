@@ -4830,3 +4830,32 @@ Consequences:
 - This is a client-side layout behavior only. It does not change map-layer
   metadata, filtering, styling, labels, legend content, database state, API
   authorization, or the iframe bearer-token boundary.
+
+## DEC-156: Dashboard map supports deeper vector-detail zoom
+
+Date: 2026-08-25
+
+Status: Accepted
+
+Decision:
+
+- `Mapove podklady / Mapa` allows manual Leaflet zoom to level 24 for detail
+  inspection of vector overlays.
+- Base tile layers also allow zoom 24, but their native tile zoom limits stay
+  unchanged: OpenStreetMap remains `maxNativeZoom=19` and the ČÚZK aerial
+  layer remains `maxNativeZoom=20`.
+- Automatic `fitBounds` after map load is capped at zoom 22, so initial map
+  framing can be closer than before without jumping to the most extreme
+  manual detail zoom.
+
+Consequences:
+
+- At high detail zoom, operators can switch the base layer to `Bez mapy` and
+  inspect sharp vector overlays without relying on blurry upscaled background
+  tiles.
+- Background maps remain useful primarily for wider context. Above their
+  native tile zoom, they are intentionally upscaled by Leaflet rather than
+  treated as higher-resolution source data.
+- This is a client-side map display change only. It does not change geometry,
+  map-layer metadata, database state, API authorization, or the iframe
+  bearer-token boundary.

@@ -317,6 +317,35 @@ def test_leaflet_map_html_keeps_top_right_control_stack_scrollable():
     assert "scrollbar-width: thin" in html
 
 
+def test_leaflet_map_html_allows_deeper_vector_zoom_without_changing_native_tile_zoom():
+    payload = {
+        "primary_layer_id": "potrubi",
+        "layers": [
+            {
+                "layer_id": "potrubi",
+                "title": "Potrubi",
+                "feature_collection": {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "LineString", "coordinates": [[14.1, 50.7], [14.2, 50.8]]},
+                            "properties": {},
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert 'L.map("map", { center: [50.77, 14.23], zoom: 17, maxZoom: 24 })' in html
+    assert "maxNativeZoom: 19" in html
+    assert "maxNativeZoom: 20" in html
+    assert "map.fitBounds(bounds, { padding: [24, 24], maxZoom: 22 })" in html
+
+
 def test_leaflet_map_html_supports_conditional_feature_style():
     payload = {
         "primary_layer_id": "potrubi",

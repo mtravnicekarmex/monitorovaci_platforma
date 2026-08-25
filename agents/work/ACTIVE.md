@@ -30,7 +30,10 @@
   Leaflet control stack is now viewport-bounded and vertically scrollable, so
   lower controls remain reachable when multiple panels are open; the
   scrollable Leaflet corner also enables `pointer-events: auto` so the
-  scrollbar is draggable/clickable.
+  scrollbar is draggable/clickable. Manual map zoom now allows level 24 for
+  detailed vector-layer inspection; base tiles can be upscaled to level 24
+  while retaining native tile limits 19/20, and automatic `fitBounds` is
+  capped at zoom 22.
 - Current pause point: the user is restarting the workstation. After restart,
   browser-test the map page with the sidebar expanded and collapsed. The
   latest CSS uses a transparent fixed zero-height Streamlit header and a
@@ -59,7 +62,9 @@
   `tests/test_dashboard_map_layers_admin.py`; after the legend color fix the
   same focused test pair returned `24 passed`. After the control-stack scroll
   and pointer-events fix, `tests/test_dashboard_map_shared.py` returned
-  `23 passed`.
+  `23 passed`. After the zoom-limit fix,
+  `tests/test_dashboard_map_shared.py` returned `24 passed` and the focused
+  map regression subset returned `78 passed`.
 - Changed files are listed in the 2026-08-24 10:29 +02:00 pre-restart
   handoff in `../history/SESSION_NOTES.md`.
 - Updated: 2026-08-25

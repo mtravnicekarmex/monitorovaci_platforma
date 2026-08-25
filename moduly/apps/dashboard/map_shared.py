@@ -1706,14 +1706,14 @@ def build_leaflet_map_html(
     }}
 
     const mapPayload = decodePayload(encodedPayload);
-    const map = L.map("map", {{ center: [50.77, 14.23], zoom: 17, maxZoom: 22 }});
+    const map = L.map("map", {{ center: [50.77, 14.23], zoom: 17, maxZoom: 24 }});
     const osmBaseLayer = L.tileLayer("https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
-      maxZoom: 22,
+      maxZoom: 24,
       maxNativeZoom: 19,
       attribution: "&copy; OpenStreetMap contributors"
     }}).addTo(map);
     const aerialBaseLayer = L.tileLayer("https://ags.cuzk.gov.cz/arcgis1/rest/services/ORTOFOTO_WM/MapServer/tile/{{z}}/{{y}}/{{x}}", {{
-      maxZoom: 22,
+      maxZoom: 24,
       maxNativeZoom: 20,
       attribution: "&copy; ČÚZK"
     }});
@@ -1893,7 +1893,7 @@ def build_leaflet_map_html(
         || leafletLayers[0]?.layer;
       const bounds = primaryLayer ? primaryLayer.getBounds() : null;
       if (bounds && bounds.isValid()) {{
-        map.fitBounds(bounds, {{ padding: [24, 24], maxZoom: 20 }});
+        map.fitBounds(bounds, {{ padding: [24, 24], maxZoom: 22 }});
       }}
     }} catch (_) {{}}
 

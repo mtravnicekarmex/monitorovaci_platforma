@@ -44,6 +44,11 @@ Date: 2026-08-21
   `pointer-events: auto`, because Leaflet corner containers default to
   disabled pointer events; without this, the scrollbar can be visible but not
   draggable/clickable.
+- Follow-up zoom change: manual Leaflet zoom now allows level 24 for detailed
+  vector-layer inspection. OSM/ČÚZK base layers also allow zoom 24 but keep
+  their native tile limits at 19/20, so high detail can be used together with
+  `Bez mapy` while background tiles remain contextual. Automatic `fitBounds`
+  is capped at zoom 22.
 - Per-layer legend checkbox: turning a layer off in `Legenda` hides only that
   layer's legend entries. It does not hide geometry, filters, labels, popups,
   styles, or the layer itself.
@@ -60,7 +65,9 @@ Date: 2026-08-21
   `tests/test_dashboard_map_layers_admin.py` returned `24 passed`. After the
   legend color fix, the same focused test pair returned `24 passed`. After
   the control-stack scroll and pointer-events fixes,
-  `tests/test_dashboard_map_shared.py` returned `23 passed`.
+  `tests/test_dashboard_map_shared.py` returned `23 passed`. After the
+  zoom-limit fix, `tests/test_dashboard_map_shared.py` returned `24 passed`
+  and the focused map regression subset returned `78 passed`.
 - Not done: browser runtime has not yet been manually checked after this
   source change.
 

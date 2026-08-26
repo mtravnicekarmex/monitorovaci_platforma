@@ -39,6 +39,16 @@ def test_map_layers_admin_supports_property_display_labels_json():
     assert 'key=f"{prefix}_property_labels"' in source
 
 
+def test_map_layers_admin_supports_map_context_selection():
+    source = MAP_LAYERS_ADMIN_PATH.read_text(encoding="utf-8")
+
+    assert 'MAP_CONTEXT_OPTIONS = ("evidence", "revize", "shared")' in source
+    assert '"Mapa"' in source
+    assert 'key=f"{prefix}_map_context"' in source
+    assert '"map_context": str(st.session_state.get' in source
+    assert '"kontext": MAP_CONTEXT_LABELS.get' in source
+
+
 def test_map_layers_admin_orders_source_alias_usage_and_display_label_fields():
     source = MAP_LAYERS_ADMIN_PATH.read_text(encoding="utf-8")
 

@@ -268,6 +268,14 @@ PAGES: tuple[DashboardPage, ...] = (
         configurable=True,
     ),
     DashboardPage(
+        key="revize_map",
+        path="pages/40_revize_mapa.py",
+        title="Mapa",
+        icon="🗺",
+        section_key="revize",
+        configurable=True,
+    ),
+    DashboardPage(
         key="mapove_podklady_map",
         path="pages/36_mapove_podklady.py",
         title="Mapa",

@@ -115,9 +115,22 @@ def test_nabijecky_section_and_page_are_configurable():
 def test_revize_section_and_page_are_configurable():
     section_keys = get_configurable_section_keys()
     page_keys = get_configurable_page_keys(section_keys)
+    page = get_page_definition("revize_map")
 
     assert "revize" in section_keys
     assert "revize_overview" in page_keys
+    assert page is not None
+    assert page.section_key == "revize"
+    assert page.configurable is True
+    assert "revize_map" in page_keys
+
+
+def test_revize_map_page_is_after_revize_overview():
+    main_page_keys = [page.key for page in get_dashboard_pages("main")]
+
+    assert "revize_overview" in main_page_keys
+    assert "revize_map" in main_page_keys
+    assert main_page_keys.index("revize_overview") < main_page_keys.index("revize_map")
 
 
 def test_mapove_podklady_section_and_page_are_configurable():

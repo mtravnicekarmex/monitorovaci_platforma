@@ -21,6 +21,13 @@ from services.api.services.device_map import (
 
 LAYER_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 VALID_LAYER_KINDS = {"context", "device"}
+DEFAULT_MAP_CONTEXT = "evidence"
+SHARED_MAP_CONTEXT = "shared"
+VALID_MAP_CONTEXTS = {DEFAULT_MAP_CONTEXT, "revize", SHARED_MAP_CONTEXT}
+MAP_CONTEXT_SECTION_KEYS = {
+    DEFAULT_MAP_CONTEXT: "mapove_podklady",
+    "revize": "revize",
+}
 
 
 DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
@@ -28,6 +35,7 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
         "layer_id": "budovy",
         "title": "Budovy",
         "layer_kind": "context",
+        "map_context": DEFAULT_MAP_CONTEXT,
         "source_schema": "evidence",
         "source_table": "BUDOVY",
         "geometry_column": "geom",
@@ -57,6 +65,7 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
         "layer_id": "mistnosti",
         "title": "M\u00edstnosti",
         "layer_kind": "context",
+        "map_context": DEFAULT_MAP_CONTEXT,
         "source_schema": "evidence",
         "source_table": "M\u00cdSTNOSTI",
         "geometry_column": "geom",
@@ -95,6 +104,7 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
         "layer_id": "vodomery",
         "title": "Vodom\u011bry",
         "layer_kind": "device",
+        "map_context": DEFAULT_MAP_CONTEXT,
         "source_schema": "evidence",
         "source_table": "vodom\u011bry",
         "geometry_column": "geom",
@@ -150,6 +160,136 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
         "is_active": True,
         "draw_order": 100,
     },
+    {
+        "layer_id": "revize_terminy_zarizeni",
+        "title": "Terminy revizi a cejchu",
+        "layer_kind": "context",
+        "map_context": "revize",
+        "source_schema": "revize",
+        "source_table": "v_mapa_terminy_zarizeni",
+        "geometry_column": "geom",
+        "identifier_column": "map_id",
+        "source_srid": 3857,
+        "target_srid": WEB_MAP_TARGET_SRID,
+        "property_columns": [
+            "map_id",
+            "typ_zarizeni",
+            "typ_terminu",
+            "zarizeni_id",
+            "budova",
+            "patro",
+            "mistnost_id",
+            "mistnost",
+            "identifikace",
+            "seriove_cislo",
+            "mbus",
+            "revize_id",
+            "termin_nazev",
+            "datum_provedeni",
+            "datum_platnosti",
+            "delka_platnosti",
+            "dnu_do_konce",
+            "stav_terminu",
+            "stav_terminu_poradi",
+            "posledni_mereni_datum",
+            "posledni_stav",
+            "poznamka",
+        ],
+        "property_aliases": {},
+        "property_labels": {
+            "typ_zarizeni": "Typ zarizeni",
+            "typ_terminu": "Typ terminu",
+            "zarizeni_id": "ID zarizeni",
+            "budova": "Budova",
+            "patro": "Patro",
+            "mistnost_id": "Mistnost ID",
+            "mistnost": "Mistnost",
+            "identifikace": "Identifikace",
+            "seriove_cislo": "Seriove cislo",
+            "mbus": "MBUS",
+            "revize_id": "Revize ID",
+            "termin_nazev": "Nazev terminu",
+            "datum_provedeni": "Datum provedeni",
+            "datum_platnosti": "Datum platnosti",
+            "delka_platnosti": "Delka platnosti",
+            "dnu_do_konce": "Dnu do konce",
+            "stav_terminu": "Stav terminu",
+            "stav_terminu_poradi": "Poradi stavu",
+            "posledni_mereni_datum": "Posledni mereni",
+            "posledni_stav": "Posledni stav",
+            "poznamka": "Poznamka",
+        },
+        "filter_columns": ["stav_terminu", "typ_zarizeni", "typ_terminu", "budova", "patro", "mistnost"],
+        "map_label_columns": [],
+        "popup_columns": [
+            "typ_zarizeni",
+            "identifikace",
+            "stav_terminu",
+            "datum_platnosti",
+            "dnu_do_konce",
+            "typ_terminu",
+            "termin_nazev",
+            "budova",
+            "patro",
+            "mistnost",
+            "seriove_cislo",
+            "mbus",
+            "poznamka",
+        ],
+        "style": {
+            "color": "#4b5563",
+            "fillColor": "#9ca3af",
+            "weight": 2,
+            "fillOpacity": 0.35,
+            "radius": 7,
+            "conditionalStyle": {
+                "rules": [
+                    {
+                        "name": "Bez revize",
+                        "property": "stav_terminu",
+                        "operator": "equals",
+                        "value": "Bez revize",
+                        "style": {"color": "#7c2d12", "fillColor": "#9a3412", "weight": 3, "radius": 7},
+                    },
+                    {
+                        "name": "Bez data platnosti",
+                        "property": "stav_terminu",
+                        "operator": "equals",
+                        "value": "Bez data platnosti",
+                        "style": {"color": "#6b7280", "fillColor": "#9ca3af", "weight": 2, "radius": 7},
+                    },
+                    {
+                        "name": "Po platnosti",
+                        "property": "stav_terminu",
+                        "operator": "equals",
+                        "value": "Po platnosti",
+                        "style": {"color": "#b91c1c", "fillColor": "#ef4444", "weight": 4, "radius": 8},
+                    },
+                    {
+                        "name": "Do 30 dnu",
+                        "property": "stav_terminu",
+                        "operator": "equals",
+                        "value": "Do 30 dn\u016f",
+                        "style": {"color": "#c2410c", "fillColor": "#f97316", "weight": 3, "radius": 8},
+                    },
+                    {
+                        "name": "Platne",
+                        "property": "stav_terminu",
+                        "operator": "equals",
+                        "value": "Platn\u00e9",
+                        "style": {"color": "#15803d", "fillColor": "#22c55e", "weight": 2, "radius": 7},
+                    },
+                ],
+                "fallback": {"color": "#4b5563", "fillColor": "#9ca3af", "weight": 2, "fillOpacity": 0.35, "radius": 7},
+            },
+        },
+        "restrict_to_allowed_devices": False,
+        "map_enabled": True,
+        "default_visible": True,
+        "show_photo": False,
+        "is_active": True,
+        "draw_order": 200,
+    },
 )
 
 
@@ -169,6 +309,21 @@ def _clean_layer_id(layer_id: str) -> str:
     if not LAYER_ID_PATTERN.match(cleaned):
         raise MapLayerOperationError("layer_id muze obsahovat jen pismena, cisla, pomlcku a podtrzitko.")
     return cleaned
+
+
+def _clean_map_context(map_context: str | None) -> str:
+    cleaned = (map_context or DEFAULT_MAP_CONTEXT).strip()
+    if cleaned not in VALID_MAP_CONTEXTS:
+        raise MapLayerOperationError("map_context musi byt evidence, revize nebo shared.")
+    return cleaned
+
+
+def _record_matches_map_context(record: dict[str, object], map_context: str | None) -> bool:
+    if map_context is None:
+        return True
+    requested_context = _clean_map_context(map_context)
+    record_context = str(record.get("map_context") or DEFAULT_MAP_CONTEXT).strip() or DEFAULT_MAP_CONTEXT
+    return record_context in {requested_context, SHARED_MAP_CONTEXT}
 
 
 def _clean_list(values: list[str] | tuple[str, ...] | None) -> list[str]:
@@ -283,6 +438,7 @@ def _serialize_record(layer: Dashboard_MapLayer) -> dict[str, object]:
         "layer_id": layer.layer_id,
         "title": layer.title,
         "layer_kind": layer.layer_kind,
+        "map_context": getattr(layer, "map_context", DEFAULT_MAP_CONTEXT) or DEFAULT_MAP_CONTEXT,
         "source_schema": layer.source_schema,
         "source_table": layer.source_table,
         "geometry_column": layer.geometry_column,
@@ -314,6 +470,7 @@ def map_layer_record_to_config(record: dict[str, object]) -> MapLayerConfig:
     return MapLayerConfig(
         layer_id=str(record["layer_id"]),
         title=str(record["title"]),
+        map_context=str(record.get("map_context") or DEFAULT_MAP_CONTEXT),
         schema=str(record["source_schema"]),
         table=str(record["source_table"]),
         geometry_column=str(record["geometry_column"]),
@@ -340,6 +497,7 @@ def map_layer_record_to_config(record: dict[str, object]) -> MapLayerConfig:
 def _apply_record_fields(layer: Dashboard_MapLayer, values: dict[str, object]) -> None:
     layer.title = str(values["title"])
     layer.layer_kind = str(values["layer_kind"])
+    layer.map_context = str(values["map_context"])
     layer.source_schema = str(values["source_schema"])
     layer.source_table = str(values["source_table"])
     layer.geometry_column = str(values["geometry_column"])
@@ -386,6 +544,7 @@ def _prepare_record_values(
     show_photo: bool,
     is_active: bool,
     draw_order: int,
+    map_context: str = DEFAULT_MAP_CONTEXT,
     map_label_columns: list[str] | None = None,
     property_labels: dict[str, object] | None = None,
 ) -> dict[str, object]:
@@ -393,6 +552,7 @@ def _prepare_record_values(
     cleaned_layer_kind = _clean_text(layer_kind, field_name="layer_kind")
     if cleaned_layer_kind not in VALID_LAYER_KINDS:
         raise MapLayerOperationError("layer_kind musi byt context nebo device.")
+    cleaned_map_context = _clean_map_context(map_context)
 
     cleaned_style = _clean_style(style)
     cleaned_property_columns = _ensure_conditional_style_property_column(
@@ -404,6 +564,7 @@ def _prepare_record_values(
         "layer_id": cleaned_layer_id,
         "title": _clean_text(title, field_name="title"),
         "layer_kind": cleaned_layer_kind,
+        "map_context": cleaned_map_context,
         "source_schema": _clean_text(source_schema, field_name="source_schema"),
         "source_table": _clean_text(source_table, field_name="source_table"),
         "geometry_column": _clean_text(geometry_column, field_name="geometry_column"),
@@ -468,7 +629,12 @@ def list_map_layers_admin(user_context: DashboardUserContext) -> list[dict[str, 
         session.close()
 
 
-def list_enabled_map_layer_configs(layer_ids: tuple[str, ...] | None = None) -> list[MapLayerConfig]:
+def list_enabled_map_layer_configs(
+    layer_ids: tuple[str, ...] | None = None,
+    *,
+    map_context: str | None = DEFAULT_MAP_CONTEXT,
+) -> list[MapLayerConfig]:
+    cleaned_map_context = None if map_context is None else _clean_map_context(map_context)
     session = get_session_pg()
     try:
         existing_query = session.query(Dashboard_MapLayer.layer_id)
@@ -482,6 +648,9 @@ def list_enabled_map_layer_configs(layer_ids: tuple[str, ...] | None = None) -> 
         )
         if layer_ids is not None:
             query = query.filter(Dashboard_MapLayer.layer_id.in_(layer_ids))
+        if cleaned_map_context is not None:
+            allowed_contexts = {cleaned_map_context, SHARED_MAP_CONTEXT}
+            query = query.filter(Dashboard_MapLayer.map_context.in_(allowed_contexts))
         rows = query.order_by(Dashboard_MapLayer.draw_order.asc(), Dashboard_MapLayer.layer_id.asc()).all()
         records = [_serialize_record(row) for row in rows]
     finally:
@@ -491,17 +660,25 @@ def list_enabled_map_layer_configs(layer_ids: tuple[str, ...] | None = None) -> 
         for seed in DEFAULT_MAP_LAYER_SEEDS:
             if seed["layer_id"] in existing_ids or seed["layer_id"] not in layer_ids:
                 continue
+            if not _record_matches_map_context(seed, cleaned_map_context):
+                continue
             if seed.get("is_active", True) and seed.get("map_enabled", True):
                 records.append(dict(seed))
     elif not records and not existing_ids:
-        records = [dict(seed) for seed in DEFAULT_MAP_LAYER_SEEDS if seed.get("is_active", True) and seed.get("map_enabled", True)]
+        records = [
+            dict(seed)
+            for seed in DEFAULT_MAP_LAYER_SEEDS
+            if _record_matches_map_context(seed, cleaned_map_context)
+            and seed.get("is_active", True)
+            and seed.get("map_enabled", True)
+        ]
 
     records.sort(key=lambda item: (int(item.get("draw_order", 100)), str(item.get("layer_id", ""))))
     return [map_layer_record_to_config(record) for record in records]
 
 
-def get_enabled_map_layer_config(layer_id: str) -> MapLayerConfig | None:
-    configs = list_enabled_map_layer_configs((layer_id,))
+def get_enabled_map_layer_config(layer_id: str, *, map_context: str | None = None) -> MapLayerConfig | None:
+    configs = list_enabled_map_layer_configs((layer_id,), map_context=map_context)
     return configs[0] if configs else None
 
 
@@ -522,6 +699,7 @@ def map_layer_config_to_catalog_record(config: MapLayerConfig) -> dict[str, obje
         "layer_id": config.layer_id,
         "title": config.title,
         "layer_kind": config.layer_kind,
+        "map_context": config.map_context,
         "device_section_key": config.device_section_key,
         "default_visible": config.default_visible,
         "draw_order": config.draw_order,
@@ -542,8 +720,20 @@ def map_layer_config_to_catalog_record(config: MapLayerConfig) -> dict[str, obje
     }
 
 
+def user_can_access_map_context(user_context: DashboardUserContext, map_context: str | None) -> bool:
+    if user_context.is_admin:
+        return True
+    cleaned_map_context = _clean_map_context(map_context)
+    if cleaned_map_context == SHARED_MAP_CONTEXT:
+        return any(section_key in user_context.allowed_sections for section_key in MAP_CONTEXT_SECTION_KEYS.values())
+    required_section = MAP_CONTEXT_SECTION_KEYS.get(cleaned_map_context)
+    return bool(required_section and required_section in user_context.allowed_sections)
+
+
 def user_can_access_map_layer(user_context: DashboardUserContext, config: MapLayerConfig) -> bool:
     if not config.map_enabled:
+        return False
+    if not user_can_access_map_context(user_context, config.map_context):
         return False
     if user_context.is_admin:
         return True
@@ -559,13 +749,19 @@ def user_can_access_map_layer(user_context: DashboardUserContext, config: MapLay
 def list_available_map_layer_configs(
     user_context: DashboardUserContext,
     layer_ids: tuple[str, ...] | None = None,
+    *,
+    map_context: str | None = DEFAULT_MAP_CONTEXT,
 ) -> list[MapLayerConfig]:
-    configs = list_enabled_map_layer_configs(layer_ids)
+    configs = list_enabled_map_layer_configs(layer_ids, map_context=map_context)
     return [config for config in configs if user_can_access_map_layer(user_context, config)]
 
 
-def list_map_layer_catalog(user_context: DashboardUserContext) -> list[dict[str, object]]:
-    configs = list_available_map_layer_configs(user_context)
+def list_map_layer_catalog(
+    user_context: DashboardUserContext,
+    *,
+    map_context: str | None = DEFAULT_MAP_CONTEXT,
+) -> list[dict[str, object]]:
+    configs = list_available_map_layer_configs(user_context, map_context=map_context)
     return [map_layer_config_to_catalog_record(config) for config in configs]
 
 
@@ -675,6 +871,8 @@ def _load_layer_filter_options(
 def load_requested_map_filter_options(
     user_context: DashboardUserContext,
     requested_layers: list[dict[str, object]],
+    *,
+    map_context: str | None = DEFAULT_MAP_CONTEXT,
 ) -> dict[str, object]:
     if not requested_layers:
         requested_layers = [
@@ -682,7 +880,7 @@ def load_requested_map_filter_options(
                 "layer_id": config.layer_id,
                 "filters": {},
             }
-            for config in list_available_map_layer_configs(user_context)
+            for config in list_available_map_layer_configs(user_context, map_context=map_context)
         ]
 
     requested_ids: list[str] = []
@@ -693,7 +891,7 @@ def load_requested_map_filter_options(
         if layer_id not in requested_ids:
             requested_ids.append(layer_id)
 
-    all_requested_configs = list_enabled_map_layer_configs(tuple(requested_ids))
+    all_requested_configs = list_enabled_map_layer_configs(tuple(requested_ids), map_context=map_context)
     config_by_id = {config.layer_id: config for config in all_requested_configs}
     available_by_id = {
         config.layer_id: config
@@ -754,9 +952,11 @@ def load_map_feature_image_file(
 def load_requested_map_features(
     user_context: DashboardUserContext,
     requested_layers: list[dict[str, object]],
+    *,
+    map_context: str | None = DEFAULT_MAP_CONTEXT,
 ) -> dict[str, object]:
     if not requested_layers:
-        configs = list_available_map_layer_configs(user_context)
+        configs = list_available_map_layer_configs(user_context, map_context=map_context)
         layers = [
             load_map_layer_features(user_context, config)
             for config in configs
@@ -774,7 +974,7 @@ def load_requested_map_features(
         if layer_id not in requested_ids:
             requested_ids.append(layer_id)
 
-    all_requested_configs = list_enabled_map_layer_configs(tuple(requested_ids))
+    all_requested_configs = list_enabled_map_layer_configs(tuple(requested_ids), map_context=map_context)
     config_by_id = {config.layer_id: config for config in all_requested_configs}
     available_by_id = {
         config.layer_id: config

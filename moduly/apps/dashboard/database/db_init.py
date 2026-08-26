@@ -52,6 +52,11 @@ def ensure_map_layer_columns() -> None:
         return
 
     alter_statements: list[str] = []
+    if "map_context" not in columns:
+        alter_statements.append(
+            'ALTER TABLE dashboard."Map_Layers" '
+            "ADD COLUMN map_context VARCHAR(50) NOT NULL DEFAULT 'evidence'"
+        )
     if "show_photo" not in columns:
         alter_statements.append(
             'ALTER TABLE dashboard."Map_Layers" '

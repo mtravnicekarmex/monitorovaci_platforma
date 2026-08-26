@@ -43,6 +43,17 @@
   also explicitly merges `property_labels` from catalog metadata and feature
   payloads when building the Leaflet iframe payload, so configured popup
   labels are not erased by an empty/partial layer payload.
+- Revize map follow-up completed on 2026-08-26:
+  map-layer configuration now includes `map_context` with supported contexts
+  `evidence`, `revize`, and `shared`. The existing evidence map and the new
+  `Revize / Mapa` page use the same shared full-viewport Leaflet page shell
+  while loading different layer contexts. `Sprava / Mapove vrstvy` exposes the
+  context as a `Mapa` selector. The default `revize_terminy_zarizeni` layer is
+  sourced from `revize.v_mapa_terminy_zarizeni`, styled by `stav_terminu`,
+  and filterable by status, device type, term type, building, floor, and room.
+  Map API access is also checked by map context, so direct API calls for
+  `revize` layers require access to the `revize` section.
+  `scripts/postgres_dashboard_map_contexts.sql` was applied on 2026-08-26.
 - Current pause point: the user is restarting the workstation. After restart,
   browser-test the map page with the sidebar expanded and collapsed. The
   latest CSS uses a transparent fixed zero-height Streamlit header and a
@@ -81,10 +92,16 @@
   dashboard/API map modules. After the property-label runtime merge fix,
   targeted map-page/renderer/admin tests returned `32 passed`, the focused
   map regression subset returned `82 passed`, and `py_compile` passed for
-  `36_mapove_podklady.py` and `map_shared.py`.
+  `36_mapove_podklady.py` and `map_shared.py`. After the revize map context
+  follow-up on 2026-08-26, targeted map/context/navigation tests returned
+  `64 passed`, the focused map regression set returned `110 passed`,
+  `py_compile` passed for touched dashboard/API map modules, DB verification
+  loaded 230 revize map features and confirmed revize-context API access
+  control, and `git diff --check` returned only LF/CRLF normalization
+  warnings.
 - Changed files are listed in the 2026-08-24 10:29 +02:00 pre-restart
   handoff in `../history/SESSION_NOTES.md`.
-- Updated: 2026-08-25
+- Updated: 2026-08-26
 
 ## DASH-REVIZE-001 - Dashboard Revize renewal history
 

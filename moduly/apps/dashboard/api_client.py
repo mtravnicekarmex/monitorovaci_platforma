@@ -384,30 +384,38 @@ def update_admin_device(
     )
 
 
-def get_map_layer_catalog(access_token: str) -> dict[str, object]:
+def get_map_layer_catalog(access_token: str, *, map_context: str = "evidence") -> dict[str, object]:
     response = _request(
         "GET",
         "/api/v1/map/layers/catalog",
         access_token=access_token,
+        query_params={"map_context": map_context},
     )
     return dict(response.json())
 
 
-def get_map_features(access_token: str, payload: dict[str, object]) -> dict[str, object]:
+def get_map_features(access_token: str, payload: dict[str, object], *, map_context: str = "evidence") -> dict[str, object]:
     response = _request(
         "POST",
         "/api/v1/map/features",
         access_token=access_token,
+        query_params={"map_context": map_context},
         json_payload=payload,
     )
     return dict(response.json())
 
 
-def get_map_filter_options(access_token: str, payload: dict[str, object]) -> dict[str, object]:
+def get_map_filter_options(
+    access_token: str,
+    payload: dict[str, object],
+    *,
+    map_context: str = "evidence",
+) -> dict[str, object]:
     response = _request(
         "POST",
         "/api/v1/map/filter-options",
         access_token=access_token,
+        query_params={"map_context": map_context},
         json_payload=payload,
     )
     return dict(response.json())

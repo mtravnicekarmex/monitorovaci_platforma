@@ -22,6 +22,64 @@ Date: 2026-08-21
 
 ## Active handoff
 
+### 2026-08-26 - Dashboard Revize map context and page
+
+- Source state: dashboard map layers now carry `map_context` in
+  `dashboard."Map_Layers"`. The existing `Mapove podklady / Mapa` wrapper
+  passes `map_context="evidence"` and the new `Revize / Mapa` page passes
+  `map_context="revize"`. API catalog/features/filter-options endpoints
+  default to `evidence` and can load a requested context plus any `shared`
+  layers.
+- Layer operation: `Sprava / Mapove vrstvy` exposes a `Mapa` selector with
+  `Evidence`, `Revize`, and `Sdilene`. The default revize layer is
+  `revize_terminy_zarizeni`, sourced from
+  `revize.v_mapa_terminy_zarizeni`, with initial filters on
+  `stav_terminu`, `typ_zarizeni`, `typ_terminu`, `budova`, `patro`, and
+  `mistnost`.
+- UI structure: the full-viewport Leaflet page shell moved to
+  `moduly/apps/dashboard/map_page_shared.py`; `36_mapove_podklady.py` and
+  new `40_revize_mapa.py` are thin wrappers around the shared renderer.
+- Database state: `scripts/postgres_dashboard_map_contexts.sql` was applied
+  on 2026-08-26. Follow-up checks confirmed
+  `revize_terminy_zarizeni` is active in `map_context=revize`, absent from
+  the evidence catalog, present in the revize catalog, loads 230 features
+  from `revize.v_mapa_terminy_zarizeni`, and returns filter options for
+  `budova`, `mistnost`, `patro`, `stav_terminu`, `typ_terminu`, and
+  `typ_zarizeni`.
+- Authorization: map API access is checked by map context. A user with the
+  `revize` section can load the revize map layer; a user with only
+  `mapove_podklady` is forbidden from loading the revize layer directly
+  through the map API.
+- Changed local source for this task:
+  `moduly/apps/dashboard/api_client.py`,
+  `moduly/apps/dashboard/database/db_init.py`,
+  `moduly/apps/dashboard/database/models.py`,
+  `moduly/apps/dashboard/map_page_shared.py`,
+  `moduly/apps/dashboard/map_shared.py`,
+  `moduly/apps/dashboard/navigation_config.py`,
+  `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`,
+  `moduly/apps/dashboard/pages/36_mapove_podklady.py`,
+  `moduly/apps/dashboard/pages/40_revize_mapa.py`,
+  `services/api/routes/map.py`,
+  `services/api/schemas/admin.py`,
+  `services/api/schemas/device_map.py`,
+  `services/api/services/device_map.py`,
+  `services/api/services/map_layers.py`,
+  `scripts/postgres_dashboard_map_contexts.sql`,
+  `tests/test_dashboard_map_layers_admin.py`,
+  `tests/test_dashboard_map_page_layout.py`,
+  `tests/test_dashboard_navigation_config.py`,
+  `tests/test_map_layers_service.py`, and `tests/test_map_routes.py`.
+- Verification:
+  targeted map/context/navigation tests returned `64 passed`; the focused map
+  regression set returned `110 passed`; `py_compile` passed for touched
+  dashboard/API map modules; DB runtime checks confirmed the expected catalog,
+  feature-load, filter-option, and map-context authorization behavior; `git
+  diff --check` returned only LF/CRLF normalization warnings.
+- Not done: browser runtime has not yet been manually checked after this
+  source change. A dashboard/API restart is required for the running services
+  to load the new page, route parameters, and ORM column.
+
 ### 2026-08-25 - Dashboard map legend for named style rules
 
 - Source state: `Mapove vrstvy` admin now adds `Název pravidla` directly

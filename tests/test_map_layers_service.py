@@ -14,6 +14,7 @@ from services.api.services.map_layers import (
     list_map_layers_admin,
     list_map_layer_catalog,
     map_layer_record_to_config,
+    user_can_access_map_context,
     user_can_access_map_layer,
 )
 from services.api.services.device_map import BUDOVY_MAP_LAYER, MISTNOSTI_MAP_LAYER, VODOMERY_MAP_LAYER
@@ -22,15 +23,21 @@ from services.api.services.device_map import BUDOVY_MAP_LAYER, MISTNOSTI_MAP_LAY
 def test_default_map_layer_seeds_cover_initial_map_layers():
     seed_ids = [seed["layer_id"] for seed in DEFAULT_MAP_LAYER_SEEDS]
 
-    assert seed_ids == ["budovy", "mistnosti", "vodomery"]
+    assert seed_ids == ["budovy", "mistnosti", "vodomery", "revize_terminy_zarizeni"]
     vodomery_seed = next(seed for seed in DEFAULT_MAP_LAYER_SEEDS if seed["layer_id"] == "vodomery")
     mistnosti_seed = next(seed for seed in DEFAULT_MAP_LAYER_SEEDS if seed["layer_id"] == "mistnosti")
+    revize_seed = next(seed for seed in DEFAULT_MAP_LAYER_SEEDS if seed["layer_id"] == "revize_terminy_zarizeni")
+    assert vodomery_seed["map_context"] == "evidence"
     assert vodomery_seed["layer_kind"] == "device"
     assert vodomery_seed["device_section_key"] == "vodomery"
     assert vodomery_seed["restrict_to_allowed_devices"] is True
     assert vodomery_seed["map_enabled"] is True
     assert vodomery_seed["show_photo"] is True
     assert mistnosti_seed["map_label_columns"] == ["mistnost"]
+    assert revize_seed["map_context"] == "revize"
+    assert revize_seed["source_schema"] == "revize"
+    assert revize_seed["source_table"] == "v_mapa_terminy_zarizeni"
+    assert "stav_terminu" in revize_seed["filter_columns"]
 
 
 def test_map_layer_record_to_config_preserves_runtime_metadata():
@@ -38,6 +45,7 @@ def test_map_layer_record_to_config_preserves_runtime_metadata():
         "layer_id": "test",
         "title": "Test",
         "layer_kind": "device",
+        "map_context": "revize",
         "source_schema": "evidence",
         "source_table": "TEST",
         "geometry_column": "geom",
@@ -63,6 +71,7 @@ def test_map_layer_record_to_config_preserves_runtime_metadata():
 
     assert config.layer_id == "test"
     assert config.layer_kind == "device"
+    assert config.map_context == "revize"
     assert config.device_section_key == "vodomery"
     assert config.property_aliases["budova"] == "evidence_budova"
     assert config.property_labels["evidence_budova"] == "Budova evidence"
@@ -226,17 +235,22 @@ def test_list_map_layers_admin_requires_admin():
 def test_user_can_access_device_layer_only_with_section_and_devices():
     allowed_user = SimpleNamespace(
         is_admin=False,
-        allowed_sections=("vodomery",),
+        allowed_sections=("mapove_podklady", "vodomery"),
         allowed_devices=("V-1",),
     )
     no_devices_user = SimpleNamespace(
         is_admin=False,
-        allowed_sections=("vodomery",),
+        allowed_sections=("mapove_podklady", "vodomery"),
         allowed_devices=(),
     )
     wrong_section_user = SimpleNamespace(
         is_admin=False,
-        allowed_sections=("plynomery",),
+        allowed_sections=("mapove_podklady", "plynomery"),
+        allowed_devices=("V-1",),
+    )
+    no_map_context_user = SimpleNamespace(
+        is_admin=False,
+        allowed_sections=("vodomery",),
         allowed_devices=("V-1",),
     )
 
@@ -244,6 +258,22 @@ def test_user_can_access_device_layer_only_with_section_and_devices():
     assert user_can_access_map_layer(no_devices_user, VODOMERY_MAP_LAYER) is False
     assert user_can_access_map_layer(wrong_section_user, VODOMERY_MAP_LAYER) is False
     assert user_can_access_map_layer(wrong_section_user, BUDOVY_MAP_LAYER) is True
+    assert user_can_access_map_layer(no_map_context_user, BUDOVY_MAP_LAYER) is False
+
+
+def test_user_can_access_map_context_requires_matching_section():
+    admin_user = SimpleNamespace(is_admin=True, allowed_sections=(), allowed_devices=())
+    revize_user = SimpleNamespace(is_admin=False, allowed_sections=("revize",), allowed_devices=())
+    evidence_user = SimpleNamespace(is_admin=False, allowed_sections=("mapove_podklady",), allowed_devices=())
+    unrelated_user = SimpleNamespace(is_admin=False, allowed_sections=("vodomery",), allowed_devices=("V-1",))
+
+    assert user_can_access_map_context(admin_user, "revize") is True
+    assert user_can_access_map_context(revize_user, "revize") is True
+    assert user_can_access_map_context(evidence_user, "revize") is False
+    assert user_can_access_map_context(evidence_user, "evidence") is True
+    assert user_can_access_map_context(revize_user, "evidence") is False
+    assert user_can_access_map_context(revize_user, "shared") is True
+    assert user_can_access_map_context(unrelated_user, "shared") is False
 
 
 def test_map_layer_catalog_filters_unavailable_device_layers(monkeypatch):
@@ -254,18 +284,18 @@ def test_map_layer_catalog_filters_unavailable_device_layers(monkeypatch):
     )
     allowed_user = SimpleNamespace(
         is_admin=False,
-        allowed_sections=("vodomery",),
+        allowed_sections=("mapove_podklady", "vodomery"),
         allowed_devices=("V-1",),
     )
     monkeypatch.setattr(
         "services.api.services.map_layers.list_enabled_map_layer_configs",
-        lambda _layer_ids=None: [BUDOVY_MAP_LAYER, VODOMERY_MAP_LAYER],
+        lambda _layer_ids=None, **_kwargs: [BUDOVY_MAP_LAYER, VODOMERY_MAP_LAYER],
     )
 
     restricted_catalog = list_map_layer_catalog(restricted_user)
     allowed_catalog = list_map_layer_catalog(allowed_user)
 
-    assert [layer["layer_id"] for layer in restricted_catalog] == ["budovy"]
+    assert [layer["layer_id"] for layer in restricted_catalog] == []
     assert [layer["layer_id"] for layer in allowed_catalog] == [
         "budovy",
         "vodomery",
@@ -300,14 +330,14 @@ def test_normalize_requested_filters_rejects_unknown_filter():
 def test_load_requested_map_filter_options_passes_filters_to_layer_loader(monkeypatch):
     current_user = SimpleNamespace(
         is_admin=False,
-        allowed_sections=(),
+        allowed_sections=("mapove_podklady",),
         allowed_devices=(),
     )
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
         "services.api.services.map_layers.list_enabled_map_layer_configs",
-        lambda _layer_ids=None: [MISTNOSTI_MAP_LAYER],
+        lambda _layer_ids=None, **_kwargs: [MISTNOSTI_MAP_LAYER],
     )
 
     def fake_load_layer_filter_options(user_context, config, filters):
@@ -350,7 +380,7 @@ def test_load_requested_map_filter_options_rejects_unavailable_device_layer(monk
     )
     monkeypatch.setattr(
         "services.api.services.map_layers.list_enabled_map_layer_configs",
-        lambda _layer_ids=None: [VODOMERY_MAP_LAYER],
+        lambda _layer_ids=None, **_kwargs: [VODOMERY_MAP_LAYER],
     )
 
     with pytest.raises(AuthorizationError):
@@ -365,7 +395,7 @@ def test_load_requested_map_features_rejects_unavailable_device_layer(monkeypatc
     )
     monkeypatch.setattr(
         "services.api.services.map_layers.list_enabled_map_layer_configs",
-        lambda _layer_ids=None: [VODOMERY_MAP_LAYER],
+        lambda _layer_ids=None, **_kwargs: [VODOMERY_MAP_LAYER],
     )
 
     with pytest.raises(AuthorizationError):
@@ -421,7 +451,7 @@ def test_map_filter_queries_restrict_options_to_assigned_devices(monkeypatch):
 
     current_user = SimpleNamespace(
         is_admin=False,
-        allowed_sections=("vodomery",),
+        allowed_sections=("mapove_podklady", "vodomery"),
         allowed_devices=("V-1",),
     )
     required_columns = {
@@ -453,12 +483,12 @@ def test_map_filter_queries_restrict_options_to_assigned_devices(monkeypatch):
 def test_load_map_feature_image_file_rejects_device_outside_allowed_identifiers(monkeypatch):
     current_user = SimpleNamespace(
         is_admin=False,
-        allowed_sections=("vodomery",),
+        allowed_sections=("mapove_podklady", "vodomery"),
         allowed_devices=("V-1",),
     )
     monkeypatch.setattr(
         "services.api.services.map_layers.get_enabled_map_layer_config",
-        lambda _layer_id: VODOMERY_MAP_LAYER,
+        lambda _layer_id, **_kwargs: VODOMERY_MAP_LAYER,
     )
 
     with pytest.raises(AuthorizationError):
@@ -468,7 +498,7 @@ def test_load_map_feature_image_file_rejects_device_outside_allowed_identifiers(
 def test_load_map_feature_image_file_resolves_allowed_device(monkeypatch, tmp_path):
     current_user = SimpleNamespace(
         is_admin=False,
-        allowed_sections=("vodomery",),
+        allowed_sections=("mapove_podklady", "vodomery"),
         allowed_devices=("V-1",),
     )
     image_path = tmp_path / "device.jpg"
@@ -476,7 +506,7 @@ def test_load_map_feature_image_file_resolves_allowed_device(monkeypatch, tmp_pa
     captured: dict[str, object] = {}
     monkeypatch.setattr(
         "services.api.services.map_layers.get_enabled_map_layer_config",
-        lambda _layer_id: VODOMERY_MAP_LAYER,
+        lambda _layer_id, **_kwargs: VODOMERY_MAP_LAYER,
     )
 
     def fake_resolve_map_feature_image_file(config, identifier):

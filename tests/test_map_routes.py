@@ -93,11 +93,12 @@ def test_get_map_layer_catalog_returns_available_layers(monkeypatch):
     monkeypatch.setattr(
         map_routes,
         "list_map_layer_catalog",
-        lambda _user: [
+        lambda _user, **_kwargs: [
             {
                 "layer_id": "budovy",
                 "title": "Budovy",
                 "layer_kind": "context",
+                "map_context": "evidence",
                 "device_section_key": None,
                 "default_visible": True,
                 "draw_order": 10,
@@ -126,7 +127,7 @@ def test_get_map_layer_catalog_returns_available_layers(monkeypatch):
 def test_post_map_features_returns_feature_layers(monkeypatch):
     current_user = SimpleNamespace(is_admin=False, allowed_sections=("vodomery",), allowed_devices=("V-1",))
 
-    def fake_load_requested_map_features(_user, requested_layers):
+    def fake_load_requested_map_features(_user, requested_layers, **_kwargs):
         assert requested_layers == [{"layer_id": "vodomery", "filters": {"budova": ["F"]}}]
         return {
             "primary_layer_id": "vodomery",
@@ -135,6 +136,7 @@ def test_post_map_features_returns_feature_layers(monkeypatch):
                     "layer_id": "vodomery",
                     "title": "Vodomery",
                     "layer_kind": "device",
+                    "map_context": "evidence",
                     "device_section_key": "vodomery",
                     "source_srid": 3857,
                     "target_srid": 4326,
@@ -166,7 +168,7 @@ def test_post_map_features_maps_authorization_error_to_403(monkeypatch):
     monkeypatch.setattr(
         map_routes,
         "load_requested_map_features",
-        lambda *_: (_ for _ in ()).throw(AuthorizationError("forbidden")),
+        lambda *_, **__: (_ for _ in ()).throw(AuthorizationError("forbidden")),
     )
 
     with pytest.raises(HTTPException) as exc_info:
@@ -178,7 +180,7 @@ def test_post_map_features_maps_authorization_error_to_403(monkeypatch):
 def test_post_map_filter_options_returns_distinct_options(monkeypatch):
     current_user = SimpleNamespace(is_admin=False, allowed_sections=("vodomery",), allowed_devices=("V-1",))
 
-    def fake_load_requested_map_filter_options(_user, requested_layers):
+    def fake_load_requested_map_filter_options(_user, requested_layers, **_kwargs):
         assert requested_layers == [{"layer_id": "vodomery", "filters": {"budova": ["F"], "patro": ["1.NP"]}}]
         return {
             "layers": [
@@ -213,7 +215,7 @@ def test_post_map_filter_options_maps_authorization_error_to_403(monkeypatch):
     monkeypatch.setattr(
         map_routes,
         "load_requested_map_filter_options",
-        lambda *_: (_ for _ in ()).throw(AuthorizationError("forbidden")),
+        lambda *_, **__: (_ for _ in ()).throw(AuthorizationError("forbidden")),
     )
 
     with pytest.raises(HTTPException) as exc_info:

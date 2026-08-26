@@ -14,15 +14,15 @@ from moduly.apps.dashboard.map_page_shared import render_dashboard_map_page
 
 
 st.set_page_config(
-    page_title="Mapove podklady - Mapa",
+    page_title="Revize - Mapa",
     page_icon="map",
     layout="wide",
 )
 
 
 render_dashboard_map_page(
-    page_key="mapove_podklady_map",
-    map_context="evidence",
-    empty_message="Pro aktualniho uzivatele nejsou dostupne zadne mapove vrstvy.",
-    load_error_message="Nepodarilo se nacist mapove podklady.",
+    page_key="revize_map",
+    map_context="revize",
+    empty_message="Pro revizni mapu nejsou dostupne zadne aktivni vrstvy.",
+    load_error_message="Nepodarilo se nacist revizni mapu.",
 )

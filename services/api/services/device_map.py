@@ -27,6 +27,7 @@ class MapLayerConfig:
     schema: str
     table: str
     geometry_column: str
+    map_context: str = "evidence"
     identifier_column: str = "identifikace"
     source_srid: int = 3857
     target_srid: int = WEB_MAP_TARGET_SRID
@@ -585,6 +586,7 @@ def load_map_layer_features(
         "layer_id": config.layer_id,
         "title": config.title,
         "layer_kind": config.layer_kind,
+        "map_context": config.map_context,
         "device_section_key": config.device_section_key,
         "identifier_column": config.identifier_column,
         "source_srid": config.source_srid,
@@ -622,6 +624,7 @@ def _empty_layer_response(config: MapLayerConfig) -> dict[str, object]:
         "layer_id": config.layer_id,
         "title": config.title,
         "layer_kind": config.layer_kind,
+        "map_context": config.map_context,
         "device_section_key": config.device_section_key,
         "identifier_column": config.identifier_column,
         "source_srid": config.source_srid,

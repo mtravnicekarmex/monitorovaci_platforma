@@ -17,6 +17,7 @@ class MapLayerCatalogItem(BaseModel):
     layer_id: str
     title: str
     layer_kind: str = "context"
+    map_context: str = "evidence"
     device_section_key: str | None = None
     default_visible: bool = True
     draw_order: int = 100
@@ -36,6 +37,7 @@ class MapLayerResponse(BaseModel):
     layer_id: str
     title: str
     layer_kind: str = "context"
+    map_context: str = "evidence"
     device_section_key: str | None = None
     identifier_column: str = "identifikace"
     source_srid: int

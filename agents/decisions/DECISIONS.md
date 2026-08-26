@@ -4926,3 +4926,39 @@ Consequences:
   labels belong in `property_labels`.
 - This does not change source data, GeoJSON values, map filters, popup value
   selection, conditional style matching, authorization, or layer visibility.
+
+## DEC-159: Dashboard maps are separated by map context
+
+Date: 2026-08-26
+
+Status: Accepted
+
+Decision:
+
+- Dashboard map-layer configuration now includes `map_context` on
+  `dashboard."Map_Layers"`.
+- The existing `Mapove podklady / Mapa` page loads only `evidence` layers
+  plus any future `shared` layers.
+- The new `Revize / Mapa` page loads only `revize` layers plus any future
+  `shared` layers.
+- `shared` is reserved for common underlay layers that should appear in every
+  dashboard map context.
+- The default revize map layer is `revize_terminy_zarizeni`, sourced from
+  `revize.v_mapa_terminy_zarizeni` and initially styled by `stav_terminu`.
+- Layer operation remains centralized in `Sprava / Mapove vrstvy`; admins
+  choose the map context there instead of maintaining separate page-specific
+  layer configuration tables.
+- Map API access checks now require the section that owns the requested map
+  context: `mapove_podklady` for `evidence` and `revize` for `revize`.
+
+Consequences:
+
+- Adding the revize layer no longer pollutes the existing evidence map.
+- Future map pages can reuse the same Leaflet renderer, API routes, filters,
+  labels, legends, and style-rule semantics by passing a different
+  `map_context`.
+- Existing map API calls default to `map_context=evidence`, preserving current
+  behavior for the evidence map.
+- This does not expose the API bearer token to iframe JavaScript, change
+  source evidence/revize data, or require a separate Leaflet implementation
+  for each dashboard section.

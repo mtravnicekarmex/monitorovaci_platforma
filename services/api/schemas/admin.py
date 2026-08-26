@@ -54,6 +54,7 @@ class AdminMapLayerRecord(BaseModel):
     layer_id: str
     title: str
     layer_kind: str
+    map_context: str = "evidence"
     source_schema: str
     source_table: str
     geometry_column: str
@@ -87,6 +88,7 @@ class AdminMapLayerCreateRequest(BaseModel):
     layer_id: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
     title: str = Field(min_length=1, max_length=250)
     layer_kind: str = Field(default="context", pattern="^(context|device)$")
+    map_context: str = Field(default="evidence", pattern="^(evidence|revize|shared)$")
     source_schema: str = Field(default="evidence", min_length=1, max_length=100)
     source_table: str = Field(min_length=1, max_length=250)
     geometry_column: str = Field(default="geom", min_length=1, max_length=100)

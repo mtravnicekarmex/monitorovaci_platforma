@@ -23,18 +23,28 @@ LEAFLET_CSS_IMAGE_NAMES = (
 
 
 @st.cache_data(ttl=60)
-def load_map_layer_catalog_payload(access_token: str) -> dict[str, object]:
-    return get_map_layer_catalog(access_token)
+def load_map_layer_catalog_payload(access_token: str, *, map_context: str = "evidence") -> dict[str, object]:
+    return get_map_layer_catalog(access_token, map_context=map_context)
 
 
 @st.cache_data(ttl=60)
-def load_map_features_payload(access_token: str, request_payload: dict[str, object]) -> dict[str, object]:
-    return get_map_features(access_token, request_payload)
+def load_map_features_payload(
+    access_token: str,
+    request_payload: dict[str, object],
+    *,
+    map_context: str = "evidence",
+) -> dict[str, object]:
+    return get_map_features(access_token, request_payload, map_context=map_context)
 
 
 @st.cache_data(ttl=60)
-def load_map_filter_options_payload(access_token: str, request_payload: dict[str, object]) -> dict[str, object]:
-    return get_map_filter_options(access_token, request_payload)
+def load_map_filter_options_payload(
+    access_token: str,
+    request_payload: dict[str, object],
+    *,
+    map_context: str = "evidence",
+) -> dict[str, object]:
+    return get_map_filter_options(access_token, request_payload, map_context=map_context)
 
 
 def _json_payload_to_base64(payload: dict[str, Any]) -> str:

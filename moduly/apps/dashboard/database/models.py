@@ -68,6 +68,7 @@ class Dashboard_MapLayer(Base):
     layer_id: Mapped[str] = mapped_column(String(100), primary_key=True, nullable=False, unique=True)
     title: Mapped[str] = mapped_column(String(250), nullable=False)
     layer_kind: Mapped[str] = mapped_column(String(50), nullable=False, default="context", server_default="context")
+    map_context: Mapped[str] = mapped_column(String(50), nullable=False, default="evidence", server_default="evidence")
     source_schema: Mapped[str] = mapped_column(String(100), nullable=False)
     source_table: Mapped[str] = mapped_column(String(250), nullable=False)
     geometry_column: Mapped[str] = mapped_column(String(100), nullable=False, default="geom", server_default="geom")

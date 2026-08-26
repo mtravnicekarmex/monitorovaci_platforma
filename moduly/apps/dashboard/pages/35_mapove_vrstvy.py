@@ -50,6 +50,12 @@ CONDITIONAL_STYLE_LOGIC_LABELS = {
 CONDITIONAL_VALUE_TYPES = ("boolean", "text", "number")
 MAX_CONDITIONAL_RULES = 10
 MAX_CONDITIONAL_RULE_CONDITIONS = 10
+MAP_CONTEXT_OPTIONS = ("evidence", "revize", "shared")
+MAP_CONTEXT_LABELS = {
+    "evidence": "Evidence",
+    "revize": "Revize",
+    "shared": "Sdilene",
+}
 
 
 @st.cache_data(ttl=60)
@@ -530,6 +536,7 @@ def build_payload(prefix: str, current: dict[str, object] | None = None) -> dict
         "layer_id": str(st.session_state.get(f"{prefix}_layer_id", "")).strip(),
         "title": str(st.session_state.get(f"{prefix}_title", "")).strip(),
         "layer_kind": str(st.session_state.get(f"{prefix}_layer_kind", "context")),
+        "map_context": str(st.session_state.get(f"{prefix}_map_context", "evidence")),
         "source_schema": str(st.session_state.get(f"{prefix}_source_schema", "evidence")).strip(),
         "source_table": str(st.session_state.get(f"{prefix}_source_table", "")).strip(),
         "geometry_column": str(st.session_state.get(f"{prefix}_geometry_column", "geom")).strip(),
@@ -555,7 +562,7 @@ def build_payload(prefix: str, current: dict[str, object] | None = None) -> dict
 
 def render_layer_fields(prefix: str, current: dict[str, object] | None = None, *, allow_layer_id_edit: bool) -> None:
     current = current or {}
-    top_cols = st.columns([1, 2, 1, 1])
+    top_cols = st.columns([1, 2, 1, 1, 1])
     top_cols[0].text_input(
         "Layer ID",
         value=str(current.get("layer_id") or ""),
@@ -569,7 +576,18 @@ def render_layer_fields(prefix: str, current: dict[str, object] | None = None, *
         index=0 if str(current.get("layer_kind") or "context") == "context" else 1,
         key=f"{prefix}_layer_kind",
     )
-    top_cols[3].number_input(
+    current_map_context = str(current.get("map_context") or "evidence")
+    if current_map_context not in MAP_CONTEXT_OPTIONS:
+        current_map_context = "evidence"
+    top_cols[3].selectbox(
+        "Mapa",
+        options=list(MAP_CONTEXT_OPTIONS),
+        index=MAP_CONTEXT_OPTIONS.index(current_map_context),
+        format_func=lambda item: MAP_CONTEXT_LABELS.get(str(item), str(item)),
+        key=f"{prefix}_map_context",
+        help="Evidence = stavajici mapa Mapove podklady. Revize = mapa v sekci Revize. Sdilene = vrstva se zobrazi ve vsech mapach.",
+    )
+    top_cols[4].number_input(
         "Poradi",
         min_value=0,
         max_value=10000,
@@ -679,6 +697,7 @@ def render_page() -> None:
                     "layer_id": layer["layer_id"],
                     "nazev": layer["title"],
                     "typ": layer["layer_kind"],
+                    "kontext": MAP_CONTEXT_LABELS.get(str(layer.get("map_context") or "evidence"), str(layer.get("map_context") or "evidence")),
                     "zdroj": f'{layer["source_schema"]}.{layer["source_table"]}',
                     "mapa": "ANO" if layer["map_enabled"] else "NE",
                     "aktivni": "ANO" if layer["is_active"] else "NE",
@@ -701,6 +720,7 @@ def render_page() -> None:
             "create",
             {
                 "layer_kind": "context",
+                "map_context": "evidence",
                 "source_schema": "evidence",
                 "geometry_column": "geom",
                 "source_srid": 3857,

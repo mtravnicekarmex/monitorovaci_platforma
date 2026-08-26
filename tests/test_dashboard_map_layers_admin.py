@@ -49,6 +49,21 @@ def test_map_layers_admin_supports_map_context_selection():
     assert '"kontext": MAP_CONTEXT_LABELS.get' in source
 
 
+def test_map_layers_admin_supports_label_default_visibility_checkbox_with_help():
+    source = MAP_LAYERS_ADMIN_PATH.read_text(encoding="utf-8")
+
+    assert '"Popisek defaultne"' in source
+    assert 'key=f"{prefix}_map_labels_default_visible"' in source
+    assert '"map_labels_default_visible": bool(st.session_state.get' in source
+    assert '"popisek_defaultne": "ANO" if layer.get("map_labels_default_visible", True) else "NE"' in source
+    assert 'help="Vrstva je dostupna pro pouziti v dashboardu.' in source
+    assert 'help="Vrstva se zobrazi v mapovem katalogu' in source
+    assert 'help="Vrstva bude po otevreni mapy rovnou zapnuta.' in source
+    assert 'help="Popisky nastavene ve Sloupce zobrazene v mape budou po otevreni mapy zapnute.' in source
+    assert 'help="U device vrstvy se nactou jen zarizeni prirazena prihlasenemu uzivateli.' in source
+    assert 'help="Pri zapnuti se v popupu nabidne fotka zarizeni' in source
+
+
 def test_map_layers_admin_orders_source_alias_usage_and_display_label_fields():
     source = MAP_LAYERS_ADMIN_PATH.read_text(encoding="utf-8")
 

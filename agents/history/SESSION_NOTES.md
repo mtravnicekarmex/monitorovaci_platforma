@@ -22,6 +22,44 @@ Date: 2026-08-21
 
 ## Active handoff
 
+### 2026-08-26 - Dashboard map label default visibility
+
+- Source state: `dashboard."Map_Layers"` now has
+  `map_labels_default_visible` with default `true`.
+- Admin UI: `Sprava / Mapove vrstvy` adds checkbox `Popisek defaultne`
+  between `Viditelna defaultne` and `Omezit podle zarizeni`. Every checkbox
+  in that state row now has help text: `Aktivni`, `Mapove zobrazovani`,
+  `Viditelna defaultne`, `Popisek defaultne`, `Omezit podle zarizeni`, and
+  `Zobrazit foto`.
+- Map UI behavior: Leaflet still uses the existing `Popisky` control for
+  runtime label toggling. The new flag only sets the initial label visibility
+  for a layer when the map iframe is rendered.
+- Database state: `scripts/postgres_map_layer_label_default_visibility.sql`
+  was applied on 2026-08-26. Follow-up checks confirmed the column exists and
+  the map catalog includes `map_labels_default_visible` for every returned
+  layer.
+- Changed local source for this task:
+  `moduly/apps/dashboard/database/db_init.py`,
+  `moduly/apps/dashboard/database/models.py`,
+  `moduly/apps/dashboard/map_shared.py`,
+  `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`,
+  `services/api/schemas/admin.py`,
+  `services/api/schemas/device_map.py`,
+  `services/api/services/device_map.py`,
+  `services/api/services/map_layers.py`,
+  `scripts/postgres_map_layer_label_default_visibility.sql`,
+  `tests/test_dashboard_map_layers_admin.py`,
+  `tests/test_dashboard_map_shared.py`, and
+  `tests/test_map_layers_service.py`.
+- Verification:
+  targeted map label/admin/service tests returned `63 passed`; the focused map
+  regression set returned `111 passed`; `py_compile` passed for touched
+  dashboard/API map modules; DB runtime checks confirmed column/catalog
+  behavior.
+- Not done: browser runtime has not yet been manually checked after this
+  source change. A dashboard/API restart is required for the running services
+  to load the new ORM/API/UI field.
+
 ### 2026-08-26 - Dashboard Revize map context and page
 
 - Source state: dashboard map layers now carry `map_context` in

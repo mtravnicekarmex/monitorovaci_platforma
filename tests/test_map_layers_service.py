@@ -32,8 +32,10 @@ def test_default_map_layer_seeds_cover_initial_map_layers():
     assert vodomery_seed["device_section_key"] == "vodomery"
     assert vodomery_seed["restrict_to_allowed_devices"] is True
     assert vodomery_seed["map_enabled"] is True
+    assert vodomery_seed["map_labels_default_visible"] is True
     assert vodomery_seed["show_photo"] is True
     assert mistnosti_seed["map_label_columns"] == ["mistnost"]
+    assert mistnosti_seed["map_labels_default_visible"] is True
     assert revize_seed["map_context"] == "revize"
     assert revize_seed["source_schema"] == "revize"
     assert revize_seed["source_table"] == "v_mapa_terminy_zarizeni"
@@ -63,6 +65,7 @@ def test_map_layer_record_to_config_preserves_runtime_metadata():
         "restrict_to_allowed_devices": True,
         "map_enabled": True,
         "default_visible": False,
+        "map_labels_default_visible": False,
         "show_photo": True,
         "draw_order": 50,
     }
@@ -80,6 +83,7 @@ def test_map_layer_record_to_config_preserves_runtime_metadata():
     assert config.popup_columns == ("identifikace",)
     assert config.style["color"] == "#111111"
     assert config.default_visible is False
+    assert config.map_labels_default_visible is False
     assert config.show_photo is True
     assert config.draw_order == 50
 

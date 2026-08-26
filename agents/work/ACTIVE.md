@@ -54,6 +54,13 @@
   Map API access is also checked by map context, so direct API calls for
   `revize` layers require access to the `revize` section.
   `scripts/postgres_dashboard_map_contexts.sql` was applied on 2026-08-26.
+- Label-default follow-up completed on 2026-08-26:
+  map-layer configuration now includes `map_labels_default_visible`, exposed
+  in `Sprava / Mapove vrstvy` as `Popisek defaultne`. It controls only the
+  initial visibility of configured map labels; the Leaflet `Popisky` control
+  remains the runtime per-layer toggle. All checkbox controls in the map-layer
+  state row now have help text. `scripts/postgres_map_layer_label_default_visibility.sql`
+  was applied on 2026-08-26.
 - Current pause point: the user is restarting the workstation. After restart,
   browser-test the map page with the sidebar expanded and collapsed. The
   latest CSS uses a transparent fixed zero-height Streamlit header and a
@@ -98,7 +105,10 @@
   `py_compile` passed for touched dashboard/API map modules, DB verification
   loaded 230 revize map features and confirmed revize-context API access
   control, and `git diff --check` returned only LF/CRLF normalization
-  warnings.
+  warnings. After the label-default follow-up on 2026-08-26, targeted map
+  label/admin/service tests returned `63 passed`, the focused map regression
+  set returned `111 passed`, `py_compile` passed for touched dashboard/API
+  map modules, and DB verification confirmed the new column/catalog field.
 - Changed files are listed in the 2026-08-24 10:29 +02:00 pre-restart
   handoff in `../history/SESSION_NOTES.md`.
 - Updated: 2026-08-26

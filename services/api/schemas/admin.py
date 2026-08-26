@@ -72,6 +72,7 @@ class AdminMapLayerRecord(BaseModel):
     restrict_to_allowed_devices: bool
     map_enabled: bool
     default_visible: bool
+    map_labels_default_visible: bool = True
     show_photo: bool
     is_active: bool
     draw_order: int
@@ -106,6 +107,7 @@ class AdminMapLayerCreateRequest(BaseModel):
     restrict_to_allowed_devices: bool = False
     map_enabled: bool = True
     default_visible: bool = True
+    map_labels_default_visible: bool = True
     show_photo: bool = False
     is_active: bool = True
     draw_order: int = 100

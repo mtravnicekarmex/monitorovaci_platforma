@@ -312,6 +312,7 @@ def test_leaflet_map_html_can_toggle_configured_map_labels_by_layer():
                 "layer_id": "mistnosti",
                 "title": "Mistnosti",
                 "map_label_columns": ["mistnost"],
+                "map_labels_default_visible": False,
                 "feature_collection": {
                     "type": "FeatureCollection",
                     "features": [
@@ -338,6 +339,9 @@ def test_leaflet_map_html_can_toggle_configured_map_labels_by_layer():
     assert "const labelVisibilityByLayer = {}" in html
     assert "function layerHasMapLabels" in html
     assert "function layerLabelsVisible" in html
+    assert "function layerLabelsDefaultVisible" in html
+    assert "layerConfig.map_labels_default_visible !== false" in html
+    assert "labelVisibilityByLayer[layerId] = false" in html
     assert "function setLayerLabelsVisible" in html
     assert "labelHtml && layerLabelsVisible(layerId)" in html
     assert 'toggle.textContent = "Popisky"' in html

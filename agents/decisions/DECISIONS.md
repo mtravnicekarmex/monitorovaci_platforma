@@ -4962,3 +4962,29 @@ Consequences:
 - This does not expose the API bearer token to iframe JavaScript, change
   source evidence/revize data, or require a separate Leaflet implementation
   for each dashboard section.
+
+## DEC-160: Dashboard map labels have configurable default visibility
+
+Date: 2026-08-26
+
+Status: Accepted
+
+Decision:
+
+- Map-layer configuration includes
+  `dashboard."Map_Layers".map_labels_default_visible`.
+- `Sprava / Mapove vrstvy` exposes this as checkbox `Popisek defaultne`.
+- The flag controls only whether configured `map_label_columns` are shown when
+  a map is first opened or rerendered.
+- The existing Leaflet `Popisky` control remains the runtime override for
+  turning labels on or off per visible layer.
+- Existing and new layers default to `map_labels_default_visible=true`, so
+  prior label behavior is preserved unless an admin disables it for a layer.
+
+Consequences:
+
+- Dense labels can be hidden by default for selected layers without removing
+  the label configuration or changing geometry visibility.
+- This is display metadata only. It does not change GeoJSON feature values,
+  popup rows, filters, legends, source tables, authorization, or iframe token
+  boundaries.

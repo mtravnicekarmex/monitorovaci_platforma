@@ -929,6 +929,10 @@ def build_leaflet_map_html(
       return labelVisibilityByLayer[String(layerId)] !== false;
     }}
 
+    function layerLabelsDefaultVisible(layerConfig) {{
+      return layerConfig.map_labels_default_visible !== false;
+    }}
+
     function setLayerLabelsVisible(layerId, isVisible) {{
       const normalizedLayerId = String(layerId);
       if (isVisible) {{
@@ -1826,6 +1830,9 @@ def build_leaflet_map_html(
       const layerId = String(layerConfig.layer_id || "layer");
       const title = String(layerConfig.title || layerId);
       const isInitiallyVisible = layerConfig.default_visible !== false;
+      if (layerHasMapLabels(layerConfig) && !layerLabelsDefaultVisible(layerConfig)) {{
+        labelVisibilityByLayer[layerId] = false;
+      }}
       const paneName = ensureLayerPane(layerId, layerIndex);
       const leafletLayer = L.geoJSON(
         isInitiallyVisible ? filteredFeatureCollection(layerConfig) : {{ type: "FeatureCollection", features: [] }},

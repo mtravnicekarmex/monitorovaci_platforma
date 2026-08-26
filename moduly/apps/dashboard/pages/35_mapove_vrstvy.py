@@ -554,6 +554,7 @@ def build_payload(prefix: str, current: dict[str, object] | None = None) -> dict
         "restrict_to_allowed_devices": bool(st.session_state.get(f"{prefix}_restrict_to_allowed_devices", False)),
         "map_enabled": bool(st.session_state.get(f"{prefix}_map_enabled", True)),
         "default_visible": bool(st.session_state.get(f"{prefix}_default_visible", True)),
+        "map_labels_default_visible": bool(st.session_state.get(f"{prefix}_map_labels_default_visible", True)),
         "show_photo": bool(st.session_state.get(f"{prefix}_show_photo", False)),
         "is_active": bool(st.session_state.get(f"{prefix}_is_active", True)),
         "draw_order": int(st.session_state.get(f"{prefix}_draw_order", 100)),
@@ -616,20 +617,42 @@ def render_layer_fields(prefix: str, current: dict[str, object] | None = None, *
         key=f"{prefix}_target_srid",
     )
 
-    state_cols = st.columns([1, 1, 1, 1, 1])
-    state_cols[0].checkbox("Aktivni", value=bool(current.get("is_active", True)), key=f"{prefix}_is_active")
-    state_cols[1].checkbox("Mapove zobrazovani", value=bool(current.get("map_enabled", True)), key=f"{prefix}_map_enabled")
-    state_cols[2].checkbox("Viditelna defaultne", value=bool(current.get("default_visible", True)), key=f"{prefix}_default_visible")
+    state_cols = st.columns([1, 1, 1, 1, 1, 1])
+    state_cols[0].checkbox(
+        "Aktivni",
+        value=bool(current.get("is_active", True)),
+        key=f"{prefix}_is_active",
+        help="Vrstva je dostupna pro pouziti v dashboardu. Vypnuta vrstva se nenabizi ani nenacita.",
+    )
+    state_cols[1].checkbox(
+        "Mapove zobrazovani",
+        value=bool(current.get("map_enabled", True)),
+        key=f"{prefix}_map_enabled",
+        help="Vrstva se zobrazi v mapovem katalogu a muze se nacitat do mapy.",
+    )
+    state_cols[2].checkbox(
+        "Viditelna defaultne",
+        value=bool(current.get("default_visible", True)),
+        key=f"{prefix}_default_visible",
+        help="Vrstva bude po otevreni mapy rovnou zapnuta. Uzivatel ji muze v Leaflet ovladani vrstev vypnout.",
+    )
     state_cols[3].checkbox(
+        "Popisek defaultne",
+        value=bool(current.get("map_labels_default_visible", True)),
+        key=f"{prefix}_map_labels_default_visible",
+        help="Popisky nastavene ve Sloupce zobrazene v mape budou po otevreni mapy zapnute. Uzivatel je muze v Leaflet panelu Popisky vypnout nebo zapnout.",
+    )
+    state_cols[4].checkbox(
         "Omezit podle zarizeni",
         value=bool(current.get("restrict_to_allowed_devices", False)),
         key=f"{prefix}_restrict_to_allowed_devices",
+        help="U device vrstvy se nactou jen zarizeni prirazena prihlasenemu uzivateli. Kontextove vrstvy obvykle nech prazdne/vypnute.",
     )
-    state_cols[4].checkbox(
+    state_cols[5].checkbox(
         "Zobrazit foto",
         value=bool(current.get("show_photo", False)),
         key=f"{prefix}_show_photo",
-        help="Pri zapnuti se pro zarizeni nacita cesta ze sloupce foto.",
+        help="Pri zapnuti se v popupu nabidne fotka zarizeni, pokud ji vrstva nebo detail zarizeni umi bezpecne dohledat.",
     )
 
     st.text_input(
@@ -701,6 +724,7 @@ def render_page() -> None:
                     "zdroj": f'{layer["source_schema"]}.{layer["source_table"]}',
                     "mapa": "ANO" if layer["map_enabled"] else "NE",
                     "aktivni": "ANO" if layer["is_active"] else "NE",
+                    "popisek_defaultne": "ANO" if layer.get("map_labels_default_visible", True) else "NE",
                     "device_filter": "ANO" if layer["restrict_to_allowed_devices"] else "NE",
                     "stitky_v_mape": _list_to_csv(layer.get("map_label_columns")),
                     "foto": "ANO" if layer["show_photo"] else "NE",
@@ -727,6 +751,7 @@ def render_page() -> None:
                 "target_srid": 4326,
                 "map_enabled": True,
                 "default_visible": True,
+                "map_labels_default_visible": True,
                 "show_photo": False,
                 "is_active": True,
                 "draw_order": 100,

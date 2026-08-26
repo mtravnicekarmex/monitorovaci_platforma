@@ -39,6 +39,7 @@ class MapLayerConfig:
     device_section_key: str | None = None
     map_enabled: bool = True
     default_visible: bool = True
+    map_labels_default_visible: bool = True
     show_photo: bool = False
     draw_order: int = 100
     filter_columns: tuple[str, ...] = ()
@@ -593,6 +594,7 @@ def load_map_layer_features(
         "target_srid": config.target_srid,
         "map_enabled": config.map_enabled,
         "default_visible": config.default_visible,
+        "map_labels_default_visible": config.map_labels_default_visible,
         "draw_order": config.draw_order,
         "filter_columns": list(config.filter_columns),
         "map_label_columns": list(config.map_label_columns),
@@ -631,6 +633,7 @@ def _empty_layer_response(config: MapLayerConfig) -> dict[str, object]:
         "target_srid": config.target_srid,
         "map_enabled": config.map_enabled,
         "default_visible": config.default_visible,
+        "map_labels_default_visible": config.map_labels_default_visible,
         "draw_order": config.draw_order,
         "filter_columns": list(config.filter_columns),
         "map_label_columns": list(config.map_label_columns),

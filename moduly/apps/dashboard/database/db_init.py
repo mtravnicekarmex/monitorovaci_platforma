@@ -67,6 +67,11 @@ def ensure_map_layer_columns() -> None:
             'ALTER TABLE dashboard."Map_Layers" '
             "ADD COLUMN map_label_columns TEXT NOT NULL DEFAULT '[]'"
         )
+    if "map_labels_default_visible" not in columns:
+        alter_statements.append(
+            'ALTER TABLE dashboard."Map_Layers" '
+            "ADD COLUMN map_labels_default_visible BOOLEAN NOT NULL DEFAULT TRUE"
+        )
     if "property_labels" not in columns:
         alter_statements.append(
             'ALTER TABLE dashboard."Map_Layers" '

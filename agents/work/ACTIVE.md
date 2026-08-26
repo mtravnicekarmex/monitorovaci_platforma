@@ -54,6 +54,16 @@
   Map API access is also checked by map context, so direct API calls for
   `revize` layers require access to the `revize` section.
   `scripts/postgres_dashboard_map_contexts.sql` was applied on 2026-08-26.
+- Revize map field follow-up completed on 2026-08-26:
+  `revize.v_mapa_terminy_zarizeni` now appends `servisni_smlouva` and
+  `revize_soubor` to the output. The `revize_terminy_zarizeni` layer metadata
+  includes both fields in popup/map properties and labels. The DB update was
+  applied through `scripts/postgres_revize_map_terms_view.sql` plus
+  `scripts/postgres_revize_map_terms_revision_file_fields.sql`. Runtime
+  checks loaded 230 revize-map features and confirmed both keys in the feature
+  payload. `revize_soubor` is populated in current source data, while
+  `revize_servisni_smlouva` is currently empty in all revision evidence
+  source views.
 - Label-default follow-up completed on 2026-08-26:
   map-layer configuration now includes `map_labels_default_visible`, exposed
   in `Sprava / Mapove vrstvy` as `Popisek defaultne`. It controls only the
@@ -105,7 +115,12 @@
   `py_compile` passed for touched dashboard/API map modules, DB verification
   loaded 230 revize map features and confirmed revize-context API access
   control, and `git diff --check` returned only LF/CRLF normalization
-  warnings. After the label-default follow-up on 2026-08-26, targeted map
+  warnings. After the revize map field follow-up on 2026-08-26, targeted map
+  service/routes/shared/admin tests returned `63 passed`, `compileall` passed
+  for `services/api/services/map_layers.py` and
+  `tests/test_map_layers_service.py`, and DB verification confirmed the new
+  appended view columns plus catalog/feature payload metadata. After the
+  label-default follow-up on 2026-08-26, targeted map
   label/admin/service tests returned `63 passed`, the focused map regression
   set returned `111 passed`, `py_compile` passed for touched dashboard/API
   map modules, and DB verification confirmed the new column/catalog field.

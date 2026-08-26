@@ -22,6 +22,35 @@ Date: 2026-08-21
 
 ## Active handoff
 
+### 2026-08-26 - Revize map term view revision file fields
+
+- Source state: `revize.v_mapa_terminy_zarizeni` now exposes revision-file
+  and service-contract data through appended output columns
+  `servisni_smlouva` and `revize_soubor`. The existing 24 output columns keep
+  their original order; the new columns are appended to preserve the
+  PostgreSQL `CREATE OR REPLACE VIEW` contract for existing consumers.
+- Map metadata: the default `revize_terminy_zarizeni` seed and current
+  `dashboard."Map_Layers"` record now include `servisni_smlouva` and
+  `revize_soubor` in popup/map properties and `property_labels`.
+- Database state: `scripts/postgres_revize_map_terms_view.sql` and
+  `scripts/postgres_revize_map_terms_revision_file_fields.sql` were applied
+  on 2026-08-26. Runtime checks confirmed 230 map rows, output column tail
+  `poznamka`, `servisni_smlouva`, `revize_soubor`, and feature payload keys
+  for both new fields. `revize_soubor` is populated for 91 of 136 revision
+  rows; source `revize_servisni_smlouva` is currently empty in all 13
+  revision evidence views, so the new map field is present but has no
+  non-null source values yet.
+- Changed local source for this task:
+  `scripts/postgres_revize_map_terms_view.sql`,
+  `scripts/postgres_revize_map_terms_revision_file_fields.sql`,
+  `scripts/postgres_dashboard_map_contexts.sql`,
+  `services/api/services/map_layers.py`, and
+  `tests/test_map_layers_service.py`.
+- Verification:
+  targeted map service/routes/shared/admin tests returned `63 passed`;
+  `compileall` passed for `services/api/services/map_layers.py` and
+  `tests/test_map_layers_service.py`.
+
 ### 2026-08-26 - Dashboard map label default visibility
 
 - Source state: `dashboard."Map_Layers"` now has

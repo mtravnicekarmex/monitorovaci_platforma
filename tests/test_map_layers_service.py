@@ -40,6 +40,12 @@ def test_default_map_layer_seeds_cover_initial_map_layers():
     assert revize_seed["source_schema"] == "revize"
     assert revize_seed["source_table"] == "v_mapa_terminy_zarizeni"
     assert "stav_terminu" in revize_seed["filter_columns"]
+    assert "servisni_smlouva" in revize_seed["property_columns"]
+    assert "revize_soubor" in revize_seed["property_columns"]
+    assert "servisni_smlouva" in revize_seed["popup_columns"]
+    assert "revize_soubor" in revize_seed["popup_columns"]
+    assert revize_seed["property_labels"]["servisni_smlouva"] == "Servisni smlouva"
+    assert revize_seed["property_labels"]["revize_soubor"] == "Soubor revize"
 
 
 def test_map_layer_record_to_config_preserves_runtime_metadata():

@@ -60,6 +60,20 @@ Date: 2026-08-21
   `tests/test_map_routes.py` returned `65 passed`; `compileall` passed for
   the touched backend/test Python files.
 
+### 2026-08-27 - Main Leaflet layer control separates building and room layers
+
+- Source state: the shared Leaflet renderer now decorates the main layer
+  control so `budovy` and `mistnosti` are visually grouped before the other
+  overlay layers.
+- UI behavior: the first layer after `budovy`/`mistnosti` receives a subtle
+  top border and spacing, matching the existing visual separation between
+  base-map choices and overlay choices.
+- The grouping is based on stable layer IDs, not on displayed Czech labels.
+- Verification:
+  `tests/test_dashboard_map_shared.py` and
+  `tests/test_dashboard_map_page_layout.py` returned `33 passed`;
+  `compileall` passed for the touched dashboard/test Python files.
+
 ### 2026-08-27 - Evidence map linked Mistnosti filters
 
 - Source state: `Mapove podklady / Mapa` now extends the Leaflet linked-filter

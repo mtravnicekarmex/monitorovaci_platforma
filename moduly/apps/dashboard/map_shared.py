@@ -1506,16 +1506,54 @@ def build_leaflet_map_html(
       return cleanedValues;
     }}
 
-    function layerSupportsFilter(layerId, filterKey) {{
+    function layerSupportedFilterKey(layerId, filterKeys) {{
       const item = leafletLayers.find((entry) => entry.id === String(layerId));
       if (!item) {{
-        return false;
+        return null;
       }}
-      return layerFilterFields(item.config).some((field) => String(field.key) === String(filterKey));
+      const candidateKeys = Array.isArray(filterKeys) ? filterKeys.map((key) => String(key)) : [String(filterKeys)];
+      const supportedField = layerFilterFields(item.config).find((field) => candidateKeys.includes(String(field.key)));
+      return supportedField ? String(supportedField.key) : null;
+    }}
+
+    function layerSupportsFilter(layerId, filterKey) {{
+      return Boolean(layerSupportedFilterKey(layerId, [filterKey]));
+    }}
+
+    function isDeviceMapLayer(item) {{
+      return String((item && item.config && item.config.layer_kind) || "").toLowerCase() === "device";
+    }}
+
+    function evidenceLinkedFilterTargets(filterKey) {{
+      const fieldMap = {{
+        budova: ["budova"],
+        patro: ["patro"],
+        mistnost_id: ["mistnost_id"],
+        mistnost: ["mistnost", "místnost", "evidence_mistnost"],
+        místnost: ["místnost", "mistnost", "evidence_mistnost"]
+      }};
+      const targetFilterKeys = fieldMap[String(filterKey)];
+      if (!targetFilterKeys) {{
+        return [];
+      }}
+      return leafletLayers
+        .filter((item) => item.id !== "mistnosti")
+        .filter((item) => isDeviceMapLayer(item))
+        .map((item) => ({{
+          layerId: item.id,
+          filterKey: layerSupportedFilterKey(item.id, targetFilterKeys)
+        }}))
+        .filter((target) => target.filterKey);
     }}
 
     function linkedFilterTargets(layerId, filterKey) {{
-      if (mapContext !== "revize" || String(layerId) !== "mistnosti") {{
+      if (String(layerId) !== "mistnosti") {{
+        return [];
+      }}
+      if (mapContext === "evidence") {{
+        return evidenceLinkedFilterTargets(filterKey);
+      }}
+      if (mapContext !== "revize") {{
         return [];
       }}
       const targetLayerId = "revize_terminy_zarizeni";

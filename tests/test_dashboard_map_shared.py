@@ -458,6 +458,60 @@ def test_leaflet_map_html_syncs_revize_mistnosti_filters_to_revision_terms_layer
     assert "applyLayerFilters();" in html
 
 
+def test_leaflet_map_html_syncs_evidence_mistnosti_filters_to_device_layers():
+    payload = {
+        "map_context": "evidence",
+        "primary_layer_id": "mistnosti",
+        "layers": [
+            {
+                "layer_id": "mistnosti",
+                "title": "Mistnosti",
+                "layer_kind": "context",
+                "filter_fields": [
+                    {"key": "budova", "source_column": "budova", "property_key": "budova", "label": "Budova"},
+                    {"key": "patro", "source_column": "patro", "property_key": "patro", "label": "Patro"},
+                ],
+                "filter_options": {"budova": ["F"], "patro": ["1.NP"]},
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            },
+            {
+                "layer_id": "vodomery",
+                "title": "Vodomery",
+                "layer_kind": "device",
+                "filter_fields": [
+                    {"key": "budova", "source_column": "budova", "property_key": "budova", "label": "Budova"},
+                    {"key": "patro", "source_column": "patro", "property_key": "patro", "label": "Patro"},
+                ],
+                "filter_options": {"budova": ["F"], "patro": ["1.NP"]},
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            },
+            {
+                "layer_id": "budovy",
+                "title": "Budovy",
+                "layer_kind": "context",
+                "filter_fields": [
+                    {"key": "budova", "source_column": "budova", "property_key": "budova", "label": "Budova"},
+                ],
+                "filter_options": {"budova": ["F"]},
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            },
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert "function layerSupportedFilterKey" in html
+    assert "function isDeviceMapLayer" in html
+    assert "function evidenceLinkedFilterTargets" in html
+    assert 'if (mapContext === "evidence")' in html
+    assert 'budova: ["budova"]' in html
+    assert 'patro: ["patro"]' in html
+    assert '.filter((item) => item.id !== "mistnosti")' in html
+    assert ".filter((item) => isDeviceMapLayer(item))" in html
+    assert "layerSupportedFilterKey(item.id, targetFilterKeys)" in html
+    assert ".filter((target) => target.filterKey)" in html
+
+
 def test_leaflet_map_html_preserves_filter_layer_expansion_after_panel_rerender():
     payload = {
         "primary_layer_id": "mistnosti",

@@ -408,6 +408,91 @@ def test_leaflet_map_html_keeps_top_right_control_stack_scrollable():
     assert "scrollbar-width: thin" in html
 
 
+def test_leaflet_map_html_syncs_revize_mistnosti_filters_to_revision_terms_layer():
+    payload = {
+        "map_context": "revize",
+        "primary_layer_id": "revize_terminy_zarizeni",
+        "layers": [
+            {
+                "layer_id": "mistnosti",
+                "title": "Mistnosti",
+                "filter_fields": [
+                    {"key": "budova", "source_column": "budova", "property_key": "budova", "label": "Budova"},
+                    {"key": "patro", "source_column": "patro", "property_key": "patro", "label": "Patro"},
+                ],
+                "filter_options": {"budova": ["A", "B"], "patro": ["1.NP"]},
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            },
+            {
+                "layer_id": "revize_terminy_zarizeni",
+                "title": "Terminy revizi a kontrol",
+                "filter_fields": [
+                    {"key": "budova", "source_column": "budova", "property_key": "budova", "label": "Budova"},
+                    {"key": "patro", "source_column": "patro", "property_key": "patro", "label": "Patro"},
+                    {
+                        "key": "stav_terminu",
+                        "source_column": "stav_terminu",
+                        "property_key": "stav_terminu",
+                        "label": "Stav terminu",
+                    },
+                ],
+                "filter_options": {"budova": ["A", "B"], "patro": ["1.NP"], "stav_terminu": ["platna"]},
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            },
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert 'const mapContext = String(mapPayload.map_context || "")' in html
+    assert "function layerSupportsFilter" in html
+    assert "function linkedFilterTargets" in html
+    assert 'mapContext !== "revize"' in html
+    assert 'String(layerId) !== "mistnosti"' in html
+    assert 'const targetLayerId = "revize_terminy_zarizeni"' in html
+    assert 'budova: "budova"' in html
+    assert 'patro: "patro"' in html
+    assert "function syncLinkedLayerFilters" in html
+    assert "syncLinkedLayerFilters(layerId, field.key, selectedValues)" in html
+    assert "renderPanel();" in html
+    assert "applyLayerFilters();" in html
+
+
+def test_leaflet_map_html_preserves_filter_layer_expansion_after_panel_rerender():
+    payload = {
+        "primary_layer_id": "mistnosti",
+        "layers": [
+            {
+                "layer_id": "mistnosti",
+                "title": "Mistnosti",
+                "filter_fields": [
+                    {"key": "budova", "source_column": "budova", "property_key": "budova", "label": "Budova"},
+                ],
+                "filter_options": {"budova": ["A", "B"]},
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            },
+            {
+                "layer_id": "revize_terminy_zarizeni",
+                "title": "Terminy revizi a kontrol",
+                "filter_fields": [
+                    {"key": "budova", "source_column": "budova", "property_key": "budova", "label": "Budova"},
+                ],
+                "filter_options": {"budova": ["A", "B"]},
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            },
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert "const filterLayerOpenState = {}" in html
+    assert "const rememberFilterLayerOpenState = () =>" in html
+    assert 'details.map-filter-layer[data-layer-id]' in html
+    assert "layerElement.dataset.layerId = layerId" in html
+    assert "Object.prototype.hasOwnProperty.call(filterLayerOpenState, layerId)" in html
+    assert "filterLayerOpenState[layerId] = layerElement.open" in html
+
+
 def test_leaflet_map_html_allows_deeper_vector_zoom_without_changing_native_tile_zoom():
     payload = {
         "primary_layer_id": "potrubi",

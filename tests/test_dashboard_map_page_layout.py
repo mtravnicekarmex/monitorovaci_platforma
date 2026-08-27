@@ -22,7 +22,8 @@ def test_map_page_uses_full_width_map_with_in_map_controls():
     assert '"filter_options": filter_options_by_layer.get(layer_id, {})' in source
     assert "filter_options_request = build_map_features_request(layer_ids)" in source
     assert "features_request = build_map_features_request(layer_ids)" in source
-    assert "leaflet_payload = _leaflet_map_payload(features_payload, catalog_layers, options_by_layer)" in source
+    assert '"map_context": map_context' in source
+    assert "leaflet_payload = _leaflet_map_payload(" in source
     assert "map_context=map_context" in source
     assert "with st.container(key=\"map_page_layout\")" in source
     assert "filter_col, map_col = st.columns" not in source

@@ -77,6 +77,8 @@ def _leaflet_map_payload(
     features_payload: dict[str, object],
     catalog_layers: list[dict[str, object]],
     filter_options_by_layer: dict[str, dict[str, list[str]]],
+    *,
+    map_context: str,
 ) -> dict[str, object]:
     catalog_by_id = {_layer_id(layer): layer for layer in catalog_layers if _layer_id(layer)}
     raw_layers = features_payload.get("layers")
@@ -118,6 +120,7 @@ def _leaflet_map_payload(
     )
     return {
         **features_payload,
+        "map_context": map_context,
         "primary_layer_id": primary_layer_id,
         "layers": layers,
     }
@@ -286,7 +289,12 @@ def render_dashboard_map_page(
                 features_request,
                 map_context=map_context,
             )
-            leaflet_payload = _leaflet_map_payload(features_payload, catalog_layers, options_by_layer)
+            leaflet_payload = _leaflet_map_payload(
+                features_payload,
+                catalog_layers,
+                options_by_layer,
+                map_context=map_context,
+            )
 
             components.html(
                 build_leaflet_map_html(

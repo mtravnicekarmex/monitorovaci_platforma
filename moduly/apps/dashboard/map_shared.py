@@ -205,7 +205,12 @@ def build_leaflet_map_html(
 ) -> str:
     layers = _normalize_map_layers(payload)
 
-    encoded_payload = _json_payload_to_base64({"layers": layers})
+    encoded_payload = _json_payload_to_base64(
+        {
+            "layers": layers,
+            "map_context": str(payload.get("map_context") or ""),
+        }
+    )
     primary_layer_id = escape(str(payload.get("primary_layer_id") or "vodomery"))
     layer_title = escape(str(payload.get("title") or "Mapa"))
     leaflet_css = _leaflet_css_for_inline_html()
@@ -1498,6 +1503,39 @@ def build_leaflet_map_html(
       if (!Object.keys(activeLayerFilters[layerId]).length) {{
         delete activeLayerFilters[layerId];
       }}
+      return cleanedValues;
+    }}
+
+    function layerSupportsFilter(layerId, filterKey) {{
+      const item = leafletLayers.find((entry) => entry.id === String(layerId));
+      if (!item) {{
+        return false;
+      }}
+      return layerFilterFields(item.config).some((field) => String(field.key) === String(filterKey));
+    }}
+
+    function linkedFilterTargets(layerId, filterKey) {{
+      if (mapContext !== "revize" || String(layerId) !== "mistnosti") {{
+        return [];
+      }}
+      const targetLayerId = "revize_terminy_zarizeni";
+      const fieldMap = {{
+        budova: "budova",
+        patro: "patro",
+        mistnost_id: "mistnost_id",
+        mistnost: "mistnost"
+      }};
+      const targetFilterKey = fieldMap[String(filterKey)];
+      if (!targetFilterKey || !layerSupportsFilter(targetLayerId, targetFilterKey)) {{
+        return [];
+      }}
+      return [{{ layerId: targetLayerId, filterKey: targetFilterKey }}];
+    }}
+
+    function syncLinkedLayerFilters(layerId, filterKey, values) {{
+      linkedFilterTargets(layerId, filterKey).forEach((target) => {{
+        setLayerFilterValues(target.layerId, target.filterKey, values);
+      }});
     }}
 
     function featurePassesLayerFilters(feature, layerConfig) {{
@@ -1591,8 +1629,16 @@ def build_leaflet_map_html(
 
         const panel = document.createElement("div");
         panel.className = "map-filter-panel";
+        const filterLayerOpenState = {{}};
+
+        const rememberFilterLayerOpenState = () => {{
+          panel.querySelectorAll("details.map-filter-layer[data-layer-id]").forEach((layerElement) => {{
+            filterLayerOpenState[layerElement.dataset.layerId] = layerElement.open;
+          }});
+        }};
 
         const renderPanel = () => {{
+          rememberFilterLayerOpenState();
           while (panel.firstChild) {{
             panel.removeChild(panel.firstChild);
           }}
@@ -1611,7 +1657,13 @@ def build_leaflet_map_html(
           const layerTitle = String(item.layerConfig.title || layerId);
           const layerElement = document.createElement("details");
           layerElement.className = "map-filter-layer";
-          layerElement.open = visibleEntries.length === 1;
+          layerElement.dataset.layerId = layerId;
+          layerElement.open = Object.prototype.hasOwnProperty.call(filterLayerOpenState, layerId)
+            ? filterLayerOpenState[layerId]
+            : visibleEntries.length === 1;
+          layerElement.addEventListener("toggle", () => {{
+            filterLayerOpenState[layerId] = layerElement.open;
+          }});
 
           const titleElement = document.createElement("summary");
           titleElement.className = "map-filter-layer-title";
@@ -1640,11 +1692,13 @@ def build_leaflet_map_html(
             }});
 
             selectElement.addEventListener("change", () => {{
-              setLayerFilterValues(
+              const selectedValues = setLayerFilterValues(
                 layerId,
                 field.key,
                 Array.from(selectElement.selectedOptions).map((option) => option.value)
               );
+              syncLinkedLayerFilters(layerId, field.key, selectedValues);
+              renderPanel();
               applyLayerFilters();
             }});
 
@@ -1874,6 +1928,7 @@ def build_leaflet_map_html(
     }}
 
     const mapPayload = decodePayload(encodedPayload);
+    const mapContext = String(mapPayload.map_context || "");
     const map = L.map("map", {{ center: [50.77, 14.23], zoom: 17, maxZoom: 24 }});
     const osmBaseLayer = L.tileLayer("https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
       maxZoom: 24,

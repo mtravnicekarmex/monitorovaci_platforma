@@ -22,6 +22,26 @@ Date: 2026-08-21
 
 ## Active handoff
 
+### 2026-08-27 - Map GeoJSON supports curved PostGIS geometries
+
+- Problem reproduced for layer `spalinova_cesta`: backend feature loading
+  failed with PostGIS `lwgeom_to_geojson: 'CurvePolygon' geometry type not
+  supported` when `ST_AsGeoJSON` was called directly on curved geometry from
+  `evidence."v_SPALINOVÉ CESTY"`.
+- Source state: the shared map feature SQL builder now wraps source geometry
+  with `ST_CurveToLine(ST_SetSRID(...))` before `ST_Transform` and
+  `ST_AsGeoJSON`, so curved PostGIS geometries are linearized for Leaflet.
+- Runtime verification: loading `spalinova_cesta` through
+  `load_requested_map_features(..., map_context="evidence")` returned 7
+  features instead of raising an internal server error.
+- Changed local source for this task:
+  `services/api/services/device_map.py` and
+  `tests/test_device_map_service.py`.
+- Verification:
+  `tests/test_device_map_service.py`, `tests/test_map_layers_service.py`, and
+  `tests/test_map_routes.py` returned `64 passed`; `compileall` passed for
+  the touched backend/test Python files.
+
 ### 2026-08-27 - Evidence map linked Mistnosti filters
 
 - Source state: `Mapove podklady / Mapa` now extends the Leaflet linked-filter

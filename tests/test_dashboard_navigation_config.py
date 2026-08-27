@@ -23,6 +23,7 @@ def test_sidebar_section_order_matches_requested_dashboard_order():
         "manometry",
         "nabijecky",
         "revize",
+        "pronajem",
         "mapove_podklady",
     )
 
@@ -143,6 +144,19 @@ def test_mapove_podklady_section_and_page_are_configurable():
     assert page.section_key == "mapove_podklady"
     assert page.configurable is True
     assert "mapove_podklady_map" in page_keys
+
+
+def test_pronajem_section_and_map_page_are_configurable():
+    section_keys = get_configurable_section_keys()
+    page_keys = get_configurable_page_keys(section_keys)
+    page = get_page_definition("pronajem_map")
+
+    assert "pronajem" in section_keys
+    assert page is not None
+    assert page.section_key == "pronajem"
+    assert page.title == "Mapa - pronájem"
+    assert page.configurable is True
+    assert "pronajem_map" in page_keys
 
 
 def test_sprava_section_exposes_only_web_search_to_users():
@@ -272,14 +286,18 @@ def test_smartfuelpass_interactive_login_is_admin_only_charger_page():
     assert page.path.endswith("39_smartfuelpass_prihlaseni.py")
 
 
-def test_revize_page_is_after_kalorimetry_pages():
+def test_revize_pronajem_and_mapove_podklady_sections_are_ordered():
     main_page_keys = [page.key for page in get_dashboard_pages("main")]
 
     assert "kalorimetry_list" in main_page_keys
     assert "kalorimetry_detail" in main_page_keys
     assert "revize_overview" in main_page_keys
+    assert "revize_map" in main_page_keys
+    assert "pronajem_map" in main_page_keys
     assert "mapove_podklady_map" in main_page_keys
     assert main_page_keys.index("kalorimetry_overview") < main_page_keys.index("kalorimetry_list")
     assert main_page_keys.index("kalorimetry_list") < main_page_keys.index("kalorimetry_detail")
     assert main_page_keys.index("kalorimetry_detail") < main_page_keys.index("revize_overview")
-    assert main_page_keys.index("revize_overview") < main_page_keys.index("mapove_podklady_map")
+    assert main_page_keys.index("revize_overview") < main_page_keys.index("revize_map")
+    assert main_page_keys.index("revize_map") < main_page_keys.index("pronajem_map")
+    assert main_page_keys.index("pronajem_map") < main_page_keys.index("mapove_podklady_map")

@@ -34,6 +34,7 @@ SECTIONS: tuple[DashboardSection, ...] = (
     DashboardSection(key="nabijecky", label="Nabíječky", icon="🔌", requires_device_permissions=False),
     DashboardSection(key="kalorimetry", label="Kalorimetry", icon="♨️"),
     DashboardSection(key="revize", label="Revize", icon="📋", requires_device_permissions=False),
+    DashboardSection(key="pronajem", label="Pronájem", icon="🏢", requires_device_permissions=False),
     DashboardSection(key="mapove_podklady", label="Mapove podklady", icon="🗺️", requires_device_permissions=False),
     DashboardSection(key="sprava", label="Správa", icon="⚙️", requires_device_permissions=False),
 )
@@ -47,6 +48,7 @@ SIDEBAR_SECTION_ORDER: tuple[str, ...] = (
     "manometry",
     "nabijecky",
     "revize",
+    "pronajem",
     "mapove_podklady",
 )
 
@@ -273,6 +275,14 @@ PAGES: tuple[DashboardPage, ...] = (
         title="Mapa",
         icon="🗺",
         section_key="revize",
+        configurable=True,
+    ),
+    DashboardPage(
+        key="pronajem_map",
+        path="pages/41_pronajem_mapa.py",
+        title="Mapa - pronájem",
+        icon="🗺",
+        section_key="pronajem",
         configurable=True,
     ),
     DashboardPage(

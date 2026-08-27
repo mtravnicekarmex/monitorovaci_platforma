@@ -129,6 +129,21 @@ def test_get_map_layer_catalog_returns_available_layers(monkeypatch):
     assert response.layers[0].filter_fields[0].key == "budova"
 
 
+def test_get_map_layer_catalog_accepts_pronajem_context(monkeypatch):
+    current_user = SimpleNamespace(is_admin=False, allowed_sections=("pronajem",), allowed_devices=())
+
+    def fake_list_map_layer_catalog(_user, **kwargs):
+        assert kwargs["map_context"] == "pronajem"
+        return []
+
+    monkeypatch.setattr(map_routes, "list_map_layer_catalog", fake_list_map_layer_catalog)
+
+    response = map_routes.get_map_layer_catalog(current_user, map_context="pronajem")
+
+    assert response.total == 0
+    assert response.layers == []
+
+
 def test_post_map_features_returns_feature_layers(monkeypatch):
     current_user = SimpleNamespace(is_admin=False, allowed_sections=("vodomery",), allowed_devices=("V-1",))
 

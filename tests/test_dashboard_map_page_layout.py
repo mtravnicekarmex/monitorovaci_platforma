@@ -4,6 +4,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MAP_PAGE_PATH = PROJECT_ROOT / "moduly" / "apps" / "dashboard" / "pages" / "36_mapove_podklady.py"
 REVIZE_MAP_PAGE_PATH = PROJECT_ROOT / "moduly" / "apps" / "dashboard" / "pages" / "40_revize_mapa.py"
+PRONAJEM_MAP_PAGE_PATH = PROJECT_ROOT / "moduly" / "apps" / "dashboard" / "pages" / "41_pronajem_mapa.py"
 MAP_PAGE_SHARED_PATH = PROJECT_ROOT / "moduly" / "apps" / "dashboard" / "map_page_shared.py"
 
 
@@ -11,6 +12,7 @@ def test_map_page_uses_full_width_map_with_in_map_controls():
     source = MAP_PAGE_SHARED_PATH.read_text(encoding="utf-8")
     map_page_source = MAP_PAGE_PATH.read_text(encoding="utf-8")
     revize_map_page_source = REVIZE_MAP_PAGE_PATH.read_text(encoding="utf-8")
+    pronajem_map_page_source = PRONAJEM_MAP_PAGE_PATH.read_text(encoding="utf-8")
 
     assert "MAP_IFRAME_FALLBACK_HEIGHT_PX = 920" in source
     assert "def _leaflet_map_payload(" in source
@@ -85,6 +87,9 @@ def test_map_page_uses_full_width_map_with_in_map_controls():
     assert 'page_key="mapove_podklady_map"' in map_page_source
     assert 'map_context="revize"' in revize_map_page_source
     assert 'page_key="revize_map"' in revize_map_page_source
+    assert 'map_context="pronajem"' in pronajem_map_page_source
+    assert 'page_key="pronajem_map"' in pronajem_map_page_source
+    assert 'page_title="Pronájem - Mapa"' in pronajem_map_page_source
 
 
 def test_map_page_does_not_pass_main_token_to_iframe():
@@ -93,6 +98,7 @@ def test_map_page_does_not_pass_main_token_to_iframe():
             MAP_PAGE_SHARED_PATH.read_text(encoding="utf-8"),
             MAP_PAGE_PATH.read_text(encoding="utf-8"),
             REVIZE_MAP_PAGE_PATH.read_text(encoding="utf-8"),
+            PRONAJEM_MAP_PAGE_PATH.read_text(encoding="utf-8"),
         ]
     )
 

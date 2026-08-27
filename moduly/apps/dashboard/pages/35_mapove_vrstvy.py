@@ -50,10 +50,11 @@ CONDITIONAL_STYLE_LOGIC_LABELS = {
 CONDITIONAL_VALUE_TYPES = ("boolean", "text", "number")
 MAX_CONDITIONAL_RULES = 10
 MAX_CONDITIONAL_RULE_CONDITIONS = 10
-MAP_CONTEXT_OPTIONS = ("evidence", "revize", "shared")
+MAP_CONTEXT_OPTIONS = ("evidence", "revize", "pronajem", "shared")
 MAP_CONTEXT_LABELS = {
     "evidence": "Evidence",
     "revize": "Revize",
+    "pronajem": "Pronajem",
     "shared": "Sdilene",
 }
 

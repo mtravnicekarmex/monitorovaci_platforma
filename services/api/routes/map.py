@@ -42,7 +42,7 @@ router = APIRouter(prefix="/api/v1/map", tags=["map"])
 )
 def get_map_layer_catalog(
     current_user: DashboardUserContext = Depends(get_current_user),
-    map_context: str = Query(default="evidence", pattern="^(evidence|revize|shared)$"),
+    map_context: str = Query(default="evidence", pattern="^(evidence|revize|pronajem|shared)$"),
 ) -> MapLayerCatalogResponse:
     layers = list_map_layer_catalog(current_user, map_context=map_context)
     return MapLayerCatalogResponse(total=len(layers), layers=layers)
@@ -60,7 +60,7 @@ def get_map_layer_catalog(
 def post_map_features(
     payload: MapFeaturesRequest,
     current_user: DashboardUserContext = Depends(get_current_user),
-    map_context: str = Query(default="evidence", pattern="^(evidence|revize|shared)$"),
+    map_context: str = Query(default="evidence", pattern="^(evidence|revize|pronajem|shared)$"),
 ) -> MapLayersResponse:
     try:
         response = load_requested_map_features(
@@ -93,7 +93,7 @@ def post_map_features(
 def post_map_filter_options(
     payload: MapFilterOptionsRequest,
     current_user: DashboardUserContext = Depends(get_current_user),
-    map_context: str = Query(default="evidence", pattern="^(evidence|revize|shared)$"),
+    map_context: str = Query(default="evidence", pattern="^(evidence|revize|pronajem|shared)$"),
 ) -> MapFilterOptionsResponse:
     try:
         response = load_requested_map_filter_options(

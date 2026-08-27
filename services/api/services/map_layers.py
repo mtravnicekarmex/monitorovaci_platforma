@@ -25,10 +25,11 @@ LAYER_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 VALID_LAYER_KINDS = {"context", "device"}
 DEFAULT_MAP_CONTEXT = "evidence"
 SHARED_MAP_CONTEXT = "shared"
-VALID_MAP_CONTEXTS = {DEFAULT_MAP_CONTEXT, "revize", SHARED_MAP_CONTEXT}
+VALID_MAP_CONTEXTS = {DEFAULT_MAP_CONTEXT, "revize", "pronajem", SHARED_MAP_CONTEXT}
 MAP_CONTEXT_SECTION_KEYS = {
     DEFAULT_MAP_CONTEXT: "mapove_podklady",
     "revize": "revize",
+    "pronajem": "pronajem",
 }
 
 
@@ -326,7 +327,7 @@ def _clean_layer_id(layer_id: str) -> str:
 def _clean_map_context(map_context: str | None) -> str:
     cleaned = (map_context or DEFAULT_MAP_CONTEXT).strip()
     if cleaned not in VALID_MAP_CONTEXTS:
-        raise MapLayerOperationError("map_context musi byt evidence, revize nebo shared.")
+        raise MapLayerOperationError("map_context musi byt evidence, revize, pronajem nebo shared.")
     return cleaned
 
 

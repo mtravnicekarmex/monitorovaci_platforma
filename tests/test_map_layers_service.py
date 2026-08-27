@@ -281,15 +281,19 @@ def test_user_can_access_device_layer_only_with_section_and_devices():
 def test_user_can_access_map_context_requires_matching_section():
     admin_user = SimpleNamespace(is_admin=True, allowed_sections=(), allowed_devices=())
     revize_user = SimpleNamespace(is_admin=False, allowed_sections=("revize",), allowed_devices=())
+    pronajem_user = SimpleNamespace(is_admin=False, allowed_sections=("pronajem",), allowed_devices=())
     evidence_user = SimpleNamespace(is_admin=False, allowed_sections=("mapove_podklady",), allowed_devices=())
     unrelated_user = SimpleNamespace(is_admin=False, allowed_sections=("vodomery",), allowed_devices=("V-1",))
 
     assert user_can_access_map_context(admin_user, "revize") is True
     assert user_can_access_map_context(revize_user, "revize") is True
     assert user_can_access_map_context(evidence_user, "revize") is False
+    assert user_can_access_map_context(pronajem_user, "pronajem") is True
+    assert user_can_access_map_context(revize_user, "pronajem") is False
     assert user_can_access_map_context(evidence_user, "evidence") is True
     assert user_can_access_map_context(revize_user, "evidence") is False
     assert user_can_access_map_context(revize_user, "shared") is True
+    assert user_can_access_map_context(pronajem_user, "shared") is True
     assert user_can_access_map_context(unrelated_user, "shared") is False
 
 

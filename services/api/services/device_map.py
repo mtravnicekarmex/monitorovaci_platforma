@@ -431,7 +431,7 @@ def _build_layer_statement(
     ]
     selected_columns.append(
         "ST_AsGeoJSON("
-        f"ST_Transform(ST_SetSRID({geometry_ref}, :source_srid), :target_srid)"
+        f"ST_Transform(ST_CurveToLine(ST_SetSRID({geometry_ref}, :source_srid)), :target_srid)"
         ") AS geometry"
     )
 

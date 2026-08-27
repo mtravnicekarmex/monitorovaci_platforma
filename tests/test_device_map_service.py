@@ -12,6 +12,7 @@ from services.api.services.device_map import (
     MapFeatureImageNotFound,
     MapLayerConfig,
     VODOMERY_MAP_LAYER,
+    _build_layer_statement,
     _empty_layer_response,
     _load_detail_properties,
     _row_to_feature,
@@ -107,6 +108,29 @@ def test_empty_layer_response_keeps_geojson_shape():
         "type": "FeatureCollection",
         "features": [],
     }
+
+
+def test_build_layer_statement_linearizes_curved_geometries_before_geojson():
+    config = MapLayerConfig(
+        layer_id="spalinova_cesta",
+        title="Spalinove cesty",
+        schema="evidence",
+        table="v_SPALINOVE CESTY",
+        geometry_column="geom",
+        identifier_column="fid",
+        property_columns=("budova",),
+    )
+
+    statement = _build_layer_statement(
+        config,
+        restrict_identifiers=False,
+        available_columns={"fid", "geom", "budova"},
+    )
+
+    assert (
+        'ST_AsGeoJSON(ST_Transform(ST_CurveToLine(ST_SetSRID(t."geom", :source_srid)), :target_srid)) AS geometry'
+        in statement.text
+    )
 
 
 def test_row_to_feature_serializes_budovy_polygon_and_properties():

@@ -138,6 +138,37 @@ def test_leaflet_map_html_exposes_mistnosti_overlay_layer():
     assert 'if (layerId === "mistnosti")' in html
 
 
+def test_leaflet_map_html_separates_room_context_layers_in_main_layer_control():
+    payload = {
+        "primary_layer_id": "mistnosti",
+        "layers": [
+            {
+                "layer_id": "budovy",
+                "title": "Budovy",
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            },
+            {
+                "layer_id": "mistnosti",
+                "title": "Místnosti",
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            },
+            {
+                "layer_id": "hydranty",
+                "title": "Hydranty",
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            },
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert ".leaflet-control-layers-overlays label.map-layer-control-after-room-context" in html
+    assert 'const roomContextLayerIds = new Set(["budovy", "mistnosti"])' in html
+    assert "function syncLayerControlRoomContextSeparator" in html
+    assert 'label.classList.add("map-layer-control-after-room-context")' in html
+    assert 'map.on("overlayadd overlayremove baselayerchange", refreshLayerControlRoomContextSeparator)' in html
+
+
 def test_leaflet_map_html_uses_configured_layer_style_and_default_visibility():
     payload = {
         "primary_layer_id": "vodomery",

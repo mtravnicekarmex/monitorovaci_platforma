@@ -346,6 +346,11 @@ def build_leaflet_map_html(
       max-height: min(520px, calc(100vh - 90px));
       overflow-y: auto;
     }}
+    .leaflet-control-layers-overlays label.map-layer-control-after-room-context {{
+      margin-top: 7px;
+      padding-top: 7px;
+      border-top: 1px solid rgba(15, 23, 42, 0.16);
+    }}
     .leaflet-top.leaflet-right {{
       max-height: calc(100vh - 12px);
       max-height: calc(100dvh - 12px);
@@ -2042,6 +2047,44 @@ def build_leaflet_map_html(
       overlayLayers,
       {{ collapsed: compactMapControls, position: "topright" }}
     ).addTo(map);
+    const roomContextLayerIds = new Set(["budovy", "mistnosti"]);
+    function syncLayerControlRoomContextSeparator() {{
+      const layersContainer = layersControl.getContainer ? layersControl.getContainer() : null;
+      const overlaysContainer = layersContainer ? layersContainer.querySelector(".leaflet-control-layers-overlays") : null;
+      if (!overlaysContainer) {{
+        return;
+      }}
+      const titleToLayerId = new Map(
+        leafletLayers.map((entry) => [
+          String((entry.config && entry.config.title) || entry.id || "").trim(),
+          String(entry.id || "").toLowerCase()
+        ])
+      );
+      let seenRoomContextLayer = false;
+      let separatorApplied = false;
+      Array.from(overlaysContainer.querySelectorAll("label")).forEach((label) => {{
+        label.classList.remove("map-layer-control-after-room-context");
+        const title = String(label.textContent || "").trim();
+        const layerId = titleToLayerId.get(title) || "";
+        if (roomContextLayerIds.has(layerId)) {{
+          seenRoomContextLayer = true;
+          return;
+        }}
+        if (seenRoomContextLayer && !separatorApplied) {{
+          label.classList.add("map-layer-control-after-room-context");
+          separatorApplied = true;
+        }}
+      }});
+    }}
+    const refreshLayerControlRoomContextSeparator = () => window.setTimeout(syncLayerControlRoomContextSeparator, 0);
+    window.requestAnimationFrame(syncLayerControlRoomContextSeparator);
+    map.on("overlayadd overlayremove baselayerchange", refreshLayerControlRoomContextSeparator);
+    const layersContainerForRoomContextSeparator = layersControl.getContainer ? layersControl.getContainer() : null;
+    if (layersContainerForRoomContextSeparator) {{
+      ["mouseover", "focusin", "click"].forEach((eventName) => {{
+        layersContainerForRoomContextSeparator.addEventListener(eventName, refreshLayerControlRoomContextSeparator);
+      }});
+    }}
     function syncFilterControlWidthToLayerControl(...controlInstances) {{
       const layersContainer = layersControl.getContainer ? layersControl.getContainer() : null;
       if (!layersContainer) {{

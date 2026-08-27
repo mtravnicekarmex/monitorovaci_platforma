@@ -5170,3 +5170,31 @@ Consequences:
   water node, and VZT overlays.
 - The behavior remains a client-side evidence-map rule and does not require a
   database migration, API contract change, or map-layer metadata update.
+
+## DEC-167: Switche cache rack location fields
+
+Date: 2026-08-27
+
+Status: Accepted
+
+Decision:
+
+- `evidence."SWITCHE"` now stores denormalized rack-location fields `budova`,
+  `patro`, and `místnost`.
+- The source of truth remains `evidence."RACKY"`:
+  `SWITCHE"."rack"` references `RACKY"."označení"`.
+- A `BEFORE INSERT OR UPDATE OF "rack"` trigger on `evidence."SWITCHE"` fills
+  `budova`, `patro`, and `místnost` from the matching rack.
+- An `AFTER UPDATE OF "budova", "patro", "místnost"` trigger on
+  `evidence."RACKY"` propagates rack-location changes into matching switches.
+- Existing rows are backfilled from the current rack records when the
+  migration is applied.
+
+Consequences:
+
+- Map/filter consumers can read switch location directly from
+  `evidence."SWITCHE"` without joining to `RACKY`.
+- Rack location should be edited on `RACKY`; direct manual edits of cached
+  location fields on `SWITCHE` are not the authoritative workflow.
+- The migration is captured in
+  `scripts/postgres_switche_rack_location_columns.sql`.

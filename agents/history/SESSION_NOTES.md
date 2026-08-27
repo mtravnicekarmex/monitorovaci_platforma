@@ -22,6 +22,27 @@ Date: 2026-08-21
 
 ## Active handoff
 
+### 2026-08-27 - Switche rack-location columns
+
+- Database state: `scripts/postgres_switche_rack_location_columns.sql` was
+  added and applied to PostgreSQL.
+- `evidence."SWITCHE"` now has `budova`, `patro`, and `místnost` columns, all
+  `character varying`.
+- Synchronization state:
+  `trg_switche_sync_location_from_rack` fills these fields before insert or
+  rack change on `SWITCHE`; `trg_racky_propagate_switche_location` propagates
+  rack-location changes from `evidence."RACKY"`.
+- Verification: `SWITCHE` currently has 0 rows. The migration created 3
+  location columns, 1 rack index, and 3 trigger events. A rollback-only insert
+  test against an existing rack proved that `budova`, `patro`, and `místnost`
+  are copied from `RACKY`.
+- Map-layer metadata state: no dashboard map layer for `SWITCHE` currently
+  exists, so no map metadata update was applied.
+- Changed local source for this task:
+  `scripts/postgres_switche_rack_location_columns.sql`,
+  `agents/decisions/DECISIONS.md`, and
+  `agents/history/SESSION_NOTES.md`.
+
 ### 2026-08-27 - Map GeoJSON supports curved PostGIS geometries
 
 - Problem reproduced for layer `spalinova_cesta`: backend feature loading

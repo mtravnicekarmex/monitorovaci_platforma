@@ -116,6 +116,16 @@
   found 5 optical-tray rows, 5 matched racks, and 5 rows matching the current
   rack location values. Existing map-layer metadata for `opticke_vany` and
   `racky` already exposes these fields, so no map metadata update was needed.
+- Switche rack-location follow-up completed on 2026-08-27:
+  `scripts/postgres_switche_rack_location_columns.sql` was added and applied.
+  `evidence."SWITCHE"` now has `budova`, `patro`, and `místnost` cache
+  columns populated from `evidence."RACKY"` through
+  `SWITCHE"."rack" -> RACKY"."označení"`. A before trigger fills the cache
+  when a switch is inserted or its rack changes, and an after trigger on
+  `RACKY` propagates later rack-location changes. Verification found 0 switch
+  rows currently present and proved the insert trigger through a rollback-only
+  test against an existing rack. No dashboard map layer for `SWITCHE` exists
+  yet, so no map metadata update was needed.
 - Evidence linked-filter follow-up completed on 2026-08-27:
   `Mapove podklady / Mapa` now uses `mistnosti` as a linked-filter source for
   all other `layer_kind=device` layers with matching supported filter keys,

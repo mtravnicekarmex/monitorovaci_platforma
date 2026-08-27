@@ -525,6 +525,10 @@ def build_payload(prefix: str, current: dict[str, object] | None = None) -> dict
         st.session_state.get(f"{prefix}_property_labels", "{}"),
         field_name="Popisky vlastnosti",
     )
+    document_columns = _json_to_dict(
+        st.session_state.get(f"{prefix}_document_columns", "{}"),
+        field_name="Dokumenty v popupu",
+    )
     style = _style_payload_from_state(prefix)
 
     property_columns = _csv_to_list(str(st.session_state.get(f"{prefix}_property_columns", "")))
@@ -549,6 +553,7 @@ def build_payload(prefix: str, current: dict[str, object] | None = None) -> dict
         "filter_columns": _csv_to_list(str(st.session_state.get(f"{prefix}_filter_columns", ""))),
         "map_label_columns": _csv_to_list(str(st.session_state.get(f"{prefix}_map_label_columns", ""))),
         "popup_columns": _csv_to_list(str(st.session_state.get(f"{prefix}_popup_columns", ""))),
+        "document_columns": document_columns,
         "style": style,
         "device_section_key": str(st.session_state.get(f"{prefix}_device_section_key", "")).strip() or None,
         "restrict_to_allowed_devices": bool(st.session_state.get(f"{prefix}_restrict_to_allowed_devices", False)),
@@ -696,6 +701,16 @@ def render_layer_fields(prefix: str, current: dict[str, object] | None = None, *
         key=f"{prefix}_popup_columns",
     )
     st.text_area(
+        "Dokumenty v popupu JSON",
+        value=_dict_to_json(current.get("document_columns")),
+        help=(
+            'Mapovani zdrojovy_sloupec -> text odkazu pro PDF dokumenty, napr. '
+            '{"revize_soubor": "Zobrazit revizi"}. Cesta k souboru se do mapy neposila; '
+            "PDF se dohleda server-side pres autorizovany endpoint."
+        ),
+        key=f"{prefix}_document_columns",
+    )
+    st.text_area(
         "Popisky vlastnosti JSON",
         value=_dict_to_json(current.get("property_labels")),
         help='Mapovani GeoJSON property_key -> zobrazovany popisek, napr. {"mistnost": "Mistnost"}.',
@@ -727,6 +742,7 @@ def render_page() -> None:
                     "popisek_defaultne": "ANO" if layer.get("map_labels_default_visible", True) else "NE",
                     "device_filter": "ANO" if layer["restrict_to_allowed_devices"] else "NE",
                     "stitky_v_mape": _list_to_csv(layer.get("map_label_columns")),
+                    "dokumenty": "ANO" if layer.get("document_columns") else "NE",
                     "foto": "ANO" if layer["show_photo"] else "NE",
                     "poradi": layer["draw_order"],
                 }

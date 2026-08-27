@@ -64,6 +64,22 @@
   payload. `revize_soubor` is populated in current source data, while
   `revize_servisni_smlouva` is currently empty in all revision evidence
   source views.
+- PDF document-link follow-up completed on 2026-08-27:
+  map-layer configuration now includes `document_columns`, a JSON object
+  mapping source columns to popup link labels. Configured document source
+  values stay server-side; GeoJSON feature payloads expose only sanitized
+  `document_links`. The map has a new authorized
+  `GET /api/v1/map/documents` endpoint that resolves PDF files by
+  `layer_id`, `identifier`, and `document_key` using the same HttpOnly
+  session-cookie boundary as map photos. Leaflet popups render these entries
+  as links opening a new browser tab. The `revize_terminy_zarizeni` layer
+  uses `revize_soubor -> Zobrazit revizi` and
+  `servisni_smlouva -> Zobrazit servisni smlouvu`; these columns are no
+  longer ordinary popup/property values. DB verification loaded 230 revize
+  features, found 91 document-linked features, confirmed zero raw document
+  path properties in feature payloads, and resolved all 91 current
+  `revize_soubor` values as PDF files. `servisni_smlouva` is still empty in
+  current source data.
 - Label-default follow-up completed on 2026-08-26:
   map-layer configuration now includes `map_labels_default_visible`, exposed
   in `Sprava / Mapove vrstvy` as `Popisek defaultne`. It controls only the
@@ -124,9 +140,15 @@
   label/admin/service tests returned `63 passed`, the focused map regression
   set returned `111 passed`, `py_compile` passed for touched dashboard/API
   map modules, and DB verification confirmed the new column/catalog field.
+  After the PDF document-link follow-up on 2026-08-27, targeted map
+  service/routes/shared/admin/page tests returned `98 passed`, `compileall`
+  passed for touched dashboard/API/test Python files, DB verification
+  confirmed sanitized document-link feature payloads and 91 resolvable current
+  revision PDFs, and `git diff --check` returned only LF/CRLF normalization
+  warnings.
 - Changed files are listed in the 2026-08-24 10:29 +02:00 pre-restart
   handoff in `../history/SESSION_NOTES.md`.
-- Updated: 2026-08-26
+- Updated: 2026-08-27
 
 ## DASH-REVIZE-001 - Dashboard Revize renewal history
 

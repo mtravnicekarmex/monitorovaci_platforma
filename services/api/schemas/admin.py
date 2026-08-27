@@ -67,6 +67,7 @@ class AdminMapLayerRecord(BaseModel):
     filter_columns: list[str]
     map_label_columns: list[str]
     popup_columns: list[str]
+    document_columns: dict[str, Any]
     style: dict[str, Any]
     device_section_key: str | None = None
     restrict_to_allowed_devices: bool
@@ -102,6 +103,7 @@ class AdminMapLayerCreateRequest(BaseModel):
     filter_columns: list[str] = Field(default_factory=list)
     map_label_columns: list[str] = Field(default_factory=list)
     popup_columns: list[str] = Field(default_factory=list)
+    document_columns: dict[str, Any] = Field(default_factory=dict)
     style: dict[str, Any] = Field(default_factory=dict)
     device_section_key: str | None = Field(default=None, max_length=100)
     restrict_to_allowed_devices: bool = False

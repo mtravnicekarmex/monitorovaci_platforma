@@ -81,6 +81,7 @@ class Dashboard_MapLayer(Base):
     filter_columns: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
     map_label_columns: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
     popup_columns: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
+    document_columns: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
     style: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
     device_section_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     restrict_to_allowed_devices: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
@@ -152,6 +153,12 @@ class Dashboard_MapLayer(Base):
 
     def set_popup_columns(self, columns: list[str]) -> None:
         self.popup_columns = json.dumps(columns, ensure_ascii=True)
+
+    def get_document_columns(self) -> dict[str, object]:
+        return self._load_json_dict(self.document_columns)
+
+    def set_document_columns(self, columns: dict[str, object]) -> None:
+        self.document_columns = json.dumps(columns, ensure_ascii=True)
 
     def get_style(self) -> dict[str, object]:
         return self._load_json_dict(self.style)

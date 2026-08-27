@@ -11,10 +11,12 @@ from moduly.apps.dashboard.database.models import Dashboard_MapLayer
 from services.api.services.dashboard_admin import require_admin_access
 from services.api.services.dashboard_auth import AuthorizationError, DashboardUserContext
 from services.api.services.device_map import (
+    MapFeatureDocumentFile,
     MapFeatureImageFile,
     MapLayerConfig,
     WEB_MAP_TARGET_SRID,
     load_map_layer_features,
+    resolve_map_feature_document_file,
     resolve_map_feature_image_file,
 )
 
@@ -191,8 +193,6 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
             "datum_provedeni",
             "datum_platnosti",
             "delka_platnosti",
-            "servisni_smlouva",
-            "revize_soubor",
             "dnu_do_konce",
             "stav_terminu",
             "stav_terminu_poradi",
@@ -236,8 +236,6 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
             "dnu_do_konce",
             "typ_terminu",
             "termin_nazev",
-            "servisni_smlouva",
-            "revize_soubor",
             "budova",
             "patro",
             "mistnost",
@@ -245,6 +243,10 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
             "mbus",
             "poznamka",
         ],
+        "document_columns": {
+            "revize_soubor": "Zobrazit revizi",
+            "servisni_smlouva": "Zobrazit servisni smlouvu",
+        },
         "style": {
             "color": "#4b5563",
             "fillColor": "#9ca3af",
@@ -428,13 +430,14 @@ def _validate_source_columns(
     identifier_column: str,
     property_columns: list[str],
     filter_columns: list[str],
+    document_columns: list[str] | None = None,
 ) -> None:
     columns = _table_columns(source_schema, source_table)
     if not columns:
         raise MapLayerOperationError(f"Zdrojova tabulka {source_schema}.{source_table} neexistuje nebo nema sloupce.")
 
     required = {geometry_column, identifier_column}
-    optional = set(property_columns) | set(filter_columns)
+    optional = set(property_columns) | set(filter_columns) | set(document_columns or [])
     missing_required = sorted(required - columns)
     missing_optional = sorted(optional - columns)
     if missing_required:
@@ -461,6 +464,7 @@ def _serialize_record(layer: Dashboard_MapLayer) -> dict[str, object]:
         "filter_columns": layer.get_filter_columns(),
         "map_label_columns": layer.get_map_label_columns(),
         "popup_columns": layer.get_popup_columns(),
+        "document_columns": layer.get_document_columns(),
         "style": layer.get_style(),
         "device_section_key": layer.device_section_key,
         "restrict_to_allowed_devices": bool(layer.restrict_to_allowed_devices),
@@ -478,6 +482,7 @@ def _serialize_record(layer: Dashboard_MapLayer) -> dict[str, object]:
 def map_layer_record_to_config(record: dict[str, object]) -> MapLayerConfig:
     aliases = {str(key): str(value) for key, value in dict(record.get("property_aliases") or {}).items()}
     labels = {str(key): str(value) for key, value in dict(record.get("property_labels") or {}).items()}
+    document_columns = {str(key): str(value) for key, value in dict(record.get("document_columns") or {}).items()}
     return MapLayerConfig(
         layer_id=str(record["layer_id"]),
         title=str(record["title"]),
@@ -502,6 +507,7 @@ def map_layer_record_to_config(record: dict[str, object]) -> MapLayerConfig:
         filter_columns=tuple(str(column) for column in record.get("filter_columns", []) or []),
         map_label_columns=tuple(str(column) for column in record.get("map_label_columns", []) or []),
         popup_columns=tuple(str(column) for column in record.get("popup_columns", []) or []),
+        document_columns=document_columns,
         style=dict(record.get("style") or {}),
     )
 
@@ -522,6 +528,7 @@ def _apply_record_fields(layer: Dashboard_MapLayer, values: dict[str, object]) -
     layer.set_filter_columns(list(values["filter_columns"]))
     layer.set_map_label_columns(list(values["map_label_columns"]))
     layer.set_popup_columns(list(values["popup_columns"]))
+    layer.set_document_columns(dict(values.get("document_columns") or {}))
     layer.set_style(dict(values["style"]))
     layer.device_section_key = str(values["device_section_key"]) if values.get("device_section_key") else None
     layer.restrict_to_allowed_devices = bool(values["restrict_to_allowed_devices"])
@@ -561,6 +568,7 @@ def _prepare_record_values(
     map_labels_default_visible: bool = True,
     map_label_columns: list[str] | None = None,
     property_labels: dict[str, object] | None = None,
+    document_columns: dict[str, object] | None = None,
 ) -> dict[str, object]:
     cleaned_layer_id = _clean_layer_id(layer_id)
     cleaned_layer_kind = _clean_text(layer_kind, field_name="layer_kind")
@@ -591,6 +599,7 @@ def _prepare_record_values(
         "filter_columns": _clean_list(filter_columns),
         "map_label_columns": _clean_list(map_label_columns),
         "popup_columns": _clean_list(popup_columns),
+        "document_columns": _clean_aliases(document_columns),
         "style": cleaned_style,
         "device_section_key": (device_section_key or "").strip() or None,
         "restrict_to_allowed_devices": bool(restrict_to_allowed_devices),
@@ -608,6 +617,7 @@ def _prepare_record_values(
         identifier_column=str(values["identifier_column"]),
         property_columns=list(values["property_columns"]),
         filter_columns=list(values["filter_columns"]),
+        document_columns=list(dict(values["document_columns"]).keys()),
     )
     return values
 
@@ -731,6 +741,7 @@ def map_layer_config_to_catalog_record(config: MapLayerConfig) -> dict[str, obje
         ],
         "map_label_columns": list(config.map_label_columns),
         "popup_columns": list(config.popup_columns),
+        "document_columns": dict(config.document_columns),
         "property_labels": dict(config.property_labels),
         "style": dict(config.style),
     }
@@ -963,6 +974,36 @@ def load_map_feature_image_file(
             raise AuthorizationError(f"Nemate opravneni k zarizeni {cleaned_identifier}.")
 
     return resolve_map_feature_image_file(config, cleaned_identifier)
+
+
+def load_map_feature_document_file(
+    user_context: DashboardUserContext,
+    *,
+    layer_id: str,
+    identifier: str,
+    document_key: str,
+) -> MapFeatureDocumentFile:
+    cleaned_layer_id = str(layer_id or "").strip()
+    cleaned_identifier = str(identifier or "").strip()
+    cleaned_document_key = str(document_key or "").strip()
+    if not cleaned_layer_id:
+        raise MapLayerOperationError("layer_id je povinne.")
+    if not cleaned_identifier:
+        raise MapLayerOperationError("identifier je povinne.")
+    if not cleaned_document_key:
+        raise MapLayerOperationError("document_key je povinne.")
+
+    config = get_enabled_map_layer_config(cleaned_layer_id)
+    if config is None:
+        raise MapLayerOperationError(f"Mapova vrstva {cleaned_layer_id} neexistuje nebo neni aktivni.")
+    if not user_can_access_map_layer(user_context, config):
+        raise AuthorizationError(f"Nemate opravneni k mapove vrstve {cleaned_layer_id}.")
+    if config.restrict_to_allowed_devices and not user_context.is_admin:
+        allowed_identifiers = {str(identifier) for identifier in user_context.allowed_devices if identifier}
+        if cleaned_identifier not in allowed_identifiers:
+            raise AuthorizationError(f"Nemate opravneni k zarizeni {cleaned_identifier}.")
+
+    return resolve_map_feature_document_file(config, cleaned_identifier, cleaned_document_key)
 
 
 def load_requested_map_features(

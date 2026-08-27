@@ -77,6 +77,11 @@ def ensure_map_layer_columns() -> None:
             'ALTER TABLE dashboard."Map_Layers" '
             "ADD COLUMN property_labels TEXT NOT NULL DEFAULT '{}'"
         )
+    if "document_columns" not in columns:
+        alter_statements.append(
+            'ALTER TABLE dashboard."Map_Layers" '
+            "ADD COLUMN document_columns TEXT NOT NULL DEFAULT '{}'"
+        )
 
     if not alter_statements:
         return

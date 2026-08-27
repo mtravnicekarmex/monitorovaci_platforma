@@ -39,6 +39,18 @@ def test_map_layers_admin_supports_property_display_labels_json():
     assert 'key=f"{prefix}_property_labels"' in source
 
 
+def test_map_layers_admin_supports_popup_document_links_json():
+    source = MAP_LAYERS_ADMIN_PATH.read_text(encoding="utf-8")
+
+    assert '"Dokumenty v popupu JSON"' in source
+    assert "document_columns = _json_to_dict" in source
+    assert 'st.session_state.get(f"{prefix}_document_columns", "{}")' in source
+    assert '"document_columns": document_columns' in source
+    assert 'key=f"{prefix}_document_columns"' in source
+    assert '"dokumenty": "ANO" if layer.get("document_columns") else "NE"' in source
+    assert "PDF se dohleda server-side pres autorizovany endpoint" in source
+
+
 def test_map_layers_admin_supports_map_context_selection():
     source = MAP_LAYERS_ADMIN_PATH.read_text(encoding="utf-8")
 
@@ -71,4 +83,5 @@ def test_map_layers_admin_orders_source_alias_usage_and_display_label_fields():
     assert source.index('"Filter sloupce"') < source.index('"Aliasy vlastnosti JSON"')
     assert source.index('"Aliasy vlastnosti JSON"') < source.index('"Sloupce zobrazene v mape"')
     assert source.index('"Sloupce zobrazene v mape"') < source.index('"Popup sloupce"')
-    assert source.index('"Popup sloupce"') < source.index('"Popisky vlastnosti JSON"')
+    assert source.index('"Popup sloupce"') < source.index('"Dokumenty v popupu JSON"')
+    assert source.index('"Dokumenty v popupu JSON"') < source.index('"Popisky vlastnosti JSON"')

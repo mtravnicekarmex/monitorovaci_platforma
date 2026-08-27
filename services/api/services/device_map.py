@@ -45,11 +45,18 @@ class MapLayerConfig:
     filter_columns: tuple[str, ...] = ()
     map_label_columns: tuple[str, ...] = ()
     popup_columns: tuple[str, ...] = ()
+    document_columns: Mapping[str, str] = field(default_factory=dict)
     style: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class MapFeatureImageFile:
+    path: Path
+    media_type: str
+
+
+@dataclass(frozen=True)
+class MapFeatureDocumentFile:
     path: Path
     media_type: str
 
@@ -62,6 +69,14 @@ class MapFeatureImageNotFound(FileNotFoundError):
     """Raised when a configured map feature image is missing or empty."""
 
 
+class MapFeatureDocumentError(ValueError):
+    """Raised when a map feature document cannot be resolved from supported metadata."""
+
+
+class MapFeatureDocumentNotFound(FileNotFoundError):
+    """Raised when a configured map feature document is missing or empty."""
+
+
 SUPPORTED_IMAGE_SUFFIXES = {
     ".bmp",
     ".gif",
@@ -70,6 +85,7 @@ SUPPORTED_IMAGE_SUFFIXES = {
     ".png",
     ".webp",
 }
+SUPPORTED_DOCUMENT_SUFFIXES = {".pdf"}
 PHOTO_PATH_PREFIX_FALLBACKS: tuple[tuple[str, str], ...] = (
     ("P:\\", "\\\\SERVER1A\\Company\\"),
 )
@@ -258,21 +274,41 @@ def _path_from_file_url(raw_value: str) -> Path:
     return Path(path_text)
 
 
-def _path_from_photo_value(value: object) -> Path:
+def _path_from_file_value(
+    value: object,
+    *,
+    not_found_error: type[FileNotFoundError],
+    invalid_error: type[ValueError],
+    missing_message: str,
+    invalid_message: str,
+) -> Path:
     raw_value = str(value or "").strip().strip('"').strip("'")
     if not raw_value:
-        raise MapFeatureImageNotFound("Fotka neni nastavena.")
+        raise not_found_error(missing_message)
 
     parsed = urlparse(raw_value)
     if parsed.scheme in {"http", "https", "data", "blob"}:
-        raise MapFeatureImageError("Fotka neni souborova cesta.")
+        raise invalid_error(invalid_message)
     if parsed.scheme == "file":
         return _path_from_file_url(raw_value)
     return Path(raw_value)
 
 
-def _photo_path_candidates(value: object) -> tuple[Path, ...]:
-    primary_path = _path_from_photo_value(value)
+def _path_candidates(
+    value: object,
+    *,
+    not_found_error: type[FileNotFoundError],
+    invalid_error: type[ValueError],
+    missing_message: str,
+    invalid_message: str,
+) -> tuple[Path, ...]:
+    primary_path = _path_from_file_value(
+        value,
+        not_found_error=not_found_error,
+        invalid_error=invalid_error,
+        missing_message=missing_message,
+        invalid_message=invalid_message,
+    )
     primary_text = str(primary_path)
     candidates = [primary_path]
 
@@ -293,6 +329,26 @@ def _photo_path_candidates(value: object) -> tuple[Path, ...]:
     return tuple(unique_candidates)
 
 
+def _photo_path_candidates(value: object) -> tuple[Path, ...]:
+    return _path_candidates(
+        value,
+        not_found_error=MapFeatureImageNotFound,
+        invalid_error=MapFeatureImageError,
+        missing_message="Fotka neni nastavena.",
+        invalid_message="Fotka neni souborova cesta.",
+    )
+
+
+def _document_path_candidates(value: object) -> tuple[Path, ...]:
+    return _path_candidates(
+        value,
+        not_found_error=MapFeatureDocumentNotFound,
+        invalid_error=MapFeatureDocumentError,
+        missing_message="Dokument neni nastaven.",
+        invalid_message="Dokument neni souborova cesta.",
+    )
+
+
 def _resolve_image_file(value: object) -> MapFeatureImageFile:
     path = next((candidate for candidate in _photo_path_candidates(value) if candidate.is_file()), None)
     if path is None:
@@ -307,6 +363,18 @@ def _resolve_image_file(value: object) -> MapFeatureImageFile:
         raise MapFeatureImageError("Soubor fotky nema podporovany obrazovy typ.")
 
     return MapFeatureImageFile(path=path, media_type=media_type)
+
+
+def _resolve_pdf_file(value: object) -> MapFeatureDocumentFile:
+    path = next((candidate for candidate in _document_path_candidates(value) if candidate.is_file()), None)
+    if path is None:
+        raise MapFeatureDocumentNotFound("Soubor dokumentu neexistuje.")
+
+    suffix = path.suffix.casefold()
+    if suffix not in SUPPORTED_DOCUMENT_SUFFIXES:
+        raise MapFeatureDocumentError("Dokument nema podporovanou PDF priponu.")
+
+    return MapFeatureDocumentFile(path=path, media_type="application/pdf")
 
 
 def _property_key(column: str, config: MapLayerConfig) -> str:
@@ -349,6 +417,7 @@ def _build_layer_statement(
     internal_columns = [config.identifier_column]
     if config.show_photo and PHOTO_SOURCE_COLUMN in available_columns:
         internal_columns.append(PHOTO_SOURCE_COLUMN)
+    internal_columns.extend(str(column) for column in config.document_columns if column in available_columns)
     selected_column_names = tuple(
         dict.fromkeys(
             column
@@ -465,6 +534,37 @@ def _load_source_photo_value(config: MapLayerConfig, identifier: str) -> object:
     return row.get(PHOTO_SOURCE_COLUMN)
 
 
+def _load_source_column_value(config: MapLayerConfig, identifier: str, source_column: str) -> object:
+    session = get_session_pg()
+    try:
+        available_columns = _load_table_columns(session, config)
+        required_columns = {config.identifier_column, source_column}
+        missing_required = sorted(required_columns - available_columns)
+        if missing_required:
+            raise MapFeatureDocumentError(
+                f"Mapova vrstva {config.layer_id} nema sloupec dokumentu: {source_column}."
+            )
+
+        table_ref = f"{_quote_identifier(config.schema)}.{_quote_identifier(config.table)}"
+        identifier_ref = f"t.{_quote_identifier(config.identifier_column)}"
+        column_ref = f"t.{_quote_identifier(source_column)}"
+        row = session.execute(
+            text(
+                f"SELECT {column_ref} AS {_quote_identifier(source_column)} "
+                f"FROM {table_ref} AS t "
+                f"WHERE {identifier_ref} = :identifier "
+                f"LIMIT 1"
+            ),
+            {"identifier": identifier},
+        ).mappings().first()
+    finally:
+        session.close()
+
+    if row is None:
+        raise MapFeatureDocumentNotFound("Prvek mapove vrstvy nebyl nalezen.")
+    return row.get(source_column)
+
+
 def resolve_map_feature_image_file(config: MapLayerConfig, identifier: str) -> MapFeatureImageFile:
     cleaned_identifier = str(identifier or "").strip()
     if not cleaned_identifier:
@@ -485,6 +585,33 @@ def resolve_map_feature_image_file(config: MapLayerConfig, identifier: str) -> M
     return _resolve_image_file(_load_source_photo_value(config, cleaned_identifier))
 
 
+def _document_source_column(config: MapLayerConfig, document_key: str) -> str | None:
+    cleaned_key = str(document_key or "").strip()
+    for source_column in config.document_columns:
+        if cleaned_key in {source_column, _property_key(source_column, config)}:
+            return source_column
+    return None
+
+
+def resolve_map_feature_document_file(
+    config: MapLayerConfig,
+    identifier: str,
+    document_key: str,
+) -> MapFeatureDocumentFile:
+    cleaned_identifier = str(identifier or "").strip()
+    cleaned_document_key = str(document_key or "").strip()
+    if not cleaned_identifier:
+        raise MapFeatureDocumentError("identifier je povinne.")
+    if not cleaned_document_key:
+        raise MapFeatureDocumentError("document_key je povinne.")
+
+    source_column = _document_source_column(config, cleaned_document_key)
+    if source_column is None:
+        raise MapFeatureDocumentError("Dokument neni pro tuto vrstvu povolen.")
+
+    return _resolve_pdf_file(_load_source_column_value(config, cleaned_identifier, source_column))
+
+
 def _row_to_feature(
     row: dict[str, Any],
     config: MapLayerConfig,
@@ -500,10 +627,11 @@ def _row_to_feature(
     if not isinstance(geometry, dict):
         return None
 
+    document_source_columns = {str(column) for column in config.document_columns}
     properties = {
         _property_key(column, config): _serialize_property_value(row.get(column))
         for column in config.property_columns
-        if column in row and column.casefold() != PHOTO_SOURCE_COLUMN
+        if column in row and column.casefold() != PHOTO_SOURCE_COLUMN and column not in document_source_columns
     }
     identifier = row.get(config.identifier_column)
     if identifier not in (None, "") and config.identifier_column not in properties:
@@ -515,6 +643,16 @@ def _row_to_feature(
         photo_value = row.get(PHOTO_SOURCE_COLUMN)
     if config.show_photo:
         properties["has_photo"] = bool(str(photo_value or "").strip())
+    document_links = [
+        {
+            "key": _property_key(source_column, config),
+            "label": str(label or _property_key(source_column, config)),
+        }
+        for source_column, label in config.document_columns.items()
+        if str(row.get(source_column) or "").strip()
+    ]
+    if document_links:
+        properties["document_links"] = document_links
     properties.update(detail)
     properties["layer_id"] = config.layer_id
     properties["layer_title"] = config.title
@@ -599,6 +737,7 @@ def load_map_layer_features(
         "filter_columns": list(config.filter_columns),
         "map_label_columns": list(config.map_label_columns),
         "popup_columns": list(config.popup_columns),
+        "document_columns": dict(config.document_columns),
         "property_labels": dict(config.property_labels),
         "style": dict(config.style),
         "total": len(features),
@@ -638,6 +777,7 @@ def _empty_layer_response(config: MapLayerConfig) -> dict[str, object]:
         "filter_columns": list(config.filter_columns),
         "map_label_columns": list(config.map_label_columns),
         "popup_columns": list(config.popup_columns),
+        "document_columns": dict(config.document_columns),
         "property_labels": dict(config.property_labels),
         "style": dict(config.style),
         "total": 0,

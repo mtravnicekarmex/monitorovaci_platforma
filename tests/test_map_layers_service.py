@@ -8,6 +8,7 @@ from services.api.services.map_layers import (
     _load_layer_filter_options,
     _normalize_requested_filters,
     _prepare_record_values,
+    load_map_feature_document_file,
     load_map_feature_image_file,
     load_requested_map_features,
     load_requested_map_filter_options,
@@ -40,10 +41,14 @@ def test_default_map_layer_seeds_cover_initial_map_layers():
     assert revize_seed["source_schema"] == "revize"
     assert revize_seed["source_table"] == "v_mapa_terminy_zarizeni"
     assert "stav_terminu" in revize_seed["filter_columns"]
-    assert "servisni_smlouva" in revize_seed["property_columns"]
-    assert "revize_soubor" in revize_seed["property_columns"]
-    assert "servisni_smlouva" in revize_seed["popup_columns"]
-    assert "revize_soubor" in revize_seed["popup_columns"]
+    assert "servisni_smlouva" not in revize_seed["property_columns"]
+    assert "revize_soubor" not in revize_seed["property_columns"]
+    assert "servisni_smlouva" not in revize_seed["popup_columns"]
+    assert "revize_soubor" not in revize_seed["popup_columns"]
+    assert revize_seed["document_columns"] == {
+        "revize_soubor": "Zobrazit revizi",
+        "servisni_smlouva": "Zobrazit servisni smlouvu",
+    }
     assert revize_seed["property_labels"]["servisni_smlouva"] == "Servisni smlouva"
     assert revize_seed["property_labels"]["revize_soubor"] == "Soubor revize"
 
@@ -66,6 +71,7 @@ def test_map_layer_record_to_config_preserves_runtime_metadata():
         "filter_columns": ["budova"],
         "map_label_columns": ["display_name"],
         "popup_columns": ["identifikace"],
+        "document_columns": {"revize_soubor": "Zobrazit revizi"},
         "style": {"color": "#111111", "fillOpacity": 0.4},
         "device_section_key": "vodomery",
         "restrict_to_allowed_devices": True,
@@ -87,6 +93,7 @@ def test_map_layer_record_to_config_preserves_runtime_metadata():
     assert config.filter_columns == ("budova",)
     assert config.map_label_columns == ("display_name",)
     assert config.popup_columns == ("identifikace",)
+    assert config.document_columns == {"revize_soubor": "Zobrazit revizi"}
     assert config.style["color"] == "#111111"
     assert config.default_visible is False
     assert config.map_labels_default_visible is False
@@ -534,3 +541,66 @@ def test_load_map_feature_image_file_resolves_allowed_device(monkeypatch, tmp_pa
     assert captured == {"config": VODOMERY_MAP_LAYER, "identifier": "V-1"}
     assert response.path == image_path
     assert response.media_type == "image/jpeg"
+
+
+def test_load_map_feature_document_file_rejects_device_outside_allowed_identifiers(monkeypatch):
+    current_user = SimpleNamespace(
+        is_admin=False,
+        allowed_sections=("mapove_podklady", "vodomery"),
+        allowed_devices=("V-1",),
+    )
+    config = VODOMERY_MAP_LAYER
+    monkeypatch.setattr(
+        "services.api.services.map_layers.get_enabled_map_layer_config",
+        lambda _layer_id, **_kwargs: config,
+    )
+
+    with pytest.raises(AuthorizationError):
+        load_map_feature_document_file(
+            current_user,
+            layer_id="vodomery",
+            identifier="V-2",
+            document_key="revize_soubor",
+        )
+
+
+def test_load_map_feature_document_file_resolves_allowed_layer(monkeypatch, tmp_path):
+    current_user = SimpleNamespace(
+        is_admin=True,
+        allowed_sections=(),
+        allowed_devices=(),
+    )
+    document_path = tmp_path / "revize.pdf"
+    document_path.write_bytes(b"%PDF-1.7")
+    config = VODOMERY_MAP_LAYER
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "services.api.services.map_layers.get_enabled_map_layer_config",
+        lambda _layer_id, **_kwargs: config,
+    )
+
+    def fake_resolve_map_feature_document_file(config_arg, identifier, document_key):
+        captured["config"] = config_arg
+        captured["identifier"] = identifier
+        captured["document_key"] = document_key
+        return SimpleNamespace(path=document_path, media_type="application/pdf")
+
+    monkeypatch.setattr(
+        "services.api.services.map_layers.resolve_map_feature_document_file",
+        fake_resolve_map_feature_document_file,
+    )
+
+    response = load_map_feature_document_file(
+        current_user,
+        layer_id="vodomery",
+        identifier="V-1",
+        document_key="revize_soubor",
+    )
+
+    assert captured == {
+        "config": config,
+        "identifier": "V-1",
+        "document_key": "revize_soubor",
+    }
+    assert response.path == document_path
+    assert response.media_type == "application/pdf"

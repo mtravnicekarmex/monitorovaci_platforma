@@ -4988,3 +4988,38 @@ Consequences:
 - This is display metadata only. It does not change GeoJSON feature values,
   popup rows, filters, legends, source tables, authorization, or iframe token
   boundaries.
+
+## DEC-161: Dashboard map PDF documents are opened through an authorized endpoint
+
+Date: 2026-08-27
+
+Status: Accepted
+
+Decision:
+
+- Map-layer configuration includes `document_columns`, a JSON object mapping
+  source columns to popup link labels for PDF documents.
+- Document source values are not exposed as ordinary GeoJSON properties or
+  popup text.
+- Feature payloads expose only sanitized `document_links` entries containing
+  a `document_key` and display label when the configured source column has a
+  value.
+- The browser opens documents through
+  `GET /api/v1/map/documents?layer_id=...&identifier=...&document_key=...`.
+- The backend resolves the configured source column server-side, applies the
+  same map-layer authorization checks as feature/photo access, and returns
+  only existing `.pdf` files as `application/pdf`.
+- The dashboard iframe still does not receive an API bearer token; document
+  access uses the same HttpOnly dashboard session-cookie pattern as map
+  photos.
+
+Consequences:
+
+- Revision documents and service contracts can be opened from a map popup as
+  links without displaying filesystem paths in the browser.
+- The `revize_terminy_zarizeni` layer uses
+  `{"revize_soubor": "Zobrazit revizi", "servisni_smlouva": "Zobrazit servisni smlouvu"}`.
+- Missing or invalid files return 404/400 from the document endpoint instead
+  of leaking the underlying configured path.
+- The pattern can be reused for future map layers and document types, but the
+  currently allowed rendered document type is PDF only.

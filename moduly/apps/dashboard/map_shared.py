@@ -200,6 +200,7 @@ def build_leaflet_map_html(
     *,
     height_px: int = DEFAULT_MAP_HEIGHT_PX,
     image_endpoint_url: str = "/api/v1/map/images",
+    document_endpoint_url: str = "/api/v1/map/documents",
     fill_parent_height: bool = False,
 ) -> str:
     layers = _normalize_map_layers(payload)
@@ -210,6 +211,7 @@ def build_leaflet_map_html(
     leaflet_css = _leaflet_css_for_inline_html()
     leaflet_javascript = _leaflet_javascript_for_inline_html()
     map_image_endpoint_url = str(image_endpoint_url or "/api/v1/map/images")
+    map_document_endpoint_url = str(document_endpoint_url or "/api/v1/map/documents")
     leaflet_default_icon_options = json.dumps(
         {
             "iconRetinaUrl": _leaflet_image_data_uri("marker-icon-2x.png"),
@@ -553,6 +555,33 @@ def build_leaflet_map_html(
     .map-popup-photo-error {{
       color: #b91c1c;
     }}
+    .map-popup-documents {{
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 10px;
+    }}
+    .map-popup-document-link {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: fit-content;
+      max-width: 100%;
+      padding: 6px 10px;
+      border: 1px solid #bfdbfe;
+      border-radius: 999px;
+      color: #1d4ed8;
+      background: #eff6ff;
+      font-size: 12px;
+      font-weight: 600;
+      text-decoration: none;
+    }}
+    .map-popup-document-link:hover,
+    .map-popup-document-link:focus {{
+      color: #1e40af;
+      background: #dbeafe;
+      text-decoration: none;
+    }}
     .map-photo-lightbox {{
       position: fixed;
       inset: 0;
@@ -681,6 +710,7 @@ def build_leaflet_map_html(
     const encodedPayload = "{encoded_payload}";
     const primaryLayerId = "{primary_layer_id}";
     const mapImageEndpointUrl = {json.dumps(map_image_endpoint_url)};
+    const mapDocumentEndpointUrl = {json.dumps(map_document_endpoint_url)};
     const photoLightbox = document.getElementById("map-photo-lightbox");
     const photoLightboxImage = document.getElementById("map-photo-lightbox-image");
     const photoLightboxOpen = document.getElementById("map-photo-lightbox-open");
@@ -785,6 +815,53 @@ def build_leaflet_map_html(
       url.searchParams.set("layer_id", layerId);
       url.searchParams.set("identifier", identifier);
       return url.toString();
+    }}
+
+    function mapDocumentUrl(layerId, identifier, documentKey) {{
+      let url = null;
+      const baseCandidates = [document.baseURI, document.referrer, window.location.href].filter(Boolean);
+      for (const baseUrl of baseCandidates) {{
+        try {{
+          url = new URL(mapDocumentEndpointUrl, baseUrl);
+          break;
+        }} catch (_) {{}}
+      }}
+      if (!url) {{
+        try {{
+          url = new URL(mapDocumentEndpointUrl);
+        }} catch (_) {{
+          throw new Error("Map document endpoint URL is invalid.");
+        }}
+      }}
+      url.searchParams.set("layer_id", layerId);
+      url.searchParams.set("identifier", identifier);
+      url.searchParams.set("document_key", documentKey);
+      return url.toString();
+    }}
+
+    function documentLinksHtml(properties, layerId, layerConfig) {{
+      const links = Array.isArray(properties.document_links)
+        ? properties.document_links
+        : [];
+      if (!links.length) {{
+        return "";
+      }}
+      const identifier = featureIdentifier(properties, layerConfig);
+      if (!identifier) {{
+        return "";
+      }}
+      const items = links
+        .map((link) => {{
+          const documentKey = String(link && link.key ? link.key : "").trim();
+          const label = String(link && link.label ? link.label : documentKey).trim();
+          if (!documentKey || !label) {{
+            return "";
+          }}
+          return `<a class="map-popup-document-link" href="${{escapeHtml(mapDocumentUrl(layerId, identifier, documentKey))}}" target="_blank" rel="noopener noreferrer">${{escapeHtml(label)}}</a>`;
+        }})
+        .filter(Boolean)
+        .join("");
+      return items ? `<div class="map-popup-documents">${{items}}</div>` : "";
     }}
 
     function openPhotoLightbox(image) {{
@@ -897,11 +974,13 @@ def build_leaflet_map_html(
         : (displayFieldsByLayer[layerId] || Object.keys(properties).map((key) => [key, propertyDisplayLabel(layerConfig, key)]));
       const rows = displayFields
         .filter(([key]) => String(key).toLowerCase() !== "foto")
+        .filter(([key]) => String(key) !== "document_links")
         .filter(([key]) => properties[key] !== null && properties[key] !== undefined && properties[key] !== "")
         .map(([key, label]) => `<tr><th>${{escapeHtml(label)}}</th><td>${{escapeHtml(formatValue(properties[key]))}}</td></tr>`)
         .join("");
       const image = photoPlaceholderHtml(properties, layerId, layerConfig);
-      return `<div><table class="popup-table">${{rows || "<tr><td>Bez detailu</td></tr>"}}</table>${{image}}</div>`;
+      const documents = documentLinksHtml(properties, layerId, layerConfig);
+      return `<div><table class="popup-table">${{rows || "<tr><td>Bez detailu</td></tr>"}}</table>${{documents}}${{image}}</div>`;
     }}
 
     function featureMapLabel(feature, layerConfig) {{

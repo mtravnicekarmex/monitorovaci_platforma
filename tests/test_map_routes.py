@@ -10,7 +10,12 @@ from services.api.core import dependencies
 from services.api.routes import map as map_routes
 from services.api.schemas.device_map import MapLayerFeaturesRequest
 from services.api.services.dashboard_auth import AuthorizationError
-from services.api.services.device_map import MapFeatureImageFile, MapFeatureImageNotFound
+from services.api.services.device_map import (
+    MapFeatureDocumentFile,
+    MapFeatureDocumentNotFound,
+    MapFeatureImageFile,
+    MapFeatureImageNotFound,
+)
 
 
 def test_browser_session_user_uses_httponly_cookie_token(monkeypatch):
@@ -269,5 +274,60 @@ def test_get_map_image_maps_authorization_error_to_403(monkeypatch):
 
     with pytest.raises(HTTPException) as exc_info:
         map_routes.get_map_image("vodomery", "V-1", current_user)
+
+    assert exc_info.value.status_code == 403
+
+
+def test_get_map_document_returns_file_response(monkeypatch, tmp_path):
+    current_user = SimpleNamespace(is_admin=True, allowed_sections=(), allowed_devices=())
+    document_path = tmp_path / "revize.pdf"
+    document_path.write_bytes(b"%PDF-1.7")
+
+    def fake_load_map_feature_document_file(_user, *, layer_id, identifier, document_key):
+        assert layer_id == "revize_terminy_zarizeni"
+        assert identifier == "HYDRANTY:1"
+        assert document_key == "revize_soubor"
+        return MapFeatureDocumentFile(path=document_path, media_type="application/pdf")
+
+    monkeypatch.setattr(map_routes, "load_map_feature_document_file", fake_load_map_feature_document_file)
+
+    response = map_routes.get_map_document(
+        "revize_terminy_zarizeni",
+        "HYDRANTY:1",
+        "revize_soubor",
+        current_user,
+    )
+
+    assert Path(response.path) == document_path
+    assert response.media_type == "application/pdf"
+    assert response.headers["cache-control"] == "private, max-age=300"
+    assert response.headers["vary"] == "Cookie"
+
+
+def test_get_map_document_maps_missing_document_to_404(monkeypatch):
+    current_user = SimpleNamespace(is_admin=True, allowed_sections=(), allowed_devices=())
+    monkeypatch.setattr(
+        map_routes,
+        "load_map_feature_document_file",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(MapFeatureDocumentNotFound("missing")),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        map_routes.get_map_document("revize_terminy_zarizeni", "HYDRANTY:1", "revize_soubor", current_user)
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Dokument neni dostupny."
+
+
+def test_get_map_document_maps_authorization_error_to_403(monkeypatch):
+    current_user = SimpleNamespace(is_admin=False, allowed_sections=(), allowed_devices=())
+    monkeypatch.setattr(
+        map_routes,
+        "load_map_feature_document_file",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AuthorizationError("forbidden")),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        map_routes.get_map_document("revize_terminy_zarizeni", "HYDRANTY:1", "revize_soubor", current_user)
 
     assert exc_info.value.status_code == 403

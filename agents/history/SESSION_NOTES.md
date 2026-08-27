@@ -22,6 +22,48 @@ Date: 2026-08-21
 
 ## Active handoff
 
+### 2026-08-27 - Dashboard map PDF document links
+
+- Source state: map-layer configuration now includes `document_columns`, a
+  JSON object mapping source columns to popup link labels for PDF documents.
+  Document source values stay server-side and are excluded from ordinary
+  GeoJSON `properties`; feature payloads expose only sanitized
+  `document_links` with `key` and `label`.
+- API/UI behavior: `GET /api/v1/map/documents` opens configured PDF documents
+  by `layer_id`, `identifier`, and `document_key` using the same HttpOnly
+  dashboard session-cookie boundary as map photos. Leaflet popups render the
+  links as buttons opening a new browser tab; the iframe still does not get a
+  bearer token or raw filesystem path.
+- Revize layer state: `revize_terminy_zarizeni` uses
+  `{"revize_soubor": "Zobrazit revizi", "servisni_smlouva": "Zobrazit servisni smlouvu"}`.
+  `revize_soubor` and `servisni_smlouva` were removed from ordinary
+  `property_columns`/`popup_columns` and kept as server-side document columns.
+- Database state: `dashboard."Map_Layers".document_columns` was added and
+  `scripts/postgres_revize_map_terms_revision_file_fields.sql` was applied on
+  2026-08-27. Runtime checks confirmed 230 revize-map features, 91 features
+  with document links, zero raw `revize_soubor`/`servisni_smlouva` feature
+  properties, and all 91 current `revize_soubor` links resolving to PDF files.
+  `servisni_smlouva` has no non-empty source values yet.
+- Changed local source for this task:
+  `moduly/apps/dashboard/database/db_init.py`,
+  `moduly/apps/dashboard/database/models.py`,
+  `moduly/apps/dashboard/map_page_shared.py`,
+  `moduly/apps/dashboard/map_shared.py`,
+  `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`,
+  `scripts/postgres_dashboard_map_contexts.sql`,
+  `scripts/postgres_revize_map_terms_revision_file_fields.sql`,
+  `services/api/routes/map.py`,
+  `services/api/schemas/admin.py`,
+  `services/api/schemas/device_map.py`,
+  `services/api/services/device_map.py`,
+  `services/api/services/map_layers.py`,
+  and targeted map tests.
+- Verification:
+  targeted map service/routes/shared/admin/page tests returned `98 passed`;
+  `compileall` passed for touched dashboard/API/test Python files;
+  `git diff --check` returned only LF/CRLF normalization warnings.
+- Not done: browser runtime has not yet been manually checked after restart.
+
 ### 2026-08-26 - Revize map term view revision file fields
 
 - Source state: `revize.v_mapa_terminy_zarizeni` now exposes revision-file

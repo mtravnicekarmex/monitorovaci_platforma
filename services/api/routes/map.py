@@ -15,11 +15,17 @@ from services.api.services.dashboard_auth import AuthorizationError, DashboardUs
 from services.api.services.map_layers import (
     MapLayerOperationError,
     list_map_layer_catalog,
+    load_map_feature_document_file,
     load_map_feature_image_file,
     load_requested_map_filter_options,
     load_requested_map_features,
 )
-from services.api.services.device_map import MapFeatureImageError, MapFeatureImageNotFound
+from services.api.services.device_map import (
+    MapFeatureDocumentError,
+    MapFeatureDocumentNotFound,
+    MapFeatureImageError,
+    MapFeatureImageNotFound,
+)
 
 
 router = APIRouter(prefix="/api/v1/map", tags=["map"])
@@ -148,6 +154,55 @@ def get_map_image(
     return FileResponse(
         image_file.path,
         media_type=image_file.media_type,
+        headers={
+            "Cache-Control": "private, max-age=300",
+            "Vary": "Cookie",
+        },
+    )
+
+
+@router.get(
+    "/documents",
+    response_class=FileResponse,
+    summary="Load map feature PDF document",
+    description=(
+        "Vraci PDF dokument mapoveho prvku podle layer_id, identifier a document_key. "
+        "Cesta k souboru se neprebira z klienta, ale dohledava se server-side z povolene konfigurace vrstvy. "
+        "Endpoint pouziva HttpOnly dashboard session cookie misto bearer tokenu v mapovem iframe."
+    ),
+)
+def get_map_document(
+    layer_id: str = Query(min_length=1),
+    identifier: str = Query(min_length=1),
+    document_key: str = Query(min_length=1),
+    current_user: DashboardUserContext = Depends(get_current_map_image_session_user),
+) -> FileResponse:
+    try:
+        document_file = load_map_feature_document_file(
+            current_user,
+            layer_id=layer_id,
+            identifier=identifier,
+            document_key=document_key,
+        )
+    except AuthorizationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except MapFeatureDocumentNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dokument neni dostupny.",
+        ) from exc
+    except (MapFeatureDocumentError, MapLayerOperationError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return FileResponse(
+        document_file.path,
+        media_type=document_file.media_type,
         headers={
             "Cache-Control": "private, max-age=300",
             "Vary": "Cookie",

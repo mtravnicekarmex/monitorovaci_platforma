@@ -6,6 +6,8 @@ import pytest
 from services.api.services.device_map import (
     BUDOVY_MAP_LAYER,
     MISTNOSTI_MAP_LAYER,
+    MapFeatureDocumentError,
+    MapFeatureDocumentNotFound,
     MapFeatureImageError,
     MapFeatureImageNotFound,
     MapLayerConfig,
@@ -14,6 +16,7 @@ from services.api.services.device_map import (
     _load_detail_properties,
     _row_to_feature,
     load_map_layer_features,
+    resolve_map_feature_document_file,
     resolve_map_feature_image_file,
 )
 
@@ -191,6 +194,37 @@ def test_row_to_feature_uses_source_photo_without_exposing_path():
     assert "foto" not in feature["properties"]
 
 
+def test_row_to_feature_exposes_document_link_without_raw_path():
+    config = MapLayerConfig(
+        layer_id="revize",
+        title="Revize",
+        schema="revize",
+        table="v_mapa_terminy_zarizeni",
+        geometry_column="geom",
+        identifier_column="map_id",
+        property_columns=("map_id", "revize_soubor", "stav_terminu"),
+        document_columns={"revize_soubor": "Zobrazit revizi"},
+        restrict_to_allowed_devices=False,
+    )
+    row = {
+        "map_id": "HYDRANTY:1",
+        "revize_soubor": r"P:\revize\hydrant.pdf",
+        "stav_terminu": "Platne",
+        "geometry": '{"type":"Point","coordinates":[14.1,50.7]}',
+    }
+
+    feature = _row_to_feature(row, config)
+
+    assert feature is not None
+    assert feature["properties"]["map_id"] == "HYDRANTY:1"
+    assert feature["properties"]["stav_terminu"] == "Platne"
+    assert feature["properties"]["document_links"] == [
+        {"key": "revize_soubor", "label": "Zobrazit revizi"}
+    ]
+    assert "revize_soubor" not in feature["properties"]
+    assert "P:\\revize\\hydrant.pdf" not in str(feature["properties"])
+
+
 def test_row_to_feature_keeps_identifier_available_when_not_configured_as_property():
     config = MapLayerConfig(
         layer_id="kamery",
@@ -321,6 +355,118 @@ def test_resolve_map_feature_image_file_rejects_layer_with_photos_disabled(monke
         resolve_map_feature_image_file(config, "V-1")
 
     assert load_called is False
+
+
+def test_resolve_map_feature_document_file_returns_existing_pdf(monkeypatch, tmp_path):
+    document_path = tmp_path / "revize.pdf"
+    document_path.write_bytes(b"%PDF-1.7")
+    config = MapLayerConfig(
+        layer_id="revize",
+        title="Revize",
+        schema="revize",
+        table="v_mapa_terminy_zarizeni",
+        geometry_column="geom",
+        identifier_column="map_id",
+        document_columns={"revize_soubor": "Zobrazit revizi"},
+        restrict_to_allowed_devices=False,
+    )
+    monkeypatch.setattr(
+        "services.api.services.device_map._load_source_column_value",
+        lambda _config, identifier, source_column: str(document_path)
+        if (identifier, source_column) == ("HYDRANTY:1", "revize_soubor")
+        else "",
+    )
+
+    document_file = resolve_map_feature_document_file(config, "HYDRANTY:1", "revize_soubor")
+
+    assert document_file.path == document_path
+    assert document_file.media_type == "application/pdf"
+
+
+def test_resolve_map_feature_document_file_supports_alias_key(monkeypatch, tmp_path):
+    document_path = tmp_path / "smlouva.pdf"
+    document_path.write_bytes(b"%PDF-1.7")
+    config = MapLayerConfig(
+        layer_id="revize",
+        title="Revize",
+        schema="revize",
+        table="v_mapa_terminy_zarizeni",
+        geometry_column="geom",
+        identifier_column="map_id",
+        property_aliases={"servisni_smlouva": "smlouva"},
+        document_columns={"servisni_smlouva": "Zobrazit servisni smlouvu"},
+        restrict_to_allowed_devices=False,
+    )
+    monkeypatch.setattr(
+        "services.api.services.device_map._load_source_column_value",
+        lambda _config, _identifier, source_column: str(document_path)
+        if source_column == "servisni_smlouva"
+        else "",
+    )
+
+    document_file = resolve_map_feature_document_file(config, "HYDRANTY:1", "smlouva")
+
+    assert document_file.path == document_path
+
+
+def test_resolve_map_feature_document_file_rejects_unconfigured_key(tmp_path):
+    document_path = tmp_path / "revize.pdf"
+    document_path.write_bytes(b"%PDF-1.7")
+    config = MapLayerConfig(
+        layer_id="revize",
+        title="Revize",
+        schema="revize",
+        table="v_mapa_terminy_zarizeni",
+        geometry_column="geom",
+        identifier_column="map_id",
+        document_columns={"revize_soubor": "Zobrazit revizi"},
+        restrict_to_allowed_devices=False,
+    )
+
+    with pytest.raises(MapFeatureDocumentError):
+        resolve_map_feature_document_file(config, "HYDRANTY:1", "nepovoleny")
+
+
+def test_resolve_map_feature_document_file_rejects_non_pdf(monkeypatch, tmp_path):
+    document_path = tmp_path / "revize.txt"
+    document_path.write_text("not a pdf", encoding="utf-8")
+    config = MapLayerConfig(
+        layer_id="revize",
+        title="Revize",
+        schema="revize",
+        table="v_mapa_terminy_zarizeni",
+        geometry_column="geom",
+        identifier_column="map_id",
+        document_columns={"revize_soubor": "Zobrazit revizi"},
+        restrict_to_allowed_devices=False,
+    )
+    monkeypatch.setattr(
+        "services.api.services.device_map._load_source_column_value",
+        lambda _config, _identifier, _source_column: str(document_path),
+    )
+
+    with pytest.raises(MapFeatureDocumentError):
+        resolve_map_feature_document_file(config, "HYDRANTY:1", "revize_soubor")
+
+
+def test_resolve_map_feature_document_file_returns_not_found_for_empty_value(monkeypatch):
+    config = MapLayerConfig(
+        layer_id="revize",
+        title="Revize",
+        schema="revize",
+        table="v_mapa_terminy_zarizeni",
+        geometry_column="geom",
+        identifier_column="map_id",
+        document_columns={"revize_soubor": "Zobrazit revizi"},
+        restrict_to_allowed_devices=False,
+    )
+    monkeypatch.setattr(
+        "services.api.services.device_map._load_source_column_value",
+        lambda _config, _identifier, _source_column: "",
+    )
+
+    with pytest.raises(MapFeatureDocumentNotFound):
+        resolve_map_feature_document_file(config, "HYDRANTY:1", "revize_soubor")
 
 
 def test_resolve_map_feature_image_file_reads_source_photo_for_generic_layer(monkeypatch, tmp_path):

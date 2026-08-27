@@ -17,6 +17,7 @@ from moduly.apps.dashboard.map_shared import (
 
 
 MAP_IMAGE_ENDPOINT_PATH = "/api/v1/map/images"
+MAP_DOCUMENT_ENDPOINT_PATH = "/api/v1/map/documents"
 MAP_IFRAME_FALLBACK_HEIGHT_PX = 920
 
 
@@ -63,6 +64,13 @@ def _map_image_endpoint_url() -> str:
     if not origin:
         return MAP_IMAGE_ENDPOINT_PATH
     return f"{origin}{MAP_IMAGE_ENDPOINT_PATH}"
+
+
+def _map_document_endpoint_url() -> str:
+    origin = _dashboard_request_origin()
+    if not origin:
+        return MAP_DOCUMENT_ENDPOINT_PATH
+    return f"{origin}{MAP_DOCUMENT_ENDPOINT_PATH}"
 
 
 def _leaflet_map_payload(
@@ -285,6 +293,7 @@ def render_dashboard_map_page(
                     leaflet_payload,
                     height_px=MAP_IFRAME_FALLBACK_HEIGHT_PX,
                     image_endpoint_url=_map_image_endpoint_url(),
+                    document_endpoint_url=_map_document_endpoint_url(),
                     fill_parent_height=True,
                 ),
                 height=MAP_IFRAME_FALLBACK_HEIGHT_PX,

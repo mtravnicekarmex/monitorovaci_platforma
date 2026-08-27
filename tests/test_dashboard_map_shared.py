@@ -804,6 +804,56 @@ def test_leaflet_map_html_supports_same_origin_image_api():
     assert "DASHBOARD_BROWSER_API_BASE_URL" not in html
 
 
+def test_leaflet_map_html_renders_pdf_document_links_without_raw_paths():
+    payload = {
+        "primary_layer_id": "revize_terminy_zarizeni",
+        "layers": [
+            {
+                "layer_id": "revize_terminy_zarizeni",
+                "title": "Terminy revizi",
+                "identifier_column": "map_id",
+                "popup_columns": ["identifikace", "stav_terminu"],
+                "document_columns": {
+                    "revize_soubor": "Zobrazit revizi",
+                    "servisni_smlouva": "Zobrazit servisni smlouvu",
+                },
+                "feature_collection": {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "Point", "coordinates": [14.1, 50.7]},
+                            "properties": {
+                                "map_id": "HYDRANTY:1",
+                                "identifikace": "H-1",
+                                "stav_terminu": "Platne",
+                                "document_links": [
+                                    {"key": "revize_soubor", "label": "Zobrazit revizi"},
+                                    {"key": "servisni_smlouva", "label": "Zobrazit servisni smlouvu"},
+                                ],
+                            },
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert "mapDocumentEndpointUrl" in html
+    assert 'const mapDocumentEndpointUrl = "/api/v1/map/documents";' in html
+    assert "function mapDocumentUrl" in html
+    assert "function documentLinksHtml" in html
+    assert "document_key" in html
+    assert "map-popup-document-link" in html
+    assert "target=\"_blank\"" in html
+    assert "rel=\"noopener noreferrer\"" in html
+    assert "documentLinksHtml(properties, layerId, layerConfig)" in html
+    assert "P:\\\\" not in html
+    assert "file:///" not in html
+
+
 def test_leaflet_map_html_accepts_absolute_image_endpoint_without_token():
     html = build_leaflet_map_html(
         {"layers": []},

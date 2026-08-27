@@ -42,6 +42,24 @@ Date: 2026-08-21
   `tests/test_map_routes.py` returned `64 passed`; `compileall` passed for
   the touched backend/test Python files.
 
+### 2026-08-27 - Hydrant map photos prefer non-empty photo rows
+
+- Problem reproduced for layer `hydranty`: the map feature payload marked 3
+  features with `has_photo=true`, but the map image endpoint returned
+  `MapFeatureImageNotFound` for all 3.
+- Cause: `evidence."v_HYDRANTY"` has duplicate values in the configured
+  identifier column. The feature payload could come from a row with `foto`,
+  while the later image endpoint used `WHERE identifier = ... LIMIT 1` and
+  could pick a duplicate row without `foto`.
+- Source state: `_load_source_photo_value()` now prefers rows where `foto` is
+  non-null and non-empty before resolving the file path.
+- Runtime verification: all 3 hydrant features with `has_photo=true` resolved
+  through `load_map_feature_image_file()` as `image/jpeg`.
+- Verification:
+  `tests/test_device_map_service.py`, `tests/test_map_layers_service.py`, and
+  `tests/test_map_routes.py` returned `65 passed`; `compileall` passed for
+  the touched backend/test Python files.
+
 ### 2026-08-27 - Evidence map linked Mistnosti filters
 
 - Source state: `Mapove podklady / Mapa` now extends the Leaflet linked-filter

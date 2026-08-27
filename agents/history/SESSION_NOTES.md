@@ -28,14 +28,16 @@ Date: 2026-08-21
   behavior to `map_context=evidence`.
 - UI behavior: changing supported filters on layer `mistnosti` copies selected
   values into all other `layer_kind=device` layers that expose a matching
-  filter key. Current linked keys are `budova`, `patro`, `mistnost_id`, and
-  room-name variants when supported.
+  filter key, plus explicitly approved infrastructure context layers
+  `vodovodni_potrubi`, `vodovodni_uzly`, and `VZT`. Current linked keys are
+  `budova`, `patro`, `mistnost_id`, and room-name variants when supported.
 - Hidden-device behavior: the sync also writes target filter state for device
-  layers that are currently hidden, so when the user later enables a device
-  layer it is already constrained by the active `mistnosti` filter.
-- Boundary: context layers such as `budovy` are not evidence-map sync targets.
-  The Revize map keeps its existing one-target behavior from `mistnosti` to
-  `revize_terminy_zarizeni`.
+  layers and the approved infrastructure context layers that are currently
+  hidden, so when the user later enables such a layer it is already
+  constrained by the active `mistnosti` filter.
+- Boundary: generic context layers such as `budovy` are not evidence-map sync
+  targets. The Revize map keeps its existing one-target behavior from
+  `mistnosti` to `revize_terminy_zarizeni`.
 - Changed local source for this task:
   `moduly/apps/dashboard/map_shared.py` and
   `tests/test_dashboard_map_shared.py`.

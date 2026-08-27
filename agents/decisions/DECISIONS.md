@@ -5146,3 +5146,27 @@ Consequences:
   each device layer.
 - This remains a client-side map-filter behavior and does not require a
   database migration or API contract change.
+
+## DEC-166: Evidence map linked filters include selected infrastructure context layers
+
+Date: 2026-08-27
+
+Status: Accepted
+
+Decision:
+
+- DEC-165 is extended because some map layers that operators treat as
+  facility/device overlays are stored as `layer_kind=context`.
+- The evidence-map linked filter from `mistnosti` still targets all
+  `layer_kind=device` layers with matching supported filter keys.
+- It also targets the explicitly approved context layer IDs
+  `vodovodni_potrubi`, `vodovodni_uzly`, and `VZT` when they expose matching
+  supported filter keys such as `budova` or `patro`.
+- Generic context layers such as `budovy` remain excluded from the sync.
+
+Consequences:
+
+- Building/floor selections made on `Mistnosti` also constrain water pipe,
+  water node, and VZT overlays.
+- The behavior remains a client-side evidence-map rule and does not require a
+  database migration, API contract change, or map-layer metadata update.

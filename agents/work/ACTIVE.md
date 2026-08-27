@@ -118,12 +118,14 @@
   `racky` already exposes these fields, so no map metadata update was needed.
 - Evidence linked-filter follow-up completed on 2026-08-27:
   `Mapove podklady / Mapa` now uses `mistnosti` as a linked-filter source for
-  all other `layer_kind=device` layers with matching supported filter keys.
-  Current linked keys are `budova`, `patro`, `mistnost_id`, and room-name
-  variants when supported. The sync also stores filter state for hidden
-  device layers, so enabling a device layer later applies the active
-  `mistnosti` building/floor/room filter immediately. Context layers such as
-  `budovy` are not targets.
+  all other `layer_kind=device` layers with matching supported filter keys,
+  plus explicitly approved infrastructure context layers
+  `vodovodni_potrubi`, `vodovodni_uzly`, and `VZT`. Current linked keys are
+  `budova`, `patro`, `mistnost_id`, and room-name variants when supported.
+  The sync also stores filter state for hidden target layers, so enabling a
+  device or approved infrastructure layer later applies the active
+  `mistnosti` building/floor/room filter immediately. Generic context layers
+  such as `budovy` are not targets.
 - Current pause point: the user is restarting the workstation. After restart,
   browser-test the map page with the sidebar expanded and collapsed. The
   latest CSS uses a transparent fixed zero-height Streamlit header and a

@@ -106,6 +106,24 @@
   vrstvy` now accept `pronajem`; non-admin access requires section
   permission `pronajem`. No pronajem-specific seed layer or database
   migration was added.
+- Opticke vany rack-location follow-up completed on 2026-08-27:
+  `scripts/postgres_opticke_vany_rack_location_columns.sql` was added and
+  applied. `evidence."OPTICKÉ VANY"` now has `budova`, `patro`, and
+  `místnost` cache columns populated from `evidence."RACKY"` through
+  `OPTICKÉ VANY"."rack" -> RACKY"."označení"`. A before trigger fills the
+  cache when an optical tray is inserted or its rack changes, and an after
+  trigger on `RACKY` propagates later rack-location changes. Verification
+  found 5 optical-tray rows, 5 matched racks, and 5 rows matching the current
+  rack location values. Existing map-layer metadata for `opticke_vany` and
+  `racky` already exposes these fields, so no map metadata update was needed.
+- Evidence linked-filter follow-up completed on 2026-08-27:
+  `Mapove podklady / Mapa` now uses `mistnosti` as a linked-filter source for
+  all other `layer_kind=device` layers with matching supported filter keys.
+  Current linked keys are `budova`, `patro`, `mistnost_id`, and room-name
+  variants when supported. The sync also stores filter state for hidden
+  device layers, so enabling a device layer later applies the active
+  `mistnosti` building/floor/room filter immediately. Context layers such as
+  `budovy` are not targets.
 - Current pause point: the user is restarting the workstation. After restart,
   browser-test the map page with the sidebar expanded and collapsed. The
   latest CSS uses a transparent fixed zero-height Streamlit header and a
@@ -170,7 +188,14 @@
   `compileall` passed for the touched dashboard/test Python files. After the
   Pronajem map section follow-up on 2026-08-27, targeted
   navigation/map/admin/service/route tests returned `73 passed`, and
-  `compileall` passed for touched dashboard/API/test Python files.
+  `compileall` passed for touched dashboard/API/test Python files. After the
+  Opticke vany rack-location follow-up on 2026-08-27, PostgreSQL metadata
+  verification confirmed the new columns, both synchronization triggers, and
+  all 5 current rows matching rack location values. After the evidence
+  linked-filter follow-up on 2026-08-27,
+  `tests/test_dashboard_map_shared.py` and
+  `tests/test_dashboard_map_page_layout.py` returned `32 passed`, and
+  `compileall` passed for the touched dashboard/test Python files.
 - Changed files are listed in the 2026-08-24 10:29 +02:00 pre-restart
   handoff in `../history/SESSION_NOTES.md`.
 - Updated: 2026-08-27

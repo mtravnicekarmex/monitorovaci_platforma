@@ -22,6 +22,51 @@ Date: 2026-08-21
 
 ## Active handoff
 
+### 2026-08-27 - Evidence map linked Mistnosti filters
+
+- Source state: `Mapove podklady / Mapa` now extends the Leaflet linked-filter
+  behavior to `map_context=evidence`.
+- UI behavior: changing supported filters on layer `mistnosti` copies selected
+  values into all other `layer_kind=device` layers that expose a matching
+  filter key. Current linked keys are `budova`, `patro`, `mistnost_id`, and
+  room-name variants when supported.
+- Hidden-device behavior: the sync also writes target filter state for device
+  layers that are currently hidden, so when the user later enables a device
+  layer it is already constrained by the active `mistnosti` filter.
+- Boundary: context layers such as `budovy` are not evidence-map sync targets.
+  The Revize map keeps its existing one-target behavior from `mistnosti` to
+  `revize_terminy_zarizeni`.
+- Changed local source for this task:
+  `moduly/apps/dashboard/map_shared.py` and
+  `tests/test_dashboard_map_shared.py`.
+- Verification:
+  `tests/test_dashboard_map_shared.py` and
+  `tests/test_dashboard_map_page_layout.py` returned `32 passed`;
+  `compileall` passed for the touched dashboard/test Python files.
+- Not done: browser runtime has not yet been manually checked after restart.
+
+### 2026-08-27 - Opticke vany rack-location columns
+
+- Database state: `scripts/postgres_opticke_vany_rack_location_columns.sql`
+  was added and applied to PostgreSQL.
+- `evidence."OPTICKÉ VANY"` now has `budova`, `patro`, and `místnost`
+  columns, all `character varying`.
+- Synchronization state:
+  `trg_opticke_vany_sync_location_from_rack` fills these fields before insert
+  or rack change on `OPTICKÉ VANY`;
+  `trg_racky_propagate_opticke_vany_location` propagates rack-location
+  changes from `evidence."RACKY"`.
+- Verification: current data has 5 optical-tray rows, all 5 have a matched
+  rack, and all 5 cached location values match the current rack values.
+- Map-layer metadata state: dashboard layers `opticke_vany` and `racky`
+  already exist in `map_context=evidence`; both have `budova`, `patro`, and
+  `místnost` in property/popup configuration and `budova`, `patro` in
+  filters. No map-layer metadata change was needed.
+- Changed local source for this task:
+  `scripts/postgres_opticke_vany_rack_location_columns.sql`,
+  `agents/decisions/DECISIONS.md`,
+  `agents/history/SESSION_NOTES.md`, and `agents/work/ACTIVE.md`.
+
 ### 2026-08-27 - Dashboard Pronajem map section
 
 - Source state: dashboard navigation now includes section `pronajem`

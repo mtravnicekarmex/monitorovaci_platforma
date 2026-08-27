@@ -5086,3 +5086,63 @@ Consequences:
 - Existing `evidence` and `revize` maps keep their current behavior.
 - No database schema migration or source-view change is required for the
   initial empty pronajem map context.
+
+## DEC-164: Opticke vany cache rack location fields
+
+Date: 2026-08-27
+
+Status: Accepted
+
+Decision:
+
+- `evidence."OPTICKÉ VANY"` now stores denormalized rack-location fields
+  `budova`, `patro`, and `místnost`.
+- The source of truth remains `evidence."RACKY"`:
+  `OPTICKÉ VANY"."rack"` references `RACKY"."označení"`.
+- A `BEFORE INSERT OR UPDATE OF "rack"` trigger on
+  `evidence."OPTICKÉ VANY"` fills `budova`, `patro`, and `místnost` from the
+  matching rack.
+- An `AFTER UPDATE OF "budova", "patro", "místnost"` trigger on
+  `evidence."RACKY"` propagates rack-location changes into matching optical
+  trays.
+- Existing rows were backfilled from the current rack records.
+
+Consequences:
+
+- Map/filter consumers can read location directly from `OPTICKÉ VANY`
+  without joining to `RACKY`.
+- Rack location should be edited on `RACKY`; direct manual edits of cached
+  location fields on `OPTICKÉ VANY` are not the authoritative workflow.
+- The migration is captured in
+  `scripts/postgres_opticke_vany_rack_location_columns.sql`.
+
+## DEC-165: Evidence map reuses Mistnosti filters for device layers
+
+Date: 2026-08-27
+
+Status: Accepted
+
+Decision:
+
+- The dashboard evidence map (`Mapove podklady / Mapa`,
+  `map_context=evidence`) now treats the `mistnosti` layer as a source of
+  room-context filters for device layers.
+- When the user changes supported filters on `mistnosti`, the selected values
+  are copied to all other map layers with `layer_kind=device` that expose the
+  same supported filter key.
+- The initial evidence-map linked keys are `budova`, `patro`, `mistnost_id`,
+  and room-name variants when supported by the target layer.
+- The sync writes values even for currently hidden device layers, so a device
+  layer switched on later is already constrained by the active `mistnosti`
+  filter.
+- Context layers such as `budovy` are not targets of the evidence-map sync.
+- The existing Revize map behavior remains unchanged: `mistnosti` still
+  targets `revize_terminy_zarizeni` only.
+
+Consequences:
+
+- Operators can choose building/floor once in `Mistnosti`, then turn device
+  layers on and off without reselecting the same building/floor filters for
+  each device layer.
+- This remains a client-side map-filter behavior and does not require a
+  database migration or API contract change.

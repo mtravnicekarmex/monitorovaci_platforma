@@ -458,7 +458,7 @@ def test_leaflet_map_html_syncs_revize_mistnosti_filters_to_revision_terms_layer
     assert "applyLayerFilters();" in html
 
 
-def test_leaflet_map_html_syncs_evidence_mistnosti_filters_to_device_layers():
+def test_leaflet_map_html_syncs_evidence_mistnosti_filters_to_target_layers():
     payload = {
         "map_context": "evidence",
         "primary_layer_id": "mistnosti",
@@ -495,6 +495,17 @@ def test_leaflet_map_html_syncs_evidence_mistnosti_filters_to_device_layers():
                 "filter_options": {"budova": ["F"]},
                 "feature_collection": {"type": "FeatureCollection", "features": []},
             },
+            {
+                "layer_id": "vodovodni_potrubi",
+                "title": "Vodovodni potrubi",
+                "layer_kind": "context",
+                "filter_fields": [
+                    {"key": "budova", "source_column": "budova", "property_key": "budova", "label": "Budova"},
+                    {"key": "patro", "source_column": "patro", "property_key": "patro", "label": "Patro"},
+                ],
+                "filter_options": {"budova": ["F"], "patro": ["1.NP"]},
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            },
         ],
     }
 
@@ -502,12 +513,14 @@ def test_leaflet_map_html_syncs_evidence_mistnosti_filters_to_device_layers():
 
     assert "function layerSupportedFilterKey" in html
     assert "function isDeviceMapLayer" in html
+    assert 'const evidenceLinkedContextLayerIds = new Set(["vodovodni_potrubi", "vodovodni_uzly", "vzt"])' in html
+    assert "function isEvidenceLinkedFilterLayer" in html
     assert "function evidenceLinkedFilterTargets" in html
     assert 'if (mapContext === "evidence")' in html
     assert 'budova: ["budova"]' in html
     assert 'patro: ["patro"]' in html
     assert '.filter((item) => item.id !== "mistnosti")' in html
-    assert ".filter((item) => isDeviceMapLayer(item))" in html
+    assert ".filter((item) => isEvidenceLinkedFilterLayer(item))" in html
     assert "layerSupportedFilterKey(item.id, targetFilterKeys)" in html
     assert ".filter((target) => target.filterKey)" in html
 

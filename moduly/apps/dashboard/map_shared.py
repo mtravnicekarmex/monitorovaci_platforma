@@ -1524,6 +1524,16 @@ def build_leaflet_map_html(
       return String((item && item.config && item.config.layer_kind) || "").toLowerCase() === "device";
     }}
 
+    const evidenceLinkedContextLayerIds = new Set(["vodovodni_potrubi", "vodovodni_uzly", "vzt"]);
+
+    function isEvidenceLinkedFilterLayer(item) {{
+      if (isDeviceMapLayer(item)) {{
+        return true;
+      }}
+      const layerId = String((item && item.id) || "").toLowerCase();
+      return evidenceLinkedContextLayerIds.has(layerId);
+    }}
+
     function evidenceLinkedFilterTargets(filterKey) {{
       const fieldMap = {{
         budova: ["budova"],
@@ -1538,7 +1548,7 @@ def build_leaflet_map_html(
       }}
       return leafletLayers
         .filter((item) => item.id !== "mistnosti")
-        .filter((item) => isDeviceMapLayer(item))
+        .filter((item) => isEvidenceLinkedFilterLayer(item))
         .map((item) => ({{
           layerId: item.id,
           filterKey: layerSupportedFilterKey(item.id, targetFilterKeys)

@@ -22,6 +22,67 @@ Date: 2026-08-21
 
 ## Active handoff
 
+### 2026-08-27 - Dashboard Pronajem map section
+
+- Source state: dashboard navigation now includes section `pronajem`
+  labeled `Pronájem`, ordered between `Revize` and `Mapove podklady`.
+- Page state: new page `pronajem_map` at
+  `moduly/apps/dashboard/pages/41_pronajem_mapa.py` is displayed in the
+  sidebar as `Mapa - pronájem` and reuses the shared full-viewport Leaflet
+  renderer with `map_context=pronajem`.
+- Backend/admin state: map API query validation, admin map-layer request
+  validation, backend map-context validation, and `Sprava / Mapove vrstvy`
+  now accept `pronajem`. Non-admin access requires allowed section
+  `pronajem`. `shared` layers remain available in the pronajem map.
+- Boundary: no pronajem-specific default layer, database migration, source
+  table, view, or filtering rule was added in this step. Pronajem layers are
+  expected to be configured through `Sprava / Mapove vrstvy`.
+- Changed local source for this task:
+  `moduly/apps/dashboard/navigation_config.py`,
+  `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`,
+  `moduly/apps/dashboard/pages/41_pronajem_mapa.py`,
+  `services/api/routes/map.py`,
+  `services/api/schemas/admin.py`,
+  `services/api/services/map_layers.py`,
+  `tests/test_dashboard_navigation_config.py`,
+  `tests/test_dashboard_map_page_layout.py`,
+  `tests/test_dashboard_map_layers_admin.py`,
+  `tests/test_map_layers_service.py`, and `tests/test_map_routes.py`.
+- Verification:
+  targeted navigation/map/admin/service/route tests returned `73 passed`;
+  `compileall` passed for touched dashboard/API/test Python files.
+- Not done: browser runtime has not yet been manually checked after restart.
+
+### 2026-08-27 - Revize map linked room filters
+
+- Source state: the shared Leaflet map payload now includes `map_context`.
+  The renderer uses this context to keep the new filter-linking behavior
+  scoped to `Revize / Mapa`.
+- UI behavior: in `map_context=revize`, changing a filter on layer
+  `mistnosti` copies the selected values into
+  `revize_terminy_zarizeni` for matching supported filter keys. Current
+  production metadata supports `budova` and `patro`; `mistnost_id` and
+  `mistnost` are prepared but activate only if both layers expose those
+  filters.
+- Follow-up UI behavior: the Leaflet `Filtry` control preserves the open
+  state of each layer section while the panel is re-rendered after a filter
+  change, so selecting `Budova` in `Mistnosti` does not require reopening the
+  same layer section before choosing `Patro`.
+- Boundary: synchronization is one-way from `mistnosti` to
+  `revize_terminy_zarizeni`. Independent term filters such as
+  `stav_terminu` and `typ_zarizeni` remain untouched. `Mapove podklady /
+  Mapa` is unchanged because the rule is gated by `map_context=revize`.
+- Changed local source for this task:
+  `moduly/apps/dashboard/map_page_shared.py`,
+  `moduly/apps/dashboard/map_shared.py`,
+  `tests/test_dashboard_map_page_layout.py`, and
+  `tests/test_dashboard_map_shared.py`.
+- Verification:
+  `tests/test_dashboard_map_shared.py` and
+  `tests/test_dashboard_map_page_layout.py` returned `31 passed`;
+  `compileall` passed for the touched dashboard/test Python files.
+- Not done: browser runtime has not yet been manually checked after restart.
+
 ### 2026-08-27 - Dashboard map PDF document links
 
 - Source state: map-layer configuration now includes `document_columns`, a

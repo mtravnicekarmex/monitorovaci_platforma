@@ -87,6 +87,25 @@
   remains the runtime per-layer toggle. All checkbox controls in the map-layer
   state row now have help text. `scripts/postgres_map_layer_label_default_visibility.sql`
   was applied on 2026-08-26.
+- Revize linked-filter follow-up completed on 2026-08-27:
+  the shared Leaflet payload now includes `map_context`, and only in
+  `map_context=revize` the `mistnosti` layer copies supported room-context
+  filter selections into `revize_terminy_zarizeni`. Current effective linked
+  filters are `budova` and `patro`; `mistnost_id` and `mistnost` are prepared
+  but apply only if both layers expose those filter keys. The sync is one-way
+  from `mistnosti` to revision terms, and it leaves independent term filters
+  unchanged. The Leaflet `Filtry` control also preserves the open state of
+  each layer section during panel re-rendering, so selecting `Budova` no
+  longer closes the `Mistnosti` section before `Patro` can be selected.
+- Pronajem map section follow-up completed on 2026-08-27:
+  dashboard navigation now includes section `pronajem` / `Pronájem` between
+  `Revize` and `Mapove podklady`, with one configurable page
+  `pronajem_map` displayed as `Mapa - pronájem`. The page uses the shared
+  full-viewport Leaflet renderer with `map_context=pronajem`. Map API,
+  admin request validation, backend context validation, and `Sprava / Mapove
+  vrstvy` now accept `pronajem`; non-admin access requires section
+  permission `pronajem`. No pronajem-specific seed layer or database
+  migration was added.
 - Current pause point: the user is restarting the workstation. After restart,
   browser-test the map page with the sidebar expanded and collapsed. The
   latest CSS uses a transparent fixed zero-height Streamlit header and a
@@ -145,7 +164,13 @@
   passed for touched dashboard/API/test Python files, DB verification
   confirmed sanitized document-link feature payloads and 91 resolvable current
   revision PDFs, and `git diff --check` returned only LF/CRLF normalization
-  warnings.
+  warnings. After the Revize linked-filter follow-up on 2026-08-27,
+  `tests/test_dashboard_map_shared.py` and
+  `tests/test_dashboard_map_page_layout.py` returned `31 passed`, and
+  `compileall` passed for the touched dashboard/test Python files. After the
+  Pronajem map section follow-up on 2026-08-27, targeted
+  navigation/map/admin/service/route tests returned `73 passed`, and
+  `compileall` passed for touched dashboard/API/test Python files.
 - Changed files are listed in the 2026-08-24 10:29 +02:00 pre-restart
   handoff in `../history/SESSION_NOTES.md`.
 - Updated: 2026-08-27

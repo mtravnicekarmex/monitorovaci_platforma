@@ -5023,3 +5023,66 @@ Consequences:
   of leaking the underlying configured path.
 - The pattern can be reused for future map layers and document types, but the
   currently allowed rendered document type is PDF only.
+
+## DEC-162: Revize map synchronizes room-context filters into revision-term layer
+
+Date: 2026-08-27
+
+Status: Accepted
+
+Decision:
+
+- The shared Leaflet renderer now receives the active `map_context` in its
+  encoded payload.
+- In `map_context=revize` only, filter changes made on the shared
+  `mistnosti` layer are copied into the `revize_terminy_zarizeni` layer for
+  matching supported filter keys.
+- The initial linked keys are `budova` and `patro`; `mistnost_id` and
+  `mistnost` are also prepared but synchronize only if both layers expose
+  the corresponding filter key.
+- Synchronization is one-way from `mistnosti` to
+  `revize_terminy_zarizeni`. The revision-term layer can still keep its own
+  independent filters such as `stav_terminu` and `typ_zarizeni`.
+- The existing evidence map behavior remains unchanged because the rule is
+  explicitly gated by `map_context=revize`.
+
+Consequences:
+
+- Users can filter the Revize map by building/floor through the room layer
+  once, and the revision-term device layer follows without requiring the same
+  filter to be selected twice.
+- This is intentionally a client-side pilot. It does not require a database
+  migration, API contract change, source-view change, or map-layer admin
+  schema change.
+- If the behavior proves useful, the same pattern can later be generalized
+  for the evidence map or made configurable per map context/layer pair.
+
+## DEC-163: Pronajem gets an independent dashboard map context
+
+Date: 2026-08-27
+
+Status: Accepted
+
+Decision:
+
+- Dashboard navigation now includes a new main section `pronajem` labeled
+  `Pronájem`, placed between `Revize` and `Mapove podklady`.
+- The section starts with one configurable page `pronajem_map`, displayed as
+  `Mapa - pronájem`.
+- The page reuses the shared full-viewport Leaflet map renderer and passes
+  `map_context=pronajem`.
+- Map API validation, map-layer admin validation, and map-context
+  authorization now accept `pronajem`.
+- Non-admin access to the pronajem map context requires the dashboard section
+  permission `pronajem`.
+- No default pronajem-specific layer is seeded at this step. Pronajem layers
+  should be added through `Sprava / Mapove vrstvy` with context `Pronajem`;
+  `shared` layers remain available to the map automatically.
+
+Consequences:
+
+- Pronajem map filtering, labels, legends, popups, and future layer behavior
+  can evolve independently from Revize and Mapove podklady.
+- Existing `evidence` and `revize` maps keep their current behavior.
+- No database schema migration or source-view change is required for the
+  initial empty pronajem map context.

@@ -504,6 +504,7 @@ def _load_detail_properties(
 
 
 def _load_source_photo_value(config: MapLayerConfig, identifier: str) -> object:
+    feature_exists = None
     session = get_session_pg()
     try:
         available_columns = _load_table_columns(session, config)
@@ -522,15 +523,29 @@ def _load_source_photo_value(config: MapLayerConfig, identifier: str) -> object:
                 f"SELECT {photo_ref} AS {_quote_identifier(PHOTO_SOURCE_COLUMN)} "
                 f"FROM {table_ref} AS t "
                 f"WHERE {identifier_ref} = :identifier "
+                f"AND {photo_ref} IS NOT NULL "
+                f"AND CAST({photo_ref} AS TEXT) <> '' "
                 f"LIMIT 1"
             ),
             {"identifier": identifier},
         ).mappings().first()
+        if row is None:
+            feature_exists = session.execute(
+                text(
+                    "SELECT 1 "
+                    f"FROM {table_ref} AS t "
+                    f"WHERE {identifier_ref} = :identifier "
+                    "LIMIT 1"
+                ),
+                {"identifier": identifier},
+            ).first()
     finally:
         session.close()
 
     if row is None:
-        raise MapFeatureImageNotFound("Prvek mapove vrstvy nebyl nalezen.")
+        if feature_exists is None:
+            raise MapFeatureImageNotFound("Prvek mapove vrstvy nebyl nalezen.")
+        return None
     return row.get(PHOTO_SOURCE_COLUMN)
 
 

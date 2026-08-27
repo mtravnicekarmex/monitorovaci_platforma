@@ -15,6 +15,7 @@ from services.api.services.device_map import (
     _build_layer_statement,
     _empty_layer_response,
     _load_detail_properties,
+    _load_source_photo_value,
     _row_to_feature,
     load_map_layer_features,
     resolve_map_feature_document_file,
@@ -337,6 +338,54 @@ def test_resolve_map_feature_image_file_uses_configured_drive_fallback(monkeypat
 
     assert image_file.path == image_path
     assert image_file.media_type == "image/jpeg"
+
+
+def test_load_source_photo_value_prefers_non_empty_photo_for_duplicate_identifier(monkeypatch, tmp_path):
+    image_path = tmp_path / "hydrant.jpg"
+    image_path.write_bytes(b"image-bytes")
+    executed_queries: list[str] = []
+
+    class FakeColumnResult:
+        def all(self):
+            return [("hydrant_id",), ("foto",)]
+
+    class FakePhotoMappings:
+        def first(self):
+            return {"foto": str(image_path)}
+
+    class FakePhotoResult:
+        def mappings(self):
+            return FakePhotoMappings()
+
+    class FakeSession:
+        def execute(self, statement, _params=None):
+            query = statement.text
+            executed_queries.append(query)
+            if "information_schema.columns" in query:
+                return FakeColumnResult()
+            return FakePhotoResult()
+
+        def close(self):
+            pass
+
+    config = MapLayerConfig(
+        layer_id="hydranty",
+        title="Hydranty",
+        schema="evidence",
+        table="v_HYDRANTY",
+        geometry_column="geom",
+        identifier_column="hydrant_id",
+        show_photo=True,
+        restrict_to_allowed_devices=False,
+    )
+    monkeypatch.setattr("services.api.services.device_map.get_session_pg", lambda: FakeSession())
+
+    photo_value = _load_source_photo_value(config, "1")
+
+    assert photo_value == str(image_path)
+    photo_query = next(query for query in executed_queries if 'SELECT t."foto" AS "foto"' in query)
+    assert 't."foto" IS NOT NULL' in photo_query
+    assert 'CAST(t."foto" AS TEXT) <> \'\'' in photo_query
 
 
 def test_resolve_map_feature_image_file_returns_not_found_for_empty_photo(monkeypatch):

@@ -561,6 +561,7 @@ def build_payload(prefix: str, current: dict[str, object] | None = None) -> dict
         "map_enabled": bool(st.session_state.get(f"{prefix}_map_enabled", True)),
         "default_visible": bool(st.session_state.get(f"{prefix}_default_visible", True)),
         "map_labels_default_visible": bool(st.session_state.get(f"{prefix}_map_labels_default_visible", True)),
+        "sync_mistnosti_filters": bool(st.session_state.get(f"{prefix}_sync_mistnosti_filters", False)),
         "show_photo": bool(st.session_state.get(f"{prefix}_show_photo", False)),
         "is_active": bool(st.session_state.get(f"{prefix}_is_active", True)),
         "draw_order": int(st.session_state.get(f"{prefix}_draw_order", 100)),
@@ -623,7 +624,7 @@ def render_layer_fields(prefix: str, current: dict[str, object] | None = None, *
         key=f"{prefix}_target_srid",
     )
 
-    state_cols = st.columns([1, 1, 1, 1, 1, 1])
+    state_cols = st.columns([1, 1, 1, 1, 1, 1, 1])
     state_cols[0].checkbox(
         "Aktivni",
         value=bool(current.get("is_active", True)),
@@ -649,12 +650,18 @@ def render_layer_fields(prefix: str, current: dict[str, object] | None = None, *
         help="Popisky nastavene ve Sloupce zobrazene v mape budou po otevreni mapy zapnute. Uzivatel je muze v Leaflet panelu Popisky vypnout nebo zapnout.",
     )
     state_cols[4].checkbox(
+        "Prebirat filtr z Mistnosti",
+        value=bool(current.get("sync_mistnosti_filters", False)),
+        key=f"{prefix}_sync_mistnosti_filters",
+        help="V mape Evidence se na tuto vrstvu propise vyber podporovanych filtru z vrstvy Mistnosti, napr. budova, patro nebo mistnost_id.",
+    )
+    state_cols[5].checkbox(
         "Omezit podle zarizeni",
         value=bool(current.get("restrict_to_allowed_devices", False)),
         key=f"{prefix}_restrict_to_allowed_devices",
         help="U device vrstvy se nactou jen zarizeni prirazena prihlasenemu uzivateli. Kontextove vrstvy obvykle nech prazdne/vypnute.",
     )
-    state_cols[5].checkbox(
+    state_cols[6].checkbox(
         "Zobrazit foto",
         value=bool(current.get("show_photo", False)),
         key=f"{prefix}_show_photo",
@@ -741,6 +748,7 @@ def render_page() -> None:
                     "mapa": "ANO" if layer["map_enabled"] else "NE",
                     "aktivni": "ANO" if layer["is_active"] else "NE",
                     "popisek_defaultne": "ANO" if layer.get("map_labels_default_visible", True) else "NE",
+                    "prebira_mistnosti": "ANO" if layer.get("sync_mistnosti_filters", False) else "NE",
                     "device_filter": "ANO" if layer["restrict_to_allowed_devices"] else "NE",
                     "stitky_v_mape": _list_to_csv(layer.get("map_label_columns")),
                     "dokumenty": "ANO" if layer.get("document_columns") else "NE",
@@ -769,6 +777,7 @@ def render_page() -> None:
                 "map_enabled": True,
                 "default_visible": True,
                 "map_labels_default_visible": True,
+                "sync_mistnosti_filters": False,
                 "show_photo": False,
                 "is_active": True,
                 "draw_order": 100,

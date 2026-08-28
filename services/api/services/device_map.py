@@ -40,6 +40,7 @@ class MapLayerConfig:
     map_enabled: bool = True
     default_visible: bool = True
     map_labels_default_visible: bool = True
+    sync_mistnosti_filters: bool = False
     show_photo: bool = False
     draw_order: int = 100
     filter_columns: tuple[str, ...] = ()
@@ -129,6 +130,7 @@ VODOMERY_MAP_LAYER = MapLayerConfig(
     restrict_to_allowed_devices=True,
     layer_kind="device",
     device_section_key="vodomery",
+    sync_mistnosti_filters=True,
     show_photo=True,
     draw_order=100,
     filter_columns=("budova", "patro", "mistnost_id", "identifikace"),
@@ -748,6 +750,7 @@ def load_map_layer_features(
         "map_enabled": config.map_enabled,
         "default_visible": config.default_visible,
         "map_labels_default_visible": config.map_labels_default_visible,
+        "sync_mistnosti_filters": config.sync_mistnosti_filters,
         "draw_order": config.draw_order,
         "filter_columns": list(config.filter_columns),
         "map_label_columns": list(config.map_label_columns),
@@ -788,6 +791,7 @@ def _empty_layer_response(config: MapLayerConfig) -> dict[str, object]:
         "map_enabled": config.map_enabled,
         "default_visible": config.default_visible,
         "map_labels_default_visible": config.map_labels_default_visible,
+        "sync_mistnosti_filters": config.sync_mistnosti_filters,
         "draw_order": config.draw_order,
         "filter_columns": list(config.filter_columns),
         "map_label_columns": list(config.map_label_columns),

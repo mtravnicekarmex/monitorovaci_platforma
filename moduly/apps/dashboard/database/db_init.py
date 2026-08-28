@@ -72,6 +72,11 @@ def ensure_map_layer_columns() -> None:
             'ALTER TABLE dashboard."Map_Layers" '
             "ADD COLUMN map_labels_default_visible BOOLEAN NOT NULL DEFAULT TRUE"
         )
+    if "sync_mistnosti_filters" not in columns:
+        alter_statements.append(
+            'ALTER TABLE dashboard."Map_Layers" '
+            "ADD COLUMN sync_mistnosti_filters BOOLEAN NOT NULL DEFAULT FALSE"
+        )
     if "property_labels" not in columns:
         alter_statements.append(
             'ALTER TABLE dashboard."Map_Layers" '
@@ -94,6 +99,15 @@ def ensure_map_layer_columns() -> None:
                 text(
                     'UPDATE dashboard."Map_Layers" '
                     "SET show_photo = TRUE WHERE layer_id = 'vodomery'"
+                )
+            )
+        if "sync_mistnosti_filters" not in columns:
+            conn.execute(
+                text(
+                    'UPDATE dashboard."Map_Layers" '
+                    "SET sync_mistnosti_filters = TRUE "
+                    "WHERE layer_kind = 'device' "
+                    "OR lower(layer_id) IN ('vodovodni_potrubi', 'vodovodni_uzly', 'vzt')"
                 )
             )
         if "map_label_columns" not in columns:

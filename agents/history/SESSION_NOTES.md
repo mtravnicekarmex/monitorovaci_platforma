@@ -22,6 +22,42 @@ Date: 2026-08-21
 
 ## Active handoff
 
+### 2026-08-28 - Map-layer Mistnosti filter-sync checkbox
+
+- Source state: dashboard map-layer configuration now includes
+  `sync_mistnosti_filters`.
+- Admin UI: `Sprava / Mapove vrstvy` exposes the flag as checkbox
+  `Prebirat filtr z Mistnosti` and shows the value in the layer overview.
+- Map UI behavior: in `map_context=evidence`, filter changes on `mistnosti`
+  copy supported values only to layers with `sync_mistnosti_filters=true`.
+  Supported copied keys remain `budova`, `patro`, `mistnost_id`, and
+  room-name variants when both layers expose compatible filter keys.
+- Migration state:
+  `scripts/postgres_map_layer_sync_mistnosti_filters.sql` was added and
+  applied to PostgreSQL. Existing device layers and the previous context
+  exceptions `vodovodni_potrubi`, `vodovodni_uzly`, and `VZT` were initialized
+  to `true`.
+- Runtime verification: PostgreSQL has non-null boolean column
+  `dashboard."Map_Layers".sync_mistnosti_filters`. Current aggregate metadata
+  state is 20 device layers with sync enabled, 2 context layers with sync
+  enabled, and 5 context layers with sync disabled.
+- Verification:
+  targeted dashboard map shared/admin/service/route/device-map tests returned
+  `103 passed`.
+- Changed local source for this task:
+  `moduly/apps/dashboard/database/db_init.py`,
+  `moduly/apps/dashboard/database/models.py`,
+  `moduly/apps/dashboard/map_shared.py`,
+  `moduly/apps/dashboard/pages/35_mapove_vrstvy.py`,
+  `scripts/postgres_map_layer_sync_mistnosti_filters.sql`,
+  `services/api/schemas/admin.py`,
+  `services/api/schemas/device_map.py`,
+  `services/api/services/device_map.py`,
+  `services/api/services/map_layers.py`,
+  `tests/test_dashboard_map_layers_admin.py`,
+  `tests/test_dashboard_map_shared.py`, and
+  `tests/test_map_layers_service.py`.
+
 ### 2026-08-28 - MAR CPU and converters rack-location columns
 
 - Database state:

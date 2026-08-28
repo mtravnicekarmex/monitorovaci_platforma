@@ -61,6 +61,7 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
         "map_enabled": True,
         "default_visible": True,
         "map_labels_default_visible": True,
+        "sync_mistnosti_filters": False,
         "show_photo": False,
         "is_active": True,
         "draw_order": 10,
@@ -101,6 +102,7 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
         "map_enabled": True,
         "default_visible": True,
         "map_labels_default_visible": True,
+        "sync_mistnosti_filters": False,
         "show_photo": False,
         "is_active": True,
         "draw_order": 20,
@@ -162,6 +164,7 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
         "map_enabled": True,
         "default_visible": True,
         "map_labels_default_visible": True,
+        "sync_mistnosti_filters": True,
         "show_photo": True,
         "is_active": True,
         "draw_order": 100,
@@ -299,6 +302,7 @@ DEFAULT_MAP_LAYER_SEEDS: tuple[dict[str, Any], ...] = (
         "map_enabled": True,
         "default_visible": True,
         "map_labels_default_visible": True,
+        "sync_mistnosti_filters": False,
         "show_photo": False,
         "is_active": True,
         "draw_order": 200,
@@ -472,6 +476,7 @@ def _serialize_record(layer: Dashboard_MapLayer) -> dict[str, object]:
         "map_enabled": bool(layer.map_enabled),
         "default_visible": bool(layer.default_visible),
         "map_labels_default_visible": bool(getattr(layer, "map_labels_default_visible", True)),
+        "sync_mistnosti_filters": bool(getattr(layer, "sync_mistnosti_filters", False)),
         "show_photo": bool(layer.show_photo),
         "is_active": bool(layer.is_active),
         "draw_order": int(layer.draw_order),
@@ -503,6 +508,7 @@ def map_layer_record_to_config(record: dict[str, object]) -> MapLayerConfig:
         map_enabled=bool(record.get("map_enabled", True)),
         default_visible=bool(record.get("default_visible", True)),
         map_labels_default_visible=bool(record.get("map_labels_default_visible", True)),
+        sync_mistnosti_filters=bool(record.get("sync_mistnosti_filters", False)),
         show_photo=bool(record.get("show_photo", False)),
         draw_order=int(record.get("draw_order", 100)),
         filter_columns=tuple(str(column) for column in record.get("filter_columns", []) or []),
@@ -536,6 +542,7 @@ def _apply_record_fields(layer: Dashboard_MapLayer, values: dict[str, object]) -
     layer.map_enabled = bool(values["map_enabled"])
     layer.default_visible = bool(values["default_visible"])
     layer.map_labels_default_visible = bool(values["map_labels_default_visible"])
+    layer.sync_mistnosti_filters = bool(values["sync_mistnosti_filters"])
     layer.show_photo = bool(values["show_photo"])
     layer.is_active = bool(values["is_active"])
     layer.draw_order = int(values["draw_order"])
@@ -567,6 +574,7 @@ def _prepare_record_values(
     draw_order: int,
     map_context: str = DEFAULT_MAP_CONTEXT,
     map_labels_default_visible: bool = True,
+    sync_mistnosti_filters: bool = False,
     map_label_columns: list[str] | None = None,
     property_labels: dict[str, object] | None = None,
     document_columns: dict[str, object] | None = None,
@@ -607,6 +615,7 @@ def _prepare_record_values(
         "map_enabled": bool(map_enabled),
         "default_visible": bool(default_visible),
         "map_labels_default_visible": bool(map_labels_default_visible),
+        "sync_mistnosti_filters": bool(sync_mistnosti_filters),
         "show_photo": bool(show_photo),
         "is_active": bool(is_active),
         "draw_order": int(draw_order),
@@ -729,6 +738,7 @@ def map_layer_config_to_catalog_record(config: MapLayerConfig) -> dict[str, obje
         "device_section_key": config.device_section_key,
         "default_visible": config.default_visible,
         "map_labels_default_visible": config.map_labels_default_visible,
+        "sync_mistnosti_filters": config.sync_mistnosti_filters,
         "draw_order": config.draw_order,
         "filter_fields": [
             {

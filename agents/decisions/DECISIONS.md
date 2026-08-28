@@ -5230,3 +5230,36 @@ Consequences:
   workflow.
 - The migration is captured in
   `scripts/postgres_mar_cpu_prevodniky_rack_location_columns.sql`.
+
+## DEC-169: Dashboard map layers explicitly opt in to Mistnosti filter sync
+
+Date: 2026-08-28
+
+Status: Accepted
+
+Decision:
+
+- Dashboard map-layer configuration now includes
+  `dashboard."Map_Layers".sync_mistnosti_filters`.
+- `Sprava / Mapove vrstvy` exposes this as checkbox
+  `Prebirat filtr z Mistnosti`.
+- In `map_context=evidence`, changing supported filters on layer `mistnosti`
+  copies the selected values only into layers with
+  `sync_mistnosti_filters=true`.
+- Supported copied keys remain `budova`, `patro`, `mistnost_id`, and
+  room-name variants when both source and target layers expose compatible
+  filter keys.
+- The migration initializes the flag to `true` for existing `device` layers
+  and for the previously hardcoded context-layer exceptions
+  `vodovodni_potrubi`, `vodovodni_uzly`, and `VZT`.
+- The Revize map keeps its existing scoped rule from `mistnosti` to
+  `revize_terminy_zarizeni`; the new flag controls the Evidence map behavior.
+
+Consequences:
+
+- New evidence-map layers can join or skip room-context filter propagation
+  through metadata, without source-code changes.
+- Layer type remains useful for authorization and device handling, but it no
+  longer implicitly controls Evidence-map Mistnosti filter synchronization.
+- The migration is captured in
+  `scripts/postgres_map_layer_sync_mistnosti_filters.sql`.

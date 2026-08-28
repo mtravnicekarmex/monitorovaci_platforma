@@ -509,6 +509,7 @@ def test_leaflet_map_html_syncs_evidence_mistnosti_filters_to_target_layers():
                 "layer_id": "vodomery",
                 "title": "Vodomery",
                 "layer_kind": "device",
+                "sync_mistnosti_filters": True,
                 "filter_fields": [
                     {"key": "budova", "source_column": "budova", "property_key": "budova", "label": "Budova"},
                     {"key": "patro", "source_column": "patro", "property_key": "patro", "label": "Patro"},
@@ -530,6 +531,7 @@ def test_leaflet_map_html_syncs_evidence_mistnosti_filters_to_target_layers():
                 "layer_id": "vodovodni_potrubi",
                 "title": "Vodovodni potrubi",
                 "layer_kind": "context",
+                "sync_mistnosti_filters": True,
                 "filter_fields": [
                     {"key": "budova", "source_column": "budova", "property_key": "budova", "label": "Budova"},
                     {"key": "patro", "source_column": "patro", "property_key": "patro", "label": "Patro"},
@@ -543,9 +545,10 @@ def test_leaflet_map_html_syncs_evidence_mistnosti_filters_to_target_layers():
     html = build_leaflet_map_html(payload)
 
     assert "function layerSupportedFilterKey" in html
-    assert "function isDeviceMapLayer" in html
-    assert 'const evidenceLinkedContextLayerIds = new Set(["vodovodni_potrubi", "vodovodni_uzly", "vzt"])' in html
+    assert "function isDeviceMapLayer" not in html
+    assert "evidenceLinkedContextLayerIds" not in html
     assert "function isEvidenceLinkedFilterLayer" in html
+    assert "item.config.sync_mistnosti_filters === true" in html
     assert "function evidenceLinkedFilterTargets" in html
     assert 'if (mapContext === "evidence")' in html
     assert 'budova: ["budova"]' in html

@@ -74,6 +74,7 @@ class AdminMapLayerRecord(BaseModel):
     map_enabled: bool
     default_visible: bool
     map_labels_default_visible: bool = True
+    sync_mistnosti_filters: bool = False
     show_photo: bool
     is_active: bool
     draw_order: int
@@ -110,6 +111,7 @@ class AdminMapLayerCreateRequest(BaseModel):
     map_enabled: bool = True
     default_visible: bool = True
     map_labels_default_visible: bool = True
+    sync_mistnosti_filters: bool = False
     show_photo: bool = False
     is_active: bool = True
     draw_order: int = 100

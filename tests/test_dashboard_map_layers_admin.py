@@ -69,10 +69,15 @@ def test_map_layers_admin_supports_label_default_visibility_checkbox_with_help()
     assert 'key=f"{prefix}_map_labels_default_visible"' in source
     assert '"map_labels_default_visible": bool(st.session_state.get' in source
     assert '"popisek_defaultne": "ANO" if layer.get("map_labels_default_visible", True) else "NE"' in source
+    assert '"Prebirat filtr z Mistnosti"' in source
+    assert 'key=f"{prefix}_sync_mistnosti_filters"' in source
+    assert '"sync_mistnosti_filters": bool(st.session_state.get' in source
+    assert '"prebira_mistnosti": "ANO" if layer.get("sync_mistnosti_filters", False) else "NE"' in source
     assert 'help="Vrstva je dostupna pro pouziti v dashboardu.' in source
     assert 'help="Vrstva se zobrazi v mapovem katalogu' in source
     assert 'help="Vrstva bude po otevreni mapy rovnou zapnuta.' in source
     assert 'help="Popisky nastavene ve Sloupce zobrazene v mape budou po otevreni mapy zapnute.' in source
+    assert 'help="V mape Evidence se na tuto vrstvu propise vyber podporovanych filtru z vrstvy Mistnosti' in source
     assert 'help="U device vrstvy se nactou jen zarizeni prirazena prihlasenemu uzivateli.' in source
     assert 'help="Pri zapnuti se v popupu nabidne fotka zarizeni' in source
 

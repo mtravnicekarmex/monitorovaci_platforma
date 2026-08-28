@@ -1543,18 +1543,8 @@ def build_leaflet_map_html(
       return Boolean(layerSupportedFilterKey(layerId, [filterKey]));
     }}
 
-    function isDeviceMapLayer(item) {{
-      return String((item && item.config && item.config.layer_kind) || "").toLowerCase() === "device";
-    }}
-
-    const evidenceLinkedContextLayerIds = new Set(["vodovodni_potrubi", "vodovodni_uzly", "vzt"]);
-
     function isEvidenceLinkedFilterLayer(item) {{
-      if (isDeviceMapLayer(item)) {{
-        return true;
-      }}
-      const layerId = String((item && item.id) || "").toLowerCase();
-      return evidenceLinkedContextLayerIds.has(layerId);
+      return Boolean(item && item.config && item.config.sync_mistnosti_filters === true);
     }}
 
     function evidenceLinkedFilterTargets(filterKey) {{

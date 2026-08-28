@@ -21,6 +21,7 @@ class MapLayerCatalogItem(BaseModel):
     device_section_key: str | None = None
     default_visible: bool = True
     map_labels_default_visible: bool = True
+    sync_mistnosti_filters: bool = False
     draw_order: int = 100
     filter_fields: list[MapLayerFilterField] = Field(default_factory=list)
     map_label_columns: list[str] = Field(default_factory=list)
@@ -47,6 +48,7 @@ class MapLayerResponse(BaseModel):
     map_enabled: bool = True
     default_visible: bool = True
     map_labels_default_visible: bool = True
+    sync_mistnosti_filters: bool = False
     draw_order: int = 100
     filter_columns: list[str] = Field(default_factory=list)
     map_label_columns: list[str] = Field(default_factory=list)

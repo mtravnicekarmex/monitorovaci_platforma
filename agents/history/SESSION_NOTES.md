@@ -22,6 +22,31 @@ Date: 2026-08-21
 
 ## Active handoff
 
+### 2026-08-28 - MAR CPU and converters rack-location columns
+
+- Database state:
+  `scripts/postgres_mar_cpu_prevodniky_rack_location_columns.sql` was added
+  and applied to PostgreSQL.
+- `evidence."MAR CPU a převodníky"` now has `budova`, `patro`, and
+  `místnost` columns, all `character varying`.
+- Synchronization state:
+  `trg_mar_cpu_prevodniky_sync_location_from_rack` fills these fields before
+  insert or `připojeno_v_racku` change on `MAR CPU a převodníky`;
+  `trg_racky_propagate_mar_cpu_prevodniky_location` propagates rack-location
+  changes from `evidence."RACKY"`.
+- Verification: `MAR CPU a převodníky` currently has 0 rows. The migration
+  created 3 location columns, 1 rack-link index, and 3 trigger events. A
+  rollback-only insert test against an existing rack proved that `budova`,
+  `patro`, and `místnost` are copied from `RACKY`; a rollback-only `RACKY`
+  update proved propagation into the linked MAR CPU row.
+- Map-layer metadata state: no dashboard map layer for
+  `MAR CPU a převodníky` currently exists, so no map metadata update was
+  applied.
+- Changed local source for this task:
+  `scripts/postgres_mar_cpu_prevodniky_rack_location_columns.sql`,
+  `agents/decisions/DECISIONS.md`, and
+  `agents/history/SESSION_NOTES.md`.
+
 ### 2026-08-27 - Switche rack-location columns
 
 - Database state: `scripts/postgres_switche_rack_location_columns.sql` was

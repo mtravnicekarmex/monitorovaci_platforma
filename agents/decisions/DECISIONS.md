@@ -5198,3 +5198,35 @@ Consequences:
   location fields on `SWITCHE` are not the authoritative workflow.
 - The migration is captured in
   `scripts/postgres_switche_rack_location_columns.sql`.
+
+## DEC-168: MAR CPU and converters cache rack location fields
+
+Date: 2026-08-28
+
+Status: Accepted
+
+Decision:
+
+- `evidence."MAR CPU a převodníky"` now stores denormalized rack-location
+  fields `budova`, `patro`, and `místnost`.
+- The source of truth remains `evidence."RACKY"`:
+  `MAR CPU a převodníky"."připojeno_v_racku"` references
+  `RACKY"."označení"`.
+- A `BEFORE INSERT OR UPDATE OF "připojeno_v_racku"` trigger on
+  `evidence."MAR CPU a převodníky"` fills `budova`, `patro`, and `místnost`
+  from the matching rack.
+- An `AFTER UPDATE OF "budova", "patro", "místnost"` trigger on
+  `evidence."RACKY"` propagates rack-location changes into matching MAR CPU
+  and converter rows.
+- Existing rows are backfilled from the current rack records when the
+  migration is applied.
+
+Consequences:
+
+- Map/filter consumers can read MAR CPU and converter location directly from
+  `evidence."MAR CPU a převodníky"` without joining to `RACKY`.
+- Rack location should be edited on `RACKY`; direct manual edits of cached
+  location fields on `MAR CPU a převodníky` are not the authoritative
+  workflow.
+- The migration is captured in
+  `scripts/postgres_mar_cpu_prevodniky_rack_location_columns.sql`.

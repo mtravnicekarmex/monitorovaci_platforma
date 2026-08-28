@@ -851,7 +851,14 @@ def test_leaflet_map_html_renders_in_map_filter_control():
 
     assert "map-filter-control" in html
     assert "map-filter-toggle" in html
-    assert "map-filter-select" in html
+    assert "map-filter-checkbox-list" in html
+    assert "map-filter-checkbox-option" in html
+    assert 'checkboxElement.type = "checkbox"' in html
+    assert 'optionsElement.querySelectorAll("input.map-filter-checkbox:checked")' in html
+    assert "checkboxElement.checked = selectedValues.has(normalizedValue)" in html
+    assert "map-filter-select" not in html
+    assert "selectElement.multiple" not in html
+    assert "selectedOptions" not in html
     assert "const layersControl = L.control.layers" in html
     assert "function syncFilterControlWidthToLayerControl" in html
     assert 'controlContainer.style.setProperty("--map-filter-panel-width", `${measuredWidth}px`)' in html
@@ -930,8 +937,9 @@ def test_leaflet_map_html_normalizes_boolean_like_filter_values():
     assert 'return value ? "true" : "false"' in html
     assert 'if (lowered === "true" || lowered === "false")' in html
     assert "normalizeFilterCompareValue(value)" in html
-    assert "optionElement.value = normalizeFilterCompareValue(optionValue)" in html
-    assert "optionElement.textContent = optionValue" in html
+    assert "const normalizedValue = normalizeFilterCompareValue(optionValue)" in html
+    assert "checkboxElement.value = normalizedValue" in html
+    assert "optionTextElement.textContent = optionValue" in html
 
 
 def test_leaflet_map_html_renders_foto_as_popup_image_only_when_present():

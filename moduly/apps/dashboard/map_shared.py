@@ -430,16 +430,34 @@ def build_leaflet_map_html(
       color: #475569;
       font-weight: 600;
     }}
-    .map-filter-select {{
-      width: 100%;
-      min-height: 58px;
+    .map-filter-checkbox-list {{
+      display: grid;
+      gap: 4px;
+      max-height: 168px;
+      overflow-y: auto;
       box-sizing: border-box;
       border: 1px solid rgba(15, 23, 42, 0.18);
       border-radius: 6px;
-      padding: 4px;
+      padding: 6px;
       color: #0f172a;
       background: #ffffff;
-      font: inherit;
+    }}
+    .map-filter-checkbox-option {{
+      display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: start;
+      gap: 6px;
+      min-height: 22px;
+      color: #0f172a;
+      font-weight: 400;
+      cursor: pointer;
+    }}
+    .map-filter-checkbox {{
+      margin-top: 2px;
+    }}
+    .map-filter-checkbox-text {{
+      overflow-wrap: anywhere;
+      line-height: 1.25;
     }}
     .map-filter-reset {{
       width: 100%;
@@ -1724,7 +1742,7 @@ def build_leaflet_map_html(
           layerElement.appendChild(titleElement);
 
           item.fields.forEach((field) => {{
-            const fieldElement = document.createElement("label");
+            const fieldElement = document.createElement("div");
             fieldElement.className = "map-filter-field";
 
             const labelElement = document.createElement("span");
@@ -1732,35 +1750,40 @@ def build_leaflet_map_html(
             labelElement.textContent = field.label;
             fieldElement.appendChild(labelElement);
 
-            const selectElement = document.createElement("select");
-            selectElement.className = "map-filter-select";
-            selectElement.multiple = true;
-            selectElement.size = Math.min(6, Math.max(2, field.options.length));
+            const selectedValues = new Set(selectedLayerFilterValues(layerId, field.key));
+            const optionsElement = document.createElement("div");
+            optionsElement.className = "map-filter-checkbox-list";
 
             field.options.forEach((optionValue) => {{
-              const optionElement = document.createElement("option");
-              optionElement.value = normalizeFilterCompareValue(optionValue);
-              optionElement.textContent = optionValue;
-              selectElement.appendChild(optionElement);
+              const normalizedValue = normalizeFilterCompareValue(optionValue);
+              const optionElement = document.createElement("label");
+              optionElement.className = "map-filter-checkbox-option";
+
+              const checkboxElement = document.createElement("input");
+              checkboxElement.type = "checkbox";
+              checkboxElement.className = "map-filter-checkbox";
+              checkboxElement.value = normalizedValue;
+              checkboxElement.checked = selectedValues.has(normalizedValue);
+              checkboxElement.addEventListener("change", () => {{
+                const selectedCheckboxValues = Array.from(
+                  optionsElement.querySelectorAll("input.map-filter-checkbox:checked")
+                ).map((checkbox) => checkbox.value);
+                const selectedValues = setLayerFilterValues(layerId, field.key, selectedCheckboxValues);
+                syncLinkedLayerFilters(layerId, field.key, selectedValues);
+                renderPanel();
+                applyLayerFilters();
+              }});
+
+              const optionTextElement = document.createElement("span");
+              optionTextElement.className = "map-filter-checkbox-text";
+              optionTextElement.textContent = optionValue;
+
+              optionElement.appendChild(checkboxElement);
+              optionElement.appendChild(optionTextElement);
+              optionsElement.appendChild(optionElement);
             }});
 
-            selectElement.addEventListener("change", () => {{
-              const selectedValues = setLayerFilterValues(
-                layerId,
-                field.key,
-                Array.from(selectElement.selectedOptions).map((option) => option.value)
-              );
-              syncLinkedLayerFilters(layerId, field.key, selectedValues);
-              renderPanel();
-              applyLayerFilters();
-            }});
-
-            const selectedValues = new Set(selectedLayerFilterValues(layerId, field.key));
-            Array.from(selectElement.options).forEach((optionElement) => {{
-              optionElement.selected = selectedValues.has(optionElement.value);
-            }});
-
-            fieldElement.appendChild(selectElement);
+            fieldElement.appendChild(optionsElement);
             layerElement.appendChild(fieldElement);
           }});
 

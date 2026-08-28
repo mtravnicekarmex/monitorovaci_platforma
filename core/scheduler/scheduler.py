@@ -1492,16 +1492,14 @@ def daily_seven_and_two_job():
     safe_call(daily_web_monitor_job)
 
 
-# Nocni synchronizace meteo dat. SOFTLINK elektromery jsou docasne pozastavene
-# kvuli zmene prihlasovacich udaju; vratit pouze s robustnejsi prihlasovaci
-# logikou podle SOFTLINK_data_zarizeni.py.
+# Nocni synchronizace meteo dat a SOFTLINK elektromeru.
 @locked_job
 def daily_job():
     preflight_result = _run_database_preflight_or_skip("daily_job")
     if preflight_result is not None:
         return preflight_result
 
-    _run_independent_scheduler_steps(meteo_sync)
+    _run_independent_scheduler_steps(meteo_sync, SOFTLINK_save_to_database_all)
 
 
 # Denní email report větví vodoměrů.
@@ -1875,6 +1873,15 @@ def _get_manual_run_specs() -> dict[str, ManualRunnableSpec]:
             label="Synchronizace meteo dat",
             description="Synchronizace meteorologickych dat pro dalsi vyhodnoceni.",
             run_fn=meteo_sync,
+            lock_names=("daily_job",),
+            is_scheduled=False,
+            kind="internal_step",
+        ),
+        ManualRunnableSpec(
+            id="SOFTLINK_save_to_database_all",
+            label="Import SOFTLINK elektromeru",
+            description="Denni import SOFTLINK elektromernych mereni do databaze.",
+            run_fn=SOFTLINK_save_to_database_all,
             lock_names=("daily_job",),
             is_scheduled=False,
             kind="internal_step",

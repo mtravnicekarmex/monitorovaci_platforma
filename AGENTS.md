@@ -327,19 +327,21 @@ At the end of every substantive session:
   bundle is explicitly built.
 - `core/db/connect.py`: SQLAlchemy database connections for PostgreSQL and MSSQL, configured through `python-decouple`.
 - `core/scheduler/job_schedule.py`: single source of truth for APScheduler cron schedules. As of
-  2026-08-21 the scheduled `daily_job` description is intentionally only
-  `Meteo sync.` because SOFTLINK electric-meter imports are paused until the
-  changed SOFTLINK credentials/login path are resolved.
+  2026-08-28 the scheduled `daily_job` description again includes SOFTLINK
+  electric-meter imports after the login/API path was rebuilt around
+  `cem_lds_auth` bearer tokens and Playwright request-context API calls.
 - `core/scheduler/scheduler.py`: scheduler execution, locks, metrics, manual run specs, and alert emails.
   The `daily_job` now uses an independent-step runner so a failing independent
   step does not prevent later independent steps from running; it raises one
-  aggregate `SchedulerContextError` after attempted steps. The SOFTLINK
-  measurement import and `elektromery_softlink_monitoring_import` are removed
-  from the scheduled and manual scheduler registry until SOFTLINK login is
-  restored. `SOFTLINK_save_to_database_all()` lazy-loads SOFTLINK credentials
-  and import modules only when explicitly called. When SOFTLINK returns, port
-  `SOFTLINK_data_z_dotazu.py` to the more robust saved-session/API-validation
-  pattern used by `SOFTLINK_data_zarizeni.py` before re-adding it.
+  aggregate `SchedulerContextError` after attempted steps. `daily_job` runs
+  `meteo_sync` and `SOFTLINK_save_to_database_all`; the SOFTLINK measurement
+  import is also available as a manual internal step locked to `daily_job`.
+  `weekly_job` includes `send_weekly_new_elektromery_report` for the
+  SOFTLINK device inventory path. Both SOFTLINK fetchers use Playwright
+  Chromium only for login/session state and call `cem2.softlink.cz` APIs via
+  Playwright request context with the `cem_lds_auth.access_token` bearer token,
+  avoiding browser CORS-dependent `fetch` calls. Do not print token values or
+  raw SOFTLINK payloads.
 - `core/scheduler/metrics.py`: scheduler metrics persistence in `core/scheduler/logs/scheduler_metrics.json`.
 - `core/scheduler/database_availability_state.py`: local SQLite state and
   transition-event persistence for PostgreSQL/MSSQL availability.

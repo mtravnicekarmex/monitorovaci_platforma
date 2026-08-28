@@ -55,7 +55,7 @@ SCHEDULER_JOB_SPECS: tuple[SchedulerJobSpec, ...] = (
     SchedulerJobSpec(
         id="daily_job",
         label="Daily midnight",
-        description="Meteo sync.",
+        description="Meteo sync a SOFTLINK elektromery.",
         trigger_kwargs={"hour": 0, "minute": 15, "second": 5},
     ),
     SchedulerJobSpec(
@@ -67,7 +67,10 @@ SCHEDULER_JOB_SPECS: tuple[SchedulerJobSpec, ...] = (
     SchedulerJobSpec(
         id="weekly_job",
         label="Weekly",
-        description="Rebuild prediction profilu vodomeru, plynomeru a kalorimetru a tydenni branch report vodomeru.",
+        description=(
+            "Rebuild prediction profilu vodomeru, plynomeru a kalorimetru, "
+            "tydenni reporty a kontrola novych SOFTLINK elektromeru."
+        ),
         trigger_kwargs={"day_of_week": "mon", "hour": 6, "minute": 10, "second": 5},
     ),
     SchedulerJobSpec(

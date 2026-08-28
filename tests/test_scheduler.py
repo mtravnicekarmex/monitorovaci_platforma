@@ -1593,7 +1593,7 @@ def test_plynomery_manual_alerting_step_uses_per_identifier_selection(monkeypatc
     }
 
 
-def test_daily_job_runs_only_meteo_sync_while_softlink_is_paused(monkeypatch):
+def test_daily_job_runs_meteo_sync_and_softlink_import(monkeypatch):
     calls = []
 
     def fake_safe_call(fn, *args, **kwargs):
@@ -1603,13 +1603,17 @@ def test_daily_job_runs_only_meteo_sync_while_softlink_is_paused(monkeypatch):
     def fake_meteo_sync():
         return None
 
+    def fake_softlink_save_to_database_all():
+        return None
+
     monkeypatch.setattr(scheduler, "_run_database_preflight_or_skip", lambda job_id: None)
     monkeypatch.setattr(scheduler, "safe_call", fake_safe_call)
     monkeypatch.setattr(scheduler, "meteo_sync", fake_meteo_sync)
+    monkeypatch.setattr(scheduler, "SOFTLINK_save_to_database_all", fake_softlink_save_to_database_all)
 
     scheduler.daily_job.__scheduler_unlocked_fn__()
 
-    assert calls == ["fake_meteo_sync"]
+    assert calls == ["fake_meteo_sync", "fake_softlink_save_to_database_all"]
 
 
 def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
@@ -1728,18 +1732,19 @@ def test_scheduler_job_registry_matches_schedule_specs():
     }
 
 
-def test_daily_job_schedule_description_excludes_paused_portal_syncs():
+def test_daily_job_schedule_description_includes_restored_softlink_import():
     daily_job_spec = next(job_spec for job_spec in get_scheduler_job_specs() if job_spec.id == "daily_job")
 
     assert "SmartFuelPass" not in daily_job_spec.description
-    assert "SOFTLINK" not in daily_job_spec.description
+    assert "SOFTLINK" in daily_job_spec.description
 
 
-def test_manual_specs_exclude_paused_portal_syncs():
+def test_manual_specs_include_restored_softlink_measurement_import():
     manual_specs = scheduler.get_manual_run_specs()
 
     assert "sync_charge_sessions_to_db" not in manual_specs
-    assert "SOFTLINK_save_to_database_all" not in manual_specs
+    assert "SOFTLINK_save_to_database_all" in manual_specs
+    assert manual_specs["SOFTLINK_save_to_database_all"].lock_names == ("daily_job",)
     assert "elektromery_softlink_monitoring_import" not in manual_specs
 
 

@@ -22,6 +22,33 @@ Date: 2026-08-21
 
 ## Active handoff
 
+### 2026-08-28 - SOFTLINK token request-context pipeline restored to scheduler
+
+- Source state: `SOFTLINK_data_z_dotazu.py` and `SOFTLINK_data_zarizeni.py`
+  now use Playwright Chromium only for SOFTLINK login/session state. API calls
+  to `cem2.softlink.cz` use Playwright request context with the
+  `cem_lds_auth.access_token` bearer token from localStorage, avoiding browser
+  CORS-dependent `fetch`.
+- Runtime recovery: stale `lds_auth.json` was moved out of the repository to
+  `C:\ProgramData\monitorovaci_platforma\secrets\softlink_session_backups`.
+  A fresh local storage state was created by a successful SOFTLINK login.
+  Token values and raw SOFTLINK payloads were not printed.
+- Verification: `SOFTLINK_dotaz(timeout_ms=60000)` returned HTTP `200` with
+  213 measurement items. `SOFTLINK_save_to_database_all()` completed
+  successfully through the existing database import path. `SOFTLINK_dotaz_zarizeni(timeout_ms=60000)`
+  returned HTTP `200` with 96 device items, and
+  `discover_new_softlink_devices()` reported 96 total, 96 matched, and 0 new
+  devices.
+- Scheduler state: `daily_job` again runs `meteo_sync` and
+  `SOFTLINK_save_to_database_all` as independent steps. The SOFTLINK
+  measurement import is again available as a manual internal step locked to
+  `daily_job`. `weekly_job` continues to run
+  `send_weekly_new_elektromery_report` for the SOFTLINK device inventory path.
+  `elektromery_softlink_monitoring_import` remains outside the manual
+  scheduler registry pending separate review.
+- Commits: `8daa4a7` (`Fix SOFTLINK API token fetchers`) contains the fetcher
+  and test changes. The scheduler restoration commit follows this handoff.
+
 ### 2026-08-28 - Map-layer Patra filter-sync checkbox
 
 - Source state: dashboard map-layer configuration now includes

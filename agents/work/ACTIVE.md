@@ -371,6 +371,16 @@
   steps. Verification: `tests/test_scheduler.py` returned `58 passed`;
   py_compile passed for touched files; `git diff --check` had only line-ending
   normalization warnings.
+- 2026-08-28 follow-up restored the SOFTLINK path. Both
+  `SOFTLINK_data_z_dotazu.py` and `SOFTLINK_data_zarizeni.py` now use the
+  `cem_lds_auth.access_token` bearer token from Playwright storage state and
+  Playwright request context API calls instead of browser `fetch`. Real
+  verification returned 213 measurement items, completed
+  `SOFTLINK_save_to_database_all()`, returned 96 device items, and reported 0
+  new SOFTLINK devices. `daily_job` again includes
+  `SOFTLINK_save_to_database_all`; `weekly_job` continues to include
+  `send_weekly_new_elektromery_report`. `elektromery_softlink_monitoring_import`
+  remains outside the manual registry pending separate review.
 - Pre-restart handoff for 2026-08-21 is recorded in
   `../history/SESSION_NOTES.md`. After the local workstation restart,
   the later remote-agent checkpoint supersedes it. Current remote

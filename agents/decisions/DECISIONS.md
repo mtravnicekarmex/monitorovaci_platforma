@@ -5266,3 +5266,38 @@ Consequences:
   longer implicitly controls Evidence-map Patra filter synchronization.
 - The migration is captured in
   `scripts/postgres_map_layer_sync_mistnosti_filters.sql`.
+
+## DEC-170: SOFTLINK imports use bearer-token request context and return to scheduler
+
+Date: 2026-08-28
+
+Status: Accepted
+
+Supersedes: DEC-147
+
+Decision:
+
+- SOFTLINK measurement and device inventory fetchers use Playwright Chromium
+  only to obtain or refresh portal session state.
+- SOFTLINK API calls to `cem2.softlink.cz` are made through Playwright request
+  context with `Authorization: Bearer <cem_lds_auth.access_token>`, read from
+  the portal localStorage state, instead of browser JavaScript `fetch`.
+- Token values, raw credentials, and raw SOFTLINK payloads must not be printed
+  or committed.
+- `SOFTLINK_save_to_database_all` is restored to `daily_job` after
+  `meteo_sync` as an independent scheduler step and is restored as a manual
+  internal scheduler step locked to `daily_job`.
+- `weekly_job` continues to run `send_weekly_new_elektromery_report`, now
+  backed by the same bearer-token request-context pattern for
+  `SOFTLINK_data_zarizeni.py`.
+- `elektromery_softlink_monitoring_import` remains outside the manual
+  scheduler registry until it receives a separate review.
+
+Consequences:
+
+- Clearing stale Chromium/Playwright storage can still recover bad local
+  portal state, but normal API calls no longer depend on browser CORS behavior.
+- SOFTLINK login/API failures should surface as explicit authorization or
+  response-shape errors instead of generic browser `Failed to fetch` errors.
+- Daily SOFTLINK measurement import and weekly new-device checks are again part
+  of scheduled operations.

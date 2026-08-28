@@ -5231,7 +5231,7 @@ Consequences:
 - The migration is captured in
   `scripts/postgres_mar_cpu_prevodniky_rack_location_columns.sql`.
 
-## DEC-169: Dashboard map layers explicitly opt in to Mistnosti filter sync
+## DEC-169: Dashboard map layers explicitly opt in to Patra filter sync
 
 Date: 2026-08-28
 
@@ -5242,10 +5242,13 @@ Decision:
 - Dashboard map-layer configuration now includes
   `dashboard."Map_Layers".sync_mistnosti_filters`.
 - `Sprava / Mapove vrstvy` exposes this as checkbox
-  `Prebirat filtr z Mistnosti`.
+  `Prebirat filtr z Patra`.
 - In `map_context=evidence`, changing supported filters on layer `mistnosti`
   copies the selected values only into layers with
   `sync_mistnosti_filters=true`.
+- The user-facing source layer name may be `Patra`, but the stable technical
+  source layer ID remains `mistnosti`; synchronization must continue to route
+  by layer ID, not by displayed title.
 - Supported copied keys remain `budova`, `patro`, `mistnost_id`, and
   room-name variants when both source and target layers expose compatible
   filter keys.
@@ -5257,9 +5260,9 @@ Decision:
 
 Consequences:
 
-- New evidence-map layers can join or skip room-context filter propagation
+- New evidence-map layers can join or skip floor/room-context filter propagation
   through metadata, without source-code changes.
 - Layer type remains useful for authorization and device handling, but it no
-  longer implicitly controls Evidence-map Mistnosti filter synchronization.
+  longer implicitly controls Evidence-map Patra filter synchronization.
 - The migration is captured in
   `scripts/postgres_map_layer_sync_mistnosti_filters.sql`.

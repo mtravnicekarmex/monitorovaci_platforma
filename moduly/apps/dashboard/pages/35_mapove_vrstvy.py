@@ -650,10 +650,10 @@ def render_layer_fields(prefix: str, current: dict[str, object] | None = None, *
         help="Popisky nastavene ve Sloupce zobrazene v mape budou po otevreni mapy zapnute. Uzivatel je muze v Leaflet panelu Popisky vypnout nebo zapnout.",
     )
     state_cols[4].checkbox(
-        "Prebirat filtr z Mistnosti",
+        "Prebirat filtr z Patra",
         value=bool(current.get("sync_mistnosti_filters", False)),
         key=f"{prefix}_sync_mistnosti_filters",
-        help="V mape Evidence se na tuto vrstvu propise vyber podporovanych filtru z vrstvy Mistnosti, napr. budova, patro nebo mistnost_id.",
+        help="V mape Evidence se na tuto vrstvu propise vyber podporovanych filtru z vrstvy Patra, napr. budova, patro nebo mistnost_id.",
     )
     state_cols[5].checkbox(
         "Omezit podle zarizeni",

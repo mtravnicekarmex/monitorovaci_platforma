@@ -22,14 +22,16 @@ Date: 2026-08-21
 
 ## Active handoff
 
-### 2026-08-28 - Map-layer Mistnosti filter-sync checkbox
+### 2026-08-28 - Map-layer Patra filter-sync checkbox
 
 - Source state: dashboard map-layer configuration now includes
   `sync_mistnosti_filters`.
 - Admin UI: `Sprava / Mapove vrstvy` exposes the flag as checkbox
-  `Prebirat filtr z Mistnosti` and shows the value in the layer overview.
-- Map UI behavior: in `map_context=evidence`, filter changes on `mistnosti`
-  copy supported values only to layers with `sync_mistnosti_filters=true`.
+  `Prebirat filtr z Patra` and shows the value in the layer overview.
+- Map UI behavior: in `map_context=evidence`, filter changes on technical
+  layer ID `mistnosti` copy supported values only to layers with
+  `sync_mistnosti_filters=true`. The user-facing source layer name may be
+  `Patra`; routing remains based on stable layer ID, not displayed title.
   Supported copied keys remain `budova`, `patro`, `mistnost_id`, and
   room-name variants when both layers expose compatible filter keys.
 - Migration state:

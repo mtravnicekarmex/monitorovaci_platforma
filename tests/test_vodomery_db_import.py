@@ -8,6 +8,7 @@ import pytest
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from moduly.mereni.vodomery.database import vodomery_db_vse
+from moduly.mereni.vodomery.alerting import outlier_notifications
 from moduly.mereni.vodomery.database.models import Mereni_vodomery
 from moduly.mereni.time_semantics import (
     SOURCE_TIMEZONE_EUROPE_PRAGUE,
@@ -22,6 +23,41 @@ def test_vodomery_vse_model_has_time_semantics_columns():
     assert {"source_date", "time_utc", "time_basis", "source_timezone"}.issubset(
         Mereni_vodomery.__table__.c.keys()
     )
+
+
+def test_outlier_notifications_only_match_pending_reviews():
+    rule = SimpleNamespace(
+        id=1,
+        enabled=True,
+        identifikace=None,
+        event_type="OUTLIER_REVIEW",
+        severity_min="LOW",
+        min_duration_minutes=0,
+        send_on="ACTIVE",
+        rule_name="test",
+        recipient_email="operator@example.invalid",
+    )
+
+    base_review = {
+        "id": 10,
+        "identifikace": "B1_V1",
+        "date": datetime.datetime(2026, 9, 8, 7, 0, 0),
+        "zdroj": "AREAL",
+        "interval_minutes": 15,
+        "detection_kind": "NORMAL_DELTA",
+        "candidate_delta": 100.0,
+        "threshold_delta": 10.0,
+        "current_objem": 100.0,
+        "baseline_objem": 0.0,
+    }
+
+    pending_review = SimpleNamespace(**base_review, review_status="PENDING")
+    confirmed_consumption = SimpleNamespace(**base_review, review_status="CONFIRMED_CONSUMPTION")
+    confirmed_outlier = SimpleNamespace(**base_review, review_status="CONFIRMED_OUTLIER")
+
+    assert outlier_notifications._build_candidate(rule=rule, review=pending_review) is not None
+    assert outlier_notifications._build_candidate(rule=rule, review=confirmed_consumption) is None
+    assert outlier_notifications._build_candidate(rule=rule, review=confirmed_outlier) is None
 
 
 def test_prepare_rows_distributes_gap_delta_without_losing_terminal_delta(monkeypatch):

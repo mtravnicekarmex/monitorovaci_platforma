@@ -322,6 +322,8 @@ def _rule_matches_review(
     severity: str,
     duration_minutes: int,
 ) -> bool:
+    if review.review_status != "PENDING":
+        return False
     if not rule.enabled:
         return False
     if rule.identifikace and rule.identifikace != review.identifikace:

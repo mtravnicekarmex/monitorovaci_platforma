@@ -5301,3 +5301,69 @@ Consequences:
   response-shape errors instead of generic browser `Failed to fetch` errors.
 - Daily SOFTLINK measurement import and weekly new-device checks are again part
   of scheduled operations.
+
+## DEC-171: Patra filter sync is metadata-driven across map contexts
+
+Date: 2026-09-02
+
+Status: Accepted
+
+Supersedes: DEC-162 and DEC-169 where they limited the synchronization rule
+to one hardcoded Revize target or to the Evidence map context.
+
+Decision:
+
+- The Leaflet map renderer treats room/floor context layers as filter-sync
+  sources when their layer id or title identifies Patra/Mistnosti and they
+  expose supported room filters such as `budova`, `patro`, `mistnost_id`, or
+  `mistnost`.
+- Target layers are no longer hardcoded per map context. Any layer in the
+  current map payload with `sync_mistnosti_filters=true` can receive matching
+  filters from Patra.
+- The rule applies consistently in `evidence`, `revize`, `pronajem`, and
+  future contexts that reuse the shared map renderer.
+- Filter columns must be available in GeoJSON feature properties for
+  client-side filtering. The map-layer save path therefore keeps configured
+  filter columns in `property_columns`, excluding document-only columns from
+  ordinary properties as before.
+
+Consequences:
+
+- Admins can enable or disable Patra-linked filtering through
+  `Sprava / Mapove vrstvy` without new source-code rules for each map context.
+- Revize and Pronajem maps can share the same Patra-driven filtering behavior
+  as Evidence, provided the target layer exposes compatible filter columns.
+- This remains client-side display filtering only. It does not change source
+  evidence/revize/pronajem data, API authorization, document/photo protection,
+  or the iframe bearer-token boundary.
+
+## DEC-172: Cadastral map is an optional ČÚZK WMTS overlay
+
+Date: 2026-09-02
+
+Status: Accepted
+
+Decision:
+
+- Dashboard Leaflet maps expose the public ČÚZK cadastral map as a selectable
+  overlay layer, not as a base map.
+- The overlay uses the ČÚZK WMTS Google/Pseudo-Mercator endpoint
+  `local-km-wmts-google.asp` with layer `KN`, tile matrix set `KN`, and PNG
+  tiles, which matches the Leaflet EPSG:3857 tile grid used by the existing
+  dashboard map.
+- The cadastral overlay is not enabled by default and can be displayed over
+  `Zakladni mapa`, `Letecka mapa (CUZK)`, or `Bez mapy`.
+- When the overlay is enabled below the supported cadastral tile zoom, the
+  Leaflet renderer raises the map to zoom `17` so ČÚZK tiles are requested on
+  mobile and other fit-to-bounds views.
+- The integration is display-only. It does not implement identify/click
+  handling, GetFeatureInfo, cadastral attribute lookup, data persistence, or
+  server-side proxying.
+
+Consequences:
+
+- Users can inspect current parcel/building linework visually alongside
+  existing dashboard GeoJSON layers and whichever base map is selected.
+- Availability and tile freshness follow the external public ČÚZK WMTS
+  service. If ČÚZK changes the service contract, only the tile URL/options in
+  the shared map renderer should need adjustment.

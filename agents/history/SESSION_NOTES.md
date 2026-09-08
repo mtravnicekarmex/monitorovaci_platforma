@@ -22,6 +22,65 @@ Date: 2026-08-21
 
 ## Active handoff
 
+### 2026-09-02 - Optional CUZK cadastral overlay added to dashboard maps
+
+- Source state: `moduly/apps/dashboard/map_shared.py` adds
+  `cadastralOverlayLayer` from the public CUZK WMTS Google/Pseudo-Mercator
+  service (`local-km-wmts-google.asp`, layer `KN`, tile matrix set `KN`) to
+  the Leaflet overlay layer control.
+- Behavior: the cadastral map is display-only, off by default, and can be
+  toggled over `Zakladni mapa`, `Letecka mapa (CUZK)`, or `Bez mapy`. If the
+  overlay is enabled below its supported tile zoom, the map raises to zoom
+  `17` so the layer also appears after mobile `fitBounds` views. No cadastral
+  clicking, GetFeatureInfo, server proxy, or data persistence was added.
+- Verification: `tests/test_dashboard_map_shared.py` asserts the CUZK WMTS
+  overlay wiring; the targeted map shared tests returned `32 passed`, and
+  compileall passed for the touched dashboard/test files.
+
+### 2026-09-02 - Patra filter sync enabled for Revize and Pronajem maps
+
+- Problem: `Prebirat filtr z Patra` did not work reliably outside Evidence.
+  The Leaflet renderer accepted only exact source layer id `mistnosti` and
+  Revize still depended on a hardcoded target; Pronajem used
+  `mistnosti_pronajem`, and the live Revize layer was missing `budova`/`patro`
+  in filter metadata.
+- Source state: `moduly/apps/dashboard/map_shared.py` now detects Patra/
+  Mistnosti source layers by id/title and supported room filters, then copies
+  matching filter values to every layer in the current map payload with
+  `sync_mistnosti_filters=true`. The rule is no longer limited to Evidence or
+  a hardcoded Revize target.
+- Backend state: `services/api/services/map_layers.py` keeps configured
+  filter columns in `property_columns` so client-side Leaflet filtering has
+  the needed feature values. Document-only columns remain excluded from normal
+  GeoJSON properties.
+- Database state: `ensure_map_layer_columns()` was run on 2026-09-02. Live
+  metadata now has `budova` and `patro` present as filters and properties for
+  `mistnosti`, `mistnosti_pronajem`, and `revize_terminy_zarizeni`; Revize
+  and Pronajem target layers checked in the handoff have
+  `sync_mistnosti_filters=true`.
+- Verification: targeted map shared/service/admin tests returned `61 passed`;
+  compileall passed for the touched dashboard/API/test files.
+
+### 2026-09-02 - Pronajem map-layer create constraint fixed
+
+- Problem reproduced from `C:\ProgramData\monitorovaci_platforma\logs\api.log`:
+  `POST /api/v1/admin/map-layers` returned HTTP 500 while creating a
+  `map_context="pronajem"` layer because PostgreSQL constraint
+  `dashboard."Map_Layers".map_layers_map_context_check` still allowed only
+  the older map contexts.
+- Source state: `moduly/apps/dashboard/database/db_init.py` now normalizes
+  invalid/blank map contexts to `evidence` and recreates
+  `map_layers_map_context_check` with allowed values `evidence`, `revize`,
+  `pronajem`, and `shared`. `scripts/postgres_dashboard_map_contexts.sql`
+  now performs the same explicit constraint replacement.
+- Database state: the live PostgreSQL constraint was updated through
+  `ensure_map_layer_columns()` on 2026-09-02. A rollback-only insert probe for
+  `map_context="pronajem"` was accepted and rolled back, leaving no test
+  layer behind.
+- Verification: targeted map-layer admin/service tests returned `28 passed`;
+  compileall passed for the touched dashboard database, map-layer service, and
+  test files.
+
 ### 2026-08-28 - SOFTLINK token request-context pipeline restored to scheduler
 
 - Source state: `SOFTLINK_data_z_dotazu.py` and `SOFTLINK_data_zarizeni.py`

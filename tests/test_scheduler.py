@@ -1616,6 +1616,41 @@ def test_daily_job_runs_meteo_sync_and_softlink_import(monkeypatch):
     assert calls == ["fake_meteo_sync", "fake_softlink_save_to_database_all"]
 
 
+def test_softlink_import_immediately_updates_postgres_after_mssql(monkeypatch):
+    from moduly.mereni.elektromery.SOFTLINK import SOFTLINK_data_z_dotazu
+    from moduly.mereni.elektromery.SOFTLINK import SOFTLINK_to_database
+
+    calls = []
+
+    def fake_softlink_dotaz():
+        calls.append("fetch_softlink")
+        return {"data": [{"sample": True}]}
+
+    def fake_softlink_to_database_mereni(payload):
+        calls.append(("write_mssql", payload))
+        return {"inserted_mssql": 1}
+
+    def fake_elektromery_db_import():
+        calls.append("write_postgres")
+        return {"inserted_softlink": 1}
+
+    monkeypatch.setattr(SOFTLINK_data_z_dotazu, "SOFTLINK_dotaz", fake_softlink_dotaz)
+    monkeypatch.setattr(SOFTLINK_to_database, "SOFTLINK_to_database_mereni", fake_softlink_to_database_mereni)
+    monkeypatch.setattr(scheduler, "elektromery_db_import", fake_elektromery_db_import)
+
+    result = scheduler.SOFTLINK_save_to_database_all()
+
+    assert calls == [
+        "fetch_softlink",
+        ("write_mssql", {"data": [{"sample": True}]}),
+        "write_postgres",
+    ]
+    assert result == {
+        "mssql_import": {"inserted_mssql": 1},
+        "postgres_import": {"inserted_softlink": 1},
+    }
+
+
 def test_weekly_job_rebuilds_profiles_and_sends_report(monkeypatch):
     calls = []
     rebuild_result = {
@@ -1737,6 +1772,7 @@ def test_daily_job_schedule_description_includes_restored_softlink_import():
 
     assert "SmartFuelPass" not in daily_job_spec.description
     assert "SOFTLINK" in daily_job_spec.description
+    assert "PostgreSQL" in daily_job_spec.description
 
 
 def test_manual_specs_include_restored_softlink_measurement_import():

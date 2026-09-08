@@ -1093,7 +1093,12 @@ def SOFTLINK_save_to_database_all():
     from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_data_z_dotazu import SOFTLINK_dotaz
     from moduly.mereni.elektromery.SOFTLINK.SOFTLINK_to_database import SOFTLINK_to_database_mereni
 
-    SOFTLINK_to_database_mereni(SOFTLINK_dotaz())
+    mssql_result = SOFTLINK_to_database_mereni(SOFTLINK_dotaz())
+    postgres_result = elektromery_db_import()
+    return {
+        "mssql_import": mssql_result,
+        "postgres_import": postgres_result,
+    }
 
 
 def elektromery_softlink_monitoring_import():
@@ -1499,7 +1504,10 @@ def daily_job():
     if preflight_result is not None:
         return preflight_result
 
-    _run_independent_scheduler_steps(meteo_sync, SOFTLINK_save_to_database_all)
+    _run_independent_scheduler_steps(
+        meteo_sync,
+        SOFTLINK_save_to_database_all,
+    )
 
 
 # Denní email report větví vodoměrů.

@@ -55,7 +55,7 @@ SCHEDULER_JOB_SPECS: tuple[SchedulerJobSpec, ...] = (
     SchedulerJobSpec(
         id="daily_job",
         label="Daily midnight",
-        description="Meteo sync a SOFTLINK elektromery.",
+        description="Meteo sync, SOFTLINK elektromery a import elektromeru do PostgreSQL.",
         trigger_kwargs={"hour": 0, "minute": 15, "second": 5},
     ),
     SchedulerJobSpec(

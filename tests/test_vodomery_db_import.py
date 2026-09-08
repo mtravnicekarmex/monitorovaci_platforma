@@ -518,6 +518,233 @@ def test_filter_valid_rows_ignores_single_resolution_step_drop(monkeypatch):
     assert [row["reset_detected"] for row in rows] == [False, False]
 
 
+def test_filter_valid_rows_ignores_minor_backflow(monkeypatch):
+    last_valid = SimpleNamespace(
+        objem=100.0,
+        date=datetime.datetime(2026, 4, 10, 10, 0, 0),
+        seriove_cislo="S1",
+    )
+
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "get_last_measurements",
+        lambda session, affected_idents, *, only_valid=False: {"A": last_valid},
+    )
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "Session",
+        lambda *_args, **_kwargs: _FakeSession(["A"]),
+    )
+
+    rows = vodomery_db_vse.filter_valid_rows(
+        session=_FakeSession(["A"]),
+        rows=[
+            {
+                "recid": 1,
+                "identifikace": "A",
+                "seriove_cislo": "S1",
+                "date": datetime.datetime(2026, 4, 10, 10, 15, 0),
+                "objem": 99.95,
+                "interval_minutes": 15,
+            },
+            {
+                "recid": 2,
+                "identifikace": "A",
+                "seriove_cislo": "S1",
+                "date": datetime.datetime(2026, 4, 10, 10, 30, 0),
+                "objem": 100.08,
+                "interval_minutes": 15,
+            },
+        ],
+        source_name="AREAL",
+    )
+
+    assert [row["reset_detected"] for row in rows] == [False, False]
+
+
+def test_prepare_rows_keeps_baseline_across_minor_backflow(monkeypatch):
+    last_valid = SimpleNamespace(
+        objem=100.0,
+        date=datetime.datetime(2026, 4, 10, 10, 0, 0),
+        seriove_cislo="S1",
+    )
+
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "get_last_measurements",
+        lambda session, affected_idents, *, only_valid=False: {"A": last_valid},
+    )
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "get_recent_delta_stats",
+        lambda session, affected_idents, *, reference_time=None: {},
+    )
+
+    rows = vodomery_db_vse.prepare_rows(
+        session=None,
+        new_rows=[
+            {
+                "recid": 1,
+                "identifikace": "A",
+                "seriove_cislo": "S1",
+                "date": datetime.datetime(2026, 4, 10, 10, 15, 0),
+                "objem": 99.95,
+                "interval_minutes": 15,
+                "reset_detected": False,
+            },
+            {
+                "recid": 2,
+                "identifikace": "A",
+                "seriove_cislo": "S1",
+                "date": datetime.datetime(2026, 4, 10, 10, 30, 0),
+                "objem": 100.08,
+                "interval_minutes": 15,
+                "reset_detected": False,
+            },
+        ],
+        source_name="AREAL",
+    )
+
+    assert rows[0]["reset_detected"] is False
+    assert rows[0]["delta"] is None
+    assert rows[1]["reset_detected"] is False
+    assert rows[1]["delta"] == pytest.approx(0.08)
+
+
+def test_filter_valid_rows_drops_transient_zero_reset_return_block(monkeypatch):
+    last_valid = SimpleNamespace(
+        objem=596.017,
+        date=datetime.datetime(2025, 8, 5, 9, 0, 0),
+        seriove_cislo="S1",
+    )
+
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "get_last_measurements",
+        lambda session, affected_idents, *, only_valid=False: {"A": last_valid},
+    )
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "Session",
+        lambda *_args, **_kwargs: _FakeSession(["A"]),
+    )
+
+    rows = vodomery_db_vse.filter_valid_rows(
+        session=_FakeSession(["A"]),
+        rows=[
+            {
+                "recid": 1,
+                "identifikace": "A",
+                "seriove_cislo": "S1",
+                "date": datetime.datetime(2025, 8, 5, 9, 15, 0),
+                "objem": 0.0,
+                "interval_minutes": 15,
+            },
+            {
+                "recid": 2,
+                "identifikace": "A",
+                "seriove_cislo": "S1",
+                "date": datetime.datetime(2025, 8, 5, 9, 30, 0),
+                "objem": 0.0,
+                "interval_minutes": 15,
+            },
+            {
+                "recid": 3,
+                "identifikace": "A",
+                "seriove_cislo": "S1",
+                "date": datetime.datetime(2025, 8, 5, 9, 45, 0),
+                "objem": 596.019,
+                "interval_minutes": 15,
+            },
+        ],
+        source_name="AREAL",
+    )
+
+    assert [row["recid"] for row in rows] == [3]
+    assert rows[0]["reset_detected"] is False
+
+
+def test_filter_valid_rows_drops_long_same_day_zero_return_block(monkeypatch):
+    last_valid = SimpleNamespace(
+        objem=62.445,
+        date=datetime.datetime(2026, 9, 7, 6, 30, 20),
+        seriove_cislo="S1",
+    )
+
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "get_last_measurements",
+        lambda session, affected_idents, *, only_valid=False: {"A": last_valid},
+    )
+    monkeypatch.setattr(
+        vodomery_db_vse,
+        "Session",
+        lambda *_args, **_kwargs: _FakeSession(["A"]),
+    )
+
+    rows = vodomery_db_vse.filter_valid_rows(
+        session=_FakeSession(["A"]),
+        rows=[
+            {
+                "recid": 1,
+                "identifikace": "A",
+                "seriove_cislo": "S1",
+                "date": datetime.datetime(2026, 9, 7, 6, 45, 20),
+                "objem": 0.0,
+                "interval_minutes": 15,
+            },
+            {
+                "recid": 2,
+                "identifikace": "A",
+                "seriove_cislo": "S1",
+                "date": datetime.datetime(2026, 9, 7, 19, 15, 20),
+                "objem": 62.457,
+                "interval_minutes": 15,
+            },
+        ],
+        source_name="AREAL",
+    )
+
+    assert [row["recid"] for row in rows] == [2]
+    assert rows[0]["reset_detected"] is False
+
+
+def test_normalize_areal_measurement_objem_offsets_b1_v1_before_unit_cutoff():
+    assert vodomery_db_vse.normalize_areal_measurement_objem(
+        "B1_V1",
+        datetime.datetime(2026, 8, 6, 9, 30, 50),
+        706.994,
+    ) == pytest.approx(808.718)
+    assert vodomery_db_vse.normalize_areal_measurement_objem(
+        "B1_V1",
+        datetime.datetime(2026, 8, 6, 9, 45, 50),
+        808.718,
+    ) == pytest.approx(808.718)
+    assert vodomery_db_vse.normalize_areal_measurement_objem(
+        "A_V3",
+        datetime.datetime(2026, 8, 6, 9, 30, 50),
+        706.994,
+    ) == pytest.approx(706.994)
+    assert vodomery_db_vse.normalize_areal_measurement_objem(
+        "B1_V1",
+        datetime.datetime(2026, 8, 6, 9, 30, 50),
+        0.0,
+    ) == pytest.approx(0.0)
+
+
+def test_normalize_areal_measurement_objem_offsets_p_v2_before_counter_alignment():
+    assert vodomery_db_vse.normalize_areal_measurement_objem(
+        "P_V2",
+        datetime.datetime(2026, 6, 22, 11, 30, 45),
+        10.849,
+    ) == pytest.approx(265.087)
+    assert vodomery_db_vse.normalize_areal_measurement_objem(
+        "P_V2",
+        datetime.datetime(2026, 6, 22, 11, 45, 45),
+        265.087,
+    ) == pytest.approx(265.087)
+
+
 def test_import_measurements_returns_new_outlier_review_ids(monkeypatch):
     prepared_rows = [
         {

@@ -38,11 +38,51 @@ OUTLIER_P99_MULTIPLIER = 8.0
 MAX_GAP_MULTIPLIER = 2
 MIN_NIGHT_DELTA = 0.01
 SPIKE_RETURN_BASELINE_MAX_DELTA = OUTLIER_ABSOLUTE_MIN_DELTA
+VODOMERY_RESET_NEGATIVE_DIFF_THRESHOLD = 0.1
+TRANSIENT_ZERO_RESET_RETURN_MAX_DURATION = timedelta(hours=24)
+TRANSIENT_ZERO_RESET_RETURN_MAX_DELTA = 1.0
+B1_V1_UNIT_NORMALIZATION_IDENT = "B1_V1"
+B1_V1_UNIT_NORMALIZATION_CUTOFF = datetime(2026, 8, 6, 9, 45, 50)
+B1_V1_UNIT_NORMALIZATION_OFFSET = 101.724
+P_V2_COUNTER_ALIGNMENT_IDENT = "P_V2"
+P_V2_COUNTER_ALIGNMENT_CUTOFF = datetime(2026, 6, 22, 11, 45, 45)
+P_V2_COUNTER_ALIGNMENT_OFFSET = 254.238
+AREAL_CUMULATIVE_OBJEM_ALIGNMENT_RULES = (
+    (
+        B1_V1_UNIT_NORMALIZATION_IDENT,
+        B1_V1_UNIT_NORMALIZATION_CUTOFF,
+        B1_V1_UNIT_NORMALIZATION_OFFSET,
+    ),
+    (
+        P_V2_COUNTER_ALIGNMENT_IDENT,
+        P_V2_COUNTER_ALIGNMENT_CUTOFF,
+        P_V2_COUNTER_ALIGNMENT_OFFSET,
+    ),
+)
 
 
 def chunked(items, size=CHUNK_SIZE):
     for i in range(0, len(items), size):
         yield items[i:i + size]
+
+
+def normalize_areal_measurement_objem(identifikace, measurement_date, objem):
+    if measurement_date is None or objem is None or float(objem) <= 0.0:
+        return objem
+
+    for rule_ident, rule_cutoff, rule_offset in AREAL_CUMULATIVE_OBJEM_ALIGNMENT_RULES:
+        if str(identifikace) == rule_ident and measurement_date < rule_cutoff:
+            return round(float(objem) + rule_offset, 6)
+
+    return objem
+
+
+def has_vodomer_reset_diff(current_objem, previous_objem):
+    return has_significant_negative_diff(
+        current_objem,
+        previous_objem,
+        threshold=VODOMERY_RESET_NEGATIVE_DIFF_THRESHOLD,
+    )
 
 
 def ensure_destination_table():
@@ -166,7 +206,11 @@ def fetch_from_ms_areal():
                 "identifikace": r.identifikace,
                 "seriove_cislo": r.seriove_cislo,
                 "date": r.date,
-                "objem": r.objem,
+                "objem": normalize_areal_measurement_objem(
+                    r.identifikace,
+                    r.date,
+                    r.objem,
+                ),
                 "interval_minutes": 15,
             })
 
@@ -416,9 +460,9 @@ def is_single_sample_return_spike(row, next_row, prev, *, interval, candidate_de
     if next_dt - dt > expected_interval * MAX_GAP_MULTIPLIER:
         return False
 
-    if not has_significant_negative_diff(next_objem, row_objem):
+    if not has_vodomer_reset_diff(next_objem, row_objem):
         return False
-    if has_significant_negative_diff(next_objem, prev_objem):
+    if has_vodomer_reset_diff(next_objem, prev_objem):
         return False
 
     returned_delta = next_objem - prev_objem
@@ -643,7 +687,7 @@ def prepare_rows(
             reset_detected
             and prev
             and prev["date"]
-            and not has_significant_negative_diff(objem, prev["objem"])
+            and not has_vodomer_reset_diff(objem, prev["objem"])
         ):
             reset_detected = False
 
@@ -814,7 +858,15 @@ def prepare_rows(
         # -------------------------------------------------
         # Aktualizace previous_map
         # -------------------------------------------------
-        if is_valid_row:
+        should_advance_previous = (
+            is_valid_row
+            and (
+                reset_detected
+                or prev is None
+                or objem >= prev["objem"]
+            )
+        )
+        if should_advance_previous:
             previous_map[ident] = {
                 "objem": objem,
                 "date": dt,
@@ -1027,18 +1079,71 @@ def filter_valid_rows(session, rows, source_name):
             if last is not None
         }
 
-        for r in sorted(filtered, key=lambda item: (item["identifikace"], item["date"])):
-            ident = r["identifikace"]
+        sorted_by_ident = sorted(filtered, key=lambda item: (item["identifikace"], item["date"]))
+        rows_by_ident = {}
+        for r in sorted_by_ident:
+            rows_by_ident.setdefault(r["identifikace"], []).append(r)
+
+        transient_zero_reset_row_ids = set()
+        for ident, ident_rows in rows_by_ident.items():
             last = previous_by_ident.get(ident)
+            row_index = 0
 
-            if last and has_significant_negative_diff(r["objem"], last["objem"]):
-                r["reset_detected"] = True
+            while row_index < len(ident_rows):
+                r = ident_rows[row_index]
 
-            previous_by_ident[ident] = {
-                "objem": r["objem"],
-                "date": r["date"],
-                "seriove_cislo": r["seriove_cislo"],
-            }
+                if (
+                    last
+                    and float(r["objem"]) == 0.0
+                    and has_vodomer_reset_diff(r["objem"], last["objem"])
+                ):
+                    block_end_index = row_index + 1
+                    while (
+                        block_end_index < len(ident_rows)
+                        and float(ident_rows[block_end_index]["objem"]) == 0.0
+                    ):
+                        block_end_index += 1
+
+                    next_row = (
+                        ident_rows[block_end_index]
+                        if block_end_index < len(ident_rows)
+                        else None
+                    )
+                    if (
+                        next_row is not None
+                        and isinstance(r["date"], datetime)
+                        and isinstance(next_row["date"], datetime)
+                        and next_row["date"] - r["date"] <= TRANSIENT_ZERO_RESET_RETURN_MAX_DURATION
+                        and abs(float(next_row["objem"]) - float(last["objem"]))
+                        <= TRANSIENT_ZERO_RESET_RETURN_MAX_DELTA
+                    ):
+                        for transient_row in ident_rows[row_index:block_end_index]:
+                            transient_zero_reset_row_ids.add(id(transient_row))
+                        row_index = block_end_index
+                        continue
+
+                    r["reset_detected"] = True
+                elif last and has_vodomer_reset_diff(r["objem"], last["objem"]):
+                    r["reset_detected"] = True
+
+                if (
+                    r.get("reset_detected")
+                    or last is None
+                    or r["objem"] >= last["objem"]
+                ):
+                    last = {
+                        "objem": r["objem"],
+                        "date": r["date"],
+                        "seriove_cislo": r["seriove_cislo"],
+                    }
+                row_index += 1
+
+        if transient_zero_reset_row_ids:
+            filtered = [
+                r
+                for r in filtered
+                if id(r) not in transient_zero_reset_row_ids
+            ]
 
     # -------------------------------------------------
     # Logování

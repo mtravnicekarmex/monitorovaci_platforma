@@ -29,10 +29,19 @@ def test_leaflet_map_html_exposes_osm_and_aerial_base_layers():
     assert "sourceMappingURL=leaflet.js.map" not in html
     assert "osmBaseLayer" in html
     assert "aerialBaseLayer" in html
+    assert "cadastralOverlayLayer" in html
     assert "emptyBaseLayer" in html
     assert '"Bez mapy": emptyBaseLayer' in html
     assert "background: #ffffff" in html
     assert "ORTOFOTO_WM/MapServer/tile/{z}/{y}/{x}" in html
+    assert "local-km-wmts-google.asp?SERVICE=WMTS&REQUEST=GetTile" in html
+    assert "LAYER=KN" in html
+    assert "TILEMATRIXSET=KN" in html
+    assert "const CADASTRAL_OVERLAY_MIN_ZOOM = 17" in html
+    assert "minZoom: CADASTRAL_OVERLAY_MIN_ZOOM" in html
+    assert "event.layer === cadastralOverlayLayer" in html
+    assert "map.setZoom(CADASTRAL_OVERLAY_MIN_ZOOM)" in html
+    assert '"Katastralni mapa (CUZK)": cadastralOverlayLayer' in html
     assert "L.control.layers" in html
 
 

@@ -2004,6 +2004,7 @@ def build_leaflet_map_html(
 
     const mapPayload = decodePayload(encodedPayload);
     const mapContext = String(mapPayload.map_context || "");
+    const CADASTRAL_OVERLAY_MIN_ZOOM = 17;
     const map = L.map("map", {{ center: [50.77, 14.23], zoom: 17, maxZoom: 24 }});
     const osmBaseLayer = L.tileLayer("https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
       maxZoom: 24,
@@ -2016,9 +2017,20 @@ def build_leaflet_map_html(
       attribution: "&copy; ČÚZK"
     }});
 
+    const cadastralOverlayLayer = L.tileLayer("https://services.cuzk.cz/wmts/local-km-wmts-google.asp?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=KN&STYLE=default&FORMAT=image/png&TILEMATRIXSET=KN&TILEMATRIX={{z}}&TILEROW={{y}}&TILECOL={{x}}", {{
+      minZoom: CADASTRAL_OVERLAY_MIN_ZOOM,
+      maxZoom: 24,
+      maxNativeZoom: 24,
+      opacity: 0.85,
+      zIndex: 350,
+      attribution: "&copy; CUZK"
+    }});
+
     const emptyBaseLayer = L.layerGroup();
 
-    const overlayLayers = {{}};
+    const overlayLayers = {{
+      "Katastralni mapa (CUZK)": cadastralOverlayLayer
+    }};
     const leafletLayers = [];
     let currentLocationMarker = null;
     let currentAccuracyCircle = null;
@@ -2127,6 +2139,9 @@ def build_leaflet_map_html(
       }}
     }}
     map.on("overlayadd", (event) => {{
+      if (event.layer === cadastralOverlayLayer && map.getZoom() < CADASTRAL_OVERLAY_MIN_ZOOM) {{
+        map.setZoom(CADASTRAL_OVERLAY_MIN_ZOOM);
+      }}
       const item = leafletLayers.find((entry) => entry.layer === event.layer);
       ensureLayerDataLoaded(item);
     }});

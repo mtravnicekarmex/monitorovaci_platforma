@@ -1543,11 +1543,36 @@ def build_leaflet_map_html(
       return Boolean(layerSupportedFilterKey(layerId, [filterKey]));
     }}
 
-    function isEvidenceLinkedFilterLayer(item) {{
+    function normalizedLayerText(value) {{
+      return String(value || "")
+        .normalize("NFD")
+        .replace(/[\\u0300-\\u036f]/g, "")
+        .toLowerCase();
+    }}
+
+    function isRoomContextFilterSourceLayer(item) {{
+      if (!item || !item.config) {{
+        return false;
+      }}
+      const layerId = normalizedLayerText(item.id || item.config.layer_id);
+      const layerTitle = normalizedLayerText(item.config.title);
+      const hasRoomFilter = ["budova", "patro", "mistnost_id", "mistnost", "m\\u00edstnost"]
+        .some((filterKey) => layerSupportsFilter(item.id, filterKey));
+      if (!hasRoomFilter) {{
+        return false;
+      }}
+      return layerId === "mistnosti"
+        || layerId.includes("mistnosti")
+        || layerId.includes("patra")
+        || layerTitle.includes("mistnosti")
+        || layerTitle.includes("patra");
+    }}
+
+    function isMistnostiLinkedFilterLayer(item) {{
       return Boolean(item && item.config && item.config.sync_mistnosti_filters === true);
     }}
 
-    function evidenceLinkedFilterTargets(filterKey) {{
+    function mistnostiLinkedFilterTargets(sourceLayerId, filterKey) {{
       const fieldMap = {{
         budova: ["budova"],
         patro: ["patro"],
@@ -1556,12 +1581,12 @@ def build_leaflet_map_html(
         místnost: ["místnost", "mistnost", "evidence_mistnost"]
       }};
       const targetFilterKeys = fieldMap[String(filterKey)];
-      if (!targetFilterKeys) {{
+      if (!targetFilterKeys.length) {{
         return [];
       }}
       return leafletLayers
-        .filter((item) => item.id !== "mistnosti")
-        .filter((item) => isEvidenceLinkedFilterLayer(item))
+        .filter((item) => item.id !== String(sourceLayerId))
+        .filter((item) => isMistnostiLinkedFilterLayer(item))
         .map((item) => ({{
           layerId: item.id,
           filterKey: layerSupportedFilterKey(item.id, targetFilterKeys)
@@ -1570,27 +1595,11 @@ def build_leaflet_map_html(
     }}
 
     function linkedFilterTargets(layerId, filterKey) {{
-      if (String(layerId) !== "mistnosti") {{
+      const sourceItem = leafletLayers.find((item) => item.id === String(layerId));
+      if (!isRoomContextFilterSourceLayer(sourceItem)) {{
         return [];
       }}
-      if (mapContext === "evidence") {{
-        return evidenceLinkedFilterTargets(filterKey);
-      }}
-      if (mapContext !== "revize") {{
-        return [];
-      }}
-      const targetLayerId = "revize_terminy_zarizeni";
-      const fieldMap = {{
-        budova: "budova",
-        patro: "patro",
-        mistnost_id: "mistnost_id",
-        mistnost: "mistnost"
-      }};
-      const targetFilterKey = fieldMap[String(filterKey)];
-      if (!targetFilterKey || !layerSupportsFilter(targetLayerId, targetFilterKey)) {{
-        return [];
-      }}
-      return [{{ layerId: targetLayerId, filterKey: targetFilterKey }}];
+      return mistnostiLinkedFilterTargets(layerId, filterKey);
     }}
 
     function syncLinkedLayerFilters(layerId, filterKey, values) {{

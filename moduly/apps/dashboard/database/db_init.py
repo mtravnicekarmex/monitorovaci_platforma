@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import inspect, text
 
 from core.db.connect import ENGINE_PG
@@ -44,6 +46,36 @@ def ensure_streamlit_user_columns() -> None:
             conn.execute(text(statement))
 
 
+def _append_map_layer_json_list_columns(conn, *, layer_id: str, field_name: str, columns: tuple[str, ...]) -> None:
+    row = conn.execute(
+        text(f'SELECT {field_name} FROM dashboard."Map_Layers" WHERE layer_id = :layer_id'),
+        {"layer_id": layer_id},
+    ).first()
+    if row is None:
+        return
+    try:
+        current = json.loads(str(row[0] or "[]"))
+    except json.JSONDecodeError:
+        current = []
+    if not isinstance(current, list):
+        current = []
+
+    cleaned = [str(item).strip() for item in current if str(item).strip()]
+    changed = False
+    for column in columns:
+        if column not in cleaned:
+            cleaned.append(column)
+            changed = True
+    if changed:
+        conn.execute(
+            text(f'UPDATE dashboard."Map_Layers" SET {field_name} = :value WHERE layer_id = :layer_id'),
+            {
+                "layer_id": layer_id,
+                "value": json.dumps(cleaned, ensure_ascii=True),
+            },
+        )
+
+
 def ensure_map_layer_columns() -> None:
     inspector = inspect(ENGINE_PG)
     try:
@@ -51,6 +83,8 @@ def ensure_map_layer_columns() -> None:
     except Exception:
         return
 
+    valid_map_contexts = ("evidence", "revize", "pronajem", "shared")
+    quoted_contexts = ", ".join(f"'{context}'" for context in valid_map_contexts)
     alter_statements: list[str] = []
     if "map_context" not in columns:
         alter_statements.append(
@@ -88,12 +122,23 @@ def ensure_map_layer_columns() -> None:
             "ADD COLUMN document_columns TEXT NOT NULL DEFAULT '{}'"
         )
 
-    if not alter_statements:
-        return
-
     with ENGINE_PG.begin() as conn:
         for statement in alter_statements:
             conn.execute(text(statement))
+        conn.execute(
+            text(
+                'UPDATE dashboard."Map_Layers" '
+                "SET map_context = 'evidence' "
+                f"WHERE map_context IS NULL OR btrim(map_context) = '' OR map_context NOT IN ({quoted_contexts})"
+            )
+        )
+        conn.execute(text('ALTER TABLE dashboard."Map_Layers" DROP CONSTRAINT IF EXISTS map_layers_map_context_check'))
+        conn.execute(
+            text(
+                'ALTER TABLE dashboard."Map_Layers" '
+                f"ADD CONSTRAINT map_layers_map_context_check CHECK (map_context IN ({quoted_contexts}))"
+            )
+        )
         if "show_photo" not in columns:
             conn.execute(
                 text(
@@ -116,6 +161,13 @@ def ensure_map_layer_columns() -> None:
                     'UPDATE dashboard."Map_Layers" '
                     "SET map_label_columns = '[\"mistnost\"]' WHERE layer_id = 'mistnosti'"
                 )
+            )
+        for field_name in ("filter_columns", "property_columns"):
+            _append_map_layer_json_list_columns(
+                conn,
+                layer_id="revize_terminy_zarizeni",
+                field_name=field_name,
+                columns=("budova", "patro"),
             )
 
 

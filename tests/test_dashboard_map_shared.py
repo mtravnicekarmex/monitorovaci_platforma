@@ -478,11 +478,16 @@ def test_leaflet_map_html_syncs_revize_mistnosti_filters_to_revision_terms_layer
     assert 'const mapContext = String(mapPayload.map_context || "")' in html
     assert "function layerSupportsFilter" in html
     assert "function linkedFilterTargets" in html
-    assert 'mapContext !== "revize"' in html
-    assert 'String(layerId) !== "mistnosti"' in html
-    assert 'const targetLayerId = "revize_terminy_zarizeni"' in html
-    assert 'budova: "budova"' in html
-    assert 'patro: "patro"' in html
+    assert "function isRoomContextFilterSourceLayer" in html
+    assert "function isMistnostiLinkedFilterLayer" in html
+    assert "function mistnostiLinkedFilterTargets" in html
+    assert 'layerId === "mistnosti"' in html
+    assert 'layerId.includes("mistnosti")' in html
+    assert 'layerTitle.includes("patra")' in html
+    assert 'budova: ["budova"]' in html
+    assert 'patro: ["patro"]' in html
+    assert '.filter((item) => item.id !== String(sourceLayerId))' in html
+    assert ".filter((item) => isMistnostiLinkedFilterLayer(item))" in html
     assert "function syncLinkedLayerFilters" in html
     assert "syncLinkedLayerFilters(layerId, field.key, selectedValues)" in html
     assert "renderPanel();" in html
@@ -547,16 +552,53 @@ def test_leaflet_map_html_syncs_evidence_mistnosti_filters_to_target_layers():
     assert "function layerSupportedFilterKey" in html
     assert "function isDeviceMapLayer" not in html
     assert "evidenceLinkedContextLayerIds" not in html
-    assert "function isEvidenceLinkedFilterLayer" in html
+    assert "function isMistnostiLinkedFilterLayer" in html
     assert "item.config.sync_mistnosti_filters === true" in html
-    assert "function evidenceLinkedFilterTargets" in html
-    assert 'if (mapContext === "evidence")' in html
+    assert "function mistnostiLinkedFilterTargets" in html
     assert 'budova: ["budova"]' in html
     assert 'patro: ["patro"]' in html
-    assert '.filter((item) => item.id !== "mistnosti")' in html
-    assert ".filter((item) => isEvidenceLinkedFilterLayer(item))" in html
+    assert '.filter((item) => item.id !== String(sourceLayerId))' in html
+    assert ".filter((item) => isMistnostiLinkedFilterLayer(item))" in html
     assert "layerSupportedFilterKey(item.id, targetFilterKeys)" in html
     assert ".filter((target) => target.filterKey)" in html
+
+
+def test_leaflet_map_html_syncs_pronajem_room_layer_filters_by_layer_id_prefix():
+    payload = {
+        "map_context": "pronajem",
+        "primary_layer_id": "mistnosti_pronajem",
+        "layers": [
+            {
+                "layer_id": "mistnosti_pronajem",
+                "title": "Pronajem",
+                "filter_fields": [
+                    {"key": "budova", "source_column": "budova", "property_key": "budova", "label": "Budova"},
+                    {"key": "patro", "source_column": "patro", "property_key": "patro", "label": "Patro"},
+                ],
+                "filter_options": {"budova": ["A"], "patro": ["1.NP"]},
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            },
+            {
+                "layer_id": "pronajem_najemci",
+                "title": "Najemci",
+                "sync_mistnosti_filters": True,
+                "filter_fields": [
+                    {"key": "budova", "source_column": "budova", "property_key": "budova", "label": "Budova"},
+                    {"key": "patro", "source_column": "patro", "property_key": "patro", "label": "Patro"},
+                ],
+                "filter_options": {"budova": ["A"], "patro": ["1.NP"]},
+                "feature_collection": {"type": "FeatureCollection", "features": []},
+            },
+        ],
+    }
+
+    html = build_leaflet_map_html(payload)
+
+    assert "function isRoomContextFilterSourceLayer" in html
+    assert 'layerId.includes("mistnosti")' in html
+    assert "function mistnostiLinkedFilterTargets" in html
+    assert '.filter((item) => item.id !== String(sourceLayerId))' in html
+    assert ".filter((item) => isMistnostiLinkedFilterLayer(item))" in html
 
 
 def test_leaflet_map_html_preserves_filter_layer_expansion_after_panel_rerender():

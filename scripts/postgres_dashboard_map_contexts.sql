@@ -8,22 +8,16 @@ ALTER TABLE dashboard."Map_Layers"
 
 UPDATE dashboard."Map_Layers"
 SET map_context = 'evidence'
-WHERE map_context IS NULL OR btrim(map_context) = '';
+WHERE map_context IS NULL
+   OR btrim(map_context) = ''
+   OR map_context NOT IN ('evidence', 'revize', 'pronajem', 'shared');
 
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conname = 'map_layers_map_context_check'
-          AND conrelid = 'dashboard."Map_Layers"'::regclass
-    ) THEN
-        ALTER TABLE dashboard."Map_Layers"
-            ADD CONSTRAINT map_layers_map_context_check
-            CHECK (map_context IN ('evidence', 'revize', 'shared'));
-    END IF;
-END
-$$;
+ALTER TABLE dashboard."Map_Layers"
+    DROP CONSTRAINT IF EXISTS map_layers_map_context_check;
+
+ALTER TABLE dashboard."Map_Layers"
+    ADD CONSTRAINT map_layers_map_context_check
+    CHECK (map_context IN ('evidence', 'revize', 'pronajem', 'shared'));
 
 INSERT INTO dashboard."Map_Layers" (
     layer_id,
@@ -84,3 +78,41 @@ SET
     map_context = EXCLUDED.map_context,
     updated_at = now()
 WHERE dashboard."Map_Layers".map_context IS DISTINCT FROM EXCLUDED.map_context;
+
+DO $$
+DECLARE
+    field_name text;
+    current_values jsonb;
+    updated_values jsonb;
+BEGIN
+    FOR field_name IN SELECT unnest(ARRAY['filter_columns', 'property_columns'])
+    LOOP
+        EXECUTE format(
+            'SELECT COALESCE(NULLIF(%I, ''''), ''[]'')::jsonb FROM dashboard."Map_Layers" WHERE layer_id = %L',
+            field_name,
+            'revize_terminy_zarizeni'
+        )
+        INTO current_values;
+
+        IF current_values IS NULL OR jsonb_typeof(current_values) <> 'array' THEN
+            current_values := '[]'::jsonb;
+        END IF;
+
+        updated_values := current_values;
+        IF NOT updated_values ? 'budova' THEN
+            updated_values := updated_values || '["budova"]'::jsonb;
+        END IF;
+        IF NOT updated_values ? 'patro' THEN
+            updated_values := updated_values || '["patro"]'::jsonb;
+        END IF;
+
+        IF updated_values IS DISTINCT FROM current_values THEN
+            EXECUTE format(
+                'UPDATE dashboard."Map_Layers" SET %I = $1::text, updated_at = now() WHERE layer_id = $2',
+                field_name
+            )
+            USING updated_values, 'revize_terminy_zarizeni';
+        END IF;
+    END LOOP;
+END
+$$;

@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -19,6 +20,9 @@ from services.api.services.map_layers import (
     user_can_access_map_layer,
 )
 from services.api.services.device_map import BUDOVY_MAP_LAYER, MISTNOSTI_MAP_LAYER, VODOMERY_MAP_LAYER
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_default_map_layer_seeds_cover_initial_map_layers():
@@ -147,6 +151,42 @@ def test_prepare_record_values_adds_conditional_style_property_column(monkeypatc
 
     assert values["property_columns"] == ["id", "name", "bez_vody"]
     assert values["map_label_columns"] == ["name"]
+
+
+def test_prepare_record_values_adds_filter_columns_to_feature_properties(monkeypatch):
+    monkeypatch.setattr(
+        "services.api.services.map_layers._table_columns",
+        lambda _schema, _table: {"geom", "id", "name", "budova", "patro"},
+    )
+
+    values = _prepare_record_values(
+        layer_id="pronajem",
+        title="Pronajem",
+        layer_kind="context",
+        source_schema="evidence",
+        source_table="MISTNOSTI",
+        geometry_column="geom",
+        identifier_column="id",
+        source_srid=3857,
+        target_srid=4326,
+        property_columns=["id", "name", "budova"],
+        property_aliases={},
+        property_labels={},
+        filter_columns=["budova", "patro"],
+        map_label_columns=[],
+        popup_columns=["name"],
+        style={"color": "#2563eb"},
+        device_section_key=None,
+        restrict_to_allowed_devices=False,
+        map_enabled=True,
+        default_visible=True,
+        show_photo=False,
+        is_active=True,
+        draw_order=100,
+    )
+
+    assert values["property_columns"] == ["id", "name", "budova", "patro"]
+    assert values["filter_columns"] == ["budova", "patro"]
 
 
 def test_prepare_record_values_adds_multiple_conditional_style_property_columns(monkeypatch):
@@ -299,6 +339,18 @@ def test_user_can_access_map_context_requires_matching_section():
     assert user_can_access_map_context(revize_user, "shared") is True
     assert user_can_access_map_context(pronajem_user, "shared") is True
     assert user_can_access_map_context(unrelated_user, "shared") is False
+
+
+def test_map_context_migration_replaces_constraint_and_allows_pronajem():
+    script = (PROJECT_ROOT / "scripts" / "postgres_dashboard_map_contexts.sql").read_text(encoding="utf-8")
+    db_init = (PROJECT_ROOT / "moduly" / "apps" / "dashboard" / "database" / "db_init.py").read_text(encoding="utf-8")
+
+    expected_check = "CHECK (map_context IN ('evidence', 'revize', 'pronajem', 'shared'))"
+    assert "DROP CONSTRAINT IF EXISTS map_layers_map_context_check" in script
+    assert expected_check in script
+    for map_context in ("evidence", "revize", "pronajem", "shared"):
+        assert map_context in db_init
+    assert "DROP CONSTRAINT IF EXISTS map_layers_map_context_check" in db_init
 
 
 def test_map_layer_catalog_filters_unavailable_device_layers(monkeypatch):

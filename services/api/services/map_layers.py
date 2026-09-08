@@ -406,6 +406,17 @@ def _ensure_conditional_style_property_column(
     return cleaned_columns
 
 
+def _ensure_filter_property_columns(
+    property_columns: list[str],
+    filter_columns: list[str],
+) -> list[str]:
+    cleaned_columns = list(property_columns)
+    for column in filter_columns:
+        if column not in cleaned_columns:
+            cleaned_columns.append(column)
+    return cleaned_columns
+
+
 def _table_columns(source_schema: str, source_table: str) -> set[str]:
     session = get_session_pg()
     try:
@@ -586,9 +597,14 @@ def _prepare_record_values(
     cleaned_map_context = _clean_map_context(map_context)
 
     cleaned_style = _clean_style(style)
+    cleaned_filter_columns = _clean_list(filter_columns)
     cleaned_property_columns = _ensure_conditional_style_property_column(
         _clean_list(property_columns),
         cleaned_style,
+    )
+    cleaned_property_columns = _ensure_filter_property_columns(
+        cleaned_property_columns,
+        cleaned_filter_columns,
     )
 
     values: dict[str, object] = {
@@ -605,7 +621,7 @@ def _prepare_record_values(
         "property_columns": cleaned_property_columns,
         "property_aliases": _clean_aliases(property_aliases),
         "property_labels": _clean_aliases(property_labels),
-        "filter_columns": _clean_list(filter_columns),
+        "filter_columns": cleaned_filter_columns,
         "map_label_columns": _clean_list(map_label_columns),
         "popup_columns": _clean_list(popup_columns),
         "document_columns": _clean_aliases(document_columns),
